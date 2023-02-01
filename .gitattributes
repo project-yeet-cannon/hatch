@@ -1,0 +1,5 @@
+# necessary for standard line endings for some reason
+*.cs    text
+*.json  text
+*.sln   text
+*.csproj    text
