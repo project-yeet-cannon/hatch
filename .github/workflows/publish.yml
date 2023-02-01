@@ -2,7 +2,7 @@ name: Build and publish API container
 
 on:
   release:
-    types: [published]
+    types: [published, edited]
 
 env:
   REGISTRY: ghcr.io
@@ -36,7 +36,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: .
-          file: src/Aerie.Api
+          file: src/Aerie.Api/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
