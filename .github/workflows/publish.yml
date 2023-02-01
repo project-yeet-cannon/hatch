@@ -6,7 +6,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: aerie-api
+  IMAGE_NAME: eouw0o83hf/aerie-api
 
 jobs:
   build-and-push-image:
