@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Aerie.Api.Tests/Aerie.Api.Tests.csproj" />
+  <Project Path="Aerie.Api/Aerie.Api.csproj" />
+</Solution>
