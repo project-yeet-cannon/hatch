@@ -1,5 +1,5 @@
 up:
-	docker compose up -d
+	docker compose up -d --build
 
 down:
 	docker compose down
@@ -13,5 +13,6 @@ test:
 run:
 	dotnet run --project ./src/Aerie.Api/Aerie.Api.csproj
 
-build-container:
-	docker build -t aerie-api ./src/Aerie.Api
+# make ef-migration migration=MyMigrationName
+ef-migration:
+	dotnet ef migrations add $(migration) --project ./src/Aerie.Api/Aerie.Api.csproj

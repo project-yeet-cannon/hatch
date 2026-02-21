@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:18.1
+    networks:
+      - local
+    ports:
+      - "5432:5432"
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+
+  api:
+    build:
+      context: ./src/Aerie.Api
+      dockerfile: Dockerfile.api
+    networks:
+      - local
+    ports:
+      - "8080:8080"
+    environment:
+      - DOTNET_ENVIRONMENT=Docker
+    depends_on:
+      db:
+        condition: service_healthy  
+
+networks:
+  local:
+    driver: bridge

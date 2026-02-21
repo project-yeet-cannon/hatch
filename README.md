@@ -6,7 +6,7 @@ aviary home citadel
 
 `make run` to run it.
 
-[http://localhost:5082/swagger](http://localhost:5082/swagger) for swagger.
+[http://localhost:5197/swagger](http://localhost:5197/swagger) for swagger.
 
 ## Dependencies
 
