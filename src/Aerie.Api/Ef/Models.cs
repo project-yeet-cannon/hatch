@@ -4,12 +4,19 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Aerie.Api.Ef;
 
-[Table("Users")]
-[Index(nameof(ApiKey), IsUnique = true)]
-public class EfUser
+[Table("EnvironmentReadings")]
+[Index(nameof(EntityId), nameof(Timestamp), IsUnique = true)]
+public class EfEnvironmentReading
 {
     [Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]
     public Guid Id { get; set; }
-    public string Name { get; set; } = "";
-    public string? ApiKey { get; set; }
+
+    public required string EntityId { get; set; }
+    public required DateTimeOffset Timestamp { get; set; }
+
+    public decimal? Temperature { get; set; }
+    public decimal? Humidity { get; set; }
+
+    public decimal? DesiredTemperature { get; set; }
+    public bool IsHeating { get; set; }
 }

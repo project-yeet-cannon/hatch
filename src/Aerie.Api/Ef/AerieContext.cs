@@ -6,7 +6,7 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
 {
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<EfUser>();
+        modelBuilder.Entity<EfEnvironmentReading>();
 
         base.OnModelCreating(modelBuilder);
     }
