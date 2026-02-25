@@ -1,4 +1,11 @@
 {
-  "cSpell.words": ["healthcheck", "hvac", "isready", "Mysa", "Newtonsoft"],
+  "cSpell.words": [
+    "hass",
+    "healthcheck",
+    "hvac",
+    "isready",
+    "Mysa",
+    "Newtonsoft"
+  ],
   "makefile.configureOnOpen": false
 }

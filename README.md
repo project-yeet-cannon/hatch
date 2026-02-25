@@ -10,5 +10,10 @@ aviary home citadel
 
 ## Dependencies
 
-- Kafka
-    `apache/kafka` container
+- Docker
+- dotnet 10 sdk
+- HomeAssistant instance
+
+## Secret files
+
+- src/Aerie.Api/.env.json -> local environment/secrets json file
