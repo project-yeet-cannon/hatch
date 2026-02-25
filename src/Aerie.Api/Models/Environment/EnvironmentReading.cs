@@ -1,6 +1,6 @@
-namespace Aerie.Api.Models.Climate;
+namespace Aerie.Api.Models.Environment;
 
-public class ClimateReading
+public class EnvironmentReading
 {
     public Guid Id { get; set; }
 

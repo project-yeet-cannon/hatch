@@ -14,6 +14,13 @@ aviary home citadel
 - dotnet 10 sdk
 - HomeAssistant instance
 
-## Secret files
+## Secrets
 
-- src/Aerie.Api/.env.json -> local environment/secrets json file
+Local secrets file: `src/Aerie.Api/.env.json`
+Flat KVP JSON file.
+
+Required values:
+
+- `ha_host`: host name/IP of HomeAssistant 
+- `ha_port`: HA API port (usually 8123)
+- `ha_token`: HA API token

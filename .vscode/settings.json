@@ -5,7 +5,8 @@
     "hvac",
     "isready",
     "Mysa",
-    "Newtonsoft"
+    "Newtonsoft",
+    "Npgsql"
   ],
   "makefile.configureOnOpen": false
 }

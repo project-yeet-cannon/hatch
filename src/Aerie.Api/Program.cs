@@ -1,5 +1,7 @@
 using Aerie.Api.Common;
 using Aerie.Api.Ef;
+using Aerie.Api.Models.Environment;
+using Aerie.Api.Services;
 using HADotNet.Core;
 using HADotNet.Core.Clients;
 using Microsoft.AspNetCore.Rewrite;
@@ -22,18 +24,24 @@ builder.Services.AddDbContext<AerieContext>(o =>
     o.UseNpgsql(
         builder.Configuration.GetConnectionString("Aerie")));
 
+// HADotNet
 var haCfg = builder.Configuration.GetSection("HomeAssistant");
 var haHost = secrets.GetSecret("ha_host");
 var haPort = secrets.GetSecret("ha_port");
 var haToken = secrets.GetSecret("ha_token");
 
+Console.WriteLine($"http://{haHost}:{haPort}/");
+
 ClientFactory.Initialize($"http://{haHost}:{haPort}/", haToken);
 
-builder.Services.AddScoped(_ => ClientFactory.GetClient<EntityClient>());
-builder.Services.AddScoped(_ => ClientFactory.GetClient<HistoryClient>());
-builder.Services.AddScoped(_ => ClientFactory.GetClient<StatesClient>());
-builder.Services.AddScoped(_ => ClientFactory.GetClient<ServiceClient>());
-builder.Services.AddScoped(_ => ClientFactory.GetClient<DiscoveryClient>());
+builder.Services.AddTransient(_ => ClientFactory.GetClient<EntityClient>());
+builder.Services.AddTransient(_ => ClientFactory.GetClient<HistoryClient>());
+builder.Services.AddTransient(_ => ClientFactory.GetClient<StatesClient>());
+builder.Services.AddTransient(_ => ClientFactory.GetClient<ServiceClient>());
+builder.Services.AddTransient(_ => ClientFactory.GetClient<DiscoveryClient>());
+
+// Services
+builder.Services.AddTransient<IEnvironmentService, EnvironmentService>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

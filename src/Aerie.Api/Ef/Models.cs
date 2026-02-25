@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Aerie.Api.Ef;
 
 [Table("EnvironmentReadings")]
-[Index(nameof(EntityId), nameof(Timestamp), IsUnique = true)]
+[Index(nameof(EntityId), nameof(Timestamp), IsUnique = true, Name = UniqueIndexName)]
 public class EfEnvironmentReading
 {
     [Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]
@@ -19,4 +19,6 @@ public class EfEnvironmentReading
 
     public decimal? DesiredTemperature { get; set; }
     public bool IsHeating { get; set; }
+
+    public const string UniqueIndexName = "IX_EnvironmentReadings_EntityId_Timestamp";
 }
