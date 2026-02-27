@@ -10,18 +10,38 @@ using Npgsql;
 
 namespace Aerie.Api.Services;
 
+// Most network calls are in serial so we are
+// kind to the tiny HA server
 public class EnvironmentService(
     TimeProvider time,
+    EntityClient haEntity,
     HistoryClient haHistory,
     AerieContext db) : IEnvironmentService
 {
-    public async Task<IEnumerable<EnvironmentReading>> FetchFromHomeAssistant()
+    public async Task<IEnumerable<EnvironmentReading>> FetchAllFromHomeAssistant(string? namePrefix)
+    {
+        var entities = await haEntity.GetEntities();
+
+        Console.WriteLine(string.Join(", ", entities));
+
+        var filtered = entities.Where(a => namePrefix is null
+            || a.StartsWith(namePrefix, StringComparison.InvariantCultureIgnoreCase));
+
+        var result = new List<EnvironmentReading>();
+        foreach (var e in filtered)
+        {
+            var readings = await FetchFromHomeAssistant(e);
+            result.AddRange(readings);
+        }
+        return result;
+    }
+
+    public async Task<IEnumerable<EnvironmentReading>> FetchFromHomeAssistant(string entityName)
     {
         var now = time.GetUtcNow();
 
-        var history = await haHistory.GetHistory(
-            "climate.mysa_1a4c98_thermostat_2",
-            now.AddHours(-2), now);
+        var history = await haHistory.GetHistory(entityName, now.AddHours(-2), now);
+        if (history == null) return [];
 
         var mapped = history
             .Select(MapFromHa);

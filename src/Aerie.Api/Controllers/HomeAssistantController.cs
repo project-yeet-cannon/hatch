@@ -17,7 +17,7 @@ public class HomeAssistantController(IEnvironmentService envSrv) : ControllerBas
     [HttpPost]
     public async Task FetchFromHomeAssistant()
     {
-        var readings = await envSrv.FetchFromHomeAssistant();
+        var readings = await envSrv.FetchAllFromHomeAssistant("climate.");
         await envSrv.BulkInsertReadings(readings);
     }
 }
