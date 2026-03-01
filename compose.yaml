@@ -6,11 +6,14 @@ services:
     ports:
       - "5432:5432"
     restart: always
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./pginit.sql:/docker-entrypoint-initdb.d/init.sql
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready"]
+      test: ["CMD-SHELL", "pg_isready -U user"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -28,8 +31,11 @@ services:
       - DOTNET_ENVIRONMENT=Docker
     depends_on:
       db:
-        condition: service_healthy  
+        condition: service_healthy
 
 networks:
   local:
     driver: bridge
+
+volumes:
+  pgdata:
