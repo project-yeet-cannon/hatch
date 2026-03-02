@@ -50,7 +50,7 @@ builder.Services.AddTransient(_ => ClientFactory.GetClient<DiscoveryClient>());
 builder.Services.AddTransient<IEnvironmentService, EnvironmentService>();
 
 // Jobs
-builder.Services.AddTransient<IJob, SampleEnvironments>();
+builder.Services.AddTransient<IAerieJob, SampleEnvironments>();
 
 var scheduler = await JobsInit.InitQuartz(
     builder.Configuration.GetConnectionString("Quartz")!);
@@ -79,19 +79,23 @@ using (var scope = app.Services.CreateScope())
     var sf = scope.ServiceProvider.GetRequiredService<ISchedulerFactory>();
     var sch = await sf.GetScheduler();
 
-    // var job = JobBuilder.Create<SampleEnvironments>()
-    //     .WithIdentity("myJob", "group1")
-    //     .Build();
+    var jobs = scope.ServiceProvider.GetServices<IAerieJob>();
+    foreach (var aj in jobs)
+    {
+        var j = JobBuilder.Create(aj.GetType())
+            .WithIdentity(aj.Name, aj.Group)
+            .Build();
 
-    // var trigger = TriggerBuilder.Create()
-    //     .WithIdentity("myTrigger", "group1")
-    //     .StartNow()
-    //     .WithSimpleSchedule(x => x
-    //         .WithIntervalInSeconds(1)
-    //         .RepeatForever())
-    //     .Build();
+        var t = TriggerBuilder.Create()
+            .WithIdentity($"{aj.Name}_Trigger", aj.Group)
+            .WithSimpleSchedule(s => s
+                .WithIntervalInSeconds(3)
+                .RepeatForever())
+            .StartNow()
+            .Build();
 
-    // await sch.ScheduleJob(job, trigger);
+        await sch.ScheduleJob(j, t);
+    }
 }
 
 ////////

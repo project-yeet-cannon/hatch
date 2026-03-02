@@ -3,6 +3,12 @@ using Quartz;
 
 namespace Aerie.Api.Jobs;
 
+public interface IAerieJob : IJob
+{
+    string Name { get; }
+    string Group { get; }
+}
+
 public static class JobsInit
 {
     public static async Task<IScheduler> InitQuartz(string psqlCxnStr)

@@ -3,8 +3,12 @@ using Quartz;
 
 namespace Aerie.Api.Jobs;
 
-public class SampleEnvironments(IEnvironmentService es) : IJob
+public class SampleEnvironments(IEnvironmentService es) : IAerieJob
 {
+    public string Name => "SampleEnvironments";
+
+    public string Group => "Aerie.Api";
+
     public async Task Execute(IJobExecutionContext context)
     {
         Console.WriteLine("stuff " + DateTime.Now.ToLongTimeString());
