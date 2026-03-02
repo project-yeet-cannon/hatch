@@ -7,6 +7,7 @@ public interface IAerieJob : IJob
 {
     string Name { get; }
     string Group { get; }
+    TimeSpan Interval { get; }
 }
 
 public static class JobsInit

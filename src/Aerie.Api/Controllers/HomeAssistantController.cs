@@ -6,7 +6,7 @@ namespace Aerie.Api.Controllers;
 
 [ApiController]
 [Route("[controller]")]
-public class HomeAssistantController(IEnvironmentService envSrv) : ControllerBase
+public class HomeAssistantController(TimeProvider t, IEnvironmentService envSrv) : ControllerBase
 {
     [HttpGet]
     public async Task<object> Get()
@@ -17,7 +17,8 @@ public class HomeAssistantController(IEnvironmentService envSrv) : ControllerBas
     [HttpPost]
     public async Task FetchFromHomeAssistant()
     {
-        var readings = await envSrv.FetchAllFromHomeAssistant("climate.");
+        var now = t.GetUtcNow();
+        var readings = await envSrv.FetchAllFromHomeAssistant("climate.", now.Subtract(TimeSpan.FromHours(2)), now);
         await envSrv.BulkInsertReadings(readings);
     }
 }

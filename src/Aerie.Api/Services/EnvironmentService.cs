@@ -18,11 +18,9 @@ public class EnvironmentService(
     HistoryClient haHistory,
     AerieContext db) : IEnvironmentService
 {
-    public async Task<IEnumerable<EnvironmentReading>> FetchAllFromHomeAssistant(string? namePrefix)
+    public async Task<IEnumerable<EnvironmentReading>> FetchAllFromHomeAssistant(string namePrefix, DateTimeOffset from, DateTimeOffset to)
     {
         var entities = await haEntity.GetEntities();
-
-        Console.WriteLine(string.Join(", ", entities));
 
         var filtered = entities.Where(a => namePrefix is null
             || a.StartsWith(namePrefix, StringComparison.InvariantCultureIgnoreCase));
@@ -30,17 +28,15 @@ public class EnvironmentService(
         var result = new List<EnvironmentReading>();
         foreach (var e in filtered)
         {
-            var readings = await FetchFromHomeAssistant(e);
+            var readings = await FetchFromHomeAssistant(e, from, to);
             result.AddRange(readings);
         }
         return result;
     }
 
-    public async Task<IEnumerable<EnvironmentReading>> FetchFromHomeAssistant(string entityName)
+    public async Task<IEnumerable<EnvironmentReading>> FetchFromHomeAssistant(string entityName, DateTimeOffset from, DateTimeOffset to)
     {
-        var now = time.GetUtcNow();
-
-        var history = await haHistory.GetHistory(entityName, now.AddHours(-2), now);
+        var history = await haHistory.GetHistory(entityName, from, to);
         if (history == null) return [];
 
         var mapped = history

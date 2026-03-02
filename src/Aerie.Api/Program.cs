@@ -89,7 +89,7 @@ using (var scope = app.Services.CreateScope())
         var t = TriggerBuilder.Create()
             .WithIdentity($"{aj.Name}_Trigger", aj.Group)
             .WithSimpleSchedule(s => s
-                .WithIntervalInSeconds(3)
+                .WithInterval(aj.Interval)
                 .RepeatForever())
             .StartNow()
             .Build();
