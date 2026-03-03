@@ -13,7 +13,6 @@ namespace Aerie.Api.Services;
 // Most network calls are in serial so we are
 // kind to the tiny HA server
 public class EnvironmentService(
-    TimeProvider time,
     EntityClient haEntity,
     HistoryClient haHistory,
     AerieContext db) : IEnvironmentService

@@ -1,4 +1,5 @@
 using System.Collections.Specialized;
+using Microsoft.JSInterop;
 using Quartz;
 
 namespace Aerie.Api.Jobs;
@@ -32,6 +33,13 @@ public class JobsInit(IScheduler scheduler, IEnumerable<IAerieJob> jobs)
     {
         foreach (var j in jobs)
         {
+            var jd = await scheduler.GetJobDetail(JobKey.Create(j.Name, j.Group));
+            if (jd is not null)
+            {
+                // TODO handle update case
+                continue;
+            }
+
             var qj = JobBuilder.Create(j.GetType())
                 .WithIdentity(j.Name, j.Group)
                 .Build();

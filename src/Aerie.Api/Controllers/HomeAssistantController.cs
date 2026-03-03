@@ -6,7 +6,10 @@ namespace Aerie.Api.Controllers;
 
 [ApiController]
 [Route("[controller]")]
-public class HomeAssistantController(TimeProvider t, IEnvironmentService envSrv) : ControllerBase
+public class HomeAssistantController(
+    TimeProvider t,
+    IEnvironmentService envSrv
+) : ControllerBase
 {
     [HttpGet]
     public async Task<object> Get()
