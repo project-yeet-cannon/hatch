@@ -55,6 +55,7 @@ builder.Services.AddTransient<IAerieJob, SampleEnvironments>();
 var scheduler = await JobsInit.InitQuartz(
     builder.Configuration.GetConnectionString("Quartz")!);
 builder.Services.AddSingleton(scheduler);
+builder.Services.AddTransient<JobsInit>();
 
 // API / HTTP
 builder.Services.AddEndpointsApiExplorer();
@@ -76,26 +77,8 @@ using (var scope = app.Services.CreateScope())
 // Quartz
 using (var scope = app.Services.CreateScope())
 {
-    var sf = scope.ServiceProvider.GetRequiredService<ISchedulerFactory>();
-    var sch = await sf.GetScheduler();
-
-    var jobs = scope.ServiceProvider.GetServices<IAerieJob>();
-    foreach (var aj in jobs)
-    {
-        var j = JobBuilder.Create(aj.GetType())
-            .WithIdentity(aj.Name, aj.Group)
-            .Build();
-
-        var t = TriggerBuilder.Create()
-            .WithIdentity($"{aj.Name}_Trigger", aj.Group)
-            .WithSimpleSchedule(s => s
-                .WithInterval(aj.Interval)
-                .RepeatForever())
-            .StartNow()
-            .Build();
-
-        await sch.ScheduleJob(j, t);
-    }
+    var init = scope.ServiceProvider.GetRequiredService<JobsInit>();
+    await init.WireUpJobs();
 }
 
 ////////
