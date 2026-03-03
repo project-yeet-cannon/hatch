@@ -10,7 +10,7 @@ public interface IAerieJob : IJob
     TimeSpan Interval { get; }
 }
 
-public class JobsInit(ISchedulerFactory sf, IEnumerable<IAerieJob> jobs)
+public class JobsInit(IScheduler scheduler, IEnumerable<IAerieJob> jobs)
 {
     public static async Task<IScheduler> InitQuartz(string psqlCxnStr)
     {
@@ -30,8 +30,6 @@ public class JobsInit(ISchedulerFactory sf, IEnumerable<IAerieJob> jobs)
 
     public async Task WireUpJobs()
     {
-        var sch = await sf.GetScheduler();
-
         foreach (var j in jobs)
         {
             var qj = JobBuilder.Create(j.GetType())
@@ -46,7 +44,7 @@ public class JobsInit(ISchedulerFactory sf, IEnumerable<IAerieJob> jobs)
                 .StartNow()
                 .Build();
 
-            await sch.ScheduleJob(qj, qt);
+            await scheduler.ScheduleJob(qj, qt);
         }
     }
 }
