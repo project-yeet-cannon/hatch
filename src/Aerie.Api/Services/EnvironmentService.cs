@@ -15,17 +15,15 @@ namespace Aerie.Api.Services;
 public class EnvironmentService(
     EntityClient haEntity,
     HistoryClient haHistory,
+    StatesClient haStates,
     AerieContext db) : IEnvironmentService
 {
     public async Task<IEnumerable<EnvironmentReading>> FetchAllFromHomeAssistant(string namePrefix, DateTimeOffset from, DateTimeOffset to)
     {
-        var entities = await haEntity.GetEntities();
-
-        var filtered = entities.Where(a => namePrefix is null
-            || a.StartsWith(namePrefix, StringComparison.InvariantCultureIgnoreCase));
+        var entities = await GetEntities(namePrefix);
 
         var result = new List<EnvironmentReading>();
-        foreach (var e in filtered)
+        foreach (var e in entities)
         {
             var readings = await FetchFromHomeAssistant(e, from, to);
             result.AddRange(readings);
@@ -42,6 +40,26 @@ public class EnvironmentService(
             .Select(MapFromHa);
 
         return mapped;
+    }
+
+    public async IAsyncEnumerable<EnvironmentReading> FetchCurrentFromHomeAssistant(string namePrefix)
+    {
+        var entities = await GetEntities(namePrefix);
+
+        foreach (var e in entities)
+        {
+            var state = await haStates.GetState(e);
+            var mapped = MapFromHa(state);
+            yield return mapped;
+        }
+    }
+
+    private async Task<IEnumerable<string>> GetEntities(string prefix)
+    {
+        var entities = await haEntity.GetEntities();
+
+        return entities.Where(a => prefix is null
+            || a.StartsWith(prefix, StringComparison.InvariantCultureIgnoreCase));
     }
 
     public async Task BulkInsertReadings(IEnumerable<EnvironmentReading> readings)

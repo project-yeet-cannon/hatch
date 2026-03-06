@@ -24,4 +24,10 @@ public class HomeAssistantController(
         var readings = await envSrv.FetchAllFromHomeAssistant("climate.", now.Subtract(TimeSpan.FromHours(2)), now);
         await envSrv.BulkInsertReadings(readings);
     }
+
+    [HttpGet("currentStates")]
+    public async Task<object> CurrentStates()
+    {
+        return await envSrv.FetchCurrentFromHomeAssistant("climate.").ToListAsync();
+    }
 }
