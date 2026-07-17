@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.hfdev{width:480px;box-sizing:border-box;display:flex;flex-direction:column;gap:13px;padding:24px 22px 26px;border-radius:30px;background:var(--bg);color:var(--ink);font-family:var(--ui);box-shadow:0 24px 60px rgba(20,20,30,.22);transition:background .6s,color .4s}
+.hfdev *{box-sizing:border-box}
+.hf-head{display:flex;justify-content:space-between;align-items:flex-start;padding:2px 4px 4px}
+.hf-hl{display:flex;flex-direction:column;gap:5px}
+.hf-day{font-family:var(--display);font-size:23px;line-height:1;font-weight:800;color:var(--ink)}
+.hf-date{font:600 16px/1 var(--ui);letter-spacing:.01em;color:var(--muted);margin-top:2px}
+.hf-hr{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+.hf-clock{font-family:var(--num);font-size:48px;line-height:.85;font-weight:700;letter-spacing:-.03em;color:var(--ink)}
+.hf-toggle{display:flex;align-items:center;justify-content:center;width:36px;height:36px;background:var(--toggle-bg);border:none;border-radius:50%;padding:0;cursor:pointer}
+.hf-toggle span.ic{font-size:15px;line-height:1}
+.hf-zones{display:flex;flex-direction:column;gap:10px}
+.hf-zone{border-radius:var(--r);background:var(--card);border:1px solid var(--line);overflow:hidden}
+.hf-zone[open]{box-shadow:var(--shadow)}
+.hf-zsum{list-style:none;cursor:pointer;display:flex;align-items:center;gap:12px;padding:15px 17px}
+.hf-zsum::-webkit-details-marker{display:none}
+.hf-swatch{width:12px;height:12px;border-radius:50%;flex:none}
+.hf-name{font-family:var(--display);font-size:19px;line-height:1;flex:none;min-width:126px;white-space:nowrap;color:var(--ink);font-weight:700}
+.hf-temp{font-family:var(--num);font-weight:600;font-size:25px;line-height:1;letter-spacing:-.02em;margin-left:auto}
+.hf-spark{flex:1;height:40px}
+.hf-badge{font:600 11px/1 var(--ui);padding:6px 11px;border-radius:30px;flex:none;white-space:nowrap}
+.hf-chev{flex:none;color:var(--muted);transition:transform .2s;font-size:13px}
+.hf-zone[open] .hf-chev{transform:rotate(90deg)}
+.hf-zone[open] .hf-spark,.hf-zone[open] .hf-zsum .hf-badge{display:none}
+.hf-body{padding:2px 17px 17px}
+.hf-brow{display:flex;align-items:center;gap:10px;margin-bottom:9px}
+.hf-note{font:500 12px/1.3 var(--ui);color:var(--muted);margin-left:auto}
+.hf-chart{width:100%;height:130px}
+.hf-xax{display:flex;justify-content:space-between;font:600 9px/1 var(--num);letter-spacing:.05em;color:var(--muted);margin-top:7px;padding:0 2px}
+.hf-foot{display:flex;gap:18px;margin-top:12px;padding-top:11px;border-top:1px solid var(--line)}
+.hf-stat{font:500 12px/1.2 var(--ui);color:var(--muted)}
+.hf-stat b{font-family:var(--num);color:var(--ink);font-weight:700}
+.hf-out{border-radius:var(--r);background:var(--outbg);border:1px solid var(--line);padding:16px 18px 15px;box-shadow:var(--shadow)}
+.g-band{fill:var(--band)}
+.g-grid{stroke:var(--gridc);stroke-width:1;stroke-dasharray:4 4}
+.g-now{stroke:var(--ink);stroke-width:1.2;stroke-dasharray:2 3;opacity:.4}
+.g-actual{fill:none;stroke:var(--ink);stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.g-fore{fill:none;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:6 5}
+.g-warm{stroke:var(--warm)}.g-cool{stroke:var(--cool)}.g-ok{stroke:var(--comfort)}
+.g-fan-warm{fill:var(--warm);opacity:.15}.g-fan-cool{fill:var(--cool);opacity:.13}.g-fan-ok{fill:var(--comfort);opacity:.18}
+.g-dot-cool{fill:var(--cool)}.g-dot-warm{fill:var(--warm)}
+.g-sun-a{fill:var(--warm);opacity:.82}.g-sun-p{fill:var(--warm);opacity:.33}
+.g-hum{fill:var(--cool);opacity:.12}.g-precip{fill:var(--cool)}
+.g-suncircle{fill:var(--warm)}
+.b-warm{background:var(--warm-bg);color:var(--warm-ink)}
+.b-ok{background:var(--ok-bg);color:var(--ok-ink)}
+.b-cool{background:var(--cool-bg);color:var(--cool-ink)}
+.sky{--bg:#d8ecfb;--card:#ffffff;--outbg:#ffffff;--ink:#33404a;--muted:#8ba0ac;--line:#e8eef1;--gridc:#dce6ea;--comfort:#5aa883;--warm:#e39a52;--cool:#5f9fce;--band:rgba(90,168,131,.12);--warm-bg:rgba(227,154,82,.18);--warm-ink:#b56f28;--ok-bg:rgba(90,168,131,.16);--ok-ink:#3c7a58;--cool-bg:rgba(95,159,206,.16);--cool-ink:#3a6f96;--r:26px;--shadow:0 12px 30px rgba(80,120,150,.14);--ui:'Manrope',sans-serif;--display:'Manrope',sans-serif;--num:'Manrope',sans-serif;--toggle-bg:rgba(139,160,172,.14)}
+.night{--bg:linear-gradient(180deg,#0d101c,#151a2b 55%,#1b1530);--card:#171b29;--outbg:#171b29;--ink:#e7ebf3;--muted:#7b869c;--line:rgba(255,255,255,.07);--gridc:rgba(255,255,255,.09);--comfort:#7fbf9a;--warm:#e0a568;--cool:#7fa8d9;--band:rgba(127,191,154,.1);--warm-bg:rgba(224,165,104,.16);--warm-ink:#e0a568;--ok-bg:rgba(127,191,154,.16);--ok-ink:#7fbf9a;--cool-bg:rgba(127,168,217,.16);--cool-ink:#7fa8d9;--r:26px;--shadow:0 12px 34px rgba(0,0,0,.4);--ui:'Manrope',sans-serif;--display:'Manrope',sans-serif;--num:'Manrope',sans-serif;--toggle-bg:rgba(255,255,255,.08)}
+</style>
+</helmet>
+<div class="hfdev {{ themeClass }}">
+  <div class="hf-head">
+    <div class="hf-hl"><span class="hf-day">July 17</span><span class="hf-date">Wednesday</span></div>
+    <div class="hf-hr">
+      <span class="hf-clock">{{ clock }}</span>
+    </div>
+  </div>
+  <div class="hf-zones">
+    <details class="hf-zone" open="{{ true }}">
+      <summary class="hf-zsum">
+        <span class="hf-swatch" style="background:var(--warm)"></span><span class="hf-name">Living Room</span>
+        <svg class="hf-spark" viewBox="0 0 300 60" preserveAspectRatio="none"><rect class="g-band" x="0" y="22" width="300" height="18"></rect><polyline class="g-actual" points="6,42 50,38 96,32 140,26 168,26"></polyline><polyline class="g-fore g-warm" points="168,26 210,20 250,17 300,24"></polyline></svg>
+        <span class="hf-temp">71°</span><span class="hf-badge b-warm">→ 74° by 5pm</span><span class="hf-chev">›</span>
+      </summary>
+      <div class="hf-body">
+        <div class="hf-brow"><span class="hf-badge b-warm">warming</span><span class="hf-note">crosses comfort ≈ 5:10pm</span></div>
+        <svg class="hf-chart" viewBox="0 0 440 150" preserveAspectRatio="none">
+          <rect class="g-band" x="0" y="50" width="440" height="46"></rect><line class="g-grid" x1="0" y1="50" x2="440" y2="50"></line><line class="g-grid" x1="0" y1="96" x2="440" y2="96"></line>
+          <polygon class="g-fan-warm" points="248,58 288,38 330,26 380,34 440,46 440,80 380,66 330,56 288,60 248,58"></polygon>
+          <polyline class="g-actual" points="10,98 60,92 110,84 160,74 205,66 248,58"></polyline><polyline class="g-fore g-warm" points="248,58 288,48 330,41 380,50 440,60"></polyline>
+          <circle class="g-dot-cool" cx="110" cy="84" r="3.5"></circle><circle class="g-dot-warm" cx="330" cy="41" r="3.5"></circle><line class="g-now" x1="248" y1="8" x2="248" y2="142"></line>
+        </svg>
+        <div class="hf-xax"><span>6a</span><span>10a</span><span>now 3p</span><span>6p</span><span>10p</span></div>
+        <div class="hf-foot"><span class="hf-stat"><b>66°</b> low · 5am</span><span class="hf-stat"><b>71°</b> high · now</span></div>
+      </div>
+    </details>
+    <details class="hf-zone">
+      <summary class="hf-zsum">
+        <span class="hf-swatch" style="background:var(--comfort)"></span><span class="hf-name">Bedroom</span>
+        <svg class="hf-spark" viewBox="0 0 300 60" preserveAspectRatio="none"><rect class="g-band" x="0" y="22" width="300" height="18"></rect><polyline class="g-actual" points="6,36 50,35 96,34 140,33 168,33"></polyline><polyline class="g-fore g-ok" points="168,33 250,34 300,35"></polyline></svg>
+        <span class="hf-temp">70°</span><span class="hf-badge b-ok">steady</span><span class="hf-chev">›</span>
+      </summary>
+      <div class="hf-body">
+        <div class="hf-brow"><span class="hf-badge b-ok">comfortable</span><span class="hf-note">holding 69–70° all evening</span></div>
+        <svg class="hf-chart" viewBox="0 0 440 150" preserveAspectRatio="none">
+          <rect class="g-band" x="0" y="50" width="440" height="46"></rect><line class="g-grid" x1="0" y1="50" x2="440" y2="50"></line><line class="g-grid" x1="0" y1="96" x2="440" y2="96"></line>
+          <polygon class="g-fan-ok" points="248,80 330,78 440,82 440,94 330,90 248,86 248,80"></polygon>
+          <polyline class="g-actual" points="10,88 90,86 170,84 248,83"></polyline><polyline class="g-fore g-ok" points="248,83 330,84 440,86"></polyline><line class="g-now" x1="248" y1="8" x2="248" y2="142"></line>
+        </svg>
+        <div class="hf-xax"><span>6a</span><span>10a</span><span>now 3p</span><span>6p</span><span>10p</span></div>
+        <div class="hf-foot"><span class="hf-stat"><b>68°</b> low · 4am</span><span class="hf-stat"><b>71°</b> high · 1pm</span></div>
+      </div>
+    </details>
+    <details class="hf-zone">
+      <summary class="hf-zsum">
+        <span class="hf-swatch" style="background:var(--cool)"></span><span class="hf-name">Office</span>
+        <svg class="hf-spark" viewBox="0 0 300 60" preserveAspectRatio="none"><rect class="g-band" x="0" y="22" width="300" height="18"></rect><polyline class="g-actual" points="6,48 50,46 96,45 140,45 168,44"></polyline><polyline class="g-fore g-cool" points="168,44 250,46 300,47"></polyline></svg>
+        <span class="hf-temp">67°</span><span class="hf-badge b-cool">cool</span><span class="hf-chev">›</span>
+      </summary>
+      <div class="hf-body">
+        <div class="hf-brow"><span class="hf-badge b-cool">running cool</span><span class="hf-note">1° below comfort since noon</span></div>
+        <svg class="hf-chart" viewBox="0 0 440 150" preserveAspectRatio="none">
+          <rect class="g-band" x="0" y="50" width="440" height="46"></rect><line class="g-grid" x1="0" y1="50" x2="440" y2="50"></line><line class="g-grid" x1="0" y1="96" x2="440" y2="96"></line>
+          <polygon class="g-fan-cool" points="248,108 330,106 440,110 440,122 330,118 248,114 248,108"></polygon>
+          <polyline class="g-actual" points="10,104 90,106 170,110 248,111"></polyline><polyline class="g-fore g-cool" points="248,111 330,112 440,114"></polyline><line class="g-now" x1="248" y1="8" x2="248" y2="142"></line>
+        </svg>
+        <div class="hf-xax"><span>6a</span><span>10a</span><span>now 3p</span><span>6p</span><span>10p</span></div>
+        <div class="hf-foot"><span class="hf-stat"><b>66°</b> low · now</span><span class="hf-stat"><b>69°</b> high · 11am</span></div>
+      </div>
+    </details>
+  </div>
+  <div class="hf-out">
+    <div class="hf-brow" style="margin-bottom:12px"><span class="hf-swatch" style="background:var(--warm)"></span><span class="hf-name" style="width:auto">Outside</span><span class="hf-temp">58°</span></div>
+    <svg class="hf-chart" style="height:188px" viewBox="0 0 440 230" preserveAspectRatio="none">
+      <path class="g-sun-a" d="M10,58 L10,40 C60,22 110,20 160,26 C200,31 228,44 248,52 L248,58 Z"></path>
+      <path class="g-sun-p" d="M248,58 L248,52 C288,60 322,66 360,64 C392,62 418,54 440,50 L440,58 Z"></path>
+      <circle class="g-suncircle" cx="120" cy="30" r="6"></circle>
+      <text x="286" y="34" font-size="15" opacity=".5">☁</text><text x="332" y="30" font-size="17" opacity=".6">☁</text>
+      <path class="g-hum" d="M10,225 L10,140 C80,130 150,138 220,148 C300,160 370,152 440,158 L440,225 Z"></path>
+      <polyline class="g-actual" points="10,168 70,158 130,144 190,134 248,138"></polyline>
+      <polygon class="g-fan-cool" points="248,138 300,146 360,158 440,168 440,186 360,176 300,162 248,138"></polygon>
+      <polyline class="g-fore g-cool" points="248,138 300,150 360,166 440,176"></polyline>
+      <g class="g-precip"><rect x="60" y="216" width="14" height="6" opacity=".3"></rect><rect x="110" y="212" width="14" height="10" opacity=".4"></rect><rect x="248" y="196" width="14" height="26" opacity=".75"></rect><rect x="278" y="190" width="14" height="32" opacity=".85"></rect><rect x="308" y="202" width="14" height="20" opacity=".6"></rect><rect x="338" y="212" width="14" height="10" opacity=".4"></rect></g>
+      <line class="g-now" x1="248" y1="42" x2="248" y2="224"></line>
+    </svg>
+    <div class="hf-xax"><span>6a</span><span>10a</span><span>now 3p</span><span>6p</span><span>10p</span></div>
+    <div class="hf-foot"><span class="hf-stat"><b>☀ 5.2h</b> sun left</span><span class="hf-stat"><b>72%</b> humidity</span><span class="hf-stat"><b>0.3"</b> rain 4–6p</span><span class="hf-stat"><b>8:31p</b> sunset</span></div>
+    <div class="hf-note" style="margin-top:11px;color:var(--warm-ink)">Sunny til ~1pm, clouding after — Sun Room warm now, cooling this afternoon</div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:480},&quot;night&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Display&quot;}}">
+class Component extends DCLogic {
+  state = { night: new Date().getHours() >= 20 || new Date().getHours() < 6 };
+
+  renderVals() {
+    const night = this.props.night ?? this.state.night;
+    return {
+      themeClass: night ? 'night' : 'sky',
+      clock: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    };
+  }
+}
+</script>
+</body>
+</html>

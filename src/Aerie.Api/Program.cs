@@ -7,6 +7,7 @@ using HADotNet.Core;
 using HADotNet.Core.Clients;
 using Microsoft.AspNetCore.Rewrite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 using Newtonsoft.Json;
 using Quartz;
 
@@ -89,11 +90,27 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+// Dashboard (static wireframe app, outside the REST API)
+var dashboardFiles = new PhysicalFileProvider(
+    Path.Combine(app.Environment.WebRootPath, "dashboard"));
+app.UseDefaultFiles(new DefaultFilesOptions
+{
+    FileProvider = dashboardFiles,
+    RequestPath = "/dashboard"
+});
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = dashboardFiles,
+    RequestPath = "/dashboard"
+});
+
 app.UseAuthorization();
 app.MapControllers();
 
 var opt = new RewriteOptions();
 opt.AddRedirect("^$", "swagger");
+opt.AddRedirect("^dashboard$", "dashboard/");
 app.UseRewriter(opt);
 
 app.UseSwagger();
