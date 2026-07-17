@@ -16,4 +16,30 @@
     <PackageReference Include="Quartz.Extensions.DependencyInjection" Version="3.15.1"/>
     <PackageReference Include="Quartz.Extensions.Hosting" Version="3.15.1"/>
   </ItemGroup>
+
+  <!--
+    The Web SDK implicitly globs loose project-directory files as Content
+    (CopyToPublishDirectory=PreserveNewest). Without this, the local secrets
+    file gets copied into bin/ and any publish output, container images
+    included - see .env.json usage in Program.cs.
+  -->
+  <ItemGroup>
+    <Content Remove=".env.json"/>
+  </ItemGroup>
+
+  <!--
+    Builds the Aerie.Dashboard SPA into wwwroot/dashboard ahead of every build.
+    Requires Node 18+ on PATH (see ../Aerie.Dashboard/.nvmrc) - `dotnet build`
+    will fail with an old/missing npm otherwise. Skipped in Docker, where the
+    dashboard is built in its own stage and copied in (see Dockerfile.api).
+  -->
+  <ItemGroup>
+    <DashboardSource Include="../Aerie.Dashboard/src/**/*.*;../Aerie.Dashboard/index.html;../Aerie.Dashboard/package.json;../Aerie.Dashboard/vite.config.ts"/>
+  </ItemGroup>
+
+  <Target Name="BuildDashboard" BeforeTargets="Build" Condition="'$(SkipDashboardBuild)' != 'true'"
+          Inputs="@(DashboardSource)" Outputs="wwwroot/dashboard/index.html">
+    <Exec Command="npm install" WorkingDirectory="../Aerie.Dashboard" Condition="!Exists('../Aerie.Dashboard/node_modules')"/>
+    <Exec Command="npm run build" WorkingDirectory="../Aerie.Dashboard"/>
+  </Target>
 </Project>

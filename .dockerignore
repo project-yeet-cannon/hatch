@@ -1,0 +1,12 @@
+.git
+**/bin
+**/obj
+**/node_modules
+**/dist
+*.zip
+
+# Secrets - never bake these into an image (widened build context now reaches
+# the repo root, where local secrets live; the running container gets its own
+# copy via a mount/env, not a baked-in one)
+.env.json
+**/.env.json

@@ -8,6 +8,7 @@ using HADotNet.Core.Clients;
 using Microsoft.AspNetCore.Rewrite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.OpenApi;
 using Newtonsoft.Json;
 using Quartz;
 
@@ -60,7 +61,15 @@ builder.Services.AddTransient<JobsInit>();
 
 // API / HTTP
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Aerie API",
+        Version = "v1",
+        Description = "[Open the home dashboard →](/dashboard/)"
+    });
+});
 builder.Services.AddControllers();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();

@@ -1,13 +1,27 @@
+# Build the dashboard SPA (Aerie.Dashboard) separately - the .NET SDK image
+# has no Node runtime, and its output is committed to wwwroot/dashboard as a
+# static web asset of Aerie.Api.
+FROM node:22-alpine AS dashboard-build
+WORKDIR /repo
+COPY src/Aerie.Dashboard/package.json src/Aerie.Dashboard/package-lock.json src/Aerie.Dashboard/
+RUN npm --prefix src/Aerie.Dashboard ci
+COPY src/Aerie.Dashboard src/Aerie.Dashboard
+RUN npm --prefix src/Aerie.Dashboard run build
+
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build-env
 WORKDIR /App
 
-# Copy everything
+# Copy everything (build context is the repo root - see compose.yaml / the
+# release workflow - so Aerie.Api can reach its sibling Aerie.Dashboard project)
 COPY . ./
-# Restore as distinct layers
-RUN dotnet restore
+COPY --from=dashboard-build /repo/src/Aerie.Api/wwwroot/dashboard ./src/Aerie.Api/wwwroot/dashboard
 
-# Build and publish a release
-RUN dotnet publish Aerie.Api.csproj -c Release -o out
+# Restore as distinct layers
+RUN dotnet restore src/Aerie.Api/Aerie.Api.csproj
+
+# Build and publish a release. The dashboard was already built above, so skip
+# the MSBuild target that would otherwise shell out to npm (unavailable here).
+RUN dotnet publish src/Aerie.Api/Aerie.Api.csproj -c Release -o out -p:SkipDashboardBuild=true
 
 # Build runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:10.0

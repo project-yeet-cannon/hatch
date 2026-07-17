@@ -1,0 +1,19 @@
+export interface ChartPoint {
+  x: number;
+  y: number;
+}
+
+export function scaleLinear(domain: [number, number], range: [number, number]) {
+  const [d0, d1] = domain;
+  const [r0, r1] = range;
+  const span = d1 - d0 || 1;
+  return (value: number) => r0 + ((value - d0) / span) * (r1 - r0);
+}
+
+export function toPolylinePoints(points: ChartPoint[]): string {
+  return points.map((p) => `${round(p.x)},${round(p.y)}`).join(' ');
+}
+
+function round(n: number): number {
+  return Math.round(n * 10) / 10;
+}

@@ -21,8 +21,8 @@ services:
 
   api:
     build:
-      context: ./src/Aerie.Api
-      dockerfile: Dockerfile.api
+      context: .
+      dockerfile: src/Aerie.Api/Dockerfile.api
     networks:
       - local
     ports:
