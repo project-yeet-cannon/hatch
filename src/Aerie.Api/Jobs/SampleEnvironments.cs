@@ -18,5 +18,8 @@ public class SampleEnvironments(TimeProvider t, IEnvironmentService es) : IAerie
 
         var readings = await es.FetchAllFromHomeAssistant("climate.", then, now);
         await es.BulkInsertReadings(readings);
+
+        readings = await es.FetchAllFromHomeAssistant("sensor.h5110", then, now);
+        await es.BulkInsertReadings(readings);
     }
 }

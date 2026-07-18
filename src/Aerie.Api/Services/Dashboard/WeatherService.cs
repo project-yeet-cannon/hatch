@@ -1,6 +1,8 @@
 using System.Globalization;
+using Aerie.Api.Ef;
 using Aerie.Api.Models.Dashboard;
 using HADotNet.Core.Clients;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace Aerie.Api.Services.Dashboard;
@@ -11,18 +13,22 @@ public interface IWeatherService
 }
 
 /// <summary>
-/// Sources the Outside card from Home Assistant's weather + sun entities. This
-/// is best-effort by design: if the entities aren't configured or a call fails,
-/// it returns a zeroed OutsideClimate rather than throwing, so a missing weather
+/// Sources the Outside card's current temperature/humidity from Home
+/// Assistant's outdoor sensor.* entities (configured via
+/// DashboardOptions.OutsideTemperatureEntity/OutsideHumidityEntity), the
+/// condition note from a weather.* entity, and sunset from sun.sun. This is
+/// best-effort by design: if an entity isn't configured or a call fails, that
+/// piece falls back to zero/blank rather than throwing, so a missing
 /// integration degrades the outside card instead of breaking the dashboard.
 ///
-/// Outdoor temperature *history* isn't stored yet (the sampler only records
-/// climate.* entities), so history/forecast/hourly come back empty for now - the
-/// frontend chart tolerates empty series. Persisting the weather entity through
-/// the existing sampler is the natural next step to fill them in.
+/// History comes from EnvironmentReadings, populated by the SampleOutside job
+/// polling the same sensor entities - the same pattern ZoneService uses for
+/// climate.* zones. Forecast/hourly aren't sourced yet, so they come back
+/// empty - the frontend chart tolerates empty series.
 /// </summary>
 public class WeatherService(
     StatesClient states,
+    AerieContext db,
     IOptions<DashboardOptions> options,
     TimeProvider time,
     ILogger<WeatherService> logger) : IWeatherService
@@ -32,17 +38,14 @@ public class WeatherService(
     public async Task<OutsideClimate> GetOutsideAsync(DashboardWindow window, CancellationToken ct)
     {
         var now = time.GetUtcNow();
+        var from = now - window.History;
 
-        decimal currentTempF = 0, humidityPct = 0;
         var note = string.Empty;
-
         if (!string.IsNullOrWhiteSpace(Opt.WeatherEntity))
         {
             try
             {
                 var w = await states.GetState(Opt.WeatherEntity);
-                currentTempF = GetDecimal(w.Attributes, "temperature") ?? 0;
-                humidityPct = GetDecimal(w.Attributes, "humidity") ?? 0;
                 note = Humanize(w.State);
             }
             catch (Exception ex)
@@ -50,6 +53,9 @@ public class WeatherService(
                 logger.LogWarning(ex, "Failed to read weather entity {Entity}", Opt.WeatherEntity);
             }
         }
+
+        var currentTempF = await GetCurrentSensorValue(Opt.OutsideTemperatureEntity);
+        var humidityPct = await GetCurrentSensorValue(Opt.OutsideHumidityEntity);
 
         var sunsetTime = now;
         decimal sunHoursRemaining = 0;
@@ -67,6 +73,8 @@ public class WeatherService(
             logger.LogWarning(ex, "Failed to read sun entity {Entity}", Opt.SunEntity);
         }
 
+        var history = await GetHistoryAsync(Opt.OutsideTemperatureEntity, from, now, window.Bucket, ct);
+
         return new OutsideClimate(
             CurrentTempF: currentTempF,
             HumidityPct: humidityPct,
@@ -74,24 +82,42 @@ public class WeatherService(
             SunsetTime: sunsetTime,
             Precipitation: new Precipitation(0, string.Empty),
             Note: note,
-            History: [],
+            History: history,
             Forecast: [],
             Hourly: []);
     }
 
-    private static decimal? GetDecimal(IDictionary<string, object> attrs, string key)
+    private async Task<decimal> GetCurrentSensorValue(string? entityId)
     {
-        if (!attrs.TryGetValue(key, out var v) || v is null) return null;
-        return v switch
+        if (string.IsNullOrWhiteSpace(entityId)) return 0;
+        try
         {
-            long l => l,
-            int i => i,
-            double d => (decimal)d,
-            decimal m => m,
-            string s when decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var r) => r,
-            _ => null,
-        };
+            var s = await states.GetState(entityId);
+            return ParseDecimal(s.State) ?? 0;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to read sensor entity {Entity}", entityId);
+            return 0;
+        }
     }
+
+    private async Task<IReadOnlyList<TempPoint>> GetHistoryAsync(
+        string? entityId, DateTimeOffset from, DateTimeOffset to, TimeSpan bucket, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(entityId)) return [];
+
+        var rows = await db.EnvironmentReadings
+            .Where(r => r.EntityId == entityId && r.Timestamp >= from && r.Timestamp <= to)
+            .OrderBy(r => r.Timestamp)
+            .Select(r => new { r.Timestamp, r.Temperature })
+            .ToListAsync(ct);
+
+        return ZoneMath.Bucket(rows.Select(r => (r.Timestamp, r.Temperature)), from, to, bucket);
+    }
+
+    private static decimal? ParseDecimal(string? s) =>
+        decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : null;
 
     private static DateTimeOffset? GetDateTime(IDictionary<string, object> attrs, string key)
     {

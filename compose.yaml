@@ -27,6 +27,8 @@ services:
       - local
     ports:
       - "8080:8080"
+    volumes:
+      - ./src/Aerie.Api/.env.json:/App/.env.json
     environment:
       - DOTNET_ENVIRONMENT=Docker
     depends_on:

@@ -61,6 +61,7 @@ builder.Services.AddScoped<IDashboardService, DashboardService>();
 
 // Jobs
 builder.Services.AddTransient<IAerieJob, SampleEnvironments>();
+builder.Services.AddTransient<IAerieJob, SampleOutside>();
 
 var scheduler = await JobsInit.InitQuartz(
     builder.Configuration.GetConnectionString("Quartz")!);

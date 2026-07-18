@@ -6,11 +6,17 @@ public class DashboardOptions
     /// <summary>IANA timezone the dashboard displays in.</summary>
     public string TimeZone { get; set; } = "America/New_York";
 
-    /// <summary>Home Assistant weather entity id, e.g. "weather.forecast_home". Empty disables the outside card's live data.</summary>
+    /// <summary>Home Assistant weather entity id, e.g. "weather.forecast_home". Source of the outside card's condition note; empty leaves it blank.</summary>
     public string? WeatherEntity { get; set; }
 
     /// <summary>Home Assistant sun entity id, source of sunset time.</summary>
     public string SunEntity { get; set; } = "sun.sun";
+
+    /// <summary>Home Assistant sensor entity id for outdoor temperature, e.g. "sensor.h5110_716d_temperature". Empty disables the outside card's live temperature.</summary>
+    public string? OutsideTemperatureEntity { get; set; }
+
+    /// <summary>Home Assistant sensor entity id for outdoor humidity, e.g. "sensor.h5110_716d_humidity". Empty disables the outside card's live humidity.</summary>
+    public string? OutsideHumidityEntity { get; set; }
 
     /// <summary>Degrees F either side of the thermostat setpoint used as the comfort band when a zone has no configured range.</summary>
     public decimal ComfortToleranceF { get; set; } = 2m;

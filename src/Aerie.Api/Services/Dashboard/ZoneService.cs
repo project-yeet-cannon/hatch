@@ -43,10 +43,15 @@ public class ZoneService(
             .ToListAsync(ct);
 
         // Zones = anything we've seen readings for, plus configured-and-included
-        // entities that haven't reported yet; minus anything explicitly excluded.
+        // entities that haven't reported yet; minus anything explicitly excluded
+        // and minus the outside sensors (they're readings for the Outside card,
+        // sampled the same way, but aren't a thermostat zone).
+        var outsideEntityIds = new HashSet<string?> { Opt.OutsideTemperatureEntity, Opt.OutsideHumidityEntity };
+
         var entityIds = readingEntityIds
             .Union(configs.Values.Where(c => c.Included).Select(c => c.EntityId))
             .Where(id => !configs.TryGetValue(id, out var c) || c.Included)
+            .Where(id => !outsideEntityIds.Contains(id))
             .Distinct();
 
         var zones = new List<(EfZoneConfig? cfg, ZoneClimate zone)>();

@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using Aerie.Api.Ef;
 using Aerie.Api.Models.Environment;
 using Aerie.Api.Models.HomeAssistant;
@@ -37,9 +38,21 @@ public class EnvironmentService(
         if (history == null) return [];
 
         var mapped = history
-            .Select(MapFromHa);
+            .Select(MapFromHa)
+            .Where(a => a is not null)
+            .Select(a => a!);
 
         return mapped;
+    }
+
+    public async Task<IEnumerable<EnvironmentReading>> FetchSensorHistoryFromHomeAssistant(string entityId, DateTimeOffset from, DateTimeOffset to, bool isTemperature)
+    {
+        var history = await haHistory.GetHistory(entityId, from, to);
+        if (history == null) return [];
+
+        return history
+            .Select(s => MapSensorState(s, isTemperature))
+            .OfType<EnvironmentReading>();
     }
 
     public async IAsyncEnumerable<EnvironmentReading> FetchCurrentFromHomeAssistant(string namePrefix)
@@ -50,7 +63,8 @@ public class EnvironmentService(
         {
             var state = await haStates.GetState(e);
             var mapped = MapFromHa(state);
-            yield return mapped;
+            if (mapped is not null)
+                yield return mapped;
         }
     }
 
@@ -115,16 +129,25 @@ public class EnvironmentService(
             IsHeating = r.IsHeating
         };
 
-    private static EnvironmentReading MapFromHa(StateObject s)
+    private static EnvironmentReading? MapSensorState(StateObject s, bool isTemperature)
     {
-        var attributes = MysaAttributes.FromDictionary(s.Attributes);
+        if (!decimal.TryParse(s.State, NumberStyles.Any, CultureInfo.InvariantCulture, out var value))
+            return null;
 
         return new EnvironmentReading
         {
-            // Temperature is the *measured* room temperature; DesiredTemperature
-            // is the thermostat setpoint. Keep these distinct - the dashboard's
-            // currentTempF/history must reflect what the room actually is, not
-            // what it's being told to reach.
+            EntityId = s.EntityId,
+            Timestamp = s.LastUpdated,
+            Temperature = isTemperature ? value : null,
+            Humidity = isTemperature ? null : value,
+        };
+    }
+
+    private static EnvironmentReading MapClimateState(StateObject s)
+    {
+        var attributes = MysaAttributes.FromDictionary(s.Attributes);
+        return new EnvironmentReading
+        {
             DesiredTemperature = attributes.Temperature,
             EntityId = s.EntityId,
             Humidity = attributes.CurrentHumidity,
@@ -132,5 +155,24 @@ public class EnvironmentService(
             Temperature = attributes.CurrentTemperature,
             Timestamp = s.LastUpdated
         };
+    }
+
+    private static EnvironmentReading? MapFromHa(StateObject s)
+    {
+        if (s.EntityId.StartsWith("sensor."))
+        {
+            if (s.EntityId.EndsWith("_temperature"))
+                return MapSensorState(s, isTemperature: s.EntityId.EndsWith("_temperature"));
+            if (s.EntityId.EndsWith("_humidity"))
+                return MapSensorState(s, isTemperature: false);
+            else
+                return null; // nonmapped attribute
+        }
+
+        if (s.EntityId.StartsWith("climate."))
+        {
+            return MapClimateState(s);
+        }
+        throw new InvalidOperationException($"Unsupported entity ID: [{s.EntityId}]");
     }
 }
