@@ -121,11 +121,15 @@ public class EnvironmentService(
 
         return new EnvironmentReading
         {
+            // Temperature is the *measured* room temperature; DesiredTemperature
+            // is the thermostat setpoint. Keep these distinct - the dashboard's
+            // currentTempF/history must reflect what the room actually is, not
+            // what it's being told to reach.
             DesiredTemperature = attributes.Temperature,
             EntityId = s.EntityId,
             Humidity = attributes.CurrentHumidity,
             IsHeating = attributes.HvacAction == MysaActions.Heating,
-            Temperature = attributes.Temperature,
+            Temperature = attributes.CurrentTemperature,
             Timestamp = s.LastUpdated
         };
     }

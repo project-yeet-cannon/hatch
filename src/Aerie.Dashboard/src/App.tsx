@@ -15,6 +15,7 @@ function isNight(date: Date, timeZone: string): boolean {
 
 export function App() {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -22,9 +23,16 @@ export function App() {
     let cancelled = false;
 
     const load = () => {
-      source.getDashboardData().then((snapshot) => {
-        if (!cancelled) setData(snapshot);
-      });
+      source
+        .getDashboardData()
+        .then((snapshot) => {
+          if (cancelled) return;
+          setData(snapshot);
+          setError(null);
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        });
     };
 
     load();
@@ -40,7 +48,16 @@ export function App() {
     return () => clearInterval(tick);
   }, []);
 
-  if (!data) return null;
+  if (!data) {
+    if (error) {
+      return (
+        <div className="hfdev sky" role="alert">
+          <div className="hf-note" style={{ margin: 0 }}>Couldn’t load dashboard data — {error}</div>
+        </div>
+      );
+    }
+    return null;
+  }
 
   const themeClass = isNight(now, data.timezone) ? 'night' : 'sky';
 

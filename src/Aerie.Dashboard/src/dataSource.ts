@@ -1,19 +1,25 @@
 import type { DashboardDataSource } from './types';
+import { ApiDashboardDataSource } from './api/apiDataSource';
 import { MockDashboardDataSource } from './mock/mockDataSource';
 import { TestDataSource } from './mock/testDataSource';
 
 /**
- * Single place the rest of the app asks for a data source. Swapping the mock
- * for a real Aerie.Api-backed implementation later is a one-line change here.
+ * Single place the rest of the app asks for a data source. Defaults to the real
+ * Aerie.Api endpoint; override with a `?source=` query param for development:
  *
- * Visit with ?source=test to switch to TestDataSource, which returns all-X
- * text and all-9999 numbers - anything else on the page is hardcoded, not
- * data-driven.
+ *   (default)      -> ApiDashboardDataSource   — live data from GET /api/dashboard
+ *   ?source=mock   -> MockDashboardDataSource   — synthetic but realistic data
+ *   ?source=test   -> TestDataSource            — all-X text / all-9999 numbers,
+ *                                                 to spot any hardcoded UI values
  */
 export function getDashboardDataSource(): DashboardDataSource {
   const params = new URLSearchParams(window.location.search);
-  if (params.get('source') === 'test') {
-    return new TestDataSource();
+  switch (params.get('source')) {
+    case 'mock':
+      return new MockDashboardDataSource();
+    case 'test':
+      return new TestDataSource();
+    default:
+      return new ApiDashboardDataSource();
   }
-  return new MockDashboardDataSource();
 }

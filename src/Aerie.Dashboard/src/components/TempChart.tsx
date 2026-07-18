@@ -24,6 +24,14 @@ export function TempChart({ history, forecast, comfortRange, status, compact }: 
   const marginBottom = compact ? 4 : 8;
 
   const allPoints = [...history, ...forecast];
+
+  // No readings yet (e.g. a freshly configured zone, or outside before a
+  // weather integration is wired up): render an empty chart rather than
+  // producing NaN geometry from empty min/max.
+  if (allPoints.length === 0) {
+    return <svg className={compact ? 'hf-spark' : 'hf-chart'} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" />;
+  }
+
   const times = allPoints.map((p) => new Date(p.time).getTime());
   const temps = allPoints.map((p) => p.tempF).concat(
     comfortRange ? [comfortRange.lowF, comfortRange.highF] : [],
@@ -72,19 +80,18 @@ interface AxisProps {
 
 export function TempChartAxis({ history, forecast, timeZone }: AxisProps) {
   const all = [...history, ...forecast];
-  const first = all[0];
-  const last = all[all.length - 1];
+  if (all.length === 0) return <div className="hf-xax" />;
+
+  const at = (fraction: number) => all[Math.min(all.length - 1, Math.max(0, Math.round((all.length - 1) * fraction)))];
   const now = history[history.length - 1] ?? forecast[0];
-  const mid1 = all[Math.round(all.length * 0.25)];
-  const mid2 = all[Math.round(all.length * 0.75)];
 
   return (
     <div className="hf-xax">
-      <span>{formatAxisHour(first.time, timeZone)}</span>
-      <span>{formatAxisHour(mid1.time, timeZone)}</span>
+      <span>{formatAxisHour(at(0).time, timeZone)}</span>
+      <span>{formatAxisHour(at(0.25).time, timeZone)}</span>
       <span>now {formatAxisHour(now.time, timeZone)}</span>
-      <span>{formatAxisHour(mid2.time, timeZone)}</span>
-      <span>{formatAxisHour(last.time, timeZone)}</span>
+      <span>{formatAxisHour(at(0.75).time, timeZone)}</span>
+      <span>{formatAxisHour(at(1).time, timeZone)}</span>
     </div>
   );
 }

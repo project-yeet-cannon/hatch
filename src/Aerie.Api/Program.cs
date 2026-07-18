@@ -3,6 +3,7 @@ using Aerie.Api.Ef;
 using Aerie.Api.Jobs;
 using Aerie.Api.Models.Environment;
 using Aerie.Api.Services;
+using Aerie.Api.Services.Dashboard;
 using HADotNet.Core;
 using HADotNet.Core.Clients;
 using Microsoft.AspNetCore.Rewrite;
@@ -51,6 +52,13 @@ builder.Services.AddTransient(_ => ClientFactory.GetClient<DiscoveryClient>());
 // Services
 builder.Services.AddTransient<IEnvironmentService, EnvironmentService>();
 
+// Dashboard data services
+builder.Services.Configure<DashboardOptions>(builder.Configuration.GetSection("Dashboard"));
+builder.Services.AddSingleton<IForecastService, ForecastService>();
+builder.Services.AddScoped<IZoneService, ZoneService>();
+builder.Services.AddScoped<IWeatherService, WeatherService>();
+builder.Services.AddScoped<IDashboardService, DashboardService>();
+
 // Jobs
 builder.Services.AddTransient<IAerieJob, SampleEnvironments>();
 
@@ -90,6 +98,15 @@ using (var scope = app.Services.CreateScope())
     var init = scope.ServiceProvider.GetRequiredService<JobsInit>();
     await init.WireUpJobs();
 }
+
+// Graceful shutdown
+var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+lifetime.ApplicationStopping.Register(() =>
+{
+    var scheduler = app.Services.GetRequiredService<IScheduler>();
+    if (scheduler.IsStarted)
+        scheduler.Shutdown(waitForJobsToComplete: false).GetAwaiter().GetResult();
+});
 
 ////////
 /// HTTP Server
