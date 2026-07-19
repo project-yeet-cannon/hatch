@@ -11,10 +11,10 @@ destroy:
 	docker compose down -v
 
 build:
-	dotnet build --project ./src/Aerie.Api/Aerie.Api.csproj
+	bash -c 'export NVM_DIR="$$HOME/.nvm"; [ -s "$$NVM_DIR/nvm.sh" ] && \. "$$NVM_DIR/nvm.sh"; dotnet build ./src/Aerie.Api/Aerie.Api.csproj'
 
 run:
-	dotnet run --project ./src/Aerie.Api/Aerie.Api.csproj
+	bash -c 'export NVM_DIR="$$HOME/.nvm"; [ -s "$$NVM_DIR/nvm.sh" ] && \. "$$NVM_DIR/nvm.sh"; dotnet run --project ./src/Aerie.Api/Aerie.Api.csproj'
 
 test:
 	dotnet test ./src/Aerie.Api.Tests/Aerie.Api.Tests.csproj

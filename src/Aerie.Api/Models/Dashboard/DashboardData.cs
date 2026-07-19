@@ -1,7 +1,7 @@
 namespace Aerie.Api.Models.Dashboard;
 
 // These records are the server side of the dashboard's data contract. They must
-// serialize to exactly the shape in Aerie.Dashboard/src/types.ts (camelCase
+// serialize to exactly the shape in Aerie.Web/apps/dashboard/src/types.ts (camelCase
 // keys, ISO-8601 timestamps - both the System.Text.Json defaults). Only raw
 // physical quantities live here; all presentation (status words, badge text) is
 // derived on the client.

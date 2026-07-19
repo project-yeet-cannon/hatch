@@ -10,7 +10,7 @@ public interface IDashboardService
 
 /// <summary>
 /// The backend-for-frontend aggregate: composes zones + outside into the exact
-/// shape Aerie.Dashboard consumes. Zones and outside are fetched concurrently so
+/// shape the dashboard app consumes. Zones and outside are fetched concurrently so
 /// the (slower) weather call doesn't serialize behind the DB reads.
 /// </summary>
 public class DashboardService(

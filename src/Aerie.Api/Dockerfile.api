@@ -1,25 +1,25 @@
-# Build the dashboard SPA (Aerie.Dashboard) separately - the .NET SDK image
-# has no Node runtime, and its output is committed to wwwroot/dashboard as a
+# Build the dashboard SPA (Aerie.Web/apps/dashboard) separately - the .NET SDK image
+# has no Node runtime, and its output is committed to wwwroot/apps/dashboard as a
 # static web asset of Aerie.Api.
 FROM node:22-alpine AS dashboard-build
 WORKDIR /repo
-COPY src/Aerie.Dashboard/package.json src/Aerie.Dashboard/package-lock.json src/Aerie.Dashboard/
-RUN npm --prefix src/Aerie.Dashboard ci
-COPY src/Aerie.Dashboard src/Aerie.Dashboard
-RUN npm --prefix src/Aerie.Dashboard run build
+COPY src/Aerie.Web/apps/dashboard/package.json src/Aerie.Web/apps/dashboard/package-lock.json src/Aerie.Web/apps/dashboard/
+RUN npm --prefix src/Aerie.Web/apps/dashboard ci
+COPY src/Aerie.Web/apps/dashboard src/Aerie.Web/apps/dashboard
+RUN npm --prefix src/Aerie.Web/apps/dashboard run build
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build-env
 WORKDIR /App
 
 # Copy everything (build context is the repo root - see compose.yaml / the
-# release workflow - so Aerie.Api can reach its sibling Aerie.Dashboard project)
+# release workflow - so Aerie.Api can reach its sibling Aerie.Web project)
 COPY . ./
-COPY --from=dashboard-build /repo/src/Aerie.Api/wwwroot/dashboard ./src/Aerie.Api/wwwroot/dashboard
+COPY --from=dashboard-build /repo/src/Aerie.Api/wwwroot/apps/dashboard ./src/Aerie.Api/wwwroot/apps/dashboard
 
 # Restore as distinct layers
 RUN dotnet restore src/Aerie.Api/Aerie.Api.csproj
 
-# Build and publish a release. The dashboard was already built above, so skip
+# Build and publish a release. The dashboard (from Aerie.Web) was already built above, so skip
 # the MSBuild target that would otherwise shell out to npm (unavailable here).
 RUN dotnet publish src/Aerie.Api/Aerie.Api.csproj -c Release -o out -p:SkipDashboardBuild=true
 

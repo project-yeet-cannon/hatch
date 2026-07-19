@@ -6,7 +6,7 @@ namespace Aerie.Api.Controllers;
 
 /// <summary>
 /// Primary dashboard endpoint. Returns the whole DashboardData snapshot the
-/// frontend renders - this is what Aerie.Dashboard's ApiDashboardDataSource calls.
+/// frontend renders - this is what the dashboard app's ApiDashboardDataSource calls.
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
