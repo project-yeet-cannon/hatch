@@ -24,9 +24,17 @@ var env = JsonConvert.DeserializeObject<Dictionary<string, string>>(rawEnv);
 var secrets = new EnvSecrets(env ?? []);
 builder.Services.AddSingleton<ISecrets>(secrets);
 
-builder.Services.AddDbContext<AerieContext>(o =>
+// Pooled factory so services that fan out concurrent DB work (e.g.
+// DashboardService's Task.WhenAll of zones + weather) can each create their
+// own short-lived context instead of racing on one shared scoped instance,
+// which throws "A second operation was started on this context..." under
+// concurrent load. Scoped AerieContext is still available (resolved from the
+// same pool) for services that only ever touch the DB sequentially.
+builder.Services.AddPooledDbContextFactory<AerieContext>(o =>
     o.UseNpgsql(
         builder.Configuration.GetConnectionString("Aerie")));
+builder.Services.AddScoped<AerieContext>(sp =>
+    sp.GetRequiredService<IDbContextFactory<AerieContext>>().CreateDbContext());
 
 // Quartz
 builder.Services.AddQuartz();

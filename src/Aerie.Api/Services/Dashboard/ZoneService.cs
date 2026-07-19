@@ -22,7 +22,7 @@ public interface IZoneService
 /// a brand-new climate.* entity shows up on the dashboard with no setup.
 /// </summary>
 public class ZoneService(
-    AerieContext db,
+    IDbContextFactory<AerieContext> dbFactory,
     IForecastService forecast,
     IOptions<DashboardOptions> options,
     TimeProvider time) : IZoneService
@@ -33,6 +33,8 @@ public class ZoneService(
     {
         var now = time.GetUtcNow();
         var from = now - window.History;
+
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
 
         var configs = await db.ZoneConfigs.AsNoTracking().ToDictionaryAsync(c => c.EntityId, ct);
 
@@ -58,7 +60,7 @@ public class ZoneService(
         foreach (var id in entityIds)
         {
             configs.TryGetValue(id, out var cfg);
-            zones.Add((cfg, await BuildZoneAsync(id, cfg, window, now, ct)));
+            zones.Add((cfg, await BuildZoneAsync(db, id, cfg, window, now, ct)));
         }
 
         return zones
@@ -71,30 +73,34 @@ public class ZoneService(
     public async Task<ZoneClimate?> GetZoneAsync(string entityId, DashboardWindow window, CancellationToken ct)
     {
         var now = time.GetUtcNow();
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
         var cfg = await db.ZoneConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.EntityId == entityId, ct);
         var from = now - window.History;
 
         var hasReadings = await db.EnvironmentReadings.AnyAsync(r => r.EntityId == entityId && r.Timestamp >= from, ct);
         if (!hasReadings && cfg is null) return null;
 
-        return await BuildZoneAsync(entityId, cfg, window, now, ct);
+        return await BuildZoneAsync(db, entityId, cfg, window, now, ct);
     }
 
     public async Task<IReadOnlyList<TempPoint>> GetReadingsAsync(
         string entityId, DateTimeOffset from, DateTimeOffset to, TimeSpan bucket, CancellationToken ct)
     {
-        var rows = await LoadReadingsAsync(entityId, from, to, ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var rows = await LoadReadingsAsync(db, entityId, from, to, ct);
         return ZoneMath.Bucket(rows.Select(r => (r.Timestamp, r.Temperature)), from, to, bucket);
     }
 
     public async Task<ComfortRange?> GetComfortAsync(string entityId, CancellationToken ct)
     {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
         var cfg = await db.ZoneConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.EntityId == entityId, ct);
         return cfg is { ComfortLowF: { } low, ComfortHighF: { } high } ? new ComfortRange(low, high) : null;
     }
 
     public async Task UpsertComfortAsync(string entityId, ComfortRange range, CancellationToken ct)
     {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
         var cfg = await db.ZoneConfigs.FirstOrDefaultAsync(c => c.EntityId == entityId, ct);
         if (cfg is null)
         {
@@ -107,10 +113,10 @@ public class ZoneService(
     }
 
     private async Task<ZoneClimate> BuildZoneAsync(
-        string entityId, EfZoneConfig? cfg, DashboardWindow window, DateTimeOffset now, CancellationToken ct)
+        AerieContext db, string entityId, EfZoneConfig? cfg, DashboardWindow window, DateTimeOffset now, CancellationToken ct)
     {
         var from = now - window.History;
-        var rows = await LoadReadingsAsync(entityId, from, now, ct);
+        var rows = await LoadReadingsAsync(db, entityId, from, now, ct);
 
         var history = ZoneMath.Bucket(rows.Select(r => (r.Timestamp, r.Temperature)), from, now, window.Bucket);
 
@@ -127,7 +133,7 @@ public class ZoneService(
         return new ZoneClimate(entityId, name, Math.Round(currentTempF, 1), comfort, history, projected, extremes.Item1, extremes.Item2);
     }
 
-    private async Task<List<Reading>> LoadReadingsAsync(string entityId, DateTimeOffset from, DateTimeOffset to, CancellationToken ct) =>
+    private async Task<List<Reading>> LoadReadingsAsync(AerieContext db, string entityId, DateTimeOffset from, DateTimeOffset to, CancellationToken ct) =>
         await db.EnvironmentReadings
             .Where(r => r.EntityId == entityId && r.Timestamp >= from && r.Timestamp <= to)
             .OrderBy(r => r.Timestamp)
