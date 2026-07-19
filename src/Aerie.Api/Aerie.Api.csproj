@@ -42,4 +42,10 @@
     <Exec Command="npm install" WorkingDirectory="../Aerie.Web/apps/dashboard" Condition="!Exists('../Aerie.Web/apps/dashboard/node_modules')"/>
     <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/dashboard"/>
   </Target>
+
+  <!-- Apps landing page (../Aerie.Web/index.html) - just a static file, no build step needed. -->
+  <Target Name="CopyAppsIndex" BeforeTargets="Build"
+          Inputs="../Aerie.Web/index.html" Outputs="wwwroot/apps/index.html">
+    <Copy SourceFiles="../Aerie.Web/index.html" DestinationFolder="wwwroot/apps"/>
+  </Target>
 </Project>

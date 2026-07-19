@@ -84,7 +84,7 @@ builder.Services.AddSwaggerGen(c =>
     {
         Title = "Aerie API",
         Version = "v1",
-        Description = "[Open the home dashboard →](/apps/dashboard/)"
+        Description = "[Open apps →](/apps/)"
     });
 });
 builder.Services.AddControllers();
@@ -126,20 +126,20 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-// Dashboard (static wireframe app, outside the REST API)
-var dashboardPath = Path.Combine(app.Environment.WebRootPath, "apps/dashboard");
-if (Directory.Exists(dashboardPath))
+// Apps (static landing page + SPAs living under wwwroot/apps, outside the REST API)
+var appsPath = Path.Combine(app.Environment.WebRootPath, "apps");
+if (Directory.Exists(appsPath))
 {
-    var dashboardFiles = new PhysicalFileProvider(dashboardPath);
+    var appsFiles = new PhysicalFileProvider(appsPath);
     app.UseDefaultFiles(new DefaultFilesOptions
     {
-        FileProvider = dashboardFiles,
-        RequestPath = "/apps/dashboard"
+        FileProvider = appsFiles,
+        RequestPath = "/apps"
     });
     app.UseStaticFiles(new StaticFileOptions
     {
-        FileProvider = dashboardFiles,
-        RequestPath = "/apps/dashboard"
+        FileProvider = appsFiles,
+        RequestPath = "/apps"
     });
 }
 
@@ -148,6 +148,7 @@ app.MapControllers();
 
 var opt = new RewriteOptions();
 opt.AddRedirect("^$", "swagger");
+opt.AddRedirect("^apps$", "apps/");
 opt.AddRedirect("^apps/dashboard$", "apps/dashboard/");
 app.UseRewriter(opt);
 

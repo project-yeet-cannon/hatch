@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <title>Aerie</title>
+    <style>
+      :root {
+        --bg: #d8ecfb;
+        --card: #ffffff;
+        --ink: #33404a;
+        --muted: #8ba0ac;
+        --line: #e8eef1;
+        --comfort: #5aa883;
+        --ok-bg: rgba(90, 168, 131, 0.16);
+        --ok-ink: #3c7a58;
+        --shadow: 0 12px 30px rgba(80, 120, 150, 0.14);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 24px;
+        background: var(--bg);
+        font-family: 'Manrope', sans-serif;
+        color: var(--ink);
+      }
+
+      main {
+        width: 100%;
+        max-width: 420px;
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+      }
+
+      header {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 0 4px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 26px;
+        font-weight: 800;
+        letter-spacing: -0.01em;
+      }
+
+      header p {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--muted);
+      }
+
+      .apps {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      a.app {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 16px 18px;
+        border-radius: 22px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        box-shadow: var(--shadow);
+        text-decoration: none;
+        color: inherit;
+        transition: transform 0.15s ease;
+      }
+
+      a.app:hover {
+        transform: translateY(-2px);
+      }
+
+      .icon {
+        flex: none;
+        width: 42px;
+        height: 42px;
+        border-radius: 14px;
+        background: var(--ok-bg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+      }
+
+      .app-info {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .app-name {
+        font-size: 16px;
+        font-weight: 700;
+      }
+
+      .app-desc {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--muted);
+      }
+
+      .chev {
+        margin-left: auto;
+        flex: none;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      footer {
+        padding: 0 4px;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--muted);
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Aerie</h1>
+        <p>Pick an app</p>
+      </header>
+      <div class="apps">
+        <a class="app" href="/apps/dashboard/">
+          <span class="icon">🏠</span>
+          <span class="app-info">
+            <span class="app-name">Kiosk Dashboard</span>
+            <span class="app-desc">Live zone temps &amp; outside weather</span>
+          </span>
+          <span class="chev">›</span>
+        </a>
+      </div>
+      <footer>More apps on the way</footer>
+    </main>
+  </body>
+</html>
