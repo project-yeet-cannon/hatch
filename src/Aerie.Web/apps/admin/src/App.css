@@ -1,0 +1,42 @@
+.admin-app {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-header {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-ink) 100%);
+  color: white;
+  padding: 32px 20px;
+  box-shadow: var(--shadow);
+}
+
+.admin-header-content {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.admin-header h1 {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 800;
+}
+
+.admin-header p {
+  margin: 4px 0 0 0;
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+.admin-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 20px;
+  background: var(--bg);
+}
+
+.admin-content > * {
+  max-width: 1200px;
+  margin: 0 auto;
+}

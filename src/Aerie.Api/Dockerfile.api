@@ -1,12 +1,19 @@
-# Build the dashboard SPA (Aerie.Web/apps/dashboard) separately - the .NET SDK image
-# has no Node runtime, and its output is committed to wwwroot/apps/dashboard as a
-# static web asset of Aerie.Api.
+# Build the SPAs (Aerie.Web/apps/*) separately - the .NET SDK image
+# has no Node runtime, and their outputs are committed to wwwroot/apps/* as static
+# web assets of Aerie.Api.
 FROM node:22-alpine AS dashboard-build
 WORKDIR /repo
 COPY src/Aerie.Web/apps/dashboard/package.json src/Aerie.Web/apps/dashboard/package-lock.json src/Aerie.Web/apps/dashboard/
 RUN npm --prefix src/Aerie.Web/apps/dashboard ci
 COPY src/Aerie.Web/apps/dashboard src/Aerie.Web/apps/dashboard
 RUN npm --prefix src/Aerie.Web/apps/dashboard run build
+
+FROM node:22-alpine AS admin-build
+WORKDIR /repo
+COPY src/Aerie.Web/apps/admin/package.json src/Aerie.Web/apps/admin/package-lock.json src/Aerie.Web/apps/admin/
+RUN npm --prefix src/Aerie.Web/apps/admin ci
+COPY src/Aerie.Web/apps/admin src/Aerie.Web/apps/admin
+RUN npm --prefix src/Aerie.Web/apps/admin run build
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build-env
 WORKDIR /App
@@ -15,13 +22,14 @@ WORKDIR /App
 # release workflow - so Aerie.Api can reach its sibling Aerie.Web project)
 COPY . ./
 COPY --from=dashboard-build /repo/src/Aerie.Api/wwwroot/apps/dashboard ./src/Aerie.Api/wwwroot/apps/dashboard
+COPY --from=admin-build /repo/src/Aerie.Api/wwwroot/apps/admin ./src/Aerie.Api/wwwroot/apps/admin
 
 # Restore as distinct layers
 RUN dotnet restore src/Aerie.Api/Aerie.Api.csproj
 
-# Build and publish a release. The dashboard (from Aerie.Web) was already built above, so skip
-# the MSBuild target that would otherwise shell out to npm (unavailable here).
-RUN dotnet publish src/Aerie.Api/Aerie.Api.csproj -c Release -o out -p:SkipDashboardBuild=true
+# Build and publish a release. The SPAs (from Aerie.Web) were already built above, so skip
+# the MSBuild targets that would otherwise shell out to npm (unavailable here).
+RUN dotnet publish src/Aerie.Api/Aerie.Api.csproj -c Release -o out -p:SkipDashboardBuild=true -p:SkipAdminBuild=true
 
 # Build runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:10.0

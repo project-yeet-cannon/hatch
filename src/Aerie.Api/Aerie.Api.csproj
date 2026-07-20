@@ -28,10 +28,10 @@
   </ItemGroup>
 
   <!--
-    Builds the Aerie.Web SPA (dashboard app) into wwwroot/apps/dashboard ahead of every build.
-    Requires Node 18+ on PATH (see ../Aerie.Web/apps/dashboard/.nvmrc) - `dotnet build`
-    will fail with an old/missing npm otherwise. Skipped in Docker, where the
-    dashboard is built in its own stage and copied in (see Dockerfile.api).
+    Builds the Aerie.Web SPAs (dashboard and admin apps) into wwwroot/apps ahead of every build.
+    Requires Node 18+ on PATH (see ../Aerie.Web/apps/*/.nvmrc) - `dotnet build`
+    will fail with an old/missing npm otherwise. Skipped in Docker, where apps are
+    built in their own stages and copied in (see Dockerfile.api).
   -->
   <ItemGroup>
     <DashboardSource Include="../Aerie.Web/apps/dashboard/src/**/*.*;../Aerie.Web/apps/dashboard/index.html;../Aerie.Web/apps/dashboard/package.json;../Aerie.Web/apps/dashboard/vite.config.ts"/>
@@ -41,6 +41,16 @@
           Inputs="@(DashboardSource)" Outputs="wwwroot/apps/dashboard/index.html">
     <Exec Command="npm install" WorkingDirectory="../Aerie.Web/apps/dashboard" Condition="!Exists('../Aerie.Web/apps/dashboard/node_modules')"/>
     <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/dashboard"/>
+  </Target>
+
+  <ItemGroup>
+    <AdminSource Include="../Aerie.Web/apps/admin/src/**/*.*;../Aerie.Web/apps/admin/index.html;../Aerie.Web/apps/admin/package.json;../Aerie.Web/apps/admin/vite.config.ts"/>
+  </ItemGroup>
+
+  <Target Name="BuildAdmin" BeforeTargets="Build" Condition="'$(SkipAdminBuild)' != 'true'"
+          Inputs="@(AdminSource)" Outputs="wwwroot/apps/admin/index.html">
+    <Exec Command="npm install" WorkingDirectory="../Aerie.Web/apps/admin" Condition="!Exists('../Aerie.Web/apps/admin/node_modules')"/>
+    <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/admin"/>
   </Target>
 
   <!-- Apps landing page (../Aerie.Web/index.html) - just a static file, no build step needed. -->

@@ -150,6 +150,7 @@ var opt = new RewriteOptions();
 opt.AddRedirect("^$", "swagger");
 opt.AddRedirect("^apps$", "apps/");
 opt.AddRedirect("^apps/dashboard$", "apps/dashboard/");
+opt.AddRedirect("^apps/admin$", "apps/admin/");
 app.UseRewriter(opt);
 
 app.UseSwagger();
