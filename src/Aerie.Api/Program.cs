@@ -13,6 +13,7 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.OpenApi;
 using Newtonsoft.Json;
 using Quartz;
+using System.Text.Json.Serialization;
 
 ////////
 /// DI
@@ -57,6 +58,7 @@ builder.Services.AddTransient(_ => ClientFactory.GetClient<HistoryClient>());
 builder.Services.AddTransient(_ => ClientFactory.GetClient<StatesClient>());
 builder.Services.AddTransient(_ => ClientFactory.GetClient<ServiceClient>());
 builder.Services.AddTransient(_ => ClientFactory.GetClient<DiscoveryClient>());
+builder.Services.AddTransient(_ => ClientFactory.GetClient<TemplateClient>());
 
 // Services
 builder.Services.AddTransient<IEnvironmentService, EnvironmentService>();
@@ -68,6 +70,7 @@ builder.Services.AddScoped<IZoneService, ZoneService>();
 builder.Services.AddScoped<IWeatherService, WeatherService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddScoped<IDeviceMappingSeeder, DeviceMappingSeeder>();
+builder.Services.AddScoped<IDiscoveryService, DiscoveryService>();
 
 // Jobs
 builder.Services.AddTransient<IAerieJob, SampleEnvironments>();
@@ -89,7 +92,8 @@ builder.Services.AddSwaggerGen(c =>
         Description = "[Open apps →](/apps/)"
     });
 });
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 

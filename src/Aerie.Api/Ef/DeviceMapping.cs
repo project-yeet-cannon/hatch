@@ -54,6 +54,8 @@ public class EfDevice
     public string? HaDeviceId { get; set; }
 
     public bool Enabled { get; set; } = true;
+
+    public List<EfDeviceChannel> Channels { get; set; } = [];
 }
 
 public enum DeviceChannelMetric { Temperature, Humidity, Battery, SetpointTemperature, HvacAction, HeatingMode }

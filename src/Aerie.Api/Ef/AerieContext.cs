@@ -29,7 +29,7 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
 
         modelBuilder.Entity<EfDeviceChannel>()
             .HasOne(c => c.Device)
-            .WithMany()
+            .WithMany(d => d.Channels)
             .HasForeignKey(c => c.DeviceId)
             .OnDelete(DeleteBehavior.Cascade);
 
