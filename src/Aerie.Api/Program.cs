@@ -155,6 +155,15 @@ if (Directory.Exists(appsPath))
 app.UseAuthorization();
 app.MapControllers();
 
+// SPA fallback so client-side routes (e.g. /apps/admin/devices) survive a hard refresh.
+// The :nonfile constraint excludes paths with a dot in the last segment (e.g.
+// assets/index-abc123.js) so real static assets still resolve via UseStaticFiles above
+// instead of being swallowed by this catch-all route during endpoint matching.
+if (Directory.Exists(Path.Combine(appsPath, "admin")))
+{
+    app.MapFallbackToFile("/apps/admin/{*path:nonfile}", "apps/admin/index.html");
+}
+
 var opt = new RewriteOptions();
 opt.AddRedirect("^$", "swagger");
 opt.AddRedirect("^apps$", "apps/");
