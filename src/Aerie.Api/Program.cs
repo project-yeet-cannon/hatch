@@ -4,6 +4,7 @@ using Aerie.Api.Jobs;
 using Aerie.Api.Models.Environment;
 using Aerie.Api.Services;
 using Aerie.Api.Services.Dashboard;
+using Aerie.Api.Services.DeviceMapping;
 using HADotNet.Core;
 using HADotNet.Core.Clients;
 using Microsoft.AspNetCore.Rewrite;
@@ -66,6 +67,7 @@ builder.Services.AddSingleton<IForecastService, ForecastService>();
 builder.Services.AddScoped<IZoneService, ZoneService>();
 builder.Services.AddScoped<IWeatherService, WeatherService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
+builder.Services.AddScoped<IDeviceMappingSeeder, DeviceMappingSeeder>();
 
 // Jobs
 builder.Services.AddTransient<IAerieJob, SampleEnvironments>();
@@ -99,6 +101,9 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AerieContext>();
     await db.Database.MigrateAsync();
+
+    var seeder = scope.ServiceProvider.GetRequiredService<IDeviceMappingSeeder>();
+    await seeder.SeedAsync();
 }
 
 // Quartz

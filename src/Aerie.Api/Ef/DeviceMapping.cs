@@ -1,0 +1,123 @@
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using Microsoft.EntityFrameworkCore;
+
+namespace Aerie.Api.Ef;
+
+public enum ZoneKind { Interior, Outside }
+
+/// <summary>
+/// A real room (or the outdoors) that devices are assigned to. Replaces the
+/// implicit "climate entity id that isn't excluded" notion of a zone -
+/// Outside is just a Zone with Kind = Outside.
+/// </summary>
+[Table("Zones")]
+public class EfZone
+{
+    [Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+    public Guid Id { get; set; }
+
+    public required string Name { get; set; }
+    public ZoneKind Kind { get; set; } = ZoneKind.Interior;
+
+    public decimal? ComfortLowF { get; set; }
+    public decimal? ComfortHighF { get; set; }
+
+    /// <summary>Ascending display order on the dashboard.</summary>
+    public int SortOrder { get; set; }
+
+    /// <summary>When false, the zone is excluded from the dashboard.</summary>
+    public bool Included { get; set; } = true;
+}
+
+public enum DeviceKind { Thermostat, Hygrometer }
+
+/// <summary>
+/// A physical device mapped in from Home Assistant. May back onto one HA
+/// entity (a Mysa thermostat, via several attributes) or several (a
+/// hygrometer's separate temperature/humidity/battery entities) - see
+/// DeviceChannel, which is what erases that distinction.
+/// </summary>
+[Table("Devices")]
+public class EfDevice
+{
+    [Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+    public Guid Id { get; set; }
+
+    public required string Name { get; set; }
+    public DeviceKind Kind { get; set; }
+
+    public Guid? ZoneId { get; set; }
+    public EfZone? Zone { get; set; }
+
+    /// <summary>Home Assistant device registry id. Null until Discovery (Phase 2) resolves it.</summary>
+    public string? HaDeviceId { get; set; }
+
+    public bool Enabled { get; set; } = true;
+}
+
+public enum DeviceChannelMetric { Temperature, Humidity, Battery, SetpointTemperature, HvacAction, HeatingMode }
+
+public enum ChannelDirection { Read, ReadWrite }
+
+/// <summary>
+/// One (HA entity, attribute) pair mapped to one metric on a Device. Always a
+/// single field, whether a device's channels share one HA entity
+/// (thermostat attributes) or point at separate ones (hygrometer entities).
+/// </summary>
+[Table("DeviceChannels")]
+public class EfDeviceChannel
+{
+    [Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+    public Guid Id { get; set; }
+
+    public Guid DeviceId { get; set; }
+    public EfDevice? Device { get; set; }
+
+    public DeviceChannelMetric Metric { get; set; }
+
+    public required string HaEntityId { get; set; }
+
+    /// <summary>HA attribute name to read within HaEntityId's state, e.g. "current_temperature". Null when the metric is the entity's bare state (hygrometer sensors).</summary>
+    public string? HaAttribute { get; set; }
+
+    public ChannelDirection Direction { get; set; }
+}
+
+/// <summary>Admin-editable scalar settings, replacing the "Dashboard" appsettings section. See SiteSettingKeys for the keys currently in use.</summary>
+[Table("SiteSettings")]
+public class EfSiteSetting
+{
+    [Key]
+    public required string Key { get; set; }
+
+    public required string Value { get; set; }
+}
+
+/// <summary>The well-known SiteSetting keys, seeded from the "Dashboard" appsettings section (see DeviceMappingSeeder).</summary>
+public static class SiteSettingKeys
+{
+    public const string TimeZone = "TimeZone";
+    public const string SunEntity = "SunEntity";
+    public const string WeatherEntity = "WeatherEntity";
+    public const string ComfortToleranceF = "ComfortToleranceF";
+    public const string DefaultComfortLowF = "DefaultComfortLowF";
+    public const string DefaultComfortHighF = "DefaultComfortHighF";
+}
+
+/// <summary>A single numeric sample from a DeviceChannel. Replaces the wide EfEnvironmentReading table - every sample is "channel X had value V at time T."</summary>
+[Table("Measurements")]
+[Index(nameof(ChannelId), nameof(Timestamp), IsUnique = true, Name = UniqueIndexName)]
+public class EfMeasurement
+{
+    [Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+    public Guid Id { get; set; }
+
+    public Guid ChannelId { get; set; }
+    public EfDeviceChannel? Channel { get; set; }
+
+    public required DateTimeOffset Timestamp { get; set; }
+    public decimal Value { get; set; }
+
+    public const string UniqueIndexName = "IX_Measurements_ChannelId_Timestamp";
+}
