@@ -73,11 +73,11 @@ export function App() {
         </div>
       </div>
       <div className="hf-zones">
+        <OutsideCard outside={data.outside} timeZone={data.timezone} />
         {data.zones.map((zone, i) => (
           <ZoneCard key={zone.id} zone={zone} timeZone={data.timezone} defaultOpen={i === 0} />
         ))}
       </div>
-      <OutsideCard outside={data.outside} timeZone={data.timezone} />
     </div>
   );
 }
