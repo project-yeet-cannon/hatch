@@ -7,13 +7,13 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Aerie.Api.Tests;
 
 /// <summary>
-/// Covers the numeric/text routing and channel/state fan-out in
-/// ChannelHistoryWriter.WriteAsync against an EF Core InMemory database.
-/// Does NOT cover the duplicate-insert dedup path (InsertMeasurement/
-/// InsertStateChange's catch on a unique-constraint violation) - that relies
-/// on matching a real Npgsql PostgresException, which InMemory doesn't
-/// raise, so it isn't reachable here; that path would need a real Postgres
-/// (or Testcontainers) to exercise.
+/// Covers the numeric/text routing, channel/state fan-out, and pre-existing-row
+/// dedup in ChannelHistoryWriter.WriteAsync against an EF Core InMemory database.
+/// Does NOT cover the concurrent-write race fallback (BulkInsert's catch on a
+/// unique-constraint violation from a row inserted between the existing-rows
+/// check and SaveChanges) - that relies on matching a real Npgsql
+/// PostgresException, which InMemory doesn't raise, so it isn't reachable
+/// here; that path would need a real Postgres (or Testcontainers) to exercise.
 /// </summary>
 public class ChannelHistoryWriterTests
 {
@@ -100,5 +100,35 @@ public class ChannelHistoryWriterTests
         Assert.Equal(tempChannel.Id, (await db.Measurements.SingleAsync()).ChannelId);
         Assert.Equal("heating", (await db.StateChanges.SingleAsync()).State);
         Assert.Equal(hvacChannel.Id, (await db.StateChanges.SingleAsync()).ChannelId);
+    }
+
+    [Fact]
+    public async Task WriteAsync_SkipsRows_AlreadyPresentInDatabase()
+    {
+        await using var db = NewContext();
+        var channel = Channel(haAttribute: null);
+        db.Measurements.Add(new EfMeasurement { ChannelId = channel.Id, Timestamp = Now, Value = 70m });
+        await db.SaveChangesAsync();
+
+        var history = new HistoryList { State(Now, "70"), State(Now.AddMinutes(1), "71") };
+
+        var counts = await NewWriter(db).WriteAsync([channel], history);
+
+        Assert.Equal(1, counts.Measurements);
+        var rows = await db.Measurements.Where(m => m.ChannelId == channel.Id).OrderBy(m => m.Timestamp).ToListAsync();
+        Assert.Equal([70m, 71m], rows.Select(r => r.Value));
+    }
+
+    [Fact]
+    public async Task WriteAsync_DedupesWithinSameBatch_WhenHistoryHasRepeatedTimestamp()
+    {
+        await using var db = NewContext();
+        var channel = Channel(haAttribute: null);
+        var history = new HistoryList { State(Now, "70"), State(Now, "70") };
+
+        var counts = await NewWriter(db).WriteAsync([channel], history);
+
+        Assert.Equal(1, counts.Measurements);
+        Assert.Equal(1, await db.Measurements.CountAsync());
     }
 }
