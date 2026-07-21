@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
 import type {
   ChannelDirection,
   Device,
@@ -8,25 +8,32 @@ import type {
   DeviceKind,
   DeviceWriteRequest,
   Zone,
-} from '../types';
+} from "../types";
 import {
   addChannel,
   createDevice,
   deleteChannel,
   deleteDevice,
   getDevices,
+  getSettings,
   getZones,
   triggerBackfill,
   updateChannel,
   updateDevice,
-} from '../api/client';
-import { formatLastValue } from '../lib/format';
-import { HistoryModal } from '../components/HistoryModal';
+} from "../api/client";
+import { formatLastValue, homeAssistantDeviceUrl } from "../lib/format";
+import {
+  CheckIcon,
+  CopyIcon,
+  ExternalLinkIcon,
+  HomeAssistantIcon,
+} from "../components/icons";
+import { HistoryModal } from "../components/HistoryModal";
 
 const BACKFILL_PRESETS: { label: string; days: number }[] = [
-  { label: 'Past day', days: 1 },
-  { label: 'Past 3 days', days: 3 },
-  { label: 'Past week', days: 7 },
+  { label: "Past day", days: 1 },
+  { label: "Past 3 days", days: 3 },
+  { label: "Past week", days: 7 },
 ];
 
 interface BackfillFormState {
@@ -35,7 +42,7 @@ interface BackfillFormState {
 }
 
 function toDatetimeLocalValue(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
+  const pad = (n: number) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
@@ -46,14 +53,14 @@ function backfillPresetForm(days: number): BackfillFormState {
 }
 
 const METRICS: DeviceChannelMetric[] = [
-  'Temperature',
-  'Humidity',
-  'Battery',
-  'SetpointTemperature',
-  'HvacAction',
-  'HeatingMode',
+  "Temperature",
+  "Humidity",
+  "Battery",
+  "SetpointTemperature",
+  "HvacAction",
+  "HeatingMode",
 ];
-const DIRECTIONS: ChannelDirection[] = ['Read', 'ReadWrite'];
+const DIRECTIONS: ChannelDirection[] = ["Read", "ReadWrite"];
 
 interface DeviceFormState {
   name: string;
@@ -64,26 +71,26 @@ interface DeviceFormState {
 }
 
 const emptyDeviceForm = (): DeviceFormState => ({
-  name: '',
-  kind: 'Thermostat',
-  zoneId: '',
-  haDeviceId: '',
+  name: "",
+  kind: "Thermostat",
+  zoneId: "",
+  haDeviceId: "",
   enabled: true,
 });
 
 const toDeviceForm = (device: Device): DeviceFormState => ({
   name: device.name,
   kind: device.kind,
-  zoneId: device.zoneId ?? '',
-  haDeviceId: device.haDeviceId ?? '',
+  zoneId: device.zoneId ?? "",
+  haDeviceId: device.haDeviceId ?? "",
   enabled: device.enabled,
 });
 
 const toDeviceRequest = (form: DeviceFormState): DeviceWriteRequest => ({
   name: form.name.trim(),
   kind: form.kind,
-  zoneId: form.zoneId === '' ? null : form.zoneId,
-  haDeviceId: form.haDeviceId.trim() === '' ? null : form.haDeviceId.trim(),
+  zoneId: form.zoneId === "" ? null : form.zoneId,
+  haDeviceId: form.haDeviceId.trim() === "" ? null : form.haDeviceId.trim(),
   enabled: form.enabled,
 });
 
@@ -95,51 +102,73 @@ interface ChannelFormState {
 }
 
 const emptyChannelForm = (): ChannelFormState => ({
-  metric: 'Temperature',
-  haEntityId: '',
-  haAttribute: '',
-  direction: 'Read',
+  metric: "Temperature",
+  haEntityId: "",
+  haAttribute: "",
+  direction: "Read",
 });
 
 const toChannelForm = (channel: DeviceChannel): ChannelFormState => ({
   metric: channel.metric,
   haEntityId: channel.haEntityId,
-  haAttribute: channel.haAttribute ?? '',
+  haAttribute: channel.haAttribute ?? "",
   direction: channel.direction,
 });
 
-const toChannelRequest = (form: ChannelFormState): DeviceChannelWriteRequest => ({
+const toChannelRequest = (
+  form: ChannelFormState,
+): DeviceChannelWriteRequest => ({
   metric: form.metric,
   haEntityId: form.haEntityId.trim(),
-  haAttribute: form.haAttribute.trim() === '' ? null : form.haAttribute.trim(),
+  haAttribute: form.haAttribute.trim() === "" ? null : form.haAttribute.trim(),
   direction: form.direction,
 });
 
 export function DevicesPage() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
+  const [haBaseUrl, setHaBaseUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const [creatingDevice, setCreatingDevice] = useState(false);
-  const [createDeviceForm, setCreateDeviceForm] = useState<DeviceFormState>(emptyDeviceForm());
+  const [createDeviceForm, setCreateDeviceForm] =
+    useState<DeviceFormState>(emptyDeviceForm());
 
   const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
-  const [editDeviceForm, setEditDeviceForm] = useState<DeviceFormState | null>(null);
+  const [editDeviceForm, setEditDeviceForm] = useState<DeviceFormState | null>(
+    null,
+  );
 
   const [addingChannelFor, setAddingChannelFor] = useState<string | null>(null);
-  const [newChannelForm, setNewChannelForm] = useState<ChannelFormState>(emptyChannelForm());
+  const [newChannelForm, setNewChannelForm] =
+    useState<ChannelFormState>(emptyChannelForm());
 
-  const [editingChannel, setEditingChannel] = useState<{ deviceId: string; channelId: string } | null>(null);
-  const [editChannelForm, setEditChannelForm] = useState<ChannelFormState | null>(null);
+  const [editingChannel, setEditingChannel] = useState<{
+    deviceId: string;
+    channelId: string;
+  } | null>(null);
+  const [editChannelForm, setEditChannelForm] =
+    useState<ChannelFormState | null>(null);
 
   const [backfillingFor, setBackfillingFor] = useState<string | null>(null);
-  const [backfillForm, setBackfillForm] = useState<BackfillFormState>(backfillPresetForm(1));
-  const [backfillStatus, setBackfillStatus] = useState<{ deviceId: string; message: string; isError: boolean } | null>(null);
+  const [backfillForm, setBackfillForm] = useState<BackfillFormState>(
+    backfillPresetForm(1),
+  );
+  const [backfillStatus, setBackfillStatus] = useState<{
+    deviceId: string;
+    message: string;
+    isError: boolean;
+  } | null>(null);
 
   const [historyDeviceId, setHistoryDeviceId] = useState<string | null>(null);
-  const [historyChannel, setHistoryChannel] = useState<{ deviceId: string; channelId: string } | null>(null);
+  const [historyChannel, setHistoryChannel] = useState<{
+    deviceId: string;
+    channelId: string;
+  } | null>(null);
+
+  const [copiedHaDeviceId, setCopiedHaDeviceId] = useState<string | null>(null);
 
   useEffect(() => {
     load();
@@ -149,9 +178,16 @@ export function DevicesPage() {
     setLoading(true);
     setError(null);
     try {
-      const [deviceList, zoneList] = await Promise.all([getDevices(), getZones()]);
+      const [deviceList, zoneList, settings] = await Promise.all([
+        getDevices(),
+        getZones(),
+        getSettings(),
+      ]);
       setDevices(deviceList);
       setZones(zoneList);
+      setHaBaseUrl(
+        settings.find((s) => s.key === "HomeAssistantBaseUrl")?.value ?? null,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -160,8 +196,8 @@ export function DevicesPage() {
   }
 
   function zoneName(zoneId: string | null) {
-    if (!zoneId) return 'Unassigned';
-    return zones.find((z) => z.id === zoneId)?.name ?? 'Unknown zone';
+    if (!zoneId) return "Unassigned";
+    return zones.find((z) => z.id === zoneId)?.name ?? "Unknown zone";
   }
 
   async function submitCreateDevice() {
@@ -197,7 +233,10 @@ export function DevicesPage() {
   async function toggleEnabled(device: Device) {
     setError(null);
     try {
-      const updated = await updateDevice(device.id, toDeviceRequest({ ...toDeviceForm(device), enabled: !device.enabled }));
+      const updated = await updateDevice(
+        device.id,
+        toDeviceRequest({ ...toDeviceForm(device), enabled: !device.enabled }),
+      );
       setDevices((prev) => prev.map((d) => (d.id === device.id ? updated : d)));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -218,9 +257,14 @@ export function DevicesPage() {
   async function submitAddChannel(deviceId: string) {
     setError(null);
     try {
-      const channel = await addChannel(deviceId, toChannelRequest(newChannelForm));
+      const channel = await addChannel(
+        deviceId,
+        toChannelRequest(newChannelForm),
+      );
       setDevices((prev) =>
-        prev.map((d) => (d.id === deviceId ? { ...d, channels: [...d.channels, channel] } : d)),
+        prev.map((d) =>
+          d.id === deviceId ? { ...d, channels: [...d.channels, channel] } : d,
+        ),
       );
       setAddingChannelFor(null);
       setNewChannelForm(emptyChannelForm());
@@ -239,10 +283,21 @@ export function DevicesPage() {
     setError(null);
     try {
       const { deviceId, channelId } = editingChannel;
-      const channel = await updateChannel(deviceId, channelId, toChannelRequest(editChannelForm));
+      const channel = await updateChannel(
+        deviceId,
+        channelId,
+        toChannelRequest(editChannelForm),
+      );
       setDevices((prev) =>
         prev.map((d) =>
-          d.id === deviceId ? { ...d, channels: d.channels.map((c) => (c.id === channelId ? channel : c)) } : d,
+          d.id === deviceId
+            ? {
+                ...d,
+                channels: d.channels.map((c) =>
+                  c.id === channelId ? channel : c,
+                ),
+              }
+            : d,
         ),
       );
       setEditingChannel(null);
@@ -253,12 +308,17 @@ export function DevicesPage() {
   }
 
   async function handleDeleteChannel(deviceId: string, channel: DeviceChannel) {
-    if (!confirm(`Delete channel ${channel.metric} (${channel.haEntityId})?`)) return;
+    if (!confirm(`Delete channel ${channel.metric} (${channel.haEntityId})?`))
+      return;
     setError(null);
     try {
       await deleteChannel(deviceId, channel.id);
       setDevices((prev) =>
-        prev.map((d) => (d.id === deviceId ? { ...d, channels: d.channels.filter((c) => c.id !== channel.id) } : d)),
+        prev.map((d) =>
+          d.id === deviceId
+            ? { ...d, channels: d.channels.filter((c) => c.id !== channel.id) }
+            : d,
+        ),
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -271,15 +331,37 @@ export function DevicesPage() {
     setBackfillStatus(null);
   }
 
+  async function copyHaDeviceId(haDeviceId: string) {
+    try {
+      await navigator.clipboard.writeText(haDeviceId);
+      setCopiedHaDeviceId(haDeviceId);
+      setTimeout(
+        () =>
+          setCopiedHaDeviceId((prev) => (prev === haDeviceId ? null : prev)),
+        1500,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function submitBackfill(deviceId: string) {
     setBackfillStatus(null);
     try {
       const from = new Date(backfillForm.from).toISOString();
       const to = new Date(backfillForm.to).toISOString();
       await triggerBackfill(deviceId, { from, to });
-      setBackfillStatus({ deviceId, message: 'Backfill started — check server logs for progress.', isError: false });
+      setBackfillStatus({
+        deviceId,
+        message: "Backfill started — check server logs for progress.",
+        isError: false,
+      });
     } catch (err) {
-      setBackfillStatus({ deviceId, isError: true, message: err instanceof Error ? err.message : String(err) });
+      setBackfillStatus({
+        deviceId,
+        isError: true,
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -288,7 +370,10 @@ export function DevicesPage() {
       <div className="admin-page-header">
         <h2>Devices</h2>
         {!creatingDevice && (
-          <button className="btn-primary" onClick={() => setCreatingDevice(true)}>
+          <button
+            className="btn-primary"
+            onClick={() => setCreatingDevice(true)}
+          >
             Add device
           </button>
         )}
@@ -300,7 +385,11 @@ export function DevicesPage() {
       {creatingDevice && (
         <div className="card mb-2">
           <h3 className="mb-2">New device</h3>
-          <DeviceForm form={createDeviceForm} onChange={setCreateDeviceForm} zones={zones} />
+          <DeviceForm
+            form={createDeviceForm}
+            onChange={setCreateDeviceForm}
+            zones={zones}
+          />
           <div className="flex gap-1 mt-2">
             <button
               className="btn-primary"
@@ -309,22 +398,34 @@ export function DevicesPage() {
             >
               Save
             </button>
-            <button className="btn-secondary" onClick={() => setCreatingDevice(false)}>
+            <button
+              className="btn-secondary"
+              onClick={() => setCreatingDevice(false)}
+            >
               Cancel
             </button>
           </div>
         </div>
       )}
 
-      {!loading && devices.length === 0 && !creatingDevice && <p className="text-muted">No devices yet.</p>}
+      {!loading && devices.length === 0 && !creatingDevice && (
+        <p className="text-muted">No devices yet.</p>
+      )}
 
       {devices.map((device) => (
         <div className="card mb-2" key={device.id}>
           {editingDeviceId === device.id && editDeviceForm ? (
             <>
-              <DeviceForm form={editDeviceForm} onChange={setEditDeviceForm} zones={zones} />
+              <DeviceForm
+                form={editDeviceForm}
+                onChange={setEditDeviceForm}
+                zones={zones}
+              />
               <div className="flex gap-1 mt-2">
-                <button className="btn-primary" onClick={() => submitEditDevice(device.id)}>
+                <button
+                  className="btn-primary"
+                  onClick={() => submitEditDevice(device.id)}
+                >
                   Save
                 </button>
                 <button
@@ -339,22 +440,62 @@ export function DevicesPage() {
               </div>
             </>
           ) : (
-            <div className="flex between" style={{ alignItems: 'flex-start' }}>
+            <div className="flex between" style={{ alignItems: "flex-start" }}>
               <div>
-                <div className="flex gap-1" style={{ alignItems: 'center' }}>
+                <div className="flex gap-1" style={{ alignItems: "center" }}>
                   <h3>{device.name}</h3>
-                  <span className={`badge ${device.enabled ? 'badge-success' : 'badge-muted'}`}>
-                    {device.enabled ? 'Enabled' : 'Disabled'}
+                  <span
+                    className={`badge ${device.enabled ? "badge-success" : "badge-muted"}`}
+                  >
+                    {device.enabled ? "Enabled" : "Disabled"}
                   </span>
                 </div>
                 <p className="text-muted">
+                  {device.haDeviceId && (
+                    <>
+                      {" · HA Device ID "}
+                      {device.haDeviceId}{" "}
+                      <button
+                        type="button"
+                        className="icon-button"
+                        onClick={() => copyHaDeviceId(device.haDeviceId!)}
+                        title="Copy HA device id"
+                        aria-label="Copy HA device id"
+                      >
+                        {copiedHaDeviceId === device.haDeviceId ? (
+                          <CheckIcon />
+                        ) : (
+                          <CopyIcon />
+                        )}
+                      </button>{" "}
+                      <a
+                        className="icon-link"
+                        href={homeAssistantDeviceUrl(
+                          device.haDeviceId,
+                          haBaseUrl,
+                        )}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open in Home Assistant"
+                        aria-label="Open in Home Assistant"
+                      >
+                        <HomeAssistantIcon />
+                        <ExternalLinkIcon />
+                      </a>
+                    </>
+                  )}
+                </p>
+                <p className="text-muted">
                   {device.kind} · {zoneName(device.zoneId)}
-                  {device.haDeviceId ? ` · HA device ${device.haDeviceId}` : ''}
                 </p>
                 {device.channels.length > 0 && (
                   <div className="mt-1">
                     {device.channels.map((channel) => (
-                      <p className="text-muted" key={channel.id} style={{ margin: 0 }}>
+                      <p
+                        className="text-muted"
+                        key={channel.id}
+                        style={{ margin: 0 }}
+                      >
                         {channel.metric}: {formatLastValue(channel)}
                       </p>
                     ))}
@@ -362,13 +503,22 @@ export function DevicesPage() {
                 )}
               </div>
               <div className="flex gap-1">
-                <button className="btn-secondary" onClick={() => toggleEnabled(device)}>
-                  {device.enabled ? 'Disable' : 'Enable'}
+                <button
+                  className="btn-secondary"
+                  onClick={() => toggleEnabled(device)}
+                >
+                  {device.enabled ? "Disable" : "Enable"}
                 </button>
-                <button className="btn-secondary" onClick={() => startEditDevice(device)}>
+                <button
+                  className="btn-secondary"
+                  onClick={() => startEditDevice(device)}
+                >
                   Edit
                 </button>
-                <button className="btn-danger" onClick={() => handleDeleteDevice(device)}>
+                <button
+                  className="btn-danger"
+                  onClick={() => handleDeleteDevice(device)}
+                >
                   Delete
                 </button>
               </div>
@@ -378,17 +528,30 @@ export function DevicesPage() {
           <div className="flex gap-1 mt-2">
             <button
               className="btn-secondary"
-              onClick={() => setExpandedId(expandedId === device.id ? null : device.id)}
+              onClick={() =>
+                setExpandedId(expandedId === device.id ? null : device.id)
+              }
             >
-              {expandedId === device.id ? 'Hide channels' : `Channels (${device.channels.length})`}
+              {expandedId === device.id
+                ? "Hide channels"
+                : `Channels (${device.channels.length})`}
             </button>
             <button
               className="btn-secondary"
-              onClick={() => (backfillingFor === device.id ? setBackfillingFor(null) : startBackfill(device.id))}
+              onClick={() =>
+                backfillingFor === device.id
+                  ? setBackfillingFor(null)
+                  : startBackfill(device.id)
+              }
             >
-              {backfillingFor === device.id ? 'Hide backfill' : 'Backfill history'}
+              {backfillingFor === device.id
+                ? "Hide backfill"
+                : "Backfill history"}
             </button>
-            <button className="btn-secondary" onClick={() => setHistoryDeviceId(device.id)}>
+            <button
+              className="btn-secondary"
+              onClick={() => setHistoryDeviceId(device.id)}
+            >
               History
             </button>
           </div>
@@ -396,14 +559,17 @@ export function DevicesPage() {
           {backfillingFor === device.id && (
             <div className="card mt-2">
               <p className="text-muted mb-2">
-                Pull historical channel samples from Home Assistant into Aerie for this device.
+                Pull historical channel samples from Home Assistant into Aerie
+                for this device.
               </p>
               <div className="flex gap-1 mb-2">
                 {BACKFILL_PRESETS.map((preset) => (
                   <button
                     key={preset.days}
                     className="btn-secondary"
-                    onClick={() => setBackfillForm(backfillPresetForm(preset.days))}
+                    onClick={() =>
+                      setBackfillForm(backfillPresetForm(preset.days))
+                    }
                   >
                     {preset.label}
                   </button>
@@ -415,7 +581,9 @@ export function DevicesPage() {
                   <input
                     type="datetime-local"
                     value={backfillForm.from}
-                    onChange={(e) => setBackfillForm({ ...backfillForm, from: e.target.value })}
+                    onChange={(e) =>
+                      setBackfillForm({ ...backfillForm, from: e.target.value })
+                    }
                   />
                 </div>
                 <div className="field">
@@ -423,7 +591,9 @@ export function DevicesPage() {
                   <input
                     type="datetime-local"
                     value={backfillForm.to}
-                    onChange={(e) => setBackfillForm({ ...backfillForm, to: e.target.value })}
+                    onChange={(e) =>
+                      setBackfillForm({ ...backfillForm, to: e.target.value })
+                    }
                   />
                 </div>
               </div>
@@ -435,12 +605,17 @@ export function DevicesPage() {
                 >
                   Start backfill
                 </button>
-                <button className="btn-secondary" onClick={() => setBackfillingFor(null)}>
+                <button
+                  className="btn-secondary"
+                  onClick={() => setBackfillingFor(null)}
+                >
                   Cancel
                 </button>
               </div>
               {backfillStatus && backfillStatus.deviceId === device.id && (
-                <p className={`mt-2 ${backfillStatus.isError ? 'text-danger' : 'text-success'}`}>
+                <p
+                  className={`mt-2 ${backfillStatus.isError ? "text-danger" : "text-success"}`}
+                >
                   {backfillStatus.message}
                 </p>
               )}
@@ -449,7 +624,9 @@ export function DevicesPage() {
 
           {expandedId === device.id && (
             <div className="mt-2">
-              {device.channels.length === 0 && <p className="text-muted">No channels.</p>}
+              {device.channels.length === 0 && (
+                <p className="text-muted">No channels.</p>
+              )}
               {device.channels.length > 0 && (
                 <table className="admin-table">
                   <thead>
@@ -469,9 +646,15 @@ export function DevicesPage() {
                       editChannelForm ? (
                         <tr key={channel.id}>
                           <td colSpan={6}>
-                            <ChannelForm form={editChannelForm} onChange={setEditChannelForm} />
+                            <ChannelForm
+                              form={editChannelForm}
+                              onChange={setEditChannelForm}
+                            />
                             <div className="flex gap-1 mt-2">
-                              <button className="btn-primary" onClick={submitEditChannel}>
+                              <button
+                                className="btn-primary"
+                                onClick={submitEditChannel}
+                              >
                                 Save
                               </button>
                               <button
@@ -490,24 +673,36 @@ export function DevicesPage() {
                         <tr key={channel.id}>
                           <td>{channel.metric}</td>
                           <td>{channel.haEntityId}</td>
-                          <td>{channel.haAttribute ?? '—'}</td>
+                          <td>{channel.haAttribute ?? "—"}</td>
                           <td>{channel.direction}</td>
                           <td>{formatLastValue(channel)}</td>
                           <td>
                             <div className="flex gap-1">
                               <button
                                 className="btn-secondary"
-                                onClick={() => setHistoryChannel({ deviceId: device.id, channelId: channel.id })}
+                                onClick={() =>
+                                  setHistoryChannel({
+                                    deviceId: device.id,
+                                    channelId: channel.id,
+                                  })
+                                }
                               >
                                 History
                               </button>
                               <button
                                 className="btn-secondary"
-                                onClick={() => startEditChannel(device.id, channel)}
+                                onClick={() =>
+                                  startEditChannel(device.id, channel)
+                                }
                               >
                                 Edit
                               </button>
-                              <button className="btn-danger" onClick={() => handleDeleteChannel(device.id, channel)}>
+                              <button
+                                className="btn-danger"
+                                onClick={() =>
+                                  handleDeleteChannel(device.id, channel)
+                                }
+                              >
                                 Delete
                               </button>
                             </div>
@@ -521,7 +716,10 @@ export function DevicesPage() {
 
               {addingChannelFor === device.id ? (
                 <div className="mt-2">
-                  <ChannelForm form={newChannelForm} onChange={setNewChannelForm} />
+                  <ChannelForm
+                    form={newChannelForm}
+                    onChange={setNewChannelForm}
+                  />
                   <div className="flex gap-1 mt-2">
                     <button
                       className="btn-primary"
@@ -530,7 +728,10 @@ export function DevicesPage() {
                     >
                       Add channel
                     </button>
-                    <button className="btn-secondary" onClick={() => setAddingChannelFor(null)}>
+                    <button
+                      className="btn-secondary"
+                      onClick={() => setAddingChannelFor(null)}
+                    >
                       Cancel
                     </button>
                   </div>
@@ -562,7 +763,7 @@ export function DevicesPage() {
               open
               deviceId={device.id}
               channelId={historyChannel.channelId}
-              title={`${device.name} · ${device.channels.find((c) => c.id === historyChannel.channelId)?.metric ?? 'channel'} history`}
+              title={`${device.name} · ${device.channels.find((c) => c.id === historyChannel.channelId)?.metric ?? "channel"} history`}
               onClose={() => setHistoryChannel(null)}
             />
           )}
@@ -585,18 +786,30 @@ function DeviceForm({
     <div className="grid cols-3">
       <div className="field">
         <label className="field-label">Name</label>
-        <input type="text" value={form.name} onChange={(e) => onChange({ ...form, name: e.target.value })} />
+        <input
+          type="text"
+          value={form.name}
+          onChange={(e) => onChange({ ...form, name: e.target.value })}
+        />
       </div>
       <div className="field">
         <label className="field-label">Kind</label>
-        <select value={form.kind} onChange={(e) => onChange({ ...form, kind: e.target.value as DeviceKind })}>
+        <select
+          value={form.kind}
+          onChange={(e) =>
+            onChange({ ...form, kind: e.target.value as DeviceKind })
+          }
+        >
           <option value="Thermostat">Thermostat</option>
           <option value="Hygrometer">Hygrometer</option>
         </select>
       </div>
       <div className="field">
         <label className="field-label">Zone</label>
-        <select value={form.zoneId} onChange={(e) => onChange({ ...form, zoneId: e.target.value })}>
+        <select
+          value={form.zoneId}
+          onChange={(e) => onChange({ ...form, zoneId: e.target.value })}
+        >
           <option value="">Unassigned</option>
           {zones.map((zone) => (
             <option key={zone.id} value={zone.id}>
@@ -615,7 +828,7 @@ function DeviceForm({
       </div>
       <div className="field">
         <label className="field-label">Enabled</label>
-        <label className="flex gap-1" style={{ alignItems: 'center' }}>
+        <label className="flex gap-1" style={{ alignItems: "center" }}>
           <input
             type="checkbox"
             checked={form.enabled}
@@ -628,14 +841,22 @@ function DeviceForm({
   );
 }
 
-function ChannelForm({ form, onChange }: { form: ChannelFormState; onChange: (form: ChannelFormState) => void }) {
+function ChannelForm({
+  form,
+  onChange,
+}: {
+  form: ChannelFormState;
+  onChange: (form: ChannelFormState) => void;
+}) {
   return (
     <div className="grid cols-3">
       <div className="field">
         <label className="field-label">Metric</label>
         <select
           value={form.metric}
-          onChange={(e) => onChange({ ...form, metric: e.target.value as DeviceChannelMetric })}
+          onChange={(e) =>
+            onChange({ ...form, metric: e.target.value as DeviceChannelMetric })
+          }
         >
           {METRICS.map((metric) => (
             <option key={metric} value={metric}>
@@ -664,7 +885,9 @@ function ChannelForm({ form, onChange }: { form: ChannelFormState; onChange: (fo
         <label className="field-label">Direction</label>
         <select
           value={form.direction}
-          onChange={(e) => onChange({ ...form, direction: e.target.value as ChannelDirection })}
+          onChange={(e) =>
+            onChange({ ...form, direction: e.target.value as ChannelDirection })
+          }
         >
           {DIRECTIONS.map((direction) => (
             <option key={direction} value={direction}>

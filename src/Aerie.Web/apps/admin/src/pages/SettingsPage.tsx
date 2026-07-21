@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getSettings, putSetting } from '../api/client';
+import { DEFAULT_HOME_ASSISTANT_BASE_URL } from '../lib/format';
 
 interface FieldDef {
   key: string;
@@ -15,6 +16,12 @@ const FIELDS: FieldDef[] = [
   { key: 'ComfortToleranceF', label: 'Comfort tolerance (°F)', type: 'number', help: '' },
   { key: 'DefaultComfortLowF', label: 'Default comfort low (°F)', type: 'number', help: '' },
   { key: 'DefaultComfortHighF', label: 'Default comfort high (°F)', type: 'number', help: '' },
+  {
+    key: 'HomeAssistantBaseUrl',
+    label: 'Home Assistant base URL',
+    type: 'text',
+    help: `Used to link device pages back to Home Assistant. Defaults to ${DEFAULT_HOME_ASSISTANT_BASE_URL} if unset.`,
+  },
 ];
 
 export function SettingsPage() {

@@ -295,6 +295,32 @@ textarea:focus {
   color: var(--muted);
 }
 
+.icon-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--primary);
+  vertical-align: middle;
+}
+
+.icon-link:hover {
+  color: var(--success);
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  padding: 0;
+  background: none;
+  color: var(--muted);
+}
+
+.icon-button:hover:not(:disabled) {
+  background: none;
+  color: var(--primary);
+}
+
 .text-danger {
   color: var(--danger);
 }

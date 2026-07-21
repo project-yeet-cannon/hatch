@@ -105,6 +105,7 @@ public static class SiteSettingKeys
     public const string ComfortToleranceF = "ComfortToleranceF";
     public const string DefaultComfortLowF = "DefaultComfortLowF";
     public const string DefaultComfortHighF = "DefaultComfortHighF";
+    public const string HomeAssistantBaseUrl = "HomeAssistantBaseUrl";
 }
 
 /// <summary>A single numeric sample from a DeviceChannel. Replaces the wide EfEnvironmentReading table - every sample is "channel X had value V at time T."</summary>
