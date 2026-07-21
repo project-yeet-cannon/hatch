@@ -12,6 +12,7 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
     public DbSet<EfDeviceChannel> DeviceChannels => Set<EfDeviceChannel>();
     public DbSet<EfSiteSetting> SiteSettings => Set<EfSiteSetting>();
     public DbSet<EfMeasurement> Measurements => Set<EfMeasurement>();
+    public DbSet<EfStateChange> StateChanges => Set<EfStateChange>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -37,6 +38,12 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
             .HasOne(m => m.Channel)
             .WithMany()
             .HasForeignKey(m => m.ChannelId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<EfStateChange>()
+            .HasOne(s => s.Channel)
+            .WithMany()
+            .HasForeignKey(s => s.ChannelId)
             .OnDelete(DeleteBehavior.Cascade);
 
         base.OnModelCreating(modelBuilder);

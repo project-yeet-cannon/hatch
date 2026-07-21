@@ -123,3 +123,20 @@ public class EfMeasurement
 
     public const string UniqueIndexName = "IX_Measurements_ChannelId_Timestamp";
 }
+
+/// <summary>A single non-numeric sample from a DeviceChannel (e.g. hvac_action's "heating"/"idle"), for channels whose state doesn't fit Measurement's decimal column.</summary>
+[Table("StateChanges")]
+[Index(nameof(ChannelId), nameof(Timestamp), IsUnique = true, Name = UniqueIndexName)]
+public class EfStateChange
+{
+    [Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+    public Guid Id { get; set; }
+
+    public Guid ChannelId { get; set; }
+    public EfDeviceChannel? Channel { get; set; }
+
+    public required DateTimeOffset Timestamp { get; set; }
+    public required string State { get; set; }
+
+    public const string UniqueIndexName = "IX_StateChanges_ChannelId_Timestamp";
+}

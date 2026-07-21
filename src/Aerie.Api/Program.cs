@@ -73,8 +73,7 @@ builder.Services.AddScoped<IDeviceMappingSeeder, DeviceMappingSeeder>();
 builder.Services.AddScoped<IDiscoveryService, DiscoveryService>();
 
 // Jobs
-builder.Services.AddTransient<IAerieJob, SampleEnvironments>();
-builder.Services.AddTransient<IAerieJob, SampleOutside>();
+builder.Services.AddTransient<IAerieJob, SampleChannels>();
 
 var scheduler = await JobsInit.InitQuartz(
     builder.Configuration.GetConnectionString("Quartz")!);
