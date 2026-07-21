@@ -1,5 +1,5 @@
 using Aerie.Api.Models.Dashboard;
-using Microsoft.Extensions.Options;
+using Aerie.Api.Services.DeviceMapping;
 
 namespace Aerie.Api.Services.Dashboard;
 
@@ -10,24 +10,26 @@ public interface IDashboardService
 
 /// <summary>
 /// The backend-for-frontend aggregate: composes zones + outside into the exact
-/// shape the dashboard app consumes. Zones and outside are fetched concurrently so
-/// the (slower) weather call doesn't serialize behind the DB reads.
+/// shape the dashboard app consumes. Zones, outside, and settings are fetched
+/// concurrently so the (slower) weather call doesn't serialize behind the DB
+/// reads.
 /// </summary>
 public class DashboardService(
     IZoneService zones,
     IWeatherService weather,
-    IOptions<DashboardOptions> options,
+    ISiteSettingsService siteSettings,
     TimeProvider time) : IDashboardService
 {
     public async Task<DashboardData> GetDashboardAsync(DashboardWindow window, CancellationToken ct)
     {
         var zonesTask = zones.GetZonesAsync(window, ct);
         var outsideTask = weather.GetOutsideAsync(window, ct);
-        await Task.WhenAll(zonesTask, outsideTask);
+        var settingsTask = siteSettings.GetAsync(ct);
+        await Task.WhenAll(zonesTask, outsideTask, settingsTask);
 
         return new DashboardData(
             GeneratedAt: time.GetUtcNow(),
-            Timezone: options.Value.TimeZone,
+            Timezone: (await settingsTask).TimeZone,
             Zones: await zonesTask,
             Outside: await outsideTask);
     }

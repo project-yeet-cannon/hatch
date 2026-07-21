@@ -66,6 +66,7 @@ builder.Services.AddTransient<IEnvironmentService, EnvironmentService>();
 // Dashboard data services
 builder.Services.Configure<DashboardOptions>(builder.Configuration.GetSection("Dashboard"));
 builder.Services.AddSingleton<IForecastService, ForecastService>();
+builder.Services.AddSingleton<ISiteSettingsService, SiteSettingsService>();
 builder.Services.AddScoped<IZoneService, ZoneService>();
 builder.Services.AddScoped<IWeatherService, WeatherService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();

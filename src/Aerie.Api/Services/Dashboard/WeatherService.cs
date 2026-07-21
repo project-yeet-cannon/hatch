@@ -1,10 +1,9 @@
 using System.Globalization;
-using System.Linq.Expressions;
 using Aerie.Api.Ef;
 using Aerie.Api.Models.Dashboard;
+using Aerie.Api.Services.DeviceMapping;
 using HADotNet.Core.Clients;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 
 namespace Aerie.Api.Services.Dashboard;
 
@@ -15,43 +14,43 @@ public interface IWeatherService
 
 /// <summary>
 /// Sources the Outside card's current temperature/humidity and history from
-/// EnvironmentReadings (configured via DashboardOptions.OutsideTemperatureEntity/
-/// OutsideHumidityEntity), populated by the SampleOutside job polling those
-/// sensor.* entities - the same pattern ZoneService uses for climate.* zones.
-/// "Current" is just the most recent reading in that table rather than a live
-/// HA call, so the dashboard doesn't hit HA on every load. The condition note
-/// (weather.* entity) and sunset (sun.sun) aren't sampled and still come from
-/// live HA state. This is best-effort by design: if an entity isn't configured
-/// or a call/query fails, that piece falls back to zero/blank rather than
-/// throwing, so a missing integration degrades the outside card instead of
-/// breaking the dashboard. Forecast/hourly aren't sourced yet, so they come
-/// back empty - the frontend chart tolerates empty series.
+/// the Zone(Kind = Outside)'s devices - whichever hygrometer(s) an admin has
+/// assigned there - via the Measurement rows the channel-driven sampling job
+/// (Jobs/SampleChannels) writes (docs/device-architecture.md Phase 5).
+/// "Current" is the most recent Measurement rather than a live HA call,
+/// matching ZoneService.BuildZoneAsync. The condition note (weather.* entity)
+/// and sunset (sun.* entity) aren't sampled and still come from live HA state.
+/// This is best-effort by design: if the Outside zone doesn't exist yet or has
+/// no devices assigned, or a live HA call fails, that piece falls back to
+/// zero/blank rather than throwing, so a missing integration degrades the
+/// outside card instead of breaking the dashboard. Forecast/hourly aren't
+/// sourced yet, so they come back empty - the frontend chart tolerates empty
+/// series.
 /// </summary>
 public class WeatherService(
     StatesClient states,
     IDbContextFactory<AerieContext> dbFactory,
-    IOptions<DashboardOptions> options,
+    ISiteSettingsService siteSettings,
     TimeProvider time,
     ILogger<WeatherService> logger) : IWeatherService
 {
-    private DashboardOptions Opt => options.Value;
-
     public async Task<OutsideClimate> GetOutsideAsync(DashboardWindow window, CancellationToken ct)
     {
         var now = time.GetUtcNow();
         var from = now - window.History;
+        var settings = await siteSettings.GetAsync(ct);
 
         var note = string.Empty;
-        if (!string.IsNullOrWhiteSpace(Opt.WeatherEntity))
+        if (!string.IsNullOrWhiteSpace(settings.WeatherEntity))
         {
             try
             {
-                var w = await states.GetState(Opt.WeatherEntity);
+                var w = await states.GetState(settings.WeatherEntity);
                 note = Humanize(w.State);
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Failed to read weather entity {Entity}", Opt.WeatherEntity);
+                logger.LogWarning(ex, "Failed to read weather entity {Entity}", settings.WeatherEntity);
             }
         }
 
@@ -59,7 +58,7 @@ public class WeatherService(
         decimal sunHoursRemaining = 0;
         try
         {
-            var sun = await states.GetState(Opt.SunEntity);
+            var sun = await states.GetState(settings.SunEntity);
             if (GetDateTime(sun.Attributes, "next_setting") is { } nextSetting)
             {
                 sunsetTime = nextSetting;
@@ -68,11 +67,19 @@ public class WeatherService(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to read sun entity {Entity}", Opt.SunEntity);
+            logger.LogWarning(ex, "Failed to read sun entity {Entity}", settings.SunEntity);
         }
 
-        var (currentTempF, history) = await GetTempHistoryAsync(Opt.OutsideTemperatureEntity, from, now, window.Bucket, ct);
-        var humidityPct = await GetLatestReadingAsync(Opt.OutsideHumidityEntity, r => r.Humidity, from, now, ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var zone = await db.Zones.AsNoTracking().FirstOrDefaultAsync(z => z.Kind == ZoneKind.Outside, ct);
+
+        (decimal currentTempF, IReadOnlyList<TempPoint> history) = zone is null
+            ? (0m, [])
+            : await GetTempHistoryAsync(db, zone.Id, from, now, window.Bucket, ct);
+
+        var humidityPct = zone is null
+            ? 0m
+            : await ZoneMeasurements.LatestAsync(db, zone.Id, DeviceChannelMetric.Humidity, from, now, ct) ?? 0m;
 
         return new OutsideClimate(
             CurrentTempF: currentTempF,
@@ -86,44 +93,18 @@ public class WeatherService(
             Hourly: []);
     }
 
-    /// <summary>
-    /// Current temperature + charted history both come from the same
-    /// EnvironmentReadings rows SampleOutside polls into, so the "current"
-    /// value is the most recent sample rather than a live HA call - see
-    /// ZoneService.BuildZoneAsync for the same pattern applied to zones.
-    /// </summary>
-    private async Task<(decimal CurrentTempF, IReadOnlyList<TempPoint> History)> GetTempHistoryAsync(
-        string? entityId, DateTimeOffset from, DateTimeOffset to, TimeSpan bucket, CancellationToken ct)
+    private static async Task<(decimal CurrentTempF, IReadOnlyList<TempPoint> History)> GetTempHistoryAsync(
+        AerieContext db, Guid zoneId, DateTimeOffset from, DateTimeOffset to, TimeSpan bucket, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(entityId)) return (0, []);
-
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var rows = await db.EnvironmentReadings
-            .Where(r => r.EntityId == entityId && r.Timestamp >= from && r.Timestamp <= to)
-            .OrderBy(r => r.Timestamp)
-            .Select(r => new { r.Timestamp, r.Temperature })
+        var rows = await ZoneMeasurements.ForZone(db, zoneId, DeviceChannelMetric.Temperature, from, to)
+            .OrderBy(m => m.Timestamp)
+            .Select(m => new { m.Timestamp, m.Value })
             .ToListAsync(ct);
 
-        var history = ZoneMath.Bucket(rows.Select(r => (r.Timestamp, r.Temperature)), from, to, bucket);
-        var currentTempF = rows.Count > 0 ? rows[^1].Temperature ?? 0 : (history.Count > 0 ? history[^1].TempF : 0m);
+        var history = ZoneMath.Bucket(rows.Select(r => (r.Timestamp, (decimal?)r.Value)), from, to, bucket);
+        var currentTempF = rows.Count > 0 ? rows[^1].Value : (history.Count > 0 ? history[^1].TempF : 0m);
 
         return (currentTempF, history);
-    }
-
-    private async Task<decimal> GetLatestReadingAsync(
-        string? entityId, Expression<Func<EfEnvironmentReading, decimal?>> selector,
-        DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(entityId)) return 0;
-
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var latest = await db.EnvironmentReadings
-            .Where(r => r.EntityId == entityId && r.Timestamp >= from && r.Timestamp <= to)
-            .OrderByDescending(r => r.Timestamp)
-            .Select(selector)
-            .FirstOrDefaultAsync(ct);
-
-        return latest ?? 0;
     }
 
     private static DateTimeOffset? GetDateTime(IDictionary<string, object> attrs, string key)

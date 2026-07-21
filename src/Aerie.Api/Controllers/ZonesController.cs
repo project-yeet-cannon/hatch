@@ -9,12 +9,10 @@ namespace Aerie.Api.Controllers;
 
 /// <summary>
 /// Zone CRUD for the Zone/Device/DeviceChannel domain (docs/device-architecture.md
-/// Phase 2), plus the dashboard's climate read path, which still runs on the
-/// pre-Phase-1 EfZoneConfig/EnvironmentReading tables until Phase 5 re-points it.
-/// To keep both under one controller without route collisions, the climate
-/// endpoints live under a "climate" sub-path (GET api/zones/climate, GET
-/// api/zones/{id}/climate, keyed by HA entity id) while the bare routes are the
-/// new admin CRUD, keyed by the Zone's Guid id.
+/// Phase 2), plus the dashboard's climate read path (Phase 5), which reads the
+/// same Zone rows via IZoneService. Both are keyed by the Zone's Guid id; the
+/// climate endpoints live under a "climate"/"readings"/"comfort" sub-path so
+/// they don't collide with the bare admin CRUD routes.
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
@@ -81,7 +79,7 @@ public class ZonesController(IZoneService zones, AerieContext db, TimeProvider t
 
     private static ZoneDto ToDto(EfZone z) => new(z.Id, z.Name, z.Kind, z.ComfortLowF, z.ComfortHighF, z.SortOrder, z.Included);
 
-    // ---- Dashboard climate read path (pre-Phase-5; see ZoneService) ----
+    // ---- Dashboard climate read path (see ZoneService) ----
 
     [HttpGet("climate")]
     public Task<IReadOnlyList<ZoneClimate>> GetAllClimate(
@@ -91,9 +89,9 @@ public class ZonesController(IZoneService zones, AerieContext db, TimeProvider t
         CancellationToken ct)
         => zones.GetZonesAsync(DashboardController.BuildWindow(historyHours, forecastHours, bucketMinutes), ct);
 
-    [HttpGet("{id}/climate")]
+    [HttpGet("{id:guid}/climate")]
     public async Task<ActionResult<ZoneClimate>> GetClimate(
-        string id,
+        Guid id,
         [FromQuery] double? historyHours,
         [FromQuery] double? forecastHours,
         [FromQuery] double? bucketMinutes,
@@ -104,9 +102,9 @@ public class ZonesController(IZoneService zones, AerieContext db, TimeProvider t
     }
 
     /// <summary>Raw/bucketed temperature series for one zone over an explicit window.</summary>
-    [HttpGet("{id}/readings")]
+    [HttpGet("{id:guid}/readings")]
     public Task<IReadOnlyList<TempPoint>> GetReadings(
-        string id,
+        Guid id,
         [FromQuery] DateTimeOffset? from,
         [FromQuery] DateTimeOffset? to,
         [FromQuery] double? bucketMinutes,
@@ -119,18 +117,18 @@ public class ZonesController(IZoneService zones, AerieContext db, TimeProvider t
         return zones.GetReadingsAsync(id, fromValue, toValue, bucket, ct);
     }
 
-    [HttpGet("{id}/comfort")]
-    public async Task<ActionResult<ComfortRange>> GetComfort(string id, CancellationToken ct)
+    [HttpGet("{id:guid}/comfort")]
+    public async Task<ActionResult<ComfortRange>> GetComfort(Guid id, CancellationToken ct)
     {
         var comfort = await zones.GetComfortAsync(id, ct);
         return comfort is null ? NotFound() : comfort;
     }
 
-    [HttpPut("{id}/comfort")]
-    public async Task<ActionResult<ComfortRange>> PutComfort(string id, [FromBody] ComfortRange range, CancellationToken ct)
+    [HttpPut("{id:guid}/comfort")]
+    public async Task<ActionResult<ComfortRange>> PutComfort(Guid id, [FromBody] ComfortRange range, CancellationToken ct)
     {
         if (range.HighF < range.LowF) return BadRequest("highF must be >= lowF");
-        await zones.UpsertComfortAsync(id, range, ct);
-        return range;
+        var updated = await zones.UpsertComfortAsync(id, range, ct);
+        return updated ? range : NotFound();
     }
 }
