@@ -55,4 +55,26 @@ public class JobsInit(IScheduler scheduler, IEnumerable<IAerieJob> jobs)
             await scheduler.ScheduleJob(qj, qt);
         }
     }
+
+    /// <summary>
+    /// Registers a durable job with no trigger - it stays dormant until
+    /// something calls IScheduler.TriggerJob(jobKey, dataMap) for it, unlike
+    /// the recurring IAerieJobs wired up by WireUpJobs. For jobs like
+    /// BackfillChannelHistory that run on demand with caller-supplied data
+    /// rather than on a fixed interval.
+    /// </summary>
+    public async Task WireUpTriggerableJob<TJob>(string name, string group) where TJob : IJob
+    {
+        if (await scheduler.CheckExists(JobKey.Create(name, group)))
+        {
+            return;
+        }
+
+        var jd = JobBuilder.Create<TJob>()
+            .WithIdentity(name, group)
+            .StoreDurably()
+            .Build();
+
+        await scheduler.AddJob(jd, replace: false);
+    }
 }

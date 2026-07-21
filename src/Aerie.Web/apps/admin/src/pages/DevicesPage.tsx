@@ -16,9 +16,32 @@ import {
   deleteDevice,
   getDevices,
   getZones,
+  triggerBackfill,
   updateChannel,
   updateDevice,
 } from '../api/client';
+
+const BACKFILL_PRESETS: { label: string; days: number }[] = [
+  { label: 'Past day', days: 1 },
+  { label: 'Past 3 days', days: 3 },
+  { label: 'Past week', days: 7 },
+];
+
+interface BackfillFormState {
+  from: string;
+  to: string;
+}
+
+function toDatetimeLocalValue(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function backfillPresetForm(days: number): BackfillFormState {
+  const to = new Date();
+  const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
+  return { from: toDatetimeLocalValue(from), to: toDatetimeLocalValue(to) };
+}
 
 const METRICS: DeviceChannelMetric[] = [
   'Temperature',
@@ -108,6 +131,10 @@ export function DevicesPage() {
 
   const [editingChannel, setEditingChannel] = useState<{ deviceId: string; channelId: string } | null>(null);
   const [editChannelForm, setEditChannelForm] = useState<ChannelFormState | null>(null);
+
+  const [backfillingFor, setBackfillingFor] = useState<string | null>(null);
+  const [backfillForm, setBackfillForm] = useState<BackfillFormState>(backfillPresetForm(1));
+  const [backfillStatus, setBackfillStatus] = useState<{ deviceId: string; message: string; isError: boolean } | null>(null);
 
   useEffect(() => {
     load();
@@ -233,6 +260,24 @@ export function DevicesPage() {
     }
   }
 
+  function startBackfill(deviceId: string) {
+    setBackfillingFor(deviceId);
+    setBackfillForm(backfillPresetForm(1));
+    setBackfillStatus(null);
+  }
+
+  async function submitBackfill(deviceId: string) {
+    setBackfillStatus(null);
+    try {
+      const from = new Date(backfillForm.from).toISOString();
+      const to = new Date(backfillForm.to).toISOString();
+      await triggerBackfill(deviceId, { from, to });
+      setBackfillStatus({ deviceId, message: 'Backfill started — check server logs for progress.', isError: false });
+    } catch (err) {
+      setBackfillStatus({ deviceId, isError: true, message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
   return (
     <div>
       <div className="admin-page-header">
@@ -316,12 +361,74 @@ export function DevicesPage() {
             </div>
           )}
 
-          <button
-            className="btn-secondary mt-2"
-            onClick={() => setExpandedId(expandedId === device.id ? null : device.id)}
-          >
-            {expandedId === device.id ? 'Hide channels' : `Channels (${device.channels.length})`}
-          </button>
+          <div className="flex gap-1 mt-2">
+            <button
+              className="btn-secondary"
+              onClick={() => setExpandedId(expandedId === device.id ? null : device.id)}
+            >
+              {expandedId === device.id ? 'Hide channels' : `Channels (${device.channels.length})`}
+            </button>
+            <button
+              className="btn-secondary"
+              onClick={() => (backfillingFor === device.id ? setBackfillingFor(null) : startBackfill(device.id))}
+            >
+              {backfillingFor === device.id ? 'Hide backfill' : 'Backfill history'}
+            </button>
+          </div>
+
+          {backfillingFor === device.id && (
+            <div className="card mt-2">
+              <p className="text-muted mb-2">
+                Pull historical channel samples from Home Assistant into Aerie for this device.
+              </p>
+              <div className="flex gap-1 mb-2">
+                {BACKFILL_PRESETS.map((preset) => (
+                  <button
+                    key={preset.days}
+                    className="btn-secondary"
+                    onClick={() => setBackfillForm(backfillPresetForm(preset.days))}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+              <div className="grid cols-3">
+                <div className="field">
+                  <label className="field-label">From</label>
+                  <input
+                    type="datetime-local"
+                    value={backfillForm.from}
+                    onChange={(e) => setBackfillForm({ ...backfillForm, from: e.target.value })}
+                  />
+                </div>
+                <div className="field">
+                  <label className="field-label">To</label>
+                  <input
+                    type="datetime-local"
+                    value={backfillForm.to}
+                    onChange={(e) => setBackfillForm({ ...backfillForm, to: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="flex gap-1 mt-2">
+                <button
+                  className="btn-primary"
+                  disabled={!backfillForm.from || !backfillForm.to}
+                  onClick={() => submitBackfill(device.id)}
+                >
+                  Start backfill
+                </button>
+                <button className="btn-secondary" onClick={() => setBackfillingFor(null)}>
+                  Cancel
+                </button>
+              </div>
+              {backfillStatus && backfillStatus.deviceId === device.id && (
+                <p className={`mt-2 ${backfillStatus.isError ? 'text-danger' : 'text-success'}`}>
+                  {backfillStatus.message}
+                </p>
+              )}
+            </div>
+          )}
 
           {expandedId === device.id && (
             <div className="mt-2">

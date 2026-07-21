@@ -70,6 +70,11 @@ export interface DeviceWriteRequest {
   enabled: boolean;
 }
 
+export interface BackfillRequest {
+  from: string;
+  to: string;
+}
+
 export interface SiteSetting {
   key: string;
   value: string;

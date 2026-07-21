@@ -18,6 +18,9 @@ public record DeviceDto(Guid Id, string Name, DeviceKind Kind, Guid? ZoneId, str
 
 public record DeviceWriteRequest(string Name, DeviceKind Kind, Guid? ZoneId, string? HaDeviceId, bool Enabled);
 
+/// <summary>Time range for a BackfillChannelHistory job run (DevicesController.Backfill).</summary>
+public record BackfillRequest(DateTimeOffset From, DateTimeOffset To);
+
 public record SiteSettingDto(string Key, string Value);
 
 public record SiteSettingWriteRequest(string Value);

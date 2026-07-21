@@ -1,4 +1,5 @@
 import type {
+  BackfillRequest,
   Device,
   DeviceChannel,
   DeviceChannelWriteRequest,
@@ -17,10 +18,9 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     throw new Error(`${init?.method ?? 'GET'} ${path} failed: ${res.status} ${res.statusText}`);
   }
-  if (res.status === 204) {
-    return undefined as T;
-  }
-  return (await res.json()) as T;
+  // 202/204 responses (e.g. POST .../backfill) have no body - res.json() throws on empty input.
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 const asJson = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
@@ -51,6 +51,9 @@ export const updateChannel = (deviceId: string, channelId: string, request: Devi
   fetchJson<DeviceChannel>(`/api/devices/${deviceId}/channels/${channelId}`, { method: 'PUT', ...asJson(request) });
 export const deleteChannel = (deviceId: string, channelId: string) =>
   fetchJson<void>(`/api/devices/${deviceId}/channels/${channelId}`, { method: 'DELETE' });
+
+export const triggerBackfill = (deviceId: string, request: BackfillRequest) =>
+  fetchJson<void>(`/api/devices/${deviceId}/backfill`, { method: 'POST', ...asJson(request) });
 
 // ---- Settings ----
 

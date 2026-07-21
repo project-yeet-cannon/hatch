@@ -71,9 +71,11 @@ builder.Services.AddScoped<IWeatherService, WeatherService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddScoped<IDeviceMappingSeeder, DeviceMappingSeeder>();
 builder.Services.AddScoped<IDiscoveryService, DiscoveryService>();
+builder.Services.AddScoped<IChannelHistoryWriter, ChannelHistoryWriter>();
 
 // Jobs
 builder.Services.AddTransient<IAerieJob, SampleChannels>();
+builder.Services.AddTransient<BackfillChannelHistory>();
 
 var scheduler = await JobsInit.InitQuartz(
     builder.Configuration.GetConnectionString("Quartz")!);
@@ -114,6 +116,7 @@ using (var scope = app.Services.CreateScope())
 {
     var init = scope.ServiceProvider.GetRequiredService<JobsInit>();
     await init.WireUpJobs();
+    await init.WireUpTriggerableJob<BackfillChannelHistory>(BackfillChannelHistory.Name, BackfillChannelHistory.Group);
 }
 
 // Graceful shutdown

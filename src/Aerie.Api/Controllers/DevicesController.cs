@@ -1,14 +1,16 @@
 using Aerie.Api.Ef;
+using Aerie.Api.Jobs;
 using Aerie.Api.Models.DeviceMapping;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Quartz;
 
 namespace Aerie.Api.Controllers;
 
 /// <summary>CRUD for Devices and their Channels, including assigning a Device to a Zone via Update (docs/device-architecture.md Phase 2).</summary>
 [ApiController]
 [Route("api/[controller]")]
-public class DevicesController(AerieContext db) : ControllerBase
+public class DevicesController(AerieContext db, IScheduler scheduler) : ControllerBase
 {
     [HttpGet]
     public async Task<IReadOnlyList<DeviceDto>> GetAll(CancellationToken ct)
@@ -106,6 +108,24 @@ public class DevicesController(AerieContext db) : ControllerBase
         db.DeviceChannels.Remove(channel);
         await db.SaveChangesAsync(ct);
         return NoContent();
+    }
+
+    /// <summary>Triggers a one-time BackfillChannelHistory job run to pull [request.From, request.To) of HA history for this device's channels.</summary>
+    [HttpPost("{id:guid}/backfill")]
+    public async Task<IActionResult> Backfill(Guid id, BackfillRequest request, CancellationToken ct)
+    {
+        if (!await db.Devices.AnyAsync(d => d.Id == id, ct)) return NotFound();
+        if (request.From >= request.To) return BadRequest("from must be before to");
+        if (request.To > DateTimeOffset.UtcNow) return BadRequest("to cannot be in the future");
+
+        var data = new JobDataMap
+        {
+            { "deviceId", id.ToString() },
+            { "from", request.From.ToString("O") },
+            { "to", request.To.ToString("O") },
+        };
+        await scheduler.TriggerJob(new JobKey(BackfillChannelHistory.Name, BackfillChannelHistory.Group), data, ct);
+        return Accepted();
     }
 
     private static DeviceDto ToDto(EfDevice d) => new(
