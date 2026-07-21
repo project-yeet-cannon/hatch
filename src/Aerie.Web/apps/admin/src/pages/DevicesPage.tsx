@@ -20,6 +20,8 @@ import {
   updateChannel,
   updateDevice,
 } from '../api/client';
+import { formatLastValue } from '../lib/format';
+import { HistoryModal } from '../components/HistoryModal';
 
 const BACKFILL_PRESETS: { label: string; days: number }[] = [
   { label: 'Past day', days: 1 },
@@ -135,6 +137,9 @@ export function DevicesPage() {
   const [backfillingFor, setBackfillingFor] = useState<string | null>(null);
   const [backfillForm, setBackfillForm] = useState<BackfillFormState>(backfillPresetForm(1));
   const [backfillStatus, setBackfillStatus] = useState<{ deviceId: string; message: string; isError: boolean } | null>(null);
+
+  const [historyDeviceId, setHistoryDeviceId] = useState<string | null>(null);
+  const [historyChannel, setHistoryChannel] = useState<{ deviceId: string; channelId: string } | null>(null);
 
   useEffect(() => {
     load();
@@ -346,6 +351,15 @@ export function DevicesPage() {
                   {device.kind} · {zoneName(device.zoneId)}
                   {device.haDeviceId ? ` · HA device ${device.haDeviceId}` : ''}
                 </p>
+                {device.channels.length > 0 && (
+                  <div className="mt-1">
+                    {device.channels.map((channel) => (
+                      <p className="text-muted" key={channel.id} style={{ margin: 0 }}>
+                        {channel.metric}: {formatLastValue(channel)}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="flex gap-1">
                 <button className="btn-secondary" onClick={() => toggleEnabled(device)}>
@@ -373,6 +387,9 @@ export function DevicesPage() {
               onClick={() => (backfillingFor === device.id ? setBackfillingFor(null) : startBackfill(device.id))}
             >
               {backfillingFor === device.id ? 'Hide backfill' : 'Backfill history'}
+            </button>
+            <button className="btn-secondary" onClick={() => setHistoryDeviceId(device.id)}>
+              History
             </button>
           </div>
 
@@ -441,6 +458,7 @@ export function DevicesPage() {
                       <th>HA entity</th>
                       <th>Attribute</th>
                       <th>Direction</th>
+                      <th>Last value</th>
                       <th />
                     </tr>
                   </thead>
@@ -450,7 +468,7 @@ export function DevicesPage() {
                       editingChannel.channelId === channel.id &&
                       editChannelForm ? (
                         <tr key={channel.id}>
-                          <td colSpan={5}>
+                          <td colSpan={6}>
                             <ChannelForm form={editChannelForm} onChange={setEditChannelForm} />
                             <div className="flex gap-1 mt-2">
                               <button className="btn-primary" onClick={submitEditChannel}>
@@ -474,8 +492,15 @@ export function DevicesPage() {
                           <td>{channel.haEntityId}</td>
                           <td>{channel.haAttribute ?? '—'}</td>
                           <td>{channel.direction}</td>
+                          <td>{formatLastValue(channel)}</td>
                           <td>
                             <div className="flex gap-1">
+                              <button
+                                className="btn-secondary"
+                                onClick={() => setHistoryChannel({ deviceId: device.id, channelId: channel.id })}
+                              >
+                                History
+                              </button>
                               <button
                                 className="btn-secondary"
                                 onClick={() => startEditChannel(device.id, channel)}
@@ -522,6 +547,24 @@ export function DevicesPage() {
                 </button>
               )}
             </div>
+          )}
+
+          {historyDeviceId === device.id && (
+            <HistoryModal
+              open
+              deviceId={device.id}
+              title={`${device.name} history`}
+              onClose={() => setHistoryDeviceId(null)}
+            />
+          )}
+          {historyChannel?.deviceId === device.id && (
+            <HistoryModal
+              open
+              deviceId={device.id}
+              channelId={historyChannel.channelId}
+              title={`${device.name} · ${device.channels.find((c) => c.id === historyChannel.channelId)?.metric ?? 'channel'} history`}
+              onClose={() => setHistoryChannel(null)}
+            />
           )}
         </div>
       ))}

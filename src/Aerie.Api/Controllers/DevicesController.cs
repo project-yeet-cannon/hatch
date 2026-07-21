@@ -1,6 +1,7 @@
 using Aerie.Api.Ef;
 using Aerie.Api.Jobs;
 using Aerie.Api.Models.DeviceMapping;
+using Aerie.Api.Services.DeviceMapping;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Quartz;
@@ -16,14 +17,17 @@ public class DevicesController(AerieContext db, IScheduler scheduler) : Controll
     public async Task<IReadOnlyList<DeviceDto>> GetAll(CancellationToken ct)
     {
         var devices = await db.Devices.AsNoTracking().Include(d => d.Channels).ToListAsync(ct);
-        return devices.Select(ToDto).ToList();
+        var latest = await ChannelLatestValues.GetLatestAsync(db, devices.SelectMany(d => d.Channels).Select(c => c.Id).ToList(), ct);
+        return devices.Select(d => ToDto(d, latest)).ToList();
     }
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<DeviceDto>> Get(Guid id, CancellationToken ct)
     {
         var device = await db.Devices.AsNoTracking().Include(d => d.Channels).FirstOrDefaultAsync(d => d.Id == id, ct);
-        return device is null ? NotFound() : ToDto(device);
+        if (device is null) return NotFound();
+        var latest = await ChannelLatestValues.GetLatestAsync(db, device.Channels.Select(c => c.Id).ToList(), ct);
+        return ToDto(device, latest);
     }
 
     [HttpPost]
@@ -39,7 +43,7 @@ public class DevicesController(AerieContext db, IScheduler scheduler) : Controll
         };
         db.Devices.Add(device);
         await db.SaveChangesAsync(ct);
-        return CreatedAtAction(nameof(Get), new { id = device.Id }, ToDto(device));
+        return CreatedAtAction(nameof(Get), new { id = device.Id }, ToDto(device, new Dictionary<Guid, ChannelLatestValue>()));
     }
 
     /// <summary>Updates device scalars, including ZoneId - this is how a device is assigned to (or removed from) a Zone.</summary>
@@ -55,7 +59,8 @@ public class DevicesController(AerieContext db, IScheduler scheduler) : Controll
         device.HaDeviceId = request.HaDeviceId;
         device.Enabled = request.Enabled;
         await db.SaveChangesAsync(ct);
-        return ToDto(device);
+        var latest = await ChannelLatestValues.GetLatestAsync(db, device.Channels.Select(c => c.Id).ToList(), ct);
+        return ToDto(device, latest);
     }
 
     [HttpDelete("{id:guid}")]
@@ -83,7 +88,7 @@ public class DevicesController(AerieContext db, IScheduler scheduler) : Controll
         };
         db.DeviceChannels.Add(channel);
         await db.SaveChangesAsync(ct);
-        return ToDto(channel);
+        return ToDto(channel, default);
     }
 
     [HttpPut("{id:guid}/channels/{channelId:guid}")]
@@ -97,7 +102,8 @@ public class DevicesController(AerieContext db, IScheduler scheduler) : Controll
         channel.HaAttribute = request.HaAttribute;
         channel.Direction = request.Direction;
         await db.SaveChangesAsync(ct);
-        return ToDto(channel);
+        var latest = await ChannelLatestValues.GetLatestAsync(db, [channel.Id], ct);
+        return ToDto(channel, latest.GetValueOrDefault(channel.Id));
     }
 
     [HttpDelete("{id:guid}/channels/{channelId:guid}")]
@@ -128,9 +134,54 @@ public class DevicesController(AerieContext db, IScheduler scheduler) : Controll
         return Accepted();
     }
 
-    private static DeviceDto ToDto(EfDevice d) => new(
-        d.Id, d.Name, d.Kind, d.ZoneId, d.HaDeviceId, d.Enabled,
-        d.Channels.Select(ToDto).ToList());
+    /// <summary>Bucketed history for every channel on this device, for the admin history graph's device-level modal (small multiples sharing one time axis).</summary>
+    [HttpGet("{id:guid}/history")]
+    public async Task<ActionResult<DeviceHistoryDto>> GetHistory(
+        Guid id, [FromQuery] DateTimeOffset? from, [FromQuery] DateTimeOffset? to, [FromQuery] double? bucketMinutes, CancellationToken ct)
+    {
+        var channels = await db.DeviceChannels.AsNoTracking().Where(c => c.DeviceId == id).ToListAsync(ct);
+        if (channels.Count == 0 && !await db.Devices.AnyAsync(d => d.Id == id, ct)) return NotFound();
 
-    private static DeviceChannelDto ToDto(EfDeviceChannel c) => new(c.Id, c.Metric, c.HaEntityId, c.HaAttribute, c.Direction);
+        var window = BuildHistoryWindow(from, to, bucketMinutes, out var error);
+        if (error is not null) return BadRequest(error);
+
+        var history = await ChannelHistoryQuery.GetAsync(db, channels, window.From, window.To, window.Bucket, ct);
+        return new DeviceHistoryDto(id, history);
+    }
+
+    /// <summary>Bucketed history for a single channel, for the admin history graph's per-channel modal.</summary>
+    [HttpGet("{id:guid}/channels/{channelId:guid}/history")]
+    public async Task<ActionResult<ChannelHistoryDto>> GetChannelHistory(
+        Guid id, Guid channelId, [FromQuery] DateTimeOffset? from, [FromQuery] DateTimeOffset? to, [FromQuery] double? bucketMinutes, CancellationToken ct)
+    {
+        var channel = await db.DeviceChannels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId && c.DeviceId == id, ct);
+        if (channel is null) return NotFound();
+
+        var window = BuildHistoryWindow(from, to, bucketMinutes, out var error);
+        if (error is not null) return BadRequest(error);
+
+        var history = await ChannelHistoryQuery.GetAsync(db, [channel], window.From, window.To, window.Bucket, ct);
+        return history[0];
+    }
+
+    private static (DateTimeOffset From, DateTimeOffset To, TimeSpan Bucket) BuildHistoryWindow(
+        DateTimeOffset? from, DateTimeOffset? to, double? bucketMinutes, out string? error)
+    {
+        error = null;
+        var resolvedTo = to ?? DateTimeOffset.UtcNow;
+        var resolvedFrom = from ?? resolvedTo.AddHours(-24);
+        var bucket = bucketMinutes is > 0 ? TimeSpan.FromMinutes(bucketMinutes.Value) : TimeSpan.FromMinutes(15);
+
+        if (resolvedFrom >= resolvedTo) error = "from must be before to";
+        else if (resolvedTo > DateTimeOffset.UtcNow) error = "to cannot be in the future";
+
+        return (resolvedFrom, resolvedTo, bucket);
+    }
+
+    private static DeviceDto ToDto(EfDevice d, IReadOnlyDictionary<Guid, ChannelLatestValue> latest) => new(
+        d.Id, d.Name, d.Kind, d.ZoneId, d.HaDeviceId, d.Enabled,
+        d.Channels.Select(c => ToDto(c, latest.GetValueOrDefault(c.Id))).ToList());
+
+    private static DeviceChannelDto ToDto(EfDeviceChannel c, ChannelLatestValue latest) =>
+        new(c.Id, c.Metric, c.HaEntityId, c.HaAttribute, c.Direction, latest.Value, latest.State, latest.Timestamp);
 }

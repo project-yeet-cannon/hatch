@@ -10,7 +10,9 @@ public record ZoneDto(Guid Id, string Name, ZoneKind Kind, decimal? ComfortLowF,
 
 public record ZoneWriteRequest(string Name, ZoneKind Kind, decimal? ComfortLowF, decimal? ComfortHighF, int SortOrder, bool Included);
 
-public record DeviceChannelDto(Guid Id, DeviceChannelMetric Metric, string HaEntityId, string? HaAttribute, ChannelDirection Direction);
+public record DeviceChannelDto(
+    Guid Id, DeviceChannelMetric Metric, string HaEntityId, string? HaAttribute, ChannelDirection Direction,
+    decimal? LastValue, string? LastState, DateTimeOffset? LastValueAt);
 
 public record DeviceChannelWriteRequest(DeviceChannelMetric Metric, string HaEntityId, string? HaAttribute, ChannelDirection Direction);
 
@@ -32,3 +34,16 @@ public record UnmappedHaDevice(
     DeviceKind? SuggestedKind,
     IReadOnlyList<string> EntityIds,
     IReadOnlyList<DeviceChannelWriteRequest> SuggestedChannels);
+
+/// <summary>One bucketed (averaged) numeric sample for a channel history graph.</summary>
+public record ChannelHistoryPoint(DateTimeOffset Time, decimal Value);
+
+/// <summary>One raw state-change sample for a text channel (e.g. HvacAction), rendered as a step timeline rather than a line.</summary>
+public record ChannelStatePoint(DateTimeOffset Time, string State);
+
+/// <summary>A channel's history for the admin history graph - exactly one of Points/States is populated, mirroring ChannelValueExtractor's numeric-xor-text invariant.</summary>
+public record ChannelHistoryDto(
+    Guid ChannelId, DeviceChannelMetric Metric, IReadOnlyList<ChannelHistoryPoint> Points, IReadOnlyList<ChannelStatePoint> States);
+
+/// <summary>All of one device's channel histories, for the device-level history modal (small multiples sharing one time axis).</summary>
+public record DeviceHistoryDto(Guid DeviceId, IReadOnlyList<ChannelHistoryDto> Channels);

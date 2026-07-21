@@ -43,6 +43,9 @@ export interface DeviceChannel {
   haEntityId: string;
   haAttribute: string | null;
   direction: ChannelDirection;
+  lastValue: number | null;
+  lastState: string | null;
+  lastValueAt: string | null;
 }
 
 export interface DeviceChannelWriteRequest {
@@ -86,4 +89,26 @@ export interface UnmappedHaDevice {
   suggestedKind: DeviceKind | null;
   entityIds: string[];
   suggestedChannels: DeviceChannelWriteRequest[];
+}
+
+export interface ChannelHistoryPoint {
+  time: string;
+  value: number;
+}
+
+export interface ChannelStatePoint {
+  time: string;
+  state: string;
+}
+
+export interface ChannelHistory {
+  channelId: string;
+  metric: DeviceChannelMetric;
+  points: ChannelHistoryPoint[];
+  states: ChannelStatePoint[];
+}
+
+export interface DeviceHistory {
+  deviceId: string;
+  channels: ChannelHistory[];
 }

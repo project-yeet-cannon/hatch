@@ -18,7 +18,18 @@
   --success-bg: rgba(56, 142, 60, 0.08);
   --success-ink: #1b5e20;
   --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  --overlay: rgba(0, 0, 0, 0.5);
   --transition: 200ms ease;
+
+  /* Categorical series (state-timeline chart) - fixed order, validated for CVD safety */
+  --series-1: #2a78d6;
+  --series-2: #008300;
+  --series-3: #e87ba4;
+  --series-4: #eda100;
+  --series-5: #1baf7a;
+  --series-6: #eb6834;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
 }
 
 body {
@@ -53,7 +64,117 @@ html, body, #root {
     --success: #66bb6a;
     --success-bg: rgba(102, 187, 106, 0.12);
     --success-ink: #99e699;
+    --overlay: rgba(0, 0, 0, 0.65);
+
+    --series-1: #3987e5;
+    --series-2: #008300;
+    --series-3: #d55181;
+    --series-4: #c98500;
+    --series-5: #199e70;
+    --series-6: #d95926;
+    --series-7: #9085e9;
+    --series-8: #e66767;
   }
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 100;
+}
+
+.modal-panel {
+  width: 100%;
+  max-width: 720px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+
+.modal-close {
+  background: transparent;
+  padding: 4px 8px;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--muted);
+}
+
+.modal-close:hover {
+  color: var(--ink);
+}
+
+/* Channel history chart */
+.chart-svg {
+  width: 100%;
+  height: 140px;
+  touch-action: none;
+  user-select: none;
+  cursor: crosshair;
+}
+
+.chart-line {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart-crosshair {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+
+.chart-selection {
+  fill: var(--primary-bg);
+  stroke: var(--primary);
+  stroke-width: 1;
+}
+
+.chart-tooltip-bg {
+  fill: var(--card);
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.chart-tooltip-text {
+  fill: var(--ink);
+  font-size: 11px;
+}
+
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.chart-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chart-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
 }
 
 /* Headings */

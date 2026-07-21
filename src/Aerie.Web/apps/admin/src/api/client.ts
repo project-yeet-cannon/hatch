@@ -1,8 +1,10 @@
 import type {
   BackfillRequest,
+  ChannelHistory,
   Device,
   DeviceChannel,
   DeviceChannelWriteRequest,
+  DeviceHistory,
   DeviceWriteRequest,
   SiteSetting,
   UnmappedHaDevice,
@@ -24,6 +26,13 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const asJson = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
+
+/** Builds a "?key=value&..." query string, dropping undefined values. */
+function qs(params: Record<string, string | number | undefined>): string {
+  const entries = Object.entries(params).filter(([, v]) => v !== undefined) as [string, string | number][];
+  if (entries.length === 0) return '';
+  return `?${new URLSearchParams(entries.map(([k, v]) => [k, String(v)])).toString()}`;
+}
 
 // ---- Zones ----
 
@@ -54,6 +63,11 @@ export const deleteChannel = (deviceId: string, channelId: string) =>
 
 export const triggerBackfill = (deviceId: string, request: BackfillRequest) =>
   fetchJson<void>(`/api/devices/${deviceId}/backfill`, { method: 'POST', ...asJson(request) });
+
+export const getDeviceHistory = (deviceId: string, from?: string, to?: string, bucketMinutes?: number) =>
+  fetchJson<DeviceHistory>(`/api/devices/${deviceId}/history${qs({ from, to, bucketMinutes })}`);
+export const getChannelHistory = (deviceId: string, channelId: string, from?: string, to?: string, bucketMinutes?: number) =>
+  fetchJson<ChannelHistory>(`/api/devices/${deviceId}/channels/${channelId}/history${qs({ from, to, bucketMinutes })}`);
 
 // ---- Settings ----
 
