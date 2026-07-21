@@ -36,7 +36,11 @@ public class DeviceMappingSeeder(AerieContext db, IOptions<DashboardOptions> opt
 
     private async Task SeedZonesAndDevicesAsync(CancellationToken ct)
     {
-        if (await db.Zones.AnyAsync(ct)) return;
+        // Guards on Devices rather than Zones: the AddOutsideZone migration
+        // inserts a Zone(Kind=Outside) row with no paired Device ahead of
+        // this running, so a Zones-based check would find that row and skip
+        // the EfZoneConfig/climate-entity backfill below on every fresh DB.
+        if (await db.Devices.AnyAsync(ct)) return;
 
         var configs = await db.ZoneConfigs.AsNoTracking().ToDictionaryAsync(c => c.EntityId, ct);
 
