@@ -1,6 +1,13 @@
 namespace Aerie.Api.Services.Dashboard;
 
-/// <summary>Bound from the "Dashboard" section of configuration.</summary>
+/// <summary>
+/// No longer bound from configuration (the "Dashboard" appsettings section was
+/// removed in Phase 6 of docs/device-architecture.md) - only survives as the
+/// set of fallback defaults DeviceMappingSeeder writes into SiteSetting on a
+/// fresh, empty database. Entity-id fields (OutsideTemperatureEntity/
+/// OutsideHumidityEntity) were dropped since those now live on Zone/Device/
+/// DeviceChannel rows instead.
+/// </summary>
 public class DashboardOptions
 {
     /// <summary>IANA timezone the dashboard displays in.</summary>
@@ -11,12 +18,6 @@ public class DashboardOptions
 
     /// <summary>Home Assistant sun entity id, source of sunset time.</summary>
     public string SunEntity { get; set; } = "sun.sun";
-
-    /// <summary>Home Assistant sensor entity id for outdoor temperature, e.g. "sensor.h5110_716d_temperature". Empty disables the outside card's live temperature.</summary>
-    public string? OutsideTemperatureEntity { get; set; }
-
-    /// <summary>Home Assistant sensor entity id for outdoor humidity, e.g. "sensor.h5110_716d_humidity". Empty disables the outside card's live humidity.</summary>
-    public string? OutsideHumidityEntity { get; set; }
 
     /// <summary>Degrees F either side of the thermostat setpoint used as the comfort band when a zone has no configured range.</summary>
     public decimal ComfortToleranceF { get; set; } = 2m;

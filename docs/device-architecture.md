@@ -133,11 +133,11 @@ Build out `Aerie.Web/apps/admin` (currently an empty scaffold):
 - `WeatherService` reads the `Zone` with `Kind = Outside` instead of the configured outside entity ids.
 - `DashboardOptions` scalar values are replaced by a cached `ISiteSettingsService` reading from `SiteSetting`, instead of `IOptions<DashboardOptions>`.
 
-### Phase 6 — Delete the `Dashboard` config section
+### Phase 6 — Delete the `Dashboard` config section (done)
 
-- Remove the `Dashboard` section from `appsettings.json`, `appsettings.Docker.json`, and `appsettings.Development.json` (if present there).
-- Remove the `DashboardOptions` binding/registration in `Program.cs`.
-- Confirm every former key has a new home: entity ids → `Zone`/`Device`/`DeviceChannel` rows; `TimeZone`, `SunEntity`, `WeatherEntity`, comfort defaults → `SiteSetting`.
+- Removed the `Dashboard` section from `appsettings.json` and `appsettings.Docker.json` (`appsettings.Development.json` never had one).
+- Removed the `DashboardOptions` binding/registration in `Program.cs`.
+- Confirmed every former key has a new home: entity ids → `Zone`/`Device`/`DeviceChannel` rows (`OutsideTemperatureEntity`/`OutsideHumidityEntity` dropped from `DashboardOptions` entirely, since `WeatherService` already reads the `Zone(Kind = Outside)` instead); `TimeZone`, `SunEntity`, `WeatherEntity`, comfort defaults → `SiteSetting`. `DashboardOptions` itself survives only as the fallback defaults `DeviceMappingSeeder` writes into `SiteSetting` on a fresh, empty database.
 
 ### Future — Climate engine groundwork (later, related work)
 
