@@ -9,6 +9,7 @@ using HADotNet.Core;
 using HADotNet.Core.Clients;
 using Microsoft.AspNetCore.Rewrite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.OpenApi;
 using Newtonsoft.Json;
@@ -33,17 +34,40 @@ builder.Services.AddSingleton<ISecrets>(secrets);
 // concurrent load. Scoped AerieContext is still available (resolved from the
 // same pool) for services that only ever touch the DB sequentially.
 builder.Services.AddPooledDbContextFactory<AerieContext>(o =>
-    o.UseNpgsql(
-        builder.Configuration.GetConnectionString("Aerie")));
+{
+    o.UseNpgsql(builder.Configuration.GetConnectionString("Aerie"));
+
+    // EF Core logs SaveChangesFailed at Error level via its own diagnostics
+    // source before the exception ever reaches a caller's catch block, so
+    // ChannelHistoryWriter's handling of expected unique-key violations
+    // (duplicate measurements/state changes) doesn't stop it from flooding
+    // the logs. Downgrade it to Debug; genuine failures still throw and are
+    // logged by the caller.
+    o.ConfigureWarnings(w => w.Log((CoreEventId.SaveChangesFailed, LogLevel.Debug)));
+});
 builder.Services.AddScoped<AerieContext>(sp =>
     sp.GetRequiredService<IDbContextFactory<AerieContext>>().CreateDbContext());
 
 // Quartz
-builder.Services.AddQuartz();
+builder.Services.AddQuartz(q =>
+{
+    q.UsePersistentStore(sb =>
+    {
+        sb.UseProperties = true;
+        sb.UseClustering();
+        sb.UsePostgres(builder.Configuration.GetConnectionString("Quartz")!);
+        sb.UseSystemTextJsonSerializer();
+    });
+});
 builder.Services.AddQuartzHostedService(opt =>
 {
     opt.WaitForJobsToComplete = true;
 });
+// AddQuartz only registers ISchedulerFactory; JobsInit and DevicesController
+// need IScheduler directly, and GetScheduler() returns the same underlying
+// instance AddQuartzHostedService starts, so this stays in sync with it.
+builder.Services.AddSingleton(sp =>
+    sp.GetRequiredService<ISchedulerFactory>().GetScheduler().GetAwaiter().GetResult());
 
 // HADotNet
 var haCfg = builder.Configuration.GetSection("HomeAssistant");
@@ -76,10 +100,6 @@ builder.Services.AddScoped<IChannelHistoryWriter, ChannelHistoryWriter>();
 // Jobs
 builder.Services.AddTransient<IAerieJob, SampleChannels>();
 builder.Services.AddTransient<BackfillChannelHistory>();
-
-var scheduler = await JobsInit.InitQuartz(
-    builder.Configuration.GetConnectionString("Quartz")!);
-builder.Services.AddSingleton(scheduler);
 builder.Services.AddTransient<JobsInit>();
 
 // API / HTTP

@@ -1,5 +1,3 @@
-using System.Collections.Specialized;
-using Microsoft.JSInterop;
 using Quartz;
 
 namespace Aerie.Api.Jobs;
@@ -13,22 +11,6 @@ public interface IAerieJob : IJob
 
 public class JobsInit(IScheduler scheduler, IEnumerable<IAerieJob> jobs)
 {
-    public static async Task<IScheduler> InitQuartz(string psqlCxnStr)
-    {
-        var properties = new NameValueCollection();
-        var sch = await SchedulerBuilder.Create(properties)
-            .UsePersistentStore(sb =>
-            {
-                sb.UseProperties = true;
-                sb.UseClustering();
-                sb.UsePostgres(psqlCxnStr);
-                sb.UseSystemTextJsonSerializer();
-            })
-            .BuildScheduler();
-
-        return sch;
-    }
-
     public async Task WireUpJobs()
     {
         foreach (var j in jobs)
