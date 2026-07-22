@@ -12,7 +12,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.OpenApi;
-using Newtonsoft.Json;
 using Quartz;
 using System.Text.Json.Serialization;
 
@@ -24,11 +23,12 @@ builder.Services.AddSingleton(TimeProvider.System);
 
 // .env.json is optional now that ha_host/ha_port/ha_token live in SiteSettings
 // (see DeviceMappingSeeder.SeedHomeAssistantConnectionAsync, which imports it
-// once on first run if present). Kept around as a generic ISecrets source.
-var env = File.Exists(".env.json")
-    ? JsonConvert.DeserializeObject<Dictionary<string, string>>(await File.ReadAllTextAsync(".env.json"))
-    : null;
-builder.Services.AddSingleton<ISecrets>(new EnvSecrets(env ?? []));
+// once on first run if present). Kept around as a generic ISecrets source for
+// local dev; production instead injects HA_HOST/HA_PORT/HA_TOKEN as environment
+// variables (see compose.prod.yml), which the environment config provider below
+// picks up under the same case-insensitive keys.
+builder.Configuration.AddJsonFile(".env.json", optional: true);
+builder.Services.AddSingleton<ISecrets>(new EnvSecrets(builder.Configuration));
 
 // Pooled factory so services that fan out concurrent DB work (e.g.
 // DashboardService's Task.WhenAll of zones + weather) can each create their
