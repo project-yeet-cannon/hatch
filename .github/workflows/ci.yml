@@ -1,0 +1,55 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore src/Aerie.slnx
+
+      - name: Build
+        run: dotnet build src/Aerie.slnx --no-restore --configuration Release
+
+      - name: Test
+        run: dotnet test src/Aerie.slnx --no-build --configuration Release
+
+  web:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [admin, dashboard]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: src/Aerie.Web/apps/${{ matrix.app }}/.nvmrc
+          cache: npm
+          cache-dependency-path: src/Aerie.Web/apps/${{ matrix.app }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: src/Aerie.Web/apps/${{ matrix.app }}
+        run: npm ci
+
+      - name: Lint
+        working-directory: src/Aerie.Web/apps/${{ matrix.app }}
+        run: npm run lint
+
+      - name: Build
+        working-directory: src/Aerie.Web/apps/${{ matrix.app }}
+        run: npm run build

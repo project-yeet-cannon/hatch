@@ -16,8 +16,18 @@ build:
 run:
 	bash -c 'export NVM_DIR="$$HOME/.nvm"; [ -s "$$NVM_DIR/nvm.sh" ] && \. "$$NVM_DIR/nvm.sh"; dotnet run --project ./src/Aerie.Api/Aerie.Api.csproj'
 
-test:
+test: test-api test-web
+
+test-api:
 	dotnet test ./src/Aerie.Api.Tests/Aerie.Api.Tests.csproj
+
+test-web:
+	bash -c 'export NVM_DIR="$$HOME/.nvm"; [ -s "$$NVM_DIR/nvm.sh" ] && \. "$$NVM_DIR/nvm.sh"; \
+	set -e; \
+	for app in admin dashboard; do \
+		echo "==> $$app"; \
+		(cd ./src/Aerie.Web/apps/$$app && nvm use && npm ci && npm run lint && npm run build); \
+	done'
 
 # make ef-migration migration=MyMigrationName
 ef-migration:
