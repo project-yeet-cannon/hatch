@@ -1,5 +1,7 @@
+using Aerie.Api.Common;
 using Aerie.Api.Ef;
 using Aerie.Api.Models.DeviceMapping;
+using Aerie.Api.Services.DeviceMapping;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,37 +10,44 @@ namespace Aerie.Api.Controllers;
 /// <summary>CRUD over SiteSetting - the admin-editable scalars that replace the "Dashboard" appsettings section (docs/device-architecture.md Phase 2/6).</summary>
 [ApiController]
 [Route("api/[controller]")]
-public class SettingsController(AerieContext db) : ControllerBase
+public class SettingsController(AerieContext db, IHomeAssistantConnectionManager haConnection) : ControllerBase
 {
     [HttpGet]
     public async Task<IReadOnlyList<SiteSettingDto>> GetAll(CancellationToken ct)
-        => await db.SiteSettings.AsNoTracking()
-            .Select(s => new SiteSettingDto(s.Key, s.Value))
-            .ToListAsync(ct);
+    {
+        var settings = await db.SiteSettings.AsNoTracking().ToListAsync(ct);
+        return settings.Select(s => new SiteSettingDto(s.Key, Redact(s.Key, s.Value))).ToList();
+    }
 
     [HttpGet("{key}")]
     public async Task<ActionResult<SiteSettingDto>> Get(string key, CancellationToken ct)
     {
         var setting = await db.SiteSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Key == key, ct);
-        return setting is null ? NotFound() : new SiteSettingDto(setting.Key, setting.Value);
+        return setting is null ? NotFound() : new SiteSettingDto(setting.Key, Redact(setting.Key, setting.Value));
     }
 
     /// <summary>Creates or updates the setting at Key - the client controls the id, so upsert-by-PUT covers both create and update.</summary>
     [HttpPut("{key}")]
     public async Task<ActionResult<SiteSettingDto>> Upsert(string key, SiteSettingWriteRequest request, CancellationToken ct)
     {
+        var value = key == SiteSettingKeys.HomeAssistantToken ? SecretObfuscator.Obfuscate(request.Value) : request.Value;
+
         var setting = await db.SiteSettings.FirstOrDefaultAsync(s => s.Key == key, ct);
         if (setting is null)
         {
-            setting = new EfSiteSetting { Key = key, Value = request.Value };
+            setting = new EfSiteSetting { Key = key, Value = value };
             db.SiteSettings.Add(setting);
         }
         else
         {
-            setting.Value = request.Value;
+            setting.Value = value;
         }
         await db.SaveChangesAsync(ct);
-        return new SiteSettingDto(setting.Key, setting.Value);
+
+        if (key is SiteSettingKeys.HomeAssistantHost or SiteSettingKeys.HomeAssistantPort or SiteSettingKeys.HomeAssistantToken)
+            await haConnection.ApplyAsync(ct);
+
+        return new SiteSettingDto(setting.Key, Redact(setting.Key, setting.Value));
     }
 
     [HttpDelete("{key}")]
@@ -50,4 +59,8 @@ public class SettingsController(AerieContext db) : ControllerBase
         await db.SaveChangesAsync(ct);
         return NoContent();
     }
+
+    /// <summary>HomeAssistantToken is stored obfuscated, not encrypted, so it's still redacted before it leaves the API - no reason to hand back something trivially reversible.</summary>
+    private static string Redact(string key, string value) =>
+        key == SiteSettingKeys.HomeAssistantToken && value.Length > 0 ? "••••••••" : value;
 }

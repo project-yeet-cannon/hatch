@@ -22,10 +22,13 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSingleton(TimeProvider.System);
 
-var rawEnv = await File.ReadAllTextAsync(".env.json");
-var env = JsonConvert.DeserializeObject<Dictionary<string, string>>(rawEnv);
-var secrets = new EnvSecrets(env ?? []);
-builder.Services.AddSingleton<ISecrets>(secrets);
+// .env.json is optional now that ha_host/ha_port/ha_token live in SiteSettings
+// (see DeviceMappingSeeder.SeedHomeAssistantConnectionAsync, which imports it
+// once on first run if present). Kept around as a generic ISecrets source.
+var env = File.Exists(".env.json")
+    ? JsonConvert.DeserializeObject<Dictionary<string, string>>(await File.ReadAllTextAsync(".env.json"))
+    : null;
+builder.Services.AddSingleton<ISecrets>(new EnvSecrets(env ?? []));
 
 // Pooled factory so services that fan out concurrent DB work (e.g.
 // DashboardService's Task.WhenAll of zones + weather) can each create their
@@ -69,14 +72,10 @@ builder.Services.AddQuartzHostedService(opt =>
 builder.Services.AddSingleton(sp =>
     sp.GetRequiredService<ISchedulerFactory>().GetScheduler().GetAwaiter().GetResult());
 
-// HADotNet
-var haCfg = builder.Configuration.GetSection("HomeAssistant");
-var haHost = secrets.GetSecret("ha_host");
-var haPort = secrets.GetSecret("ha_port");
-var haToken = secrets.GetSecret("ha_token");
-
-ClientFactory.Initialize($"http://{haHost}:{haPort}/", haToken);
-
+// HADotNet - ClientFactory itself is initialized later, once SiteSettings is
+// migrated/seeded and HomeAssistantConnectionManager can read it (see below).
+// These registrations just wire up transient clients against whatever the
+// factory is initialized to at request time.
 builder.Services.AddTransient(_ => ClientFactory.GetClient<EntityClient>());
 builder.Services.AddTransient(_ => ClientFactory.GetClient<HistoryClient>());
 builder.Services.AddTransient(_ => ClientFactory.GetClient<StatesClient>());
@@ -96,6 +95,7 @@ builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddScoped<IDeviceMappingSeeder, DeviceMappingSeeder>();
 builder.Services.AddScoped<IDiscoveryService, DiscoveryService>();
 builder.Services.AddScoped<IChannelHistoryWriter, ChannelHistoryWriter>();
+builder.Services.AddScoped<IHomeAssistantConnectionManager, HomeAssistantConnectionManager>();
 
 // Jobs
 builder.Services.AddTransient<IAerieJob, SampleChannels>();
@@ -129,6 +129,9 @@ using (var scope = app.Services.CreateScope())
 
     var seeder = scope.ServiceProvider.GetRequiredService<IDeviceMappingSeeder>();
     await seeder.SeedAsync();
+
+    var haConnection = scope.ServiceProvider.GetRequiredService<IHomeAssistantConnectionManager>();
+    await haConnection.ApplyAsync(CancellationToken.None);
 }
 
 // Quartz

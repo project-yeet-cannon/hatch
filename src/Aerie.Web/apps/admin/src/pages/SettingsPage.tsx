@@ -5,7 +5,7 @@ import { DEFAULT_HOME_ASSISTANT_BASE_URL } from '../lib/format';
 interface FieldDef {
   key: string;
   label: string;
-  type: 'text' | 'number';
+  type: 'text' | 'number' | 'password';
   help: string;
 }
 
@@ -22,10 +22,24 @@ const FIELDS: FieldDef[] = [
     type: 'text',
     help: `Used to link device pages back to Home Assistant. Defaults to ${DEFAULT_HOME_ASSISTANT_BASE_URL} if unset.`,
   },
+  { key: 'HomeAssistantHost', label: 'Home Assistant host', type: 'text', help: 'Hostname or IP the API connects to, e.g. homeassistant.local' },
+  { key: 'HomeAssistantPort', label: 'Home Assistant port', type: 'number', help: 'e.g. 8123' },
+  {
+    key: 'HomeAssistantToken',
+    label: 'Home Assistant token',
+    type: 'password',
+    help: 'Long-lived access token. Stored obfuscated; leave blank to keep the current value.',
+  },
 ];
+
+const PASSWORD_KEYS = new Set(FIELDS.filter((f) => f.type === 'password').map((f) => f.key));
 
 export function SettingsPage() {
   const [values, setValues] = useState<Record<string, string>>({});
+  // Password fields come back from the API redacted, so we track "is a value
+  // already set" separately instead of loading the redacted string into the
+  // editable input.
+  const [configured, setConfigured] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
@@ -40,7 +54,8 @@ export function SettingsPage() {
     setError(null);
     try {
       const settings = await getSettings();
-      setValues(Object.fromEntries(settings.map((s) => [s.key, s.value])));
+      setValues(Object.fromEntries(settings.filter((s) => !PASSWORD_KEYS.has(s.key)).map((s) => [s.key, s.value])));
+      setConfigured(Object.fromEntries(settings.filter((s) => PASSWORD_KEYS.has(s.key)).map((s) => [s.key, s.value.length > 0])));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -49,12 +64,19 @@ export function SettingsPage() {
   }
 
   async function save(key: string) {
+    // Password fields left blank mean "no change" - there's nothing to send.
+    if (PASSWORD_KEYS.has(key) && !values[key]) return;
+
     setSavingKey(key);
     setSavedKey(null);
     setError(null);
     try {
       await putSetting(key, values[key] ?? '');
       setSavedKey(key);
+      if (PASSWORD_KEYS.has(key)) {
+        setConfigured((prev) => ({ ...prev, [key]: true }));
+        setValues((prev) => ({ ...prev, [key]: '' }));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -81,6 +103,7 @@ export function SettingsPage() {
                   <input
                     type={field.type}
                     value={values[field.key] ?? ''}
+                    placeholder={field.type === 'password' && configured[field.key] ? 'Token is set — enter a new value to change it' : undefined}
                     onChange={(e) => {
                       setValues((prev) => ({ ...prev, [field.key]: e.target.value }));
                       setSavedKey((prev) => (prev === field.key ? null : prev));
@@ -88,7 +111,7 @@ export function SettingsPage() {
                   />
                   <button
                     className="btn-secondary"
-                    disabled={savingKey === field.key}
+                    disabled={savingKey === field.key || (field.type === 'password' && !values[field.key])}
                     onClick={() => save(field.key)}
                   >
                     {savingKey === field.key ? 'Saving…' : savedKey === field.key ? 'Saved' : 'Save'}

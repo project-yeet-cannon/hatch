@@ -106,6 +106,11 @@ public static class SiteSettingKeys
     public const string DefaultComfortLowF = "DefaultComfortLowF";
     public const string DefaultComfortHighF = "DefaultComfortHighF";
     public const string HomeAssistantBaseUrl = "HomeAssistantBaseUrl";
+
+    /// <summary>Host/port/token used to connect the HADotNet client - see HomeAssistantConnectionManager. Distinct from HomeAssistantBaseUrl, which is just a display link back into HA's UI.</summary>
+    public const string HomeAssistantHost = "HomeAssistantHost";
+    public const string HomeAssistantPort = "HomeAssistantPort";
+    public const string HomeAssistantToken = "HomeAssistantToken";
 }
 
 /// <summary>A single numeric sample from a DeviceChannel. Replaces the wide EfEnvironmentReading table - every sample is "channel X had value V at time T."</summary>

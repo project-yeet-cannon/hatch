@@ -1,4 +1,5 @@
 using System.Globalization;
+using Aerie.Api.Common;
 using Aerie.Api.Ef;
 using Aerie.Api.Services.Dashboard;
 using Microsoft.EntityFrameworkCore;
@@ -26,12 +27,13 @@ public interface IDeviceMappingSeeder
 /// stay in Dashboard config, unmigrated, until an admin imports them as a
 /// Zone(Kind=Outside) + Device.
 /// </summary>
-public class DeviceMappingSeeder(AerieContext db, IOptions<DashboardOptions> options) : IDeviceMappingSeeder
+public class DeviceMappingSeeder(AerieContext db, IOptions<DashboardOptions> options, ISecrets secrets) : IDeviceMappingSeeder
 {
     public async Task SeedAsync(CancellationToken ct = default)
     {
         await SeedZonesAndDevicesAsync(ct);
         await SeedSiteSettingsAsync(ct);
+        await SeedHomeAssistantConnectionAsync(ct);
     }
 
     private async Task SeedZonesAndDevicesAsync(CancellationToken ct)
@@ -102,6 +104,32 @@ public class DeviceMappingSeeder(AerieContext db, IOptions<DashboardOptions> opt
             new EfSiteSetting { Key = SiteSettingKeys.ComfortToleranceF, Value = opt.ComfortToleranceF.ToString(CultureInfo.InvariantCulture) },
             new EfSiteSetting { Key = SiteSettingKeys.DefaultComfortLowF, Value = opt.DefaultComfortLowF.ToString(CultureInfo.InvariantCulture) },
             new EfSiteSetting { Key = SiteSettingKeys.DefaultComfortHighF, Value = opt.DefaultComfortHighF.ToString(CultureInfo.InvariantCulture) });
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// One-time import of ha_host/ha_port/ha_token from .env.json (the old
+    /// startup-config source, see EnvSecrets) into SiteSettings, now that the
+    /// admin Settings page owns them. Guarded per-key rather than on the
+    /// whole SiteSettings table being empty, since that table is almost
+    /// always already populated by SeedSiteSettingsAsync by the time this
+    /// runs. No-ops (leaving the fields for the admin UI) if .env.json is
+    /// missing or doesn't have all three.
+    /// </summary>
+    private async Task SeedHomeAssistantConnectionAsync(CancellationToken ct)
+    {
+        if (await db.SiteSettings.AnyAsync(s => s.Key == SiteSettingKeys.HomeAssistantHost, ct)) return;
+
+        var host = secrets.GetSecret("ha_host");
+        var port = secrets.GetSecret("ha_port");
+        var token = secrets.GetSecret("ha_token");
+        if (string.IsNullOrEmpty(host) || string.IsNullOrEmpty(port) || string.IsNullOrEmpty(token)) return;
+
+        db.SiteSettings.AddRange(
+            new EfSiteSetting { Key = SiteSettingKeys.HomeAssistantHost, Value = host },
+            new EfSiteSetting { Key = SiteSettingKeys.HomeAssistantPort, Value = port },
+            new EfSiteSetting { Key = SiteSettingKeys.HomeAssistantToken, Value = SecretObfuscator.Obfuscate(token) });
 
         await db.SaveChangesAsync(ct);
     }
