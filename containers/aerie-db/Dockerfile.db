@@ -1,2 +1,2 @@
-FROM postgres:18.1
+FROM postgres:18.4
 COPY pginit.sql /docker-entrypoint-initdb.d/init.sql
