@@ -1,6 +1,8 @@
 services:
   db:
-    image: postgres:18.1
+    build:
+      context: ./containers/aerie-db
+      dockerfile: Dockerfile.db
     networks:
       - local
     ports:
@@ -8,7 +10,6 @@ services:
     restart: always
     volumes:
       - pgdata:/var/lib/postgresql
-      - ./pginit.sql:/docker-entrypoint-initdb.d/init.sql
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
