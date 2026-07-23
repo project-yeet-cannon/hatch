@@ -18,6 +18,9 @@ jobs:
     # [self-hosted, home-server]) if the runner has one configured.
     runs-on: self-hosted
 
+    env:
+      DOCKER_HOST: tcp://localhost:2375
+
     steps:
       - name: Checkout compose file
         uses: actions/checkout@v4
