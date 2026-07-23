@@ -67,12 +67,12 @@ jobs:
 
       - name: Check for changes under containers/aerie-db
         id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          base: HEAD~1
-          filters: |
-            db:
-              - 'containers/aerie-db/**'
+        run: |
+          if git diff --quiet HEAD~1 HEAD -- containers/aerie-db; then
+            echo "db=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "db=true" >> "$GITHUB_OUTPUT"
+          fi
 
   build-and-push-db-image:
     needs: detect-db-changes
