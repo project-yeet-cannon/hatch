@@ -2,7 +2,7 @@ name: Deploy
 
 on:
   workflow_run:
-    workflows: ["Build and test"]
+    workflows: ["Build and publish containers"]
     types: [completed]
     branches: [main]
 
@@ -19,11 +19,26 @@ jobs:
     runs-on: self-hosted
 
     steps:
-      - name: Checkout repository
+      - name: Checkout compose file
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
+          sparse-checkout: |
+            compose.prod.yml
+          sparse-checkout-cone-mode: false
 
-      - name: Build and start the stack
+      - name: Log in to the Container registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+
+      - name: Pull and start the stack
         working-directory: .
-        run: docker compose -f compose.prod.yml up -d --build
+        env:
+          IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          docker compose -f compose.prod.yml pull
+          docker compose -f compose.prod.yml up -d

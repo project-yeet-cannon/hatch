@@ -1,8 +1,6 @@
 services:
   db:
-    build:
-      context: ./containers/aerie-db
-      dockerfile: Dockerfile.db
+    image: ghcr.io/eouw0o83hf/aerie-db:${IMAGE_TAG:-latest}
     networks:
       - local
     ports:
@@ -20,9 +18,7 @@ services:
       retries: 5
 
   api:
-    build:
-      context: .
-      dockerfile: src/Aerie.Api/Dockerfile.api
+    image: ghcr.io/eouw0o83hf/aerie-api:${IMAGE_TAG:-latest}
     networks:
       - local
     ports:
