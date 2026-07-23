@@ -1,10 +1,12 @@
 import type { DeviceChannel } from '../types';
 
-export const DEFAULT_HOME_ASSISTANT_BASE_URL = 'http://homeassistant.local:8123';
-
-/** Home Assistant's device config page for a given HA device id, under the given (or default) base URL. */
-export function homeAssistantDeviceUrl(haDeviceId: string, baseUrl: string | null | undefined): string {
-  const base = (baseUrl?.trim() || DEFAULT_HOME_ASSISTANT_BASE_URL).replace(/\/+$/, '');
+/** Home Assistant's device config page for a given HA device id, at the given host/port. */
+export function homeAssistantDeviceUrl(
+  haDeviceId: string,
+  haHost: string | null | undefined,
+  haPort: string | null | undefined,
+): string {
+  const base = `http://${haHost ?? ''}:${haPort ?? ''}`;
   return `${base}/config/devices/device/${haDeviceId}`;
 }
 

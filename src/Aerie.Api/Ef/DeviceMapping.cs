@@ -105,9 +105,8 @@ public static class SiteSettingKeys
     public const string ComfortToleranceF = "ComfortToleranceF";
     public const string DefaultComfortLowF = "DefaultComfortLowF";
     public const string DefaultComfortHighF = "DefaultComfortHighF";
-    public const string HomeAssistantBaseUrl = "HomeAssistantBaseUrl";
 
-    /// <summary>Host/port/token used to connect the HADotNet client - see HomeAssistantConnectionManager. Distinct from HomeAssistantBaseUrl, which is just a display link back into HA's UI.</summary>
+    /// <summary>Host/port/token used to connect the HADotNet client - see HomeAssistantConnectionManager.</summary>
     public const string HomeAssistantHost = "HomeAssistantHost";
     public const string HomeAssistantPort = "HomeAssistantPort";
     public const string HomeAssistantToken = "HomeAssistantToken";

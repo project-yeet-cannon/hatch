@@ -127,7 +127,8 @@ const toChannelRequest = (
 export function DevicesPage() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
-  const [haBaseUrl, setHaBaseUrl] = useState<string | null>(null);
+  const [haHost, setHaHost] = useState<string | null>(null);
+  const [haPort, setHaPort] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -185,8 +186,11 @@ export function DevicesPage() {
       ]);
       setDevices(deviceList);
       setZones(zoneList);
-      setHaBaseUrl(
-        settings.find((s) => s.key === "HomeAssistantBaseUrl")?.value ?? null,
+      setHaHost(
+        settings.find((s) => s.key === "HomeAssistantHost")?.value ?? null,
+      );
+      setHaPort(
+        settings.find((s) => s.key === "HomeAssistantPort")?.value ?? null,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -472,7 +476,8 @@ export function DevicesPage() {
                         className="icon-link"
                         href={homeAssistantDeviceUrl(
                           device.haDeviceId,
-                          haBaseUrl,
+                          haHost,
+                          haPort,
                         )}
                         target="_blank"
                         rel="noopener noreferrer"
