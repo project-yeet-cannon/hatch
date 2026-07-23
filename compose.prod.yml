@@ -1,6 +1,6 @@
 services:
   db:
-    image: ghcr.io/eouw0o83hf/aerie-db:${IMAGE_TAG:-latest}
+    image: ghcr.io/eouw0o83hf/aerie-db:latest
     networks:
       - local
     ports:
