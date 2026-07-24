@@ -16,8 +16,9 @@ public class DashboardOptions
     /// <summary>Home Assistant weather entity id, e.g. "weather.forecast_home". Source of the outside card's condition note; empty leaves it blank.</summary>
     public string? WeatherEntity { get; set; }
 
-    /// <summary>Home Assistant sun entity id, source of sunset time.</summary>
-    public string SunEntity { get; set; } = "sun.sun";
+    /// <summary>Site latitude/longitude in degrees, used to calculate sunset locally (SolarCalculator). Defaults to New York City, matching the TimeZone default.</summary>
+    public double Latitude { get; set; } = 40.7128;
+    public double Longitude { get; set; } = -74.0060;
 
     /// <summary>Degrees F either side of the thermostat setpoint used as the comfort band when a zone has no configured range.</summary>
     public decimal ComfortToleranceF { get; set; } = 2m;

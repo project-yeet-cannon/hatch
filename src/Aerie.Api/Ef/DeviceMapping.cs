@@ -100,7 +100,8 @@ public class EfSiteSetting
 public static class SiteSettingKeys
 {
     public const string TimeZone = "TimeZone";
-    public const string SunEntity = "SunEntity";
+    public const string Latitude = "Latitude";
+    public const string Longitude = "Longitude";
     public const string WeatherEntity = "WeatherEntity";
     public const string ComfortToleranceF = "ComfortToleranceF";
     public const string DefaultComfortLowF = "DefaultComfortLowF";

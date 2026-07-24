@@ -10,7 +10,8 @@ interface FieldDef {
 
 const FIELDS: FieldDef[] = [
   { key: 'TimeZone', label: 'Time zone', type: 'text', help: 'IANA timezone, e.g. America/Denver' },
-  { key: 'SunEntity', label: 'Sun entity', type: 'text', help: 'HA entity id, e.g. sun.sun' },
+  { key: 'Latitude', label: 'Latitude', type: 'number', help: 'Degrees, used to calculate sunset locally, e.g. 40.7128' },
+  { key: 'Longitude', label: 'Longitude', type: 'number', help: 'Degrees, used to calculate sunset locally, e.g. -74.0060' },
   { key: 'WeatherEntity', label: 'Weather entity', type: 'text', help: 'HA entity id, e.g. weather.home' },
   { key: 'ComfortToleranceF', label: 'Comfort tolerance (°F)', type: 'number', help: '' },
   { key: 'DefaultComfortLowF', label: 'Default comfort low (°F)', type: 'number', help: '' },

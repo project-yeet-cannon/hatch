@@ -99,7 +99,8 @@ public class DeviceMappingSeeder(AerieContext db, IOptions<DashboardOptions> opt
         var opt = options.Value;
         db.SiteSettings.AddRange(
             new EfSiteSetting { Key = SiteSettingKeys.TimeZone, Value = opt.TimeZone },
-            new EfSiteSetting { Key = SiteSettingKeys.SunEntity, Value = opt.SunEntity },
+            new EfSiteSetting { Key = SiteSettingKeys.Latitude, Value = opt.Latitude.ToString(CultureInfo.InvariantCulture) },
+            new EfSiteSetting { Key = SiteSettingKeys.Longitude, Value = opt.Longitude.ToString(CultureInfo.InvariantCulture) },
             new EfSiteSetting { Key = SiteSettingKeys.WeatherEntity, Value = opt.WeatherEntity ?? "" },
             new EfSiteSetting { Key = SiteSettingKeys.ComfortToleranceF, Value = opt.ComfortToleranceF.ToString(CultureInfo.InvariantCulture) },
             new EfSiteSetting { Key = SiteSettingKeys.DefaultComfortLowF, Value = opt.DefaultComfortLowF.ToString(CultureInfo.InvariantCulture) },

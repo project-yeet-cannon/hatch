@@ -19,18 +19,19 @@ public interface IWeatherService
 /// (Jobs/SampleChannels) writes (docs/device-architecture.md Phase 5).
 /// "Current" is the most recent Measurement rather than a live HA call,
 /// matching ZoneService.BuildZoneAsync. The condition note (weather.* entity)
-/// and sunset (sun.* entity) aren't sampled and still come from live HA state,
-/// fetched concurrently with each other and with the DB reads below since
-/// they're independent.
+/// isn't sampled and still comes from live HA state. Sunset is computed
+/// locally from the site's Latitude/Longitude (SolarCalculator) rather than
+/// read from HA's sun.* entity, so it's not subject to HA's availability at
+/// all.
 ///
-/// Each HA call is bounded by HaCallTimeout: StatesClient's HttpClient has no
-/// timeout configured (HADotNet just does `new HttpClient()`, so the
+/// The HA weather call is bounded by HaCallTimeout: StatesClient's HttpClient
+/// has no timeout configured (HADotNet just does `new HttpClient()`, so the
 /// framework's 100s default applies) and HADotNet has no retry/circuit
 /// breaking of its own. Without an explicit bound here, a slow or
 /// unreachable HA instance stalls the whole /api/dashboard request - this
 /// endpoint's data otherwise comes entirely from Postgres and should be fast
 /// regardless of HA's health. This is best-effort by design: if the Outside
-/// zone doesn't exist yet or has no devices assigned, or a live HA call
+/// zone doesn't exist yet or has no devices assigned, or the live HA call
 /// fails or times out, that piece falls back to zero/blank rather than
 /// throwing, so a missing/slow integration degrades the outside card instead
 /// of the whole dashboard. Forecast/hourly aren't sourced yet, so they come
@@ -54,22 +55,16 @@ public class WeatherService(
         var weatherTask = string.IsNullOrWhiteSpace(settings.WeatherEntity)
             ? Task.FromResult<StateObject?>(null)
             : BoundedStateAsync(settings.WeatherEntity, ct);
-        var sunTask = BoundedStateAsync(settings.SunEntity, ct);
 
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var zoneTask = db.Zones.AsNoTracking().FirstOrDefaultAsync(z => z.Kind == ZoneKind.Outside, ct);
 
-        await Task.WhenAll(weatherTask, sunTask, zoneTask);
+        await Task.WhenAll(weatherTask, zoneTask);
 
         var note = Humanize((await weatherTask)?.State);
 
-        var sunsetTime = now;
-        decimal sunHoursRemaining = 0;
-        if (GetDateTime((await sunTask)?.Attributes, "next_setting") is { } nextSetting)
-        {
-            sunsetTime = nextSetting;
-            sunHoursRemaining = Math.Round(Math.Max(0m, (decimal)(nextSetting - now).TotalHours), 1);
-        }
+        var sunsetTime = SolarCalculator.NextSunset(now, settings.Latitude, settings.Longitude);
+        var sunHoursRemaining = Math.Round(Math.Max(0m, (decimal)(sunsetTime - now).TotalHours), 1);
 
         var zone = await zoneTask;
         (decimal currentTempF, IReadOnlyList<TempPoint> history) = zone is null
@@ -117,18 +112,6 @@ public class WeatherService(
         var currentTempF = rows.Count > 0 ? rows[^1].Value : (history.Count > 0 ? history[^1].TempF : 0m);
 
         return (currentTempF, history);
-    }
-
-    private static DateTimeOffset? GetDateTime(IDictionary<string, object>? attrs, string key)
-    {
-        if (attrs is null || !attrs.TryGetValue(key, out var v) || v is null) return null;
-        return v switch
-        {
-            DateTimeOffset dto => dto,
-            DateTime dt => dt,
-            string s when DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var r) => r,
-            _ => null,
-        };
     }
 
     /// <summary>"partlycloudy" -> "Partly Cloudy".</summary>

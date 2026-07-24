@@ -7,7 +7,8 @@ namespace Aerie.Api.Services.DeviceMapping;
 /// <summary>Typed snapshot of the SiteSetting table, with the same defaults DashboardOptions used to carry.</summary>
 public record SiteSettingsSnapshot(
     string TimeZone,
-    string SunEntity,
+    double Latitude,
+    double Longitude,
     string? WeatherEntity,
     decimal ComfortToleranceF,
     decimal DefaultComfortLowF,
@@ -48,7 +49,8 @@ public class SiteSettingsService(IDbContextFactory<AerieContext> dbFactory, Time
 
             var snapshot = new SiteSettingsSnapshot(
                 TimeZone: values.GetValueOrDefault(SiteSettingKeys.TimeZone, "America/New_York"),
-                SunEntity: values.GetValueOrDefault(SiteSettingKeys.SunEntity, "sun.sun"),
+                Latitude: ParseDouble(values, SiteSettingKeys.Latitude, 40.7128),
+                Longitude: ParseDouble(values, SiteSettingKeys.Longitude, -74.0060),
                 WeatherEntity: NullIfEmpty(values.GetValueOrDefault(SiteSettingKeys.WeatherEntity)),
                 ComfortToleranceF: ParseDecimal(values, SiteSettingKeys.ComfortToleranceF, 2m),
                 DefaultComfortLowF: ParseDecimal(values, SiteSettingKeys.DefaultComfortLowF, 68m),
@@ -68,6 +70,11 @@ public class SiteSettingsService(IDbContextFactory<AerieContext> dbFactory, Time
 
     private static decimal ParseDecimal(IReadOnlyDictionary<string, string> values, string key, decimal fallback) =>
         values.TryGetValue(key, out var raw) && decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : fallback;
+
+    private static double ParseDouble(IReadOnlyDictionary<string, string> values, string key, double fallback) =>
+        values.TryGetValue(key, out var raw) && double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
             ? parsed
             : fallback;
 }

@@ -7,7 +7,7 @@ Admin UI for the device-mapping domain described in `docs/device-architecture.md
 - **Zones** (`/zones`) — list, create, edit, delete, and reorder zones; set each zone's comfort band.
 - **Devices** (`/devices`) — list devices, assign to a zone, enable/disable, edit device fields, and manage each device's channels (add/edit/delete).
 - **Discovery** (`/discovery`) — shows Home Assistant devices not yet mapped to an Aerie `Device`, with a suggested name/kind/channel grouping; one click creates the `Device` and its `DeviceChannel`s.
-- **Settings** (`/settings`) — edit the well-known `SiteSetting` scalars (`TimeZone`, `SunEntity`, `WeatherEntity`, `ComfortToleranceF`, `DefaultComfortLowF`, `DefaultComfortHighF`).
+- **Settings** (`/settings`) — edit the well-known `SiteSetting` scalars (`TimeZone`, `Latitude`, `Longitude`, `WeatherEntity`, `ComfortToleranceF`, `DefaultComfortLowF`, `DefaultComfortHighF`).
 
 ## Development
 
