@@ -235,6 +235,27 @@ body {
   color: var(--cool-ink);
 }
 
+@keyframes hf-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+.hf-skel {
+  display: inline-block;
+  background: var(--skel);
+  border-radius: 6px;
+  animation: hf-pulse 1.6s ease-in-out infinite;
+}
+.hf-skel.hf-chart,
+.hf-skel.hf-spark {
+  width: 100%;
+  border-radius: 12px;
+}
+.hf-skel.hf-xax {
+  height: 9px;
+  width: 55%;
+  margin-top: 7px;
+}
+
 .sky {
   --bg: #d8ecfb;
   --card: #ffffff;
@@ -253,6 +274,7 @@ body {
   --ok-ink: #3c7a58;
   --cool-bg: rgba(95, 159, 206, 0.16);
   --cool-ink: #3a6f96;
+  --skel: rgba(139, 160, 172, 0.18);
   --r: 26px;
   --shadow: 0 12px 30px rgba(80, 120, 150, 0.14);
   --ui: 'Manrope', sans-serif;
@@ -277,6 +299,7 @@ body {
   --ok-ink: #7fbf9a;
   --cool-bg: rgba(127, 168, 217, 0.16);
   --cool-ink: #7fa8d9;
+  --skel: rgba(255, 255, 255, 0.08);
   --r: 26px;
   --shadow: 0 12px 34px rgba(0, 0, 0, 0.4);
   --ui: 'Manrope', sans-serif;

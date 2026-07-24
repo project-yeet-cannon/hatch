@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import type { DashboardData } from './types';
 import { getDashboardDataSource } from './dataSource';
+import { DEFAULT_TIME_ZONE } from './config';
 import { formatClock, formatMonthDay, formatWeekday } from './lib/format';
 import { hourOfDayInZone } from './lib/timezone';
 import { ZoneCard } from './components/ZoneCard';
 import { OutsideCard } from './components/OutsideCard';
+import { DashboardSkeleton } from './components/DashboardSkeleton';
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -48,36 +50,37 @@ export function App() {
     return () => clearInterval(tick);
   }, []);
 
-  if (!data) {
-    if (error) {
-      return (
-        <div className="hfdev sky" role="alert">
-          <div className="hf-note" style={{ margin: 0 }}>Couldn’t load dashboard data — {error}</div>
-        </div>
-      );
-    }
-    return null;
-  }
-
-  const themeClass = isNight(now, data.timezone) ? 'night' : 'sky';
+  // Before the first snapshot arrives we don't know the house's timezone yet,
+  // so fall back to the configured default — it's only used for a couple of
+  // seconds' worth of header rendering and gets replaced once `data` loads.
+  const timeZone = data?.timezone ?? DEFAULT_TIME_ZONE;
+  const themeClass = isNight(now, timeZone) ? 'night' : 'sky';
 
   return (
     <div className={`hfdev ${themeClass}`}>
       <div className="hf-head">
         <div className="hf-hl">
-          <span className="hf-day">{formatMonthDay(data.generatedAt, data.timezone)}</span>
-          <span className="hf-date">{formatWeekday(data.generatedAt, data.timezone)}</span>
+          <span className="hf-day">{formatMonthDay(data?.generatedAt ?? now.toISOString(), timeZone)}</span>
+          <span className="hf-date">{formatWeekday(data?.generatedAt ?? now.toISOString(), timeZone)}</span>
         </div>
         <div className="hf-hr">
-          <span className="hf-clock">{formatClock(now, data.timezone)}</span>
+          <span className="hf-clock">{formatClock(now, timeZone)}</span>
         </div>
       </div>
-      <div className="hf-zones">
-        <OutsideCard outside={data.outside} timeZone={data.timezone} />
-        {data.zones.map((zone, i) => (
-          <ZoneCard key={zone.id} zone={zone} timeZone={data.timezone} defaultOpen={i === 0} />
-        ))}
-      </div>
+      {data ? (
+        <div className="hf-zones">
+          <OutsideCard outside={data.outside} timeZone={data.timezone} />
+          {data.zones.map((zone, i) => (
+            <ZoneCard key={zone.id} zone={zone} timeZone={data.timezone} defaultOpen={i === 0} />
+          ))}
+        </div>
+      ) : error ? (
+        <div className="hf-note" role="alert" style={{ margin: 0 }}>
+          Couldn’t load dashboard data — {error}
+        </div>
+      ) : (
+        <DashboardSkeleton />
+      )}
     </div>
   );
 }
