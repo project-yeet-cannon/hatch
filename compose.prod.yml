@@ -28,7 +28,7 @@ services:
       db:
         condition: service_healthy
     labels:
-      caddy: api.${DOMAIN}
+      caddy: home.${DOMAIN}
       caddy.reverse_proxy: "{{upstreams 8080}}"
 
   caddy:
