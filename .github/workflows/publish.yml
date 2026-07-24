@@ -1,9 +1,12 @@
 name: Build and publish containers
 
+# Triggered directly off the push, in parallel with the "Build and test" CI
+# workflow, rather than waiting for CI to finish first. Each job builds its
+# image optimistically and only pushes it once CI reports success for the
+# same commit (see .github/actions/wait-for-ci). This assumes main usually
+# builds cleanly; if CI fails, the already-built image is simply discarded.
 on:
-  workflow_run:
-    workflows: ["Build and test"]
-    types: [completed]
+  push:
     branches: [main]
 
 env:
@@ -11,17 +14,16 @@ env:
 
 jobs:
   build-and-push-api-image:
-    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
+      actions: read
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+        uses: actions/checkout@v4
 
       - name: Log in to the Container registry
         uses: docker/login-action@v2
@@ -37,19 +39,27 @@ jobs:
           images: ghcr.io/eouw0o83hf/aerie-api
           tags: |
             type=raw,value=latest
-            type=raw,value=${{ github.event.workflow_run.head_sha }}
+            type=raw,value=${{ github.sha }}
 
-      - name: Build and push Docker image
+      - name: Build Docker image
         uses: docker/build-push-action@v4
         with:
           context: .
           file: ./src/Aerie.Api/Dockerfile.api
-          push: true
+          push: false
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+      - name: Wait for CI to succeed
+        uses: ./.github/actions/wait-for-ci
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push Docker image
+        run: docker push --all-tags ghcr.io/eouw0o83hf/aerie-api
+
   detect-db-changes:
-    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -60,7 +70,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 2
           sparse-checkout: |
             containers/aerie-db
@@ -76,17 +85,18 @@ jobs:
 
   build-and-push-db-image:
     needs: detect-db-changes
-    if: github.event.workflow_run.conclusion == 'success' && needs.detect-db-changes.outputs.db-changed == 'true'
+    if: needs.detect-db-changes.outputs.db-changed == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
+      actions: read
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
           sparse-checkout: |
             containers/aerie-db
 
@@ -104,19 +114,27 @@ jobs:
           images: ghcr.io/eouw0o83hf/aerie-db
           tags: |
             type=raw,value=latest
-            type=raw,value=${{ github.event.workflow_run.head_sha }}
+            type=raw,value=${{ github.sha }}
 
-      - name: Build and push Docker image
+      - name: Build Docker image
         uses: docker/build-push-action@v4
         with:
           context: ./containers/aerie-db
           file: ./containers/aerie-db/Dockerfile.db
-          push: true
+          push: false
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+      - name: Wait for CI to succeed
+        uses: ./.github/actions/wait-for-ci
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push Docker image
+        run: docker push --all-tags ghcr.io/eouw0o83hf/aerie-db
+
   detect-caddy-changes:
-    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -127,7 +145,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 2
           sparse-checkout: |
             containers/caddy
@@ -143,17 +160,18 @@ jobs:
 
   build-and-push-caddy-image:
     needs: detect-caddy-changes
-    if: github.event.workflow_run.conclusion == 'success' && needs.detect-caddy-changes.outputs.caddy-changed == 'true'
+    if: needs.detect-caddy-changes.outputs.caddy-changed == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
+      actions: read
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
           sparse-checkout: |
             containers/caddy
 
@@ -171,13 +189,22 @@ jobs:
           images: ghcr.io/eouw0o83hf/aerie-caddy
           tags: |
             type=raw,value=latest
-            type=raw,value=${{ github.event.workflow_run.head_sha }}
+            type=raw,value=${{ github.sha }}
 
-      - name: Build and push Docker image
+      - name: Build Docker image
         uses: docker/build-push-action@v4
         with:
           context: ./containers/caddy
           file: ./containers/caddy/Dockerfile
-          push: true
+          push: false
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Wait for CI to succeed
+        uses: ./.github/actions/wait-for-ci
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push Docker image
+        run: docker push --all-tags ghcr.io/eouw0o83hf/aerie-caddy

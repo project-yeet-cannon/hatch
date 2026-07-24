@@ -1,0 +1,75 @@
+name: Wait for CI
+description: >
+  Polls the "Build and test" workflow for the current commit SHA and fails
+  unless it completed successfully. Used to gate publishing an image that was
+  built optimistically in parallel with CI.
+inputs:
+  github-token:
+    description: Token used to query the Actions API
+    required: true
+  workflow-name:
+    description: Name of the CI workflow to wait for
+    required: false
+    default: "Build and test"
+  poll-interval-seconds:
+    description: Seconds to sleep between polls
+    required: false
+    default: "15"
+  max-attempts:
+    description: Maximum number of polls before giving up
+    required: false
+    default: "120"
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        WORKFLOW_NAME: ${{ inputs.workflow-name }}
+        POLL_INTERVAL: ${{ inputs.poll-interval-seconds }}
+        MAX_ATTEMPTS: ${{ inputs.max-attempts }}
+        SHA: ${{ github.sha }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+
+        echo "Waiting for '$WORKFLOW_NAME' to complete for commit $SHA"
+
+        attempt=0
+        while [ "$attempt" -lt "$MAX_ATTEMPTS" ]; do
+          attempt=$((attempt + 1))
+
+          run_json=$(gh run list \
+            --repo "$REPO" \
+            --workflow "$WORKFLOW_NAME" \
+            --json headSha,status,conclusion,databaseId \
+            --limit 20 \
+            | jq -c --arg sha "$SHA" '[.[] | select(.headSha == $sha)] | .[0] // empty')
+
+          if [ -z "$run_json" ]; then
+            echo "[$attempt/$MAX_ATTEMPTS] No '$WORKFLOW_NAME' run found yet for $SHA, waiting ${POLL_INTERVAL}s"
+            sleep "$POLL_INTERVAL"
+            continue
+          fi
+
+          status=$(echo "$run_json" | jq -r '.status')
+
+          if [ "$status" != "completed" ]; then
+            echo "[$attempt/$MAX_ATTEMPTS] '$WORKFLOW_NAME' status: $status, waiting ${POLL_INTERVAL}s"
+            sleep "$POLL_INTERVAL"
+            continue
+          fi
+
+          conclusion=$(echo "$run_json" | jq -r '.conclusion')
+          echo "'$WORKFLOW_NAME' completed with conclusion: $conclusion"
+
+          if [ "$conclusion" != "success" ]; then
+            echo "CI did not succeed ($conclusion) - aborting publish."
+            exit 1
+          fi
+
+          exit 0
+        done
+
+        echo "Timed out after $MAX_ATTEMPTS attempts waiting for '$WORKFLOW_NAME' on $SHA"
+        exit 1
