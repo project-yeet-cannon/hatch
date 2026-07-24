@@ -90,6 +90,7 @@ builder.Services.AddTransient<IEnvironmentService, EnvironmentService>();
 builder.Services.AddSingleton<IForecastService, ForecastService>();
 builder.Services.AddSingleton<ISiteSettingsService, SiteSettingsService>();
 builder.Services.AddScoped<IZoneService, ZoneService>();
+builder.Services.AddTransient<IHomeAssistantStateReader, HomeAssistantStateReader>();
 builder.Services.AddScoped<IWeatherService, WeatherService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddScoped<IDeviceMappingSeeder, DeviceMappingSeeder>();

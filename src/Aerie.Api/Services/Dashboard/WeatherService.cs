@@ -2,7 +2,7 @@ using System.Globalization;
 using Aerie.Api.Ef;
 using Aerie.Api.Models.Dashboard;
 using Aerie.Api.Services.DeviceMapping;
-using HADotNet.Core.Clients;
+using HADotNet.Core.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aerie.Api.Services.Dashboard;
@@ -19,60 +19,59 @@ public interface IWeatherService
 /// (Jobs/SampleChannels) writes (docs/device-architecture.md Phase 5).
 /// "Current" is the most recent Measurement rather than a live HA call,
 /// matching ZoneService.BuildZoneAsync. The condition note (weather.* entity)
-/// and sunset (sun.* entity) aren't sampled and still come from live HA state.
-/// This is best-effort by design: if the Outside zone doesn't exist yet or has
-/// no devices assigned, or a live HA call fails, that piece falls back to
-/// zero/blank rather than throwing, so a missing integration degrades the
-/// outside card instead of breaking the dashboard. Forecast/hourly aren't
-/// sourced yet, so they come back empty - the frontend chart tolerates empty
-/// series.
+/// and sunset (sun.* entity) aren't sampled and still come from live HA state,
+/// fetched concurrently with each other and with the DB reads below since
+/// they're independent.
+///
+/// Each HA call is bounded by HaCallTimeout: StatesClient's HttpClient has no
+/// timeout configured (HADotNet just does `new HttpClient()`, so the
+/// framework's 100s default applies) and HADotNet has no retry/circuit
+/// breaking of its own. Without an explicit bound here, a slow or
+/// unreachable HA instance stalls the whole /api/dashboard request - this
+/// endpoint's data otherwise comes entirely from Postgres and should be fast
+/// regardless of HA's health. This is best-effort by design: if the Outside
+/// zone doesn't exist yet or has no devices assigned, or a live HA call
+/// fails or times out, that piece falls back to zero/blank rather than
+/// throwing, so a missing/slow integration degrades the outside card instead
+/// of the whole dashboard. Forecast/hourly aren't sourced yet, so they come
+/// back empty - the frontend chart tolerates empty series.
 /// </summary>
 public class WeatherService(
-    StatesClient states,
+    IHomeAssistantStateReader states,
     IDbContextFactory<AerieContext> dbFactory,
     ISiteSettingsService siteSettings,
     TimeProvider time,
     ILogger<WeatherService> logger) : IWeatherService
 {
+    private static readonly TimeSpan HaCallTimeout = TimeSpan.FromSeconds(3);
+
     public async Task<OutsideClimate> GetOutsideAsync(DashboardWindow window, CancellationToken ct)
     {
         var now = time.GetUtcNow();
         var from = now - window.History;
         var settings = await siteSettings.GetAsync(ct);
 
-        var note = string.Empty;
-        if (!string.IsNullOrWhiteSpace(settings.WeatherEntity))
-        {
-            try
-            {
-                var w = await states.GetState(settings.WeatherEntity);
-                note = Humanize(w.State);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Failed to read weather entity {Entity}", settings.WeatherEntity);
-            }
-        }
+        var weatherTask = string.IsNullOrWhiteSpace(settings.WeatherEntity)
+            ? Task.FromResult<StateObject?>(null)
+            : BoundedStateAsync(settings.WeatherEntity, ct);
+        var sunTask = BoundedStateAsync(settings.SunEntity, ct);
+
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var zoneTask = db.Zones.AsNoTracking().FirstOrDefaultAsync(z => z.Kind == ZoneKind.Outside, ct);
+
+        await Task.WhenAll(weatherTask, sunTask, zoneTask);
+
+        var note = Humanize((await weatherTask)?.State);
 
         var sunsetTime = now;
         decimal sunHoursRemaining = 0;
-        try
+        if (GetDateTime((await sunTask)?.Attributes, "next_setting") is { } nextSetting)
         {
-            var sun = await states.GetState(settings.SunEntity);
-            if (GetDateTime(sun.Attributes, "next_setting") is { } nextSetting)
-            {
-                sunsetTime = nextSetting;
-                sunHoursRemaining = Math.Round(Math.Max(0m, (decimal)(nextSetting - now).TotalHours), 1);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to read sun entity {Entity}", settings.SunEntity);
+            sunsetTime = nextSetting;
+            sunHoursRemaining = Math.Round(Math.Max(0m, (decimal)(nextSetting - now).TotalHours), 1);
         }
 
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var zone = await db.Zones.AsNoTracking().FirstOrDefaultAsync(z => z.Kind == ZoneKind.Outside, ct);
-
+        var zone = await zoneTask;
         (decimal currentTempF, IReadOnlyList<TempPoint> history) = zone is null
             ? (0m, [])
             : await GetTempHistoryAsync(db, zone.Id, from, now, window.Bucket, ct);
@@ -93,6 +92,19 @@ public class WeatherService(
             Hourly: []);
     }
 
+    private async Task<StateObject?> BoundedStateAsync(string entityId, CancellationToken ct)
+    {
+        try
+        {
+            return await states.TryGetStateAsync(entityId, ct).WaitAsync(HaCallTimeout, ct);
+        }
+        catch (TimeoutException)
+        {
+            logger.LogWarning("Home Assistant entity {Entity} did not respond within {Timeout}", entityId, HaCallTimeout);
+            return null;
+        }
+    }
+
     private static async Task<(decimal CurrentTempF, IReadOnlyList<TempPoint> History)> GetTempHistoryAsync(
         AerieContext db, Guid zoneId, DateTimeOffset from, DateTimeOffset to, TimeSpan bucket, CancellationToken ct)
     {
@@ -107,9 +119,9 @@ public class WeatherService(
         return (currentTempF, history);
     }
 
-    private static DateTimeOffset? GetDateTime(IDictionary<string, object> attrs, string key)
+    private static DateTimeOffset? GetDateTime(IDictionary<string, object>? attrs, string key)
     {
-        if (!attrs.TryGetValue(key, out var v) || v is null) return null;
+        if (attrs is null || !attrs.TryGetValue(key, out var v) || v is null) return null;
         return v switch
         {
             DateTimeOffset dto => dto,
