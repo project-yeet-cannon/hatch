@@ -106,14 +106,24 @@ public class ZoneService(
     {
         var from = now - window.History;
         var history = ZoneMath.Bucket(rows.Select(r => (r.Timestamp, (decimal?)r.Value)), from, now, window.Bucket);
-        var currentTempF = rows.Count > 0 ? rows[^1].Value : (history.Count > 0 ? history[^1].TempF : 0m);
+        var currentTempF = rows.Count > 0 ? rows[^1].Value : (history.Count > 0 ? history[^1].TempF : (decimal?)null);
 
         var comfort = ResolveComfort(zone, setpoint, settings);
-        var projected = forecast.Project(history, currentTempF, now, window.Forecast, window.Bucket);
-        var extremes = ZoneMath.Extremes(history.Concat(projected))
-            ?? (new DailyExtreme(Math.Round(currentTempF), now), new DailyExtreme(Math.Round(currentTempF), now));
+        var projected = currentTempF is { } temp
+            ? forecast.Project(history, temp, now, window.Forecast, window.Bucket)
+            : [];
+        var extremes = ZoneMath.Extremes(history.Concat(projected));
+        DailyExtreme? low = extremes?.Low;
+        DailyExtreme? high = extremes?.High;
+        if (extremes is null && currentTempF is { } fallback)
+        {
+            low = new DailyExtreme(Math.Round(fallback), now);
+            high = new DailyExtreme(Math.Round(fallback), now);
+        }
 
-        return new ZoneClimate(zone.Id.ToString(), zone.Name, Math.Round(currentTempF, 1), comfort, history, projected, extremes.Item1, extremes.Item2);
+        return new ZoneClimate(
+            zone.Id.ToString(), zone.Name, currentTempF is { } t ? Math.Round(t, 1) : null,
+            comfort, history, projected, low, high);
     }
 
     private static Task<List<Sample>> LoadMeasurementsAsync(

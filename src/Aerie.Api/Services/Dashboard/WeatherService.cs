@@ -67,13 +67,13 @@ public class WeatherService(
         var sunHoursRemaining = Math.Round(Math.Max(0m, (decimal)(sunsetTime - now).TotalHours), 1);
 
         var zone = await zoneTask;
-        (decimal currentTempF, IReadOnlyList<TempPoint> history) = zone is null
-            ? (0m, [])
+        (decimal? currentTempF, IReadOnlyList<TempPoint> history) = zone is null
+            ? (null, [])
             : await GetTempHistoryAsync(db, zone.Id, from, now, window.Bucket, ct);
 
         var humidityPct = zone is null
-            ? 0m
-            : await ZoneMeasurements.LatestAsync(db, zone.Id, DeviceChannelMetric.Humidity, from, now, ct) ?? 0m;
+            ? null
+            : await ZoneMeasurements.LatestAsync(db, zone.Id, DeviceChannelMetric.Humidity, from, now, ct);
 
         return new OutsideClimate(
             CurrentTempF: currentTempF,
@@ -100,7 +100,7 @@ public class WeatherService(
         }
     }
 
-    private static async Task<(decimal CurrentTempF, IReadOnlyList<TempPoint> History)> GetTempHistoryAsync(
+    private static async Task<(decimal? CurrentTempF, IReadOnlyList<TempPoint> History)> GetTempHistoryAsync(
         AerieContext db, Guid zoneId, DateTimeOffset from, DateTimeOffset to, TimeSpan bucket, CancellationToken ct)
     {
         var rows = await ZoneMeasurements.ForZone(db, zoneId, DeviceChannelMetric.Temperature, from, to)
@@ -109,7 +109,7 @@ public class WeatherService(
             .ToListAsync(ct);
 
         var history = ZoneMath.Bucket(rows.Select(r => (r.Timestamp, (decimal?)r.Value)), from, to, bucket);
-        var currentTempF = rows.Count > 0 ? rows[^1].Value : (history.Count > 0 ? history[^1].TempF : 0m);
+        var currentTempF = rows.Count > 0 ? rows[^1].Value : (history.Count > 0 ? history[^1].TempF : (decimal?)null);
 
         return (currentTempF, history);
     }

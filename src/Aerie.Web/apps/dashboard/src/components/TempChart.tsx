@@ -15,6 +15,7 @@ const STATUS_CLASS: Record<ComfortStatus, string> = {
   warm: 'g-warm',
   cool: 'g-cool',
   comfortable: 'g-ok',
+  unknown: 'g-unknown',
 };
 
 export function TempChart({ history, forecast, comfortRange, status, compact }: TempChartProps) {

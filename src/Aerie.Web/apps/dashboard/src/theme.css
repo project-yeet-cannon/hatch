@@ -221,6 +221,9 @@ body {
 .g-ok {
   stroke: var(--comfort);
 }
+.g-unknown {
+  stroke: var(--muted);
+}
 
 .b-warm {
   background: var(--warm-bg);
@@ -233,6 +236,10 @@ body {
 .b-cool {
   background: var(--cool-bg);
   color: var(--cool-ink);
+}
+.b-unknown {
+  background: var(--line);
+  color: var(--muted);
 }
 
 @keyframes hf-pulse {

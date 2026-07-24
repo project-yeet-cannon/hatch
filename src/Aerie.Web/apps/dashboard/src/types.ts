@@ -7,7 +7,7 @@
  * layer so they can't drift out of sync with the numbers.
  */
 
-export type ComfortStatus = 'warm' | 'cool' | 'comfortable';
+export type ComfortStatus = 'warm' | 'cool' | 'comfortable' | 'unknown';
 
 /** A single temperature sample. */
 export interface TempPoint {
@@ -31,14 +31,15 @@ export interface ZoneClimate {
   /** Stable identifier, e.g. a Home Assistant area id. */
   id: string;
   name: string;
-  currentTempF: number;
+  /** Null when there's no reading yet - distinct from a real 0°F. */
+  currentTempF: number | null;
   comfortRange: ComfortRange;
   /** Actual readings, oldest first, ending at "now". */
   history: TempPoint[];
   /** Projected readings, starting at "now". */
   forecast: TempPoint[];
-  low: DailyExtreme;
-  high: DailyExtreme;
+  low: DailyExtreme | null;
+  high: DailyExtreme | null;
 }
 
 export interface HourlyOutside {
@@ -49,8 +50,9 @@ export interface HourlyOutside {
 }
 
 export interface OutsideClimate {
-  currentTempF: number;
-  humidityPct: number;
+  /** Null when there's no reading yet - distinct from a real 0°F. */
+  currentTempF: number | null;
+  humidityPct: number | null;
   sunHoursRemaining: number;
   /** ISO 8601 timestamp. */
   sunsetTime: string;

@@ -11,18 +11,32 @@ export interface ZonePresentation {
   statusNote: string;
 }
 
-export function deriveZoneStatus(currentTempF: number, comfortRange: ZoneClimate['comfortRange']): ComfortStatus {
+export function deriveZoneStatus(
+  currentTempF: number | null,
+  comfortRange: ZoneClimate['comfortRange'],
+): ComfortStatus {
+  if (currentTempF === null) return 'unknown';
   if (currentTempF > comfortRange.highF) return 'warm';
   if (currentTempF < comfortRange.lowF) return 'cool';
   return 'comfortable';
 }
 
 export function deriveZonePresentation(zone: ZoneClimate, timeZone: string): ZonePresentation {
-  const status = deriveZoneStatus(zone.currentTempF, zone.comfortRange);
+  if (zone.currentTempF === null) {
+    return {
+      status: 'unknown',
+      summaryLabel: 'no data',
+      bodyBadgeLabel: 'no data',
+      statusNote: 'waiting for a reading',
+    };
+  }
+
+  const currentTempF = zone.currentTempF;
+  const status = deriveZoneStatus(currentTempF, zone.comfortRange);
 
   if (status === 'warm') {
     const peak = peakOf(zone.forecast.slice(1));
-    const stillRising = peak && peak.tempF > zone.currentTempF + 0.3;
+    const stillRising = peak && peak.tempF > currentTempF + 0.3;
     return {
       status,
       summaryLabel: 'warming',
@@ -35,7 +49,7 @@ export function deriveZonePresentation(zone: ZoneClimate, timeZone: string): Zon
 
   if (status === 'cool') {
     const since = firstBelow(zone.history, zone.comfortRange.lowF);
-    const delta = Math.round(zone.comfortRange.lowF - zone.currentTempF);
+    const delta = Math.round(zone.comfortRange.lowF - currentTempF);
     return {
       status,
       summaryLabel: 'cool',
@@ -47,8 +61,8 @@ export function deriveZonePresentation(zone: ZoneClimate, timeZone: string): Zon
   }
 
   const upcoming = zone.forecast.map((p) => p.tempF);
-  const min = Math.round(Math.min(...upcoming, zone.currentTempF));
-  const max = Math.round(Math.max(...upcoming, zone.currentTempF));
+  const min = Math.round(Math.min(...upcoming, currentTempF));
+  const max = Math.round(Math.max(...upcoming, currentTempF));
   return {
     status,
     summaryLabel: 'steady',

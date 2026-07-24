@@ -22,7 +22,7 @@ export function OutsideCard({ outside, timeZone }: OutsideCardProps) {
         <span className="hf-name" style={{ width: 'auto' }}>
           Outside
         </span>
-        <span className="hf-temp">{Math.round(outside.currentTempF)}°</span>
+        <span className="hf-temp">{outside.currentTempF !== null ? `${Math.round(outside.currentTempF)}°` : '—'}</span>
       </div>
       <TempChart history={outside.history} forecast={outside.forecast} status={status} />
       <TempChartAxis history={outside.history} forecast={outside.forecast} timeZone={timeZone} />
@@ -31,7 +31,7 @@ export function OutsideCard({ outside, timeZone }: OutsideCardProps) {
           <b>☀ {outside.sunHoursRemaining}h</b> sun left
         </span>
         <span className="hf-stat">
-          <b>{outside.humidityPct}%</b> humidity
+          <b>{outside.humidityPct !== null ? `${outside.humidityPct}%` : '—'}</b> humidity
         </span>
         {outside.precipitation.amountIn > 0 && (
           <span className="hf-stat">

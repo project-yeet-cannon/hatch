@@ -106,7 +106,7 @@ function deriveSunset(now: Date): Date {
 }
 
 function deriveOutsideNote(zones: ZoneClimate[], outsideNow: number, outsideForecast: TempPoint[]): string {
-  const warmest = [...zones].sort((a, b) => b.currentTempF - a.currentTempF)[0];
+  const warmest = [...zones].sort((a, b) => (b.currentTempF ?? -Infinity) - (a.currentTempF ?? -Infinity))[0];
   const later = outsideForecast[outsideForecast.length - 1]?.tempF ?? outsideNow;
   const trend = later < outsideNow ? 'cooling into the evening' : 'warming into the afternoon';
   const warmestNote = warmest && deriveZoneStatus(warmest.currentTempF, warmest.comfortRange) === 'warm'
