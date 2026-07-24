@@ -57,30 +57,32 @@ export function App() {
   const themeClass = isNight(now, timeZone) ? 'night' : 'sky';
 
   return (
-    <div className={`hfdev ${themeClass}`}>
-      <div className="hf-head">
-        <div className="hf-hl">
-          <span className="hf-day">{formatMonthDay(data?.generatedAt ?? now.toISOString(), timeZone)}</span>
-          <span className="hf-date">{formatWeekday(data?.generatedAt ?? now.toISOString(), timeZone)}</span>
+    <div className={`hf-page ${themeClass}`}>
+      <div className="hfdev">
+        <div className="hf-head">
+          <div className="hf-hl">
+            <span className="hf-day">{formatMonthDay(data?.generatedAt ?? now.toISOString(), timeZone)}</span>
+            <span className="hf-date">{formatWeekday(data?.generatedAt ?? now.toISOString(), timeZone)}</span>
+          </div>
+          <div className="hf-hr">
+            <span className="hf-clock">{formatClock(now, timeZone)}</span>
+          </div>
         </div>
-        <div className="hf-hr">
-          <span className="hf-clock">{formatClock(now, timeZone)}</span>
-        </div>
+        {data ? (
+          <div className="hf-zones">
+            <OutsideCard outside={data.outside} timeZone={data.timezone} />
+            {data.zones.map((zone, i) => (
+              <ZoneCard key={zone.id} zone={zone} timeZone={data.timezone} defaultOpen={i === 0} />
+            ))}
+          </div>
+        ) : error ? (
+          <div className="hf-note" role="alert" style={{ margin: 0 }}>
+            Couldn’t load dashboard data — {error}
+          </div>
+        ) : (
+          <DashboardSkeleton />
+        )}
       </div>
-      {data ? (
-        <div className="hf-zones">
-          <OutsideCard outside={data.outside} timeZone={data.timezone} />
-          {data.zones.map((zone, i) => (
-            <ZoneCard key={zone.id} zone={zone} timeZone={data.timezone} defaultOpen={i === 0} />
-          ))}
-        </div>
-      ) : error ? (
-        <div className="hf-note" role="alert" style={{ margin: 0 }}>
-          Couldn’t load dashboard data — {error}
-        </div>
-      ) : (
-        <DashboardSkeleton />
-      )}
     </div>
   );
 }
