@@ -30,6 +30,10 @@ services:
     labels:
       caddy: home.${DOMAIN}
       caddy.reverse_proxy: "{{upstreams 8080}}"
+      caddy_1: kiosk.${DOMAIN}
+      caddy_1.@root.path: /
+      caddy_1.rewrite: "@root /apps/dashboard/"
+      caddy_1.reverse_proxy: "{{upstreams 8080}}"
 
   caddy:
     image: ghcr.io/eouw0o83hf/aerie-caddy:latest

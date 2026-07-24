@@ -32,6 +32,22 @@ To expose a new service (e.g. `immich`, `dashboard`) at `<name>.<domain>`:
 
 That's the whole process — steps 2–4 mirror what's already done for the `api` service in `compose.prod.yml`.
 
+## Aliasing a subdomain to a path on an existing app
+
+Some apps (e.g. `dashboard`) aren't separate services — they're static SPAs served by the `api` container under a path like `/apps/dashboard/`. To give one of these its own subdomain (e.g. `kiosk.${DOMAIN}` → `/apps/dashboard/`), add a second, numbered `caddy_1`-prefixed label block to the *same* container rather than standing up a new service:
+
+```yaml
+labels:
+  caddy: home.${DOMAIN}
+  caddy.reverse_proxy: "{{upstreams 8080}}"
+  caddy_1: kiosk.${DOMAIN}
+  caddy_1.@root.path: /
+  caddy_1.rewrite: "@root /apps/dashboard/"
+  caddy_1.reverse_proxy: "{{upstreams 8080}}"
+```
+
+`caddy-docker-proxy` treats each `caddy_<N>` label as an independent site block on the same container. The `@root` matcher only rewrites the bare `/` request to `/apps/dashboard/`; everything else (hashed asset requests, API calls like `/api/dashboard`) passes straight through to the same upstream unmodified. This only works cleanly because the target SPA already emits root-absolute asset URLs baked in at build time (Vite's `base: '/apps/dashboard/'`) and has no client-side router — if a future aliased app uses relative asset paths or client-side routing, the rewrite/matcher will need to be broader (or the app served from a real subdomain instead).
+
 ## Notes / gotchas
 
 - `edge` must exist on the server *before* the first `docker compose up -d` that references it — it's declared `external: true` so compose won't create or manage it.
