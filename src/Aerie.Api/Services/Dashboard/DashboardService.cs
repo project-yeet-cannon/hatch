@@ -27,10 +27,13 @@ public class DashboardService(
         var settingsTask = siteSettings.GetAsync(ct);
         await Task.WhenAll(zonesTask, outsideTask, settingsTask);
 
+        var settings = await settingsTask;
+        var now = time.GetUtcNow();
         return new DashboardData(
-            GeneratedAt: time.GetUtcNow(),
-            Timezone: (await settingsTask).TimeZone,
+            GeneratedAt: now,
+            Timezone: settings.TimeZone,
             Zones: await zonesTask,
-            Outside: await outsideTask);
+            Outside: await outsideTask,
+            SunEvents: SolarCalculator.EventsForDay(now, settings.Latitude, settings.Longitude));
     }
 }

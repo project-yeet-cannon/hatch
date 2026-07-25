@@ -1,19 +1,16 @@
 import { useEffect, useState } from 'react';
+import type { CSSProperties } from 'react';
 import type { DashboardData } from './types';
 import { getDashboardDataSource } from './dataSource';
 import { DEFAULT_TIME_ZONE } from './config';
 import { formatClock, formatMonthDay, formatWeekday } from './lib/format';
-import { hourOfDayInZone } from './lib/timezone';
+import { getCircadianPhase, resolveThemeStyle } from './lib/circadianTheme';
+import { circadianTokens } from './theme/tokens';
 import { ZoneCard } from './components/ZoneCard';
 import { OutsideCard } from './components/OutsideCard';
 import { DashboardSkeleton } from './components/DashboardSkeleton';
 
 const REFRESH_INTERVAL_MS = 60_000;
-
-function isNight(date: Date, timeZone: string): boolean {
-  const hour = hourOfDayInZone(date, timeZone);
-  return hour >= 20 || hour < 6;
-}
 
 export function App() {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -54,10 +51,12 @@ export function App() {
   // so fall back to the configured default — it's only used for a couple of
   // seconds' worth of header rendering and gets replaced once `data` loads.
   const timeZone = data?.timezone ?? DEFAULT_TIME_ZONE;
-  const themeClass = isNight(now, timeZone) ? 'night' : 'sky';
+  const themeStyle = data
+    ? resolveThemeStyle(getCircadianPhase(now, data.sunEvents), circadianTokens)
+    : resolveThemeStyle({ kind: 'day' }, circadianTokens);
 
   return (
-    <div className={`hf-page ${themeClass}`}>
+    <div className="hf-page" style={themeStyle as CSSProperties}>
       <div className="hfdev">
         <div className="hf-head">
           <div className="hf-hl">

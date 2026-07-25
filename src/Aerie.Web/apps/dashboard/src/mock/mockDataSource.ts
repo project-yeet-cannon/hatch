@@ -5,6 +5,7 @@ import type {
   DashboardDataSource,
   HourlyOutside,
   OutsideClimate,
+  SunEvents,
   TempPoint,
   ZoneClimate,
 } from '../types';
@@ -101,8 +102,14 @@ function derivePrecipitation(hourly: HourlyOutside[]): OutsideClimate['precipita
   };
 }
 
-function deriveSunset(now: Date): Date {
-  return zonedWallClock(now, TIME_ZONE, 20, 31);
+/** Plausible dawn/sunrise/sunset/dusk around `now` - synthetic, not astronomically accurate. */
+function deriveSunEvents(now: Date): SunEvents {
+  return {
+    dawn: zonedWallClock(now, TIME_ZONE, 6, 6).toISOString(),
+    sunrise: zonedWallClock(now, TIME_ZONE, 6, 31).toISOString(),
+    sunset: zonedWallClock(now, TIME_ZONE, 20, 31).toISOString(),
+    dusk: zonedWallClock(now, TIME_ZONE, 20, 56).toISOString(),
+  };
 }
 
 function deriveOutsideNote(zones: ZoneClimate[], outsideNow: number, outsideForecast: TempPoint[]): string {
@@ -115,11 +122,11 @@ function deriveOutsideNote(zones: ZoneClimate[], outsideNow: number, outsideFore
   return `Outside ${trend}.${warmestNote}`;
 }
 
-function buildOutside(now: Date, zones: ZoneClimate[]): OutsideClimate {
+function buildOutside(now: Date, zones: ZoneClimate[], sunEvents: SunEvents): OutsideClimate {
   const { history, forecast } = buildSeries(now, OUTSIDE_CURVE);
   const hourly = buildHourlyOutside(now);
   const currentTempF = round1(diurnalTempF(now, TIME_ZONE, OUTSIDE_CURVE));
-  const sunset = deriveSunset(now);
+  const sunset = new Date(sunEvents.sunset);
   const sunHoursRemaining = round1(clamp((sunset.getTime() - now.getTime()) / HOUR_MS, 0, 24));
   const currentHumidity = hourly.find((h) => new Date(h.time) >= now)?.humidityPct ?? hourly[hourly.length - 1].humidityPct;
 
@@ -140,11 +147,13 @@ export class MockDashboardDataSource implements DashboardDataSource {
   async getDashboardData(): Promise<DashboardData> {
     const now = new Date();
     const zones = Object.keys(ZONE_CURVES).map((id) => buildZone(id, now));
+    const sunEvents = deriveSunEvents(now);
     return {
       generatedAt: now.toISOString(),
       timezone: TIME_ZONE,
       zones,
-      outside: buildOutside(now, zones),
+      outside: buildOutside(now, zones, sunEvents),
+      sunEvents,
     };
   }
 }

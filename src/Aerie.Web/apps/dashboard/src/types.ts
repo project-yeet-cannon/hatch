@@ -68,6 +68,18 @@ export interface OutsideClimate {
   hourly: HourlyOutside[];
 }
 
+/**
+ * The four sun events bounding the dashboard's circadian theme phases: full
+ * light (sunrise-sunset), evening transition (sunset-dusk), full dark
+ * (dusk-dawn), morning transition (dawn-sunrise). ISO 8601 timestamps.
+ */
+export interface SunEvents {
+  dawn: string;
+  sunrise: string;
+  sunset: string;
+  dusk: string;
+}
+
 export interface DashboardData {
   /** ISO 8601 timestamp of when this snapshot was produced. */
   generatedAt: string;
@@ -75,6 +87,7 @@ export interface DashboardData {
   timezone: string;
   zones: ZoneClimate[];
   outside: OutsideClimate;
+  sunEvents: SunEvents;
 }
 
 /** Anything that can produce a dashboard snapshot — mock today, a live API later. */

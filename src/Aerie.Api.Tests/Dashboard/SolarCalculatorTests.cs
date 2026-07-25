@@ -59,4 +59,47 @@ public class SolarCalculatorTests
 
         Assert.True(juneLocalHour < decemberLocalHour, $"expected June ({juneLocalHour}) earlier than December ({decemberLocalHour})");
     }
+
+    [Fact]
+    public void EventsForDay_OrdersDawnSunriseSunsetDusk()
+    {
+        var events = SolarCalculator.EventsForDay(new DateTimeOffset(2026, 6, 21, 12, 0, 0, TimeSpan.Zero), NycLat, NycLon);
+
+        Assert.True(events.Dawn < events.Sunrise, "dawn should precede sunrise");
+        Assert.True(events.Sunrise < events.Sunset, "sunrise should precede sunset");
+        Assert.True(events.Sunset < events.Dusk, "sunset should precede dusk");
+    }
+
+    [Fact]
+    public void EventsForDay_Sunset_MatchesNextSunset()
+    {
+        var now = new DateTimeOffset(2026, 12, 21, 12, 0, 0, TimeSpan.Zero);
+
+        var events = SolarCalculator.EventsForDay(now, NycLat, NycLon);
+        var sunset = SolarCalculator.NextSunset(now, NycLat, NycLon);
+
+        Assert.Equal(sunset, events.Sunset);
+    }
+
+    [Fact]
+    public void EventsForDay_CivilTwilightDuration_IsRoughlyTwentyToThirtyMinutesAtMidLatitude()
+    {
+        var events = SolarCalculator.EventsForDay(new DateTimeOffset(2026, 3, 21, 12, 0, 0, TimeSpan.Zero), NycLat, NycLon);
+
+        Assert.InRange((events.Sunrise - events.Dawn).TotalMinutes, 15, 35);
+        Assert.InRange((events.Dusk - events.Sunset).TotalMinutes, 15, 35);
+    }
+
+    [Fact]
+    public void EventsForDay_DependsOnlyOnUtcCalendarDate_NotTimeOfDay()
+    {
+        // Any two instants on the same UTC calendar date - including just after
+        // midnight - must resolve to the same quartet, since that's what lets
+        // callers place "now" in a light/dark cycle without special-casing
+        // midnight (see the doc comment on EventsForDay).
+        var earlyMorning = SolarCalculator.EventsForDay(new DateTimeOffset(2026, 6, 21, 0, 0, 1, TimeSpan.Zero), NycLat, NycLon);
+        var lateNight = SolarCalculator.EventsForDay(new DateTimeOffset(2026, 6, 21, 23, 59, 59, TimeSpan.Zero), NycLat, NycLon);
+
+        Assert.Equal(earlyMorning, lateNight);
+    }
 }

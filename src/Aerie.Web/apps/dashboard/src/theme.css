@@ -4,6 +4,15 @@ body {
   min-height: 100%;
 }
 
+:root {
+  /* Static across all circadian phases - see src/theme/tokens.ts for the
+     color tokens, which are blended and applied as inline styles instead. */
+  --r: 26px;
+  --ui: 'Manrope', sans-serif;
+  --display: 'Manrope', sans-serif;
+  --num: 'Manrope', sans-serif;
+}
+
 .hf-page {
   min-height: 100vh;
   width: 100%;
@@ -267,55 +276,4 @@ body {
   height: 9px;
   width: 55%;
   margin-top: 7px;
-}
-
-.sky {
-  --bg: #d8ecfb;
-  --card: #ffffff;
-  --outbg: #ffffff;
-  --ink: #33404a;
-  --muted: #8ba0ac;
-  --line: #e8eef1;
-  --gridc: #dce6ea;
-  --comfort: #5aa883;
-  --warm: #e39a52;
-  --cool: #5f9fce;
-  --band: rgba(90, 168, 131, 0.12);
-  --warm-bg: rgba(227, 154, 82, 0.18);
-  --warm-ink: #b56f28;
-  --ok-bg: rgba(90, 168, 131, 0.16);
-  --ok-ink: #3c7a58;
-  --cool-bg: rgba(95, 159, 206, 0.16);
-  --cool-ink: #3a6f96;
-  --skel: rgba(139, 160, 172, 0.18);
-  --r: 26px;
-  --shadow: 0 12px 30px rgba(80, 120, 150, 0.14);
-  --ui: 'Manrope', sans-serif;
-  --display: 'Manrope', sans-serif;
-  --num: 'Manrope', sans-serif;
-}
-.night {
-  --bg: linear-gradient(180deg, #0d101c, #151a2b 55%, #1b1530);
-  --card: #171b29;
-  --outbg: #171b29;
-  --ink: #e7ebf3;
-  --muted: #7b869c;
-  --line: rgba(255, 255, 255, 0.07);
-  --gridc: rgba(255, 255, 255, 0.09);
-  --comfort: #7fbf9a;
-  --warm: #e0a568;
-  --cool: #7fa8d9;
-  --band: rgba(127, 191, 154, 0.1);
-  --warm-bg: rgba(224, 165, 104, 0.16);
-  --warm-ink: #e0a568;
-  --ok-bg: rgba(127, 191, 154, 0.16);
-  --ok-ink: #7fbf9a;
-  --cool-bg: rgba(127, 168, 217, 0.16);
-  --cool-ink: #7fa8d9;
-  --skel: rgba(255, 255, 255, 0.08);
-  --r: 26px;
-  --shadow: 0 12px 34px rgba(0, 0, 0, 0.4);
-  --ui: 'Manrope', sans-serif;
-  --display: 'Manrope', sans-serif;
-  --num: 'Manrope', sans-serif;
 }

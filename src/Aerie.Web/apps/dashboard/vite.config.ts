@@ -11,6 +11,13 @@ const projectRoot = resolve(__dirname, '../../../..')
 export default defineConfig({
   base: '/apps/dashboard/',
   plugins: [react()],
+  server: {
+    proxy: {
+      // Aerie.Api (see Properties/launchSettings.json) - needed for dev-only
+      // pages like dev-theme.html that call the API directly from `npm run dev`.
+      '/api': 'http://localhost:5197',
+    },
+  },
   build: {
     outDir: resolve(projectRoot, 'src/Aerie.Api/wwwroot/apps/dashboard'),
     emptyOutDir: true,

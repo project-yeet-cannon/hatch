@@ -43,8 +43,16 @@ public record OutsideClimate(
     IReadOnlyList<TempPoint> Forecast,
     IReadOnlyList<HourlyOutside> Hourly);
 
+/// <summary>
+/// The four sun events (see <see cref="Aerie.Api.Services.Dashboard.SolarCalculator.EventsForDay"/>)
+/// that bound the dashboard's circadian theme phases: full light (Sunrise-Sunset),
+/// evening transition (Sunset-Dusk), full dark (Dusk-Dawn), morning transition (Dawn-Sunrise).
+/// </summary>
+public record SunEvents(DateTimeOffset Dawn, DateTimeOffset Sunrise, DateTimeOffset Sunset, DateTimeOffset Dusk);
+
 public record DashboardData(
     DateTimeOffset GeneratedAt,
     string Timezone,
     IReadOnlyList<ZoneClimate> Zones,
-    OutsideClimate Outside);
+    OutsideClimate Outside,
+    SunEvents SunEvents);

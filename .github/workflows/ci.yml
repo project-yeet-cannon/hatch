@@ -50,6 +50,10 @@ jobs:
         working-directory: src/Aerie.Web/apps/${{ matrix.app }}
         run: npm run lint
 
+      - name: Test
+        working-directory: src/Aerie.Web/apps/${{ matrix.app }}
+        run: npm run test --if-present
+
       - name: Build
         working-directory: src/Aerie.Web/apps/${{ matrix.app }}
         run: npm run build

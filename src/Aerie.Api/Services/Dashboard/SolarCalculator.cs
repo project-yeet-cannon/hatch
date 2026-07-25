@@ -1,26 +1,56 @@
+using Aerie.Api.Models.Dashboard;
+
 namespace Aerie.Api.Services.Dashboard;
 
 /// <summary>
 /// NOAA solar position algorithm (https://gml.noaa.gov/grad/solcalc/calcdetails.html),
-/// used to compute sunset locally instead of round-tripping through Home
+/// used to compute sun events locally instead of round-tripping through Home
 /// Assistant's sun.sun entity (see WeatherService). Single-pass, no
 /// iteration - accurate to well under a minute, which is all "hours until
-/// sunset" needs. Not valid inside the polar circles, where the sun can stay
-/// up or down all day and the hour-angle formula below has no solution.
+/// sunset" or dashboard theming need. Not valid inside the polar circles, where
+/// the sun can stay up or down all day and the hour-angle formula below has no
+/// solution.
 /// </summary>
 public static class SolarCalculator
 {
-    private const double SunsetAngleDeg = 90.833; // 90° + atmospheric refraction + solar disc radius
+    private const double SunriseSunsetAngleDeg = 90.833; // 90° + atmospheric refraction + solar disc radius
+    private const double CivilTwilightAngleDeg = 96.0; // 90° + 6°, civil twilight - swap for nautical (102°) or astronomical (108°) here if the theme's "full dark" window should start/end differently
+
+    private enum SunDirection { Rising, Setting }
 
     /// <summary>The next sunset (UTC) at or after <paramref name="now"/>.</summary>
-    public static DateTimeOffset NextSunset(DateTimeOffset now, double latitudeDeg, double longitudeDeg)
+    public static DateTimeOffset NextSunset(DateTimeOffset now, double latitudeDeg, double longitudeDeg) =>
+        NextEvent(now, latitudeDeg, longitudeDeg, SunriseSunsetAngleDeg, SunDirection.Setting);
+
+    /// <summary>
+    /// The day's four sun events - civil dawn, sunrise, sunset, and civil dusk -
+    /// for the UTC calendar date <paramref name="now"/> falls on. Callers place
+    /// `now` in a light/dark cycle with plain range checks against these four
+    /// instants and don't need to special-case midnight: if `now` precedes
+    /// today's dawn it's still last night, and if it's past today's dusk it's
+    /// already tonight - both correctly read as "night" without ever looking at
+    /// yesterday's or tomorrow's events.
+    /// </summary>
+    public static SunEvents EventsForDay(DateTimeOffset now, double latitudeDeg, double longitudeDeg)
     {
-        var today = SunsetUtc(now.UtcDateTime.Date, latitudeDeg, longitudeDeg);
-        return today >= now ? today : SunsetUtc(now.UtcDateTime.Date.AddDays(1), latitudeDeg, longitudeDeg);
+        var date = now.UtcDateTime.Date;
+        return new SunEvents(
+            Dawn: EventUtc(date, latitudeDeg, longitudeDeg, CivilTwilightAngleDeg, SunDirection.Rising),
+            Sunrise: EventUtc(date, latitudeDeg, longitudeDeg, SunriseSunsetAngleDeg, SunDirection.Rising),
+            Sunset: EventUtc(date, latitudeDeg, longitudeDeg, SunriseSunsetAngleDeg, SunDirection.Setting),
+            Dusk: EventUtc(date, latitudeDeg, longitudeDeg, CivilTwilightAngleDeg, SunDirection.Setting));
     }
 
-    /// <summary>Sunset time (UTC) on the given UTC calendar date, evaluated at UTC noon per the NOAA formula.</summary>
-    private static DateTimeOffset SunsetUtc(DateTime utcDate, double latitudeDeg, double longitudeDeg)
+    private static DateTimeOffset NextEvent(DateTimeOffset now, double latitudeDeg, double longitudeDeg, double angleDeg, SunDirection direction)
+    {
+        var today = EventUtc(now.UtcDateTime.Date, latitudeDeg, longitudeDeg, angleDeg, direction);
+        return today >= now
+            ? today
+            : EventUtc(now.UtcDateTime.Date.AddDays(1), latitudeDeg, longitudeDeg, angleDeg, direction);
+    }
+
+    /// <summary>The event time (UTC) on the given UTC calendar date, evaluated at UTC noon per the NOAA formula.</summary>
+    private static DateTimeOffset EventUtc(DateTime utcDate, double latitudeDeg, double longitudeDeg, double angleDeg, SunDirection direction)
     {
         var t = JulianCentury(utcDate.AddHours(12));
 
@@ -51,13 +81,14 @@ public static class SolarCalculator
 
         var latRad = ToRad(latitudeDeg);
         var declRad = ToRad(decl);
-        var haCos = Math.Cos(ToRad(SunsetAngleDeg)) / (Math.Cos(latRad) * Math.Cos(declRad)) - Math.Tan(latRad) * Math.Tan(declRad);
-        var haSunsetDeg = ToDeg(Math.Acos(Math.Clamp(haCos, -1.0, 1.0)));
+        var haCos = Math.Cos(ToRad(angleDeg)) / (Math.Cos(latRad) * Math.Cos(declRad)) - Math.Tan(latRad) * Math.Tan(declRad);
+        var haDeg = ToDeg(Math.Acos(Math.Clamp(haCos, -1.0, 1.0)));
+        var signedHaDeg = direction == SunDirection.Setting ? haDeg : -haDeg;
 
         var solarNoonFraction = (720.0 - 4.0 * longitudeDeg - eqOfTimeMinutes) / 1440.0;
-        var sunsetFraction = solarNoonFraction + haSunsetDeg * 4.0 / 1440.0;
+        var eventFraction = solarNoonFraction + signedHaDeg * 4.0 / 1440.0;
 
-        return new DateTimeOffset(utcDate, TimeSpan.Zero).AddDays(sunsetFraction);
+        return new DateTimeOffset(utcDate, TimeSpan.Zero).AddDays(eventFraction);
     }
 
     private static double JulianCentury(DateTime utc)

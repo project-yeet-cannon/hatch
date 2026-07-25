@@ -5,6 +5,7 @@ import type {
   DashboardDataSource,
   HourlyOutside,
   OutsideClimate,
+  SunEvents,
   TempPoint,
   ZoneClimate,
 } from '../types';
@@ -87,6 +88,17 @@ function xOutside(now: Date): OutsideClimate {
   };
 }
 
+// Real (not X/9999) so the theme still cycles sensibly when previewed against
+// this source - see the comment on TIME_ZONE above for why timestamps are exempt.
+function xSunEvents(now: Date): SunEvents {
+  return {
+    dawn: new Date(now.getTime() - 2 * HOUR_MS).toISOString(),
+    sunrise: new Date(now.getTime() - HOUR_MS).toISOString(),
+    sunset: new Date(now.getTime() + HOUR_MS).toISOString(),
+    dusk: new Date(now.getTime() + 2 * HOUR_MS).toISOString(),
+  };
+}
+
 /**
  * Every text field is all-X, every number is 9999, so any hardcoded label or
  * value still baked into the UI - rather than sourced from DashboardData -
@@ -100,6 +112,7 @@ export class TestDataSource implements DashboardDataSource {
       timezone: TIME_ZONE,
       zones: [1, 2, 3].map((i) => xZone(i, now)),
       outside: xOutside(now),
+      sunEvents: xSunEvents(now),
     };
   }
 }
