@@ -58,7 +58,7 @@ Do not skip ahead to implement multiple items in one session, even if it seems e
 #### Phase 2 checklist — Log pipeline (OpenSearch + Fluent Bit)
 
 - [x] `[code]` 1. Add `opensearch` and `fluent-bit` services (+ `observability` network, `opensearch_data` volume) to `compose.observability.yml`.
-- [ ] `[code]` 2. Add/confirm `containers/fluent-bit/parsers.conf`.
+- [x] `[code]` 2. Add/confirm `containers/fluent-bit/parsers.conf`.
 - [ ] `[code]` 3. Add `containers/fluent-bit/fluent-bit.conf`.
 - [ ] `[manual]` 4. Apply the ISM retention policy via the loopback `curl` call (one-time, run on the host).
 - [ ] `[verify]` 5. `curl http://127.0.0.1:9200/_cat/indices?v` shows `aerie-logs-*` growing; sample query returns real `api`/`db`/`caddy` log lines.
@@ -99,6 +99,7 @@ Do not skip ahead to implement multiple items in one session, even if it seems e
 - 2026-07-26: Updated `.github/workflows/cd.yml` for Phase 1 step 2 — added `compose.observability.yml` to the sparse-checkout list and `-f compose.observability.yml` to both the `pull` and `up -d` invocations. No other changes; the `containers/fluent-bit/` config files needed for Phase 2 aren't checked out yet and will need to be added to sparse-checkout in that phase.
 - 2026-07-26: Automated Phase 1 steps 3-5 (previously `[manual]`) at the user's request, so environments are reproducible without clicking through Kuma's UI. Researched Kuma's Socket.IO protocol (no REST API for setup/monitors/notifications) and confirmed via the `uptime-kuma-api` and `AutoKuma` source that: (a) the first-run admin account is created via an undocumented `setup` Socket.IO event, reachable directly since it doesn't require prior auth; (b) `isDefault`/`applyExisting` on a Kuma notification are WebUI-only conventions that AutoKuma's API client doesn't respect, so notification-to-monitor attachment can't be "set and forget" across both provisioning paths — `provision.py` instead re-attaches on every run, which is idempotent and ordering-independent. Added `containers/kuma-provision/` (one-shot `provision.py` + `requirements.txt`, run via a `python:3.12-slim` service with no persistent image build) and `containers/autokuma/static-monitors/` (`db.toml`, `api.toml`, `caddy.toml`, `ha.toml`). Added `autokuma` and `kuma-provision` services to `compose.observability.yml`, both `containers/kuma-provision` and `containers/autokuma` to `cd.yml`'s sparse-checkout, and `HA_HOST`/`HA_PORT`/`HA_TOKEN` to `cd.yml`'s env (from GitHub Actions vars/secrets — **these must be added to the repo's Actions config before the next deploy touches this compose file**, tracked as a new Prerequisites item above). Did not touch Phase 4's HA webhook (OpenSearch Alerting), which is unrelated and still fully manual/pending.
 - 2026-07-26: Phase 2 step 1 — added `opensearch` and `fluent-bit` services, the `observability` network, and the `opensearch_data` volume to `compose.observability.yml`, exactly as specced. `fluent-bit`'s config-file volume mounts (`containers/fluent-bit/{fluent-bit.conf,parsers.conf}`) point at files that don't exist yet by design — those are Phase 2 steps 2 and 3, left for the next session(s). Note for that next session: `cd.yml`'s sparse-checkout list will also need `containers/fluent-bit` added (same pattern as `containers/kuma-provision`/`containers/autokuma` from Phase 1), since it isn't there yet.
+- 2026-07-26: Phase 2 step 2 — pulled `fluent/fluent-bit:4.2.7` and extracted its built-in `/fluent-bit/etc/parsers.conf` (via `docker create` + `docker cp`, since the image has no shell/`cat` to `docker run` against) to confirm the `docker` parser it ships matches the doc's spec exactly. Result: no local `containers/fluent-bit/parsers.conf` was added — would've been a pure duplicate of the image default. Instead removed the now-unneeded `./containers/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro` bind mount from `compose.observability.yml`'s `fluent-bit` service (it referenced a file that was never created). `containers/fluent-bit/` still has no files on disk after this step — step 3 (`fluent-bit.conf`) is the first real file there, so `cd.yml`'s sparse-checkout still needs `containers/fluent-bit` added once that lands, not before.
 
 ## Architecture
 
@@ -212,7 +213,6 @@ No UI yet — just get data flowing and durable.
        volumes:
          - /var/lib/docker/containers:/var/lib/docker/containers:ro
          - ./containers/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
-         - ./containers/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
        networks:
          - observability
        depends_on:
@@ -228,16 +228,7 @@ No UI yet — just get data flowing and durable.
 
    Deliberately no `/var/run/docker.sock` mount for Fluent Bit — plain log-file tailing doesn't need Docker API access. Label/container-metadata enrichment (which does need the socket) can be added later if plain container-ID-in-path isn't enough.
 
-2. `containers/fluent-bit/parsers.conf` — the image ships a default one with a `docker` parser already defined for the exact JSON shape Docker's `json-file` driver writes (`log`, `stream`, `time` fields); reference it rather than duplicating it, unless it's missing then add:
-
-   ```ini
-   [PARSER]
-       Name        docker
-       Format      json
-       Time_Key    time
-       Time_Format %Y-%m-%dT%H:%M:%S.%L
-       Time_Keep   On
-   ```
+2. `containers/fluent-bit/parsers.conf` — confirmed unnecessary: the `fluent/fluent-bit:4.2.7` image's built-in `/fluent-bit/etc/parsers.conf` already defines a `docker` parser matching this exactly (`Format json`, `Time_Key time`, `Time_Format %Y-%m-%dT%H:%M:%S.%L`, `Time_Keep On`). No local file is added, and the `compose.observability.yml` bind mount for it (from step 1) was removed rather than shipping a duplicate — `fluent-bit.conf`'s `Parsers_File parsers.conf` (step 3) resolves relative to `/fluent-bit/etc/`, so it finds the image's own default file there.
 
 3. `containers/fluent-bit/fluent-bit.conf`:
 

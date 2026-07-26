@@ -75,7 +75,6 @@ services:
     volumes:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - ./containers/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
-      - ./containers/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
     networks:
       - observability
     depends_on:
