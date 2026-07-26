@@ -66,7 +66,7 @@ Do not skip ahead to implement multiple items in one session, even if it seems e
 #### Phase 3 checklist — Log inspection UI (OpenSearch Dashboards)
 
 - [x] `[code]` 1. Add `opensearch-dashboards` service to `compose.observability.yml`.
-- [ ] `[manual]` 2. In Dashboards, create an index pattern for `aerie-logs-*` (time field: `time`).
+- [x] `[code]` 2. Index pattern, automated: `containers/opensearch-provision/create-index-pattern.sh` creates the `aerie-logs-*` index pattern (time field: `time`) via Dashboards' saved objects API, idempotent via `overwrite=true`.
 - [ ] `[verify]` 3. Confirm filtering/search works (by container, level, free text) at `logs.${DOMAIN}`.
 - [ ] `[dns]` 4. Create Caddy subdomains `logs.landis.family` for opensearch and `status.landis.family` for kuma (make a suggestion if there would be more appropriate names)
 
@@ -104,6 +104,7 @@ Do not skip ahead to implement multiple items in one session, even if it seems e
 - 2026-07-26: Phase 2 step 3 — added `containers/fluent-bit/fluent-bit.conf` verbatim per the doc's spec (tail input over the host's `json-file` logs, `opensearch` output with `Logstash_Format On`/`Logstash_Prefix aerie-logs`). `compose.observability.yml` already bind-mounted this path from step 1, so no compose changes needed. Also added `containers/fluent-bit` to `cd.yml`'s sparse-checkout list, per the note left in the previous entry — this is now the first file that directory has, so the deploy would otherwise silently mount an empty path.
 - 2026-07-26: Phase 2 step 4 — automated at the user's request instead of leaving it as a manual host `curl`, for reproducible environments (same reasoning as Phase 1 steps 3-5). Added `containers/opensearch-provision/apply-ism-policy.sh` (retries until OpenSearch responds, `GET`s the policy first and only `PUT`s it if missing — a plain `PUT` on an existing ISM policy 409s without a `seq_no`/`primary_term`, so check-then-create was needed rather than an unconditional `PUT`) and a matching one-shot `opensearch-provision` service (`curlimages/curl:8.11.0`, no build needed) in `compose.observability.yml`. Added `containers/opensearch-provision` to `cd.yml`'s sparse-checkout list.
 - 2026-07-26: Phase 3 step 1 — added `opensearch-dashboards` service to `compose.observability.yml` exactly as specced (joins both `observability` and `edge`, `DISABLE_SECURITY_DASHBOARDS_PLUGIN=true` per this doc's no-auth-this-round decision, Caddy label for `logs.${DOMAIN}` on port 5601). No new files under `containers/`, so — unlike every prior code step — `cd.yml`'s sparse-checkout list needs no change here.
+- 2026-07-26: Phase 3 step 2 — automated at the user's request instead of a manual Dashboards UI click-through, same reasoning as the Phase 1/2 provisioning steps. Added `containers/opensearch-provision/create-index-pattern.sh` and folded it into the existing `opensearch-provision` one-shot service (now runs `apply-ism-policy.sh && create-index-pattern.sh`), with `depends_on: opensearch-dashboards` added. Used Dashboards' saved-objects API (`POST /api/saved_objects/index-pattern/aerie-logs?overwrite=true`, header `osd-xsrf: true`) rather than the check-then-create pattern from the ISM script — `overwrite=true` makes a plain repeated `POST` idempotent on its own, so no existence check was needed. `cd.yml`'s sparse-checkout already covers `containers/opensearch-provision` as a whole directory (non-cone-mode gitignore-style match), so no change needed there.
 
 ## Architecture
 
@@ -309,7 +310,7 @@ No UI yet — just get data flowing and durable.
          caddy.reverse_proxy: "{{upstreams 5601}}"
    ```
 
-2. In Dashboards, create an index pattern for `aerie-logs-*` (time field: `time`).
+2. Index pattern creation is automated, not clicked through: `containers/opensearch-provision/create-index-pattern.sh` runs as part of the `opensearch-provision` one-shot service (alongside the Phase 2 ISM policy script), `POST`ing to Dashboards' saved objects API (`/api/saved_objects/index-pattern/aerie-logs?overwrite=true`) to create/update an index pattern for `aerie-logs-*` with time field `time`. `overwrite=true` makes it idempotent outright — no need for the check-then-create pattern the ISM script uses, since re-POSTing the same definition is always safe.
 3. Confirm filtering/search works (by container, by log level if the app emits structured fields, by free text).
 
 **Deliverable:** browsable log search at `logs.${DOMAIN}`, no login prompt (per the auth decision above).

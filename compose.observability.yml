@@ -81,19 +81,23 @@ services:
       - opensearch
 
   # One-shot: applies the aerie-log-retention ISM policy (30-day index
-  # autodelete). Checks whether the policy already exists before creating
-  # it, so it's safe to re-run on every `up -d`.
+  # autodelete) and creates the aerie-logs-* Dashboards index pattern.
+  # Both scripts are idempotent (check-then-create / overwrite=true), so
+  # it's safe to re-run on every `up -d`.
   opensearch-provision:
     image: curlimages/curl:8.11.0
     networks:
       - observability
     volumes:
       - ./containers/opensearch-provision/apply-ism-policy.sh:/apply-ism-policy.sh:ro
-    entrypoint: ["/bin/sh", "/apply-ism-policy.sh"]
+      - ./containers/opensearch-provision/create-index-pattern.sh:/create-index-pattern.sh:ro
+    entrypoint: ["/bin/sh", "-c", "/apply-ism-policy.sh && /create-index-pattern.sh"]
     environment:
       - OPENSEARCH_URL=http://opensearch:9200
+      - DASHBOARDS_URL=http://opensearch-dashboards:5601
     depends_on:
       - opensearch
+      - opensearch-dashboards
 
   opensearch-dashboards:
     image: opensearchproject/opensearch-dashboards:3.7.0
