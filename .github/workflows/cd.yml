@@ -29,6 +29,8 @@ jobs:
           sparse-checkout: |
             compose.prod.yml
             compose.observability.yml
+            containers/kuma-provision
+            containers/autokuma
           sparse-checkout-cone-mode: false
 
       - name: Log in to the Container registry
@@ -48,6 +50,9 @@ jobs:
           AWS_REGION: ${{ vars.AWS_REGION }}
           ACME_EMAIL: ${{ vars.ACME_EMAIL }}
           DOMAIN: ${{ vars.DOMAIN }}
+          HA_HOST: ${{ vars.HA_HOST }}
+          HA_PORT: ${{ vars.HA_PORT }}
+          HA_TOKEN: ${{ secrets.HA_TOKEN }}
         run: |
           docker compose -f compose.prod.yml -f compose.observability.yml pull
           docker compose -f compose.prod.yml -f compose.observability.yml up -d
