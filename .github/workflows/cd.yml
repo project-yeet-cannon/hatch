@@ -22,12 +22,13 @@ jobs:
       DOCKER_HOST: tcp://localhost:2375
 
     steps:
-      - name: Checkout compose file
+      - name: Checkout compose files
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           sparse-checkout: |
             compose.prod.yml
+            compose.observability.yml
           sparse-checkout-cone-mode: false
 
       - name: Log in to the Container registry
@@ -48,5 +49,5 @@ jobs:
           ACME_EMAIL: ${{ vars.ACME_EMAIL }}
           DOMAIN: ${{ vars.DOMAIN }}
         run: |
-          docker compose -f compose.prod.yml pull
-          docker compose -f compose.prod.yml up -d
+          docker compose -f compose.prod.yml -f compose.observability.yml pull
+          docker compose -f compose.prod.yml -f compose.observability.yml up -d

@@ -48,7 +48,7 @@ Do not skip ahead to implement multiple items in one session, even if it seems e
 #### Phase 1 checklist — Status page + alerting (Uptime Kuma)
 
 - [x] `[code]` 1. Create `compose.observability.yml` with the `uptime-kuma` service.
-- [ ] `[code]` 2. Update `.github/workflows/cd.yml` to add `-f compose.observability.yml` to the deploy invocation.
+- [x] `[code]` 2. Update `.github/workflows/cd.yml` to add `-f compose.observability.yml` to the deploy invocation.
 - [ ] `[manual]` 3. First-run: set Kuma username/password.
 - [ ] `[manual]` 4. Add monitors: `db` (TCP 5432), `api` (HTTP health endpoint), `caddy` (HTTP on `caddy:80`), Home Assistant (HTTP on `${ha_host}:${ha_port}`).
 - [ ] `[manual]` 5. Configure the HA notification provider in Kuma, attach to all monitors, hit Test.
@@ -91,6 +91,7 @@ Do not skip ahead to implement multiple items in one session, even if it seems e
 - 2026-07-26: Implementation Progress tracking added to this doc; no phases started yet.
 - 2026-07-26: `Aerie.Api` had no health-check endpoint. Added a plain liveness check — `builder.Services.AddHealthChecks()` + `app.MapHealthChecks("/health")` in `Program.cs`, no new NuGet packages needed (the middleware ships in the shared framework). Deliberately did *not* wire in an EF Core/Npgsql DB check here: Kuma's `db` monitor (Phase 1) already covers DB liveness via a separate TCP check on `5432`, so `/health` only needs to answer "is the API process up and serving requests," keeping this step to exactly what the checklist item asked for.
 - 2026-07-26: Created `compose.observability.yml` with the `uptime-kuma` service exactly as specced in Phase 1 step 1 — `local` declared `external: true` (owned/created by `compose.prod.yml`), `edge` also `external: true` (matches `compose.prod.yml`'s existing declaration). No deviations from the plan.
+- 2026-07-26: Updated `.github/workflows/cd.yml` for Phase 1 step 2 — added `compose.observability.yml` to the sparse-checkout list and `-f compose.observability.yml` to both the `pull` and `up -d` invocations. No other changes; the `containers/fluent-bit/` config files needed for Phase 2 aren't checked out yet and will need to be added to sparse-checkout in that phase.
 
 ## Architecture
 
