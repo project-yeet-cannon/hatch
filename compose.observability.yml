@@ -5,6 +5,12 @@ services:
     networks:
       - local
       - edge
+    environment:
+      # Skips the first-run /setup-database screen: Kuma writes db-config.json
+      # itself when this is set. Without it, the setup-database HTTP server
+      # (which runs standalone, before the Socket.IO API kuma-provision talks
+      # to even starts) blocks until a human picks a DB type in the browser.
+      - UPTIME_KUMA_DB_TYPE=sqlite
     volumes:
       - uptime_kuma_data:/app/data
     labels:
