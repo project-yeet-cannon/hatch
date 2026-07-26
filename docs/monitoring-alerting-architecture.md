@@ -41,9 +41,9 @@ Do not skip ahead to implement multiple items in one session, even if it seems e
 
 #### Prerequisites
 
-- [ ] `[manual]` Confirm an HA long-lived access token is available (reuse existing `ha_token` from `src/Aerie.Api/.env.json`, or mint a dedicated one).
-- [ ] `[manual]` Check free RAM on the home server (OpenSearch wants ~1GB+, Dashboards a few hundred MB more).
-- [ ] `[code]` Confirm whether `Aerie.Api` exposes a health-check endpoint; add one (e.g. ASP.NET Core health checks at `/health`) if not.
+- [x] `[manual]` Confirm an HA long-lived access token is available (reuse existing `ha_token` from `src/Aerie.Api/.env.json`, or mint a dedicated one).
+- [x] `[manual]` Check free RAM on the home server (OpenSearch wants ~1GB+, Dashboards a few hundred MB more).
+- [x] `[code]` Confirm whether `Aerie.Api` exposes a health-check endpoint; add one (e.g. ASP.NET Core health checks at `/health`) if not.
 
 #### Phase 1 checklist — Status page + alerting (Uptime Kuma)
 
@@ -89,6 +89,7 @@ Do not skip ahead to implement multiple items in one session, even if it seems e
 *(dated notes per session — what happened, what deviated from the plan, anything the next session needs to know)*
 
 - 2026-07-26: Implementation Progress tracking added to this doc; no phases started yet.
+- 2026-07-26: `Aerie.Api` had no health-check endpoint. Added a plain liveness check — `builder.Services.AddHealthChecks()` + `app.MapHealthChecks("/health")` in `Program.cs`, no new NuGet packages needed (the middleware ships in the shared framework). Deliberately did *not* wire in an EF Core/Npgsql DB check here: Kuma's `db` monitor (Phase 1) already covers DB liveness via a separate TCP check on `5432`, so `/health` only needs to answer "is the API process up and serving requests," keeping this step to exactly what the checklist item asked for.
 
 ## Architecture
 
