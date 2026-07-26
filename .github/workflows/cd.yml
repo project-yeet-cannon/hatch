@@ -31,6 +31,7 @@ jobs:
             compose.observability.yml
             containers/kuma-provision
             containers/autokuma
+            containers/fluent-bit
           sparse-checkout-cone-mode: false
 
       - name: Log in to the Container registry
