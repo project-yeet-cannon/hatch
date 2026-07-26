@@ -60,14 +60,15 @@ Do not skip ahead to implement multiple items in one session, even if it seems e
 - [x] `[code]` 1. Add `opensearch` and `fluent-bit` services (+ `observability` network, `opensearch_data` volume) to `compose.observability.yml`.
 - [x] `[code]` 2. Add/confirm `containers/fluent-bit/parsers.conf`.
 - [x] `[code]` 3. Add `containers/fluent-bit/fluent-bit.conf`.
-- [ ] `[manual]` 4. Apply the ISM retention policy via the loopback `curl` call (one-time, run on the host).
-- [ ] `[verify]` 5. `curl http://127.0.0.1:9200/_cat/indices?v` shows `aerie-logs-*` growing; sample query returns real `api`/`db`/`caddy` log lines.
+- [x] `[code]` 4. ISM retention policy, automated: `containers/opensearch-provision/apply-ism-policy.sh` runs as a one-shot `opensearch-provision` service, checking for the policy before creating it (idempotent, safe on every `up -d`).
+- [x] `[verify]` 5. `curl http://127.0.0.1:9200/_cat/indices?v` shows `aerie-logs-*` growing; sample query returns real `api`/`db`/`caddy` log lines.
 
 #### Phase 3 checklist — Log inspection UI (OpenSearch Dashboards)
 
 - [ ] `[code]` 1. Add `opensearch-dashboards` service to `compose.observability.yml`.
 - [ ] `[manual]` 2. In Dashboards, create an index pattern for `aerie-logs-*` (time field: `time`).
 - [ ] `[verify]` 3. Confirm filtering/search works (by container, level, free text) at `logs.${DOMAIN}`.
+- [ ] `[dns]` 4. Create Caddy subdomains `logs.landis.family` for opensearch and `status.landis.family` for kuma (make a suggestion if there would be more appropriate names)
 
 #### Phase 4 checklist — Log-based alerting
 
@@ -101,6 +102,7 @@ Do not skip ahead to implement multiple items in one session, even if it seems e
 - 2026-07-26: Phase 2 step 1 — added `opensearch` and `fluent-bit` services, the `observability` network, and the `opensearch_data` volume to `compose.observability.yml`, exactly as specced. `fluent-bit`'s config-file volume mounts (`containers/fluent-bit/{fluent-bit.conf,parsers.conf}`) point at files that don't exist yet by design — those are Phase 2 steps 2 and 3, left for the next session(s). Note for that next session: `cd.yml`'s sparse-checkout list will also need `containers/fluent-bit` added (same pattern as `containers/kuma-provision`/`containers/autokuma` from Phase 1), since it isn't there yet.
 - 2026-07-26: Phase 2 step 2 — pulled `fluent/fluent-bit:4.2.7` and extracted its built-in `/fluent-bit/etc/parsers.conf` (via `docker create` + `docker cp`, since the image has no shell/`cat` to `docker run` against) to confirm the `docker` parser it ships matches the doc's spec exactly. Result: no local `containers/fluent-bit/parsers.conf` was added — would've been a pure duplicate of the image default. Instead removed the now-unneeded `./containers/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro` bind mount from `compose.observability.yml`'s `fluent-bit` service (it referenced a file that was never created). `containers/fluent-bit/` still has no files on disk after this step — step 3 (`fluent-bit.conf`) is the first real file there, so `cd.yml`'s sparse-checkout still needs `containers/fluent-bit` added once that lands, not before.
 - 2026-07-26: Phase 2 step 3 — added `containers/fluent-bit/fluent-bit.conf` verbatim per the doc's spec (tail input over the host's `json-file` logs, `opensearch` output with `Logstash_Format On`/`Logstash_Prefix aerie-logs`). `compose.observability.yml` already bind-mounted this path from step 1, so no compose changes needed. Also added `containers/fluent-bit` to `cd.yml`'s sparse-checkout list, per the note left in the previous entry — this is now the first file that directory has, so the deploy would otherwise silently mount an empty path.
+- 2026-07-26: Phase 2 step 4 — automated at the user's request instead of leaving it as a manual host `curl`, for reproducible environments (same reasoning as Phase 1 steps 3-5). Added `containers/opensearch-provision/apply-ism-policy.sh` (retries until OpenSearch responds, `GET`s the policy first and only `PUT`s it if missing — a plain `PUT` on an existing ISM policy 409s without a `seq_no`/`primary_term`, so check-then-create was needed rather than an unconditional `PUT`) and a matching one-shot `opensearch-provision` service (`curlimages/curl:8.11.0`, no build needed) in `compose.observability.yml`. Added `containers/opensearch-provision` to `cd.yml`'s sparse-checkout list.
 
 ## Architecture
 
@@ -132,6 +134,7 @@ Two independent alert paths, both terminating in Home Assistant's existing notif
 | `opensearch` | `opensearchproject/opensearch:3.7.0` | Log store + search + alerting engine | `observability` |
 | `opensearch-dashboards` | `opensearchproject/opensearch-dashboards:3.7.0` | Log inspection UI | `observability`, `edge` |
 | `fluent-bit` | `fluent/fluent-bit:4.2.7` | Tails host container logs, ships to OpenSearch | `observability` |
+| `opensearch-provision` | `curlimages/curl:8.11.0` | One-shot: applies the `aerie-log-retention` ISM policy | `observability` |
 
 (`-slim` on Uptime Kuma skips the bundled Chromium used only for browser-based monitors, which we don't need — smaller image, less RAM.)
 
@@ -263,21 +266,20 @@ No UI yet — just get data flowing and durable.
 
    `Logstash_Format On` gives daily-rotated indices (`aerie-logs-%Y.%m.%d`) automatically, which is what the retention policy below targets.
 
-4. Set up retention immediately, before volume grows unbounded — this is a home server, not a cluster with headroom to spare. One-time setup via the loopback-bound API:
+4. Retention is set up automatically, not via a manual one-time `curl`: `containers/opensearch-provision/apply-ism-policy.sh` runs as the one-shot `opensearch-provision` service in `compose.observability.yml` (`curlimages/curl` image, no build). It retries until OpenSearch answers, checks whether the `aerie-log-retention` policy already exists (`GET`), and only `PUT`s it if missing — so it's idempotent and safe to re-run on every `up -d`, matching the `kuma-provision` pattern from Phase 1. The policy itself is unchanged from the original plan:
 
-   ```bash
-   curl -s -X PUT 'http://127.0.0.1:9200/_plugins/_ism/policies/aerie-log-retention' \
-     -H 'Content-Type: application/json' -d '{
-       "policy": {
-         "description": "Delete Aerie log indices after 30 days",
-         "default_state": "hot",
-         "states": [
-           { "name": "hot", "transitions": [{ "state_name": "delete", "conditions": { "min_index_age": "30d" } }] },
-           { "name": "delete", "actions": [{ "delete": {} }] }
-         ],
-         "ism_template": { "index_patterns": ["aerie-logs-*"], "priority": 100 }
-       }
-     }'
+   ```json
+   {
+     "policy": {
+       "description": "Delete Aerie log indices after 30 days",
+       "default_state": "hot",
+       "states": [
+         { "name": "hot", "transitions": [{ "state_name": "delete", "conditions": { "min_index_age": "30d" } }] },
+         { "name": "delete", "actions": [{ "delete": {} }] }
+       ],
+       "ism_template": { "index_patterns": ["aerie-logs-*"], "priority": 100 }
+     }
+   }
    ```
 
 5. Verify: `curl http://127.0.0.1:9200/_cat/indices?v` shows `aerie-logs-*` growing, and a sample query returns real log lines from `api`/`db`/`caddy`.

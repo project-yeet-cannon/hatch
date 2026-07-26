@@ -32,6 +32,7 @@ jobs:
             containers/kuma-provision
             containers/autokuma
             containers/fluent-bit
+            containers/opensearch-provision
           sparse-checkout-cone-mode: false
 
       - name: Log in to the Container registry

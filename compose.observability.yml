@@ -80,6 +80,21 @@ services:
     depends_on:
       - opensearch
 
+  # One-shot: applies the aerie-log-retention ISM policy (30-day index
+  # autodelete). Checks whether the policy already exists before creating
+  # it, so it's safe to re-run on every `up -d`.
+  opensearch-provision:
+    image: curlimages/curl:8.11.0
+    networks:
+      - observability
+    volumes:
+      - ./containers/opensearch-provision/apply-ism-policy.sh:/apply-ism-policy.sh:ro
+    entrypoint: ["/bin/sh", "/apply-ism-policy.sh"]
+    environment:
+      - OPENSEARCH_URL=http://opensearch:9200
+    depends_on:
+      - opensearch
+
 networks:
   local:
     external: true
