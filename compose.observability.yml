@@ -1,0 +1,21 @@
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:2.4.0-slim
+    restart: always
+    networks:
+      - local
+      - edge
+    volumes:
+      - uptime_kuma_data:/app/data
+    labels:
+      caddy: status.${DOMAIN}
+      caddy.reverse_proxy: "{{upstreams 3001}}"
+
+networks:
+  local:
+    external: true
+  edge:
+    external: true
+
+volumes:
+  uptime_kuma_data:
