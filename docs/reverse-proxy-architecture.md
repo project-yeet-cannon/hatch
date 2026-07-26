@@ -6,7 +6,14 @@ This repo hosts all apps on the home server behind a single Caddy reverse proxy 
 
 - **Routing** is driven entirely by Docker container labels — Caddy watches the Docker socket and rebuilds its config whenever a labeled container starts/stops. There is no central Caddyfile to hand-edit.
 - **TLS** certs are issued automatically via Let's Encrypt DNS-01 challenges against Route53. Because it's DNS-01, subdomains never need to be publicly resolvable or have a public A record — the home server's IP stays off the public internet entirely.
-- **Local resolution**: pfSense's DNS Resolver has a wildcard host override (`Host: *`, `Domain: <domain>`) pointing every subdomain of the base domain at the server's LAN IP, so new subdomains resolve automatically with no DNS edit.
+- **Local resolution**: pfSense's DNS Resolver (Unbound) redirects the entire base domain to the server's LAN IP via a `local-zone`/`local-data` pair in Services → DNS Resolver → General Settings → Custom options (each line prefixed `server:`, matching the convention pfBlockerNG already uses in that box on this install):
+
+  ```text
+  server:local-zone: "<domain>." redirect
+  server:local-data: "<domain>. A <lan-ip>"
+  ```
+
+  This covers every subdomain automatically — no DNS edit needed for new ones. Note pfSense's own Host Override GUI does *not* support a literal wildcard `*` entry (its hostname field rejects `*`), and per-host overrides can't coexist with the zone above: Unbound's `redirect` zone type only permits a single `local-data` entry, at the zone apex — any Host Override for a subdomain of the same domain produces a second, non-apex entry and `unbound-checkconf` will fail the whole config. Any prior individual overrides (e.g. one per subdomain) must be deleted once this is in place.
 - **Secrets** (Route53 credentials, ACME email, base domain) are injected at deploy time from GitHub Actions secrets/variables into the `docker compose up -d` environment in [`cd.yml`](../.github/workflows/cd.yml) — nothing sensitive lives on the server's filesystem.
 
 All app services and `caddy` share a single external Docker network, `edge`, created once on the server (`docker network create edge`) and referenced as `external: true` in compose — it's shared across every app stack, not owned by any one of them.
