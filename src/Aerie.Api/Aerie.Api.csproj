@@ -58,4 +58,17 @@
           Inputs="../Aerie.Web/index.html" Outputs="wwwroot/apps/index.html">
     <Copy SourceFiles="../Aerie.Web/index.html" DestinationFolder="wwwroot/apps"/>
   </Target>
+
+  <!--
+    Logo app (../Aerie.Web/apps/logo) - a static Claude Design export
+    (index.html + generated support.js), no npm build step needed.
+  -->
+  <ItemGroup>
+    <LogoAppSource Include="../Aerie.Web/apps/logo/**/*.*"/>
+  </ItemGroup>
+
+  <Target Name="CopyLogoApp" BeforeTargets="Build"
+          Inputs="@(LogoAppSource)" Outputs="wwwroot/apps/logo/index.html">
+    <Copy SourceFiles="@(LogoAppSource)" DestinationFolder="wwwroot/apps/logo"/>
+  </Target>
 </Project>

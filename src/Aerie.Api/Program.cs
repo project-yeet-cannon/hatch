@@ -195,6 +195,7 @@ opt.AddRedirect("^$", "apps/");
 opt.AddRedirect("^apps$", "apps/");
 opt.AddRedirect("^apps/dashboard$", "apps/dashboard/");
 opt.AddRedirect("^apps/admin$", "apps/admin/");
+opt.AddRedirect("^apps/logo$", "apps/logo/");
 app.UseRewriter(opt);
 
 app.UseSwagger();

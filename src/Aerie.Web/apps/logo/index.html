@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aerie Logo</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  html, body { margin: 0; padding: 0; background: #EFEDE6; }
+  a { color: #1B1A16; }
+  a:hover { color: #6B6455; }
+</style>
+</helmet>
+<div style="min-height: 100vh; background: #EFEDE6; color: #1B1A16; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 56px 56px 72px; box-sizing: border-box; display: flex; flex-direction: column; gap: 40px;">
+
+  <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; border-bottom: 1px solid rgba(27,26,22,0.16); padding-bottom: 20px;">
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <div style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #86806F;">Parametric mark · generative outline</div>
+      <div style="font-size: 34px; font-weight: 500; letter-spacing: -0.02em;">A bird built from a handful of numbers</div>
+    </div>
+    <div style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.7; color: #86806F; text-align: right; white-space: pre;">{{ spec }}</div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: minmax(420px, 1fr) 320px; gap: 24px; align-items: stretch;">
+    <div style="background: #FBFAF7; border: 1px solid rgba(27,26,22,0.10); border-radius: 4px; display: flex; align-items: center; justify-content: center; padding: 40px;">
+      <svg viewBox="0 0 200 200" width="440" height="440" style="display: block; overflow: visible;">
+        <path d="{{ hero.outline }}" fill="none" stroke="{{ ink }}" stroke-width="{{ sw }}" stroke-linejoin="round" stroke-linecap="round"></path>
+        <path d="{{ hero.wing }}" fill="none" stroke="{{ ink }}" stroke-width="{{ swi }}" stroke-linejoin="round" stroke-linecap="round"></path>
+        <path d="{{ hero.perch }}" fill="none" stroke="{{ ink }}" stroke-width="{{ swi }}" stroke-linejoin="round" stroke-linecap="round"></path>
+        <circle cx="{{ hero.ex }}" cy="{{ hero.ey }}" r="{{ hero.er }}" fill="{{ ink }}"></circle>
+      </svg>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 24px;">
+      <div style="background: #FBFAF7; border: 1px solid rgba(27,26,22,0.10); border-radius: 4px; padding: 28px; display: flex; align-items: center; gap: 16px;">
+        <svg viewBox="0 0 200 200" width="60" height="60" style="display: block; flex: none;">
+          <path d="{{ hero.outline }}" fill="none" stroke="{{ ink }}" stroke-width="{{ sw }}" stroke-linejoin="round" stroke-linecap="round"></path>
+          <path d="{{ hero.wing }}" fill="none" stroke="{{ ink }}" stroke-width="{{ swi }}" stroke-linejoin="round" stroke-linecap="round"></path>
+          <circle cx="{{ hero.ex }}" cy="{{ hero.ey }}" r="{{ hero.er }}" fill="{{ ink }}"></circle>
+        </svg>
+        <div style="font-size: 27px; font-weight: 500; letter-spacing: 0.22em; text-transform: uppercase;">{{ wordmark }}</div>
+      </div>
+
+      <div style="background: #FBFAF7; border: 1px solid rgba(27,26,22,0.10); border-radius: 4px; padding: 28px; display: flex; flex-direction: column; gap: 18px; flex: 1;">
+        <div style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: #86806F;">Legibility ladder</div>
+        <div style="display: flex; align-items: flex-end; gap: 22px;">
+          <svg viewBox="0 0 200 200" width="88" height="88" style="display: block;">
+            <path d="{{ hero.outline }}" fill="none" stroke="{{ ink }}" stroke-width="{{ sw }}" stroke-linejoin="round" stroke-linecap="round"></path>
+            <path d="{{ hero.wing }}" fill="none" stroke="{{ ink }}" stroke-width="{{ swi }}" stroke-linejoin="round" stroke-linecap="round"></path>
+            <circle cx="{{ hero.ex }}" cy="{{ hero.ey }}" r="{{ hero.er }}" fill="{{ ink }}"></circle>
+          </svg>
+          <svg viewBox="0 0 200 200" width="44" height="44" style="display: block;">
+            <path d="{{ hero.outline }}" fill="none" stroke="{{ ink }}" stroke-width="{{ sw }}" stroke-linejoin="round" stroke-linecap="round"></path>
+            <path d="{{ hero.wing }}" fill="none" stroke="{{ ink }}" stroke-width="{{ swi }}" stroke-linejoin="round" stroke-linecap="round"></path>
+            <circle cx="{{ hero.ex }}" cy="{{ hero.ey }}" r="{{ hero.er }}" fill="{{ ink }}"></circle>
+          </svg>
+          <svg viewBox="0 0 200 200" width="26" height="26" style="display: block;">
+            <path d="{{ hero.outline }}" fill="none" stroke="{{ ink }}" stroke-width="{{ sw }}" stroke-linejoin="round" stroke-linecap="round"></path>
+            <circle cx="{{ hero.ex }}" cy="{{ hero.ey }}" r="{{ hero.er }}" fill="{{ ink }}"></circle>
+          </svg>
+        </div>
+        <div style="width: 100%; height: 1px; background: rgba(27,26,22,0.10);"></div>
+        <div style="display: flex; align-items: center; justify-content: center; background: #1B1A16; border-radius: 3px; padding: 22px;">
+          <svg viewBox="0 0 200 200" width="86" height="86" style="display: block;">
+            <path d="{{ hero.outline }}" fill="none" stroke="#FBFAF7" stroke-width="{{ sw }}" stroke-linejoin="round" stroke-linecap="round"></path>
+            <path d="{{ hero.wing }}" fill="none" stroke="#FBFAF7" stroke-width="{{ swi }}" stroke-linejoin="round" stroke-linecap="round"></path>
+            <circle cx="{{ hero.ex }}" cy="{{ hero.ey }}" r="{{ hero.er }}" fill="#FBFAF7"></circle>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <sc-if value="{{ showVariations }}" hint-placeholder-val="{{ true }}">
+    <div style="display: flex; flex-direction: column; gap: 16px;">
+      <div style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: #86806F;">The family · same rules, nudged parameters</div>
+      <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px;">
+        <sc-for list="{{ variants }}" as="v" hint-placeholder-count="6">
+          <div style="background: #FBFAF7; border: 1px solid rgba(27,26,22,0.10); border-radius: 4px; padding: 14px 14px 12px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
+            <svg viewBox="0 0 200 200" width="100%" style="display: block; aspect-ratio: 1;">
+              <path d="{{ v.outline }}" fill="none" stroke="{{ ink }}" stroke-width="{{ sw }}" stroke-linejoin="round" stroke-linecap="round"></path>
+              <path d="{{ v.wing }}" fill="none" stroke="{{ ink }}" stroke-width="{{ swi }}" stroke-linejoin="round" stroke-linecap="round"></path>
+              <path d="{{ v.perch }}" fill="none" stroke="{{ ink }}" stroke-width="{{ swi }}" stroke-linejoin="round" stroke-linecap="round"></path>
+              <circle cx="{{ v.ex }}" cy="{{ v.ey }}" r="{{ v.er }}" fill="{{ ink }}"></circle>
+            </svg>
+            <div style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: #86806F; text-align: center;">{{ v.label }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;headSize&quot;: { &quot;editor&quot;: &quot;range&quot;, &quot;default&quot;: 0.72, &quot;min&quot;: 0.45, &quot;max&quot;: 1.0, &quot;step&quot;: 0.01, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Head&quot; },
+  &quot;neck&quot;: { &quot;editor&quot;: &quot;range&quot;, &quot;default&quot;: 0.92, &quot;min&quot;: 0.45, &quot;max&quot;: 1.3, &quot;step&quot;: 0.01, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Head&quot; },
+  &quot;tilt&quot;: { &quot;editor&quot;: &quot;range&quot;, &quot;default&quot;: 14, &quot;min&quot;: -15, &quot;max&quot;: 45, &quot;step&quot;: 1, &quot;unit&quot;: &quot;°&quot;, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Head&quot; },
+  &quot;beakLen&quot;: { &quot;editor&quot;: &quot;range&quot;, &quot;default&quot;: 17, &quot;min&quot;: 4, &quot;max&quot;: 40, &quot;step&quot;: 1, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Head&quot; },
+  &quot;beakAngle&quot;: { &quot;editor&quot;: &quot;range&quot;, &quot;default&quot;: -4, &quot;min&quot;: -30, &quot;max&quot;: 18, &quot;step&quot;: 1, &quot;unit&quot;: &quot;°&quot;, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Head&quot; },
+  &quot;eyeSize&quot;: { &quot;editor&quot;: &quot;range&quot;, &quot;default&quot;: 3.4, &quot;min&quot;: 0, &quot;max&quot;: 7, &quot;step&quot;: 0.1, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Head&quot; },
+  &quot;plump&quot;: { &quot;editor&quot;: &quot;range&quot;, &quot;default&quot;: 0.98, &quot;min&quot;: 0.7, &quot;max&quot;: 1.25, &quot;step&quot;: 0.01, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Body&quot; },
+  &quot;tailLen&quot;: { &quot;editor&quot;: &quot;range&quot;, &quot;default&quot;: 34, &quot;min&quot;: 0, &quot;max&quot;: 70, &quot;step&quot;: 1, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Body&quot; },
+  &quot;tailLift&quot;: { &quot;editor&quot;: &quot;range&quot;, &quot;default&quot;: 26, &quot;min&quot;: -10, &quot;max&quot;: 60, &quot;step&quot;: 1, &quot;unit&quot;: &quot;°&quot;, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Body&quot; },
+  &quot;wingSize&quot;: { &quot;editor&quot;: &quot;range&quot;, &quot;default&quot;: 0.62, &quot;min&quot;: 0, &quot;max&quot;: 1, &quot;step&quot;: 0.01, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Body&quot; },
+  &quot;blend&quot;: { &quot;editor&quot;: &quot;range&quot;, &quot;default&quot;: 0.4, &quot;min&quot;: 0, &quot;max&quot;: 1, &quot;step&quot;: 0.01, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Body&quot; },
+  &quot;stroke&quot;: { &quot;editor&quot;: &quot;range&quot;, &quot;default&quot;: 7, &quot;min&quot;: 2, &quot;max&quot;: 14, &quot;step&quot;: 0.5, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Style&quot; },
+  &quot;ink&quot;: { &quot;editor&quot;: &quot;color&quot;, &quot;default&quot;: &quot;#1B1A16&quot;, &quot;options&quot;: [&quot;#1B1A16&quot;, &quot;#1D3A5F&quot;, &quot;#7A2E1E&quot;, &quot;#2F5B3A&quot;], &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;Style&quot; },
+  &quot;perch&quot;: { &quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: false, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Style&quot; },
+  &quot;wordmark&quot;: { &quot;editor&quot;: &quot;text&quot;, &quot;default&quot;: &quot;Wren&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;Style&quot; },
+  &quot;showVariations&quot;: { &quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Style&quot; }
+}">
+class Component extends DCLogic {
+  smax(a, b, k) {
+    if (k <= 0.001) return Math.max(a, b);
+    const h = Math.min(1, Math.max(0, 0.5 + 0.5 * (a - b) / k));
+    return (b + (a - b) * h) + k * h * (1 - h);
+  }
+  rayCircle(dx, dy, cx, cy, R) {
+    const f = dx * cx + dy * cy;
+    const disc = R * R - (cx * cx + cy * cy) + f * f;
+    if (disc < 0) return -1e6;
+    const t = f + Math.sqrt(disc);
+    return t > 0 ? t : -1e6;
+  }
+  raySeg(dx, dy, ax, ay, bx, by) {
+    const ex = bx - ax, ey = by - ay;
+    const den = dx * ey - dy * ex;
+    if (Math.abs(den) < 1e-9) return -1e6;
+    const t = (ax * ey - ay * ex) / den;
+    const u = (ax * dy - ay * dx) / den;
+    if (u < 0 || u > 1 || t <= 0) return -1e6;
+    return t;
+  }
+  rayTri(dx, dy, p) {
+    let t = -1e6;
+    for (let i = 0; i < 3; i++) {
+      const a = p[i], b = p[(i + 1) % 3];
+      t = Math.max(t, this.raySeg(dx, dy, a[0], a[1], b[0], b[1]));
+    }
+    return t;
+  }
+  rot(x, y, a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    return [x * c - y * s, x * s + y * c];
+  }
+  n(x) { return Math.round(x * 10) / 10; }
+
+  loopPath(pts) {
+    const f = (v) => this.n(v);
+    const N = pts.length;
+    let d = 'M' + f(pts[0][0]) + ' ' + f(pts[0][1]);
+    for (let i = 0; i < N; i++) {
+      const p0 = pts[(i - 1 + N) % N], p1 = pts[i], p2 = pts[(i + 1) % N], p3 = pts[(i + 2) % N];
+      const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+      const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+      d += 'C' + f(c1x) + ' ' + f(c1y) + ' ' + f(c2x) + ' ' + f(c2y) + ' ' + f(p2[0]) + ' ' + f(p2[1]);
+    }
+    return d + 'Z';
+  }
+
+  buildBird(v) {
+    const R = 42, cx = 100, cy = 104;
+    const rx = R, ry = R * v.plump;
+    const tilt = v.tilt * Math.PI / 180;
+    const hx = Math.sin(tilt) * v.neck * R;
+    const hy = -Math.cos(tilt) * v.neck * R;
+    const hr = R * v.headSize;
+
+    const bd = (v.beakAngle + v.tilt * 0.35) * Math.PI / 180;
+    const bdx = Math.cos(bd), bdy = Math.sin(bd);
+    const apex = [hx + bdx * (hr + v.beakLen), hy + bdy * (hr + v.beakLen)];
+    const g1 = this.rot(bdx, bdy, 0.68), g2 = this.rot(bdx, bdy, -0.68);
+    const beak = [apex,
+      [hx + g1[0] * hr * 0.92, hy + g1[1] * hr * 0.92],
+      [hx + g2[0] * hr * 0.92, hy + g2[1] * hr * 0.92]];
+
+    const td = (180 + v.tailLift) * Math.PI / 180;
+    const tdx = Math.cos(td), tdy = Math.sin(td);
+    const s1 = this.rot(tdx, tdy, 0.34), s2 = this.rot(tdx, tdy, -0.34);
+    const tail = [[tdx * (R * 0.88 + v.tailLen), tdy * (R * 0.88 + v.tailLen)],
+      [s1[0] * rx * 0.9, s1[1] * ry * 0.9],
+      [s2[0] * rx * 0.9, s2[1] * ry * 0.9]];
+
+    const N = 180, k = v.blend * 16, rr = [];
+    for (let i = 0; i < N; i++) {
+      const th = i / N * Math.PI * 2, dx = Math.cos(th), dy = Math.sin(th);
+      const e = 1 / Math.sqrt((dx / rx) * (dx / rx) + (dy / ry) * (dy / ry));
+      let r = this.smax(e, this.rayCircle(dx, dy, hx, hy, hr), k);
+      r = this.smax(r, this.rayTri(dx, dy, beak), k * 0.4);
+      r = this.smax(r, this.rayTri(dx, dy, tail), k * 0.7);
+      rr.push(r);
+    }
+    const sm = rr.map((_, i) => {
+      let s = 0, w = 0;
+      for (let j = -2; j <= 2; j++) {
+        const g = Math.exp(-j * j / 2);
+        s += rr[(i + j + N) % N] * g; w += g;
+      }
+      return s / w;
+    });
+    const pts = [];
+    for (let i = 0; i < N; i += 3) {
+      const th = i / N * Math.PI * 2;
+      pts.push([cx + sm[i] * Math.cos(th), cy + sm[i] * Math.sin(th)]);
+    }
+
+    let wing = '';
+    if (v.wingSize > 0.06) {
+      const wa = 167 * Math.PI / 180;
+      const L = R * 1.02 * v.wingSize, Wd = R * 0.36 * v.wingSize;
+      const fx = cx + rx * 0.40, fy = cy - ry * 0.04;
+      const tx = fx + Math.cos(wa) * L, ty = fy + Math.sin(wa) * L;
+      const mx = (fx + tx) / 2, my = (fy + ty) / 2;
+      const nx = -Math.sin(wa), ny = Math.cos(wa);
+      const f = (q) => this.n(q);
+      wing = 'M' + f(fx) + ' ' + f(fy) +
+        'Q' + f(mx + nx * Wd) + ' ' + f(my + ny * Wd) + ' ' + f(tx) + ' ' + f(ty) +
+        'Q' + f(mx - nx * Wd * 0.32) + ' ' + f(my - ny * Wd * 0.32) + ' ' + f(fx) + ' ' + f(fy);
+    }
+
+    let perch = '';
+    if (v.perch) {
+      const by = cy + ry - 2, fy2 = cy + ry + 16;
+      const f = (q) => this.n(q);
+      perch = 'M' + f(cx - 7) + ' ' + f(by) + 'L' + f(cx - 7) + ' ' + f(fy2) +
+        'M' + f(cx + 8) + ' ' + f(by) + 'L' + f(cx + 8) + ' ' + f(fy2) +
+        'M' + f(cx - 48) + ' ' + f(fy2) + 'L' + f(cx + 48) + ' ' + f(fy2);
+    }
+
+    return {
+      outline: this.loopPath(pts),
+      wing: wing,
+      perch: perch,
+      ex: this.n(cx + hx + hr * 0.42),
+      ey: this.n(cy + hy - hr * 0.14),
+      er: this.n(v.eyeSize)
+    };
+  }
+
+  base() {
+    const p = this.props;
+    return {
+      headSize: p.headSize ?? 0.72,
+      neck: p.neck ?? 0.92,
+      tilt: p.tilt ?? 14,
+      beakLen: p.beakLen ?? 17,
+      beakAngle: p.beakAngle ?? -4,
+      tailLen: p.tailLen ?? 34,
+      tailLift: p.tailLift ?? 26,
+      plump: p.plump ?? 0.98,
+      blend: p.blend ?? 0.4,
+      wingSize: p.wingSize ?? 0.62,
+      eyeSize: p.eyeSize ?? 3.4,
+      perch: p.perch ?? false
+    };
+  }
+
+  renderVals() {
+    const b = this.base();
+    const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+    const mix = (d) => {
+      const o = Object.assign({}, b);
+      for (const key in d) o[key] = o[key] + d[key];
+      o.headSize = clamp(o.headSize, 0.45, 1.0);
+      o.neck = clamp(o.neck, 0.45, 1.3);
+      o.plump = clamp(o.plump, 0.7, 1.25);
+      o.blend = clamp(o.blend, 0, 1);
+      o.wingSize = clamp(o.wingSize, 0, 1);
+      o.tailLen = clamp(o.tailLen, 0, 70);
+      o.tailLift = clamp(o.tailLift, -10, 60);
+      o.beakLen = clamp(o.beakLen, 4, 40);
+      return o;
+    };
+    const defs = [
+      ['Wren', { headSize: 0.10, beakLen: -6, plump: 0.08 }],
+      ['Heron', { neck: 0.28, tilt: 10, tailLen: 10, headSize: -0.08 }],
+      ['Finch', { headSize: -0.05, tailLift: 16, beakLen: 6 }],
+      ['Swift', { plump: -0.16, neck: -0.18, tailLen: -16, tilt: 8 }],
+      ['Owlet', { headSize: 0.14, neck: -0.22, tilt: -14, beakLen: -8 }],
+      ['Magpie', { tailLen: 22, tailLift: -14, plump: -0.06 }]
+    ];
+    const variants = defs.map(([label, d]) => {
+      const bird = this.buildBird(mix(d));
+      bird.label = label;
+      return bird;
+    });
+    const spec = 'head ' + b.headSize.toFixed(2) + '  neck ' + b.neck.toFixed(2) + '  tilt ' + Math.round(b.tilt) + '°\n' +
+      'beak ' + Math.round(b.beakLen) + '  tail ' + Math.round(b.tailLen) + '/' + Math.round(b.tailLift) + '°  plump ' + b.plump.toFixed(2);
+    return {
+      hero: this.buildBird(b),
+      variants: variants,
+      spec: spec,
+      ink: this.props.ink ?? '#1B1A16',
+      sw: this.props.stroke ?? 7,
+      swi: (this.props.stroke ?? 7) * 0.85,
+      wordmark: this.props.wordmark ?? 'Wren',
+      showVariations: this.props.showVariations ?? true
+    };
+  }
+}
+</script>
+</body>
+</html>
