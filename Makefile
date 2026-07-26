@@ -10,6 +10,15 @@ down:
 destroy:
 	docker compose down -v
 
+enterprise-up:
+	docker compose -f compose.observability.yml up -d
+
+enterprise-down:
+	docker compose -f compose.observability.yml down
+
+enterprise-destroy:
+	docker compose -f compose.observability.yml down -v
+
 build:
 	bash -c 'export NVM_DIR="$$HOME/.nvm"; [ -s "$$NVM_DIR/nvm.sh" ] && \. "$$NVM_DIR/nvm.sh"; dotnet build ./src/Aerie.Api/Aerie.Api.csproj'
 

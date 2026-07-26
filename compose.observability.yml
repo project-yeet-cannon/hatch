@@ -52,11 +52,43 @@ services:
     depends_on:
       - uptime-kuma
 
+  opensearch:
+    image: opensearchproject/opensearch:3.7.0
+    restart: always
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    ports:
+      - "127.0.0.1:9200:9200" # loopback-only, for setup/debug curl access
+    networks:
+      - observability
+
+  fluent-bit:
+    image: fluent/fluent-bit:4.2.7
+    restart: always
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./containers/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./containers/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+    networks:
+      - observability
+    depends_on:
+      - opensearch
+
 networks:
   local:
     external: true
   edge:
     external: true
+  observability:
+    driver: bridge
 
 volumes:
   uptime_kuma_data:
+  opensearch_data:
