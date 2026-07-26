@@ -14,6 +14,82 @@ Decisions locked in for this round:
 - **Auth: none, this round.** Every new UI (Dashboards, and OpenSearch's own API) is exposed with `plugins.security.disabled=true` / `DISABLE_SECURITY_DASHBOARDS_PLUGIN=true` and **no** Caddy `basic_auth` layer. This mirrors how [`reverse-proxy-architecture.md`](reverse-proxy-architecture.md) already reasons about exposure: subdomains get real TLS certs via Route53 DNS-01, but are never publicly resolvable — only pfSense's internal wildcard override resolves them — so they're LAN-only in practice today. Given that, and that the LAN is fully trusted, skipping auth is a legitimate smaller first increment. It is not free of cost: **if the server's exposure model ever changes** (a real public A record gets added for anything, a guest/IoT VLAN gets bridged onto the same network, split-tunnel VPN access is granted to someone not fully trusted), auth needs to be added to these three services before that happens. Adding it later is cheap — see [Deferred](#deferred--not-in-this-round) — so this is a real trade-off, not a permanent one.
 - Uptime Kuma is the one exception: it requires a username/password on first launch with no supported way to disable that entirely, so it keeps its own lightweight login regardless. No Caddy-layer auth is added on top of it.
 
+## Implementation Progress
+
+This doc is being implemented one checklist item at a time, each in its own fresh chat session, to keep token spend low and let every step be verified/committed independently before moving on.
+
+**Resuming prompt (paste this in a new chat to continue):**
+
+> Implement the next step in the monitoring/alerting architecture doc.
+
+**Process for each session:**
+
+1. Read this section, find the first unchecked `- [ ]` item below (prerequisites first, then phases in order).
+2. Implement only that one item — don't get ahead of it, even if the next step looks trivial.
+3. Item tags mean:
+   - `[code]` — Claude does this directly (files, config, workflow edits).
+   - `[manual]` — requires the live home server or clicking through a web UI (first-run setup, adding monitors, hitting Test buttons). Claude cannot do these — instead, give the user precise instructions for what to click/run, then wait for them to confirm it's done before checking the box.
+   - `[verify]` — a checkpoint to confirm the previous item(s) actually work (per that phase's "Deliverable"). Usually needs the user to confirm observed behavior (a push notification arrived, a page loads, a query returns rows), since Claude doesn't have browser/notification access.
+4. Check the box, and if anything deviated from the plan as written, or you learned something the next session should know, add a dated bullet under **Step log** below.
+5. If you spot follow-up work that isn't part of the current step but shouldn't be forgotten (a hardening item, a thing that felt hacky, something deferred), add it to **Cleanup backlog** below rather than doing it now or letting it evaporate.
+6. Commit the change (code/config + this doc's checklist update together) with a message noting the phase/step.
+7. Report back briefly what was done and what the next unchecked item is, so the user knows what to expect before they clear context.
+
+Do not skip ahead to implement multiple items in one session, even if it seems efficient — the whole point is small, independently-verifiable, committed increments.
+
+### Checklist
+
+#### Prerequisites
+
+- [ ] `[manual]` Confirm an HA long-lived access token is available (reuse existing `ha_token` from `src/Aerie.Api/.env.json`, or mint a dedicated one).
+- [ ] `[manual]` Check free RAM on the home server (OpenSearch wants ~1GB+, Dashboards a few hundred MB more).
+- [ ] `[code]` Confirm whether `Aerie.Api` exposes a health-check endpoint; add one (e.g. ASP.NET Core health checks at `/health`) if not.
+
+#### Phase 1 checklist — Status page + alerting (Uptime Kuma)
+
+- [ ] `[code]` 1. Create `compose.observability.yml` with the `uptime-kuma` service.
+- [ ] `[code]` 2. Update `.github/workflows/cd.yml` to add `-f compose.observability.yml` to the deploy invocation.
+- [ ] `[manual]` 3. First-run: set Kuma username/password.
+- [ ] `[manual]` 4. Add monitors: `db` (TCP 5432), `api` (HTTP health endpoint), `caddy` (HTTP on `caddy:80`), Home Assistant (HTTP on `${ha_host}:${ha_port}`).
+- [ ] `[manual]` 5. Configure the HA notification provider in Kuma, attach to all monitors, hit Test.
+- [ ] `[verify]` 6. Stop `db` (`docker compose stop db`) and confirm a push arrives; restart it after.
+
+#### Phase 2 checklist — Log pipeline (OpenSearch + Fluent Bit)
+
+- [ ] `[code]` 1. Add `opensearch` and `fluent-bit` services (+ `observability` network, `opensearch_data` volume) to `compose.observability.yml`.
+- [ ] `[code]` 2. Add/confirm `containers/fluent-bit/parsers.conf`.
+- [ ] `[code]` 3. Add `containers/fluent-bit/fluent-bit.conf`.
+- [ ] `[manual]` 4. Apply the ISM retention policy via the loopback `curl` call (one-time, run on the host).
+- [ ] `[verify]` 5. `curl http://127.0.0.1:9200/_cat/indices?v` shows `aerie-logs-*` growing; sample query returns real `api`/`db`/`caddy` log lines.
+
+#### Phase 3 checklist — Log inspection UI (OpenSearch Dashboards)
+
+- [ ] `[code]` 1. Add `opensearch-dashboards` service to `compose.observability.yml`.
+- [ ] `[manual]` 2. In Dashboards, create an index pattern for `aerie-logs-*` (time field: `time`).
+- [ ] `[verify]` 3. Confirm filtering/search works (by container, level, free text) at `logs.${DOMAIN}`.
+
+#### Phase 4 checklist — Log-based alerting
+
+- [ ] `[manual]` 1. In Dashboards → Alerting, create a webhook notification channel pointed at HA.
+- [ ] `[manual]` 2. Create a monitor (error-signature count over a trailing window) and attach the channel.
+- [ ] `[verify]` 3. Force an error in `api` and confirm the push arrives.
+
+#### Phase 5 — Cleanup backlog (work through after Phase 4, before calling this done)
+
+- [ ] *(items get appended here during implementation — see Cleanup backlog below; promote them into checkboxes here as they're identified, so nothing from the Deferred section or ad-hoc discoveries gets lost)*
+
+### Cleanup backlog
+
+*(running list of follow-up items discovered mid-implementation; pull the relevant ones into Phase 5's checklist above, don't just leave them prose-only)*
+
+- Auth on Dashboards/OpenSearch/Kuma's Caddy front door — deferred by design this round, see [Deferred](#deferred--not-in-this-round). Revisit if the server's exposure model changes.
+
+### Step log
+
+*(dated notes per session — what happened, what deviated from the plan, anything the next session needs to know)*
+
+- 2026-07-26: Implementation Progress tracking added to this doc; no phases started yet.
+
 ## Architecture
 
 ```text
