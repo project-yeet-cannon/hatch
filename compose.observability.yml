@@ -115,8 +115,6 @@ services:
       caddy.reverse_proxy: "{{upstreams 5601}}"
 
 networks:
-  local:
-    external: true
   edge:
     external: true
   observability:
