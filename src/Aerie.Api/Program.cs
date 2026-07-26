@@ -104,6 +104,7 @@ builder.Services.AddTransient<BackfillChannelHistory>();
 builder.Services.AddTransient<JobsInit>();
 
 // API / HTTP
+builder.Services.AddHealthChecks();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -180,6 +181,7 @@ if (Directory.Exists(appsPath))
 
 app.UseAuthorization();
 app.MapControllers();
+app.MapHealthChecks("/health");
 
 // SPA fallback so client-side routes (e.g. /apps/admin/devices) survive a hard refresh.
 // The :nonfile constraint excludes paths with a dot in the last segment (e.g.

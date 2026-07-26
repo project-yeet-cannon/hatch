@@ -1,0 +1,62 @@
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:2.4.0-slim
+    restart: always
+    networks:
+      - local
+      - edge
+    volumes:
+      - uptime_kuma_data:/app/data
+    labels:
+      caddy: status.${DOMAIN}
+      caddy.reverse_proxy: "{{upstreams 3001}}"
+
+  # Declarative monitors, synced continuously from ./containers/autokuma/static-monitors/.
+  # Dummy admin credentials below are intentional: Kuma requires *some* login
+  # (no supported way to disable it) but this stack has no real secrets behind
+  # it, matching the "LAN-only, trusted network" reasoning in
+  # docs/monitoring-alerting-architecture.md.
+  autokuma:
+    image: ghcr.io/bigboot/autokuma:latest
+    restart: unless-stopped
+    networks:
+      - local
+    environment:
+      - AUTOKUMA__KUMA__URL=http://uptime-kuma:3001
+      - AUTOKUMA__KUMA__USERNAME=admin
+      - AUTOKUMA__KUMA__PASSWORD=aerie-kuma-admin!23
+      - AUTOKUMA__STATIC_MONITORS=/static-monitors
+    volumes:
+      - ./containers/autokuma/static-monitors:/static-monitors:ro
+    depends_on:
+      - uptime-kuma
+
+  # One-shot: first-run account setup, the Home Assistant notification
+  # provider, and attaching it to every monitor. Re-runs (and re-converges)
+  # on every `up -d`, so it never needs manual first-run clicks.
+  kuma-provision:
+    image: python:3.12-slim
+    networks:
+      - local
+    working_dir: /app
+    volumes:
+      - ./containers/kuma-provision:/app:ro
+    environment:
+      - KUMA_URL=http://uptime-kuma:3001
+      - KUMA_USERNAME=admin
+      - KUMA_PASSWORD=aerie-kuma-admin!23
+      - HA_HOST=${HA_HOST}
+      - HA_PORT=${HA_PORT}
+      - HA_TOKEN=${HA_TOKEN}
+    command: sh -c "pip install --quiet --no-cache-dir -r requirements.txt && python provision.py"
+    depends_on:
+      - uptime-kuma
+
+networks:
+  local:
+    external: true
+  edge:
+    external: true
+
+volumes:
+  uptime_kuma_data:
