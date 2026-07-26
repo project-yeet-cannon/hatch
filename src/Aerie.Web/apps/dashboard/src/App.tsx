@@ -9,6 +9,7 @@ import { circadianTokens } from './theme/tokens';
 import { ZoneCard } from './components/ZoneCard';
 import { OutsideCard } from './components/OutsideCard';
 import { DashboardSkeleton } from './components/DashboardSkeleton';
+import { clientLogger } from './lib/clientLogger';
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -18,19 +19,28 @@ export function App() {
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
+    clientLogger.info('App mounted, starting dashboard data source');
     const source = getDashboardDataSource();
     let cancelled = false;
+    let firstLoad = true;
 
     const load = () => {
       source
         .getDashboardData()
         .then((snapshot) => {
           if (cancelled) return;
+          clientLogger.info(firstLoad ? 'Initial dashboard data loaded' : 'Dashboard data refreshed', {
+            zoneCount: snapshot.zones.length,
+          });
+          firstLoad = false;
           setData(snapshot);
           setError(null);
         })
         .catch((err: unknown) => {
-          if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+          if (cancelled) return;
+          const message = err instanceof Error ? err.message : String(err);
+          clientLogger.error('Dashboard data load failed', { firstLoad, reason: message });
+          setError(message);
         });
     };
 

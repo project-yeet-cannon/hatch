@@ -6,6 +6,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <title>Aerie Dashboard</title>
+    <!--
+      Fires before the module script below is even fetched, so a failure to
+      load/parse/execute main.tsx (bad deploy, MIME mismatch, syntax error)
+      still leaves a trace in the logs instead of just a blank kiosk screen.
+      Kept as plain inline JS (no build step touches this file's script tags).
+    -->
+    <script>
+      (function () {
+        try {
+          window.__kioskSessionId = crypto.randomUUID();
+          var body = JSON.stringify([{
+            level: 'info',
+            message: 'kiosk index.html parse started',
+            timestamp: new Date().toISOString(),
+            sessionId: window.__kioskSessionId,
+            url: location.href,
+            metadata: { userAgent: navigator.userAgent },
+          }]);
+          fetch('/api/kiosk-logs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: body,
+            keepalive: true,
+          }).catch(function () {});
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
