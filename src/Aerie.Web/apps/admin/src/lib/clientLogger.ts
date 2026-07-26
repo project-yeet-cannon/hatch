@@ -18,7 +18,7 @@ declare global {
   }
 }
 
-const APP_NAME = 'dashboard';
+const APP_NAME = 'admin';
 const ENDPOINT = '/api/ui-logs';
 const FLUSH_INTERVAL_MS = 4_000;
 const MAX_QUEUE = 25;
@@ -126,3 +126,23 @@ window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => 
     stack: reason instanceof Error ? reason.stack : undefined,
   });
 });
+
+// Admin is a data-entry app that's normally run with devtools closed, so
+// console.warn/console.error calls (React dev warnings, our own validation
+// warnings, etc.) would otherwise go unseen - mirror them into the shipped
+// log stream too, while still calling through so devtools behave normally.
+function formatConsoleArgs(args: unknown[]): string {
+  return args.map((arg) => (arg instanceof Error ? arg.stack ?? arg.message : String(arg))).join(' ');
+}
+
+const originalConsoleWarn = console.warn.bind(console);
+console.warn = (...args: unknown[]) => {
+  originalConsoleWarn(...args);
+  clientLogger.warn(formatConsoleArgs(args));
+};
+
+const originalConsoleError = console.error.bind(console);
+console.error = (...args: unknown[]) => {
+  originalConsoleError(...args);
+  clientLogger.error(formatConsoleArgs(args));
+};

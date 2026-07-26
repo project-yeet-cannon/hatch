@@ -15,16 +15,17 @@
     <script>
       (function () {
         try {
-          window.__kioskSessionId = crypto.randomUUID();
+          window.__uiLogSessionId = crypto.randomUUID();
           var body = JSON.stringify([{
+            app: 'dashboard',
             level: 'info',
             message: 'kiosk index.html parse started',
             timestamp: new Date().toISOString(),
-            sessionId: window.__kioskSessionId,
+            sessionId: window.__uiLogSessionId,
             url: location.href,
             metadata: { userAgent: navigator.userAgent },
           }]);
-          fetch('/api/kiosk-logs', {
+          fetch('/api/ui-logs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: body,
