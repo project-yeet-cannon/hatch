@@ -1,0 +1,115 @@
+package family.landis.aeriekiosk
+
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageInstaller
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+
+private const val TAG = "UpdateManager"
+private const val VERSION_URL = "https://files.landis.family/version.json"
+private const val APK_URL = "https://files.landis.family/app-release.apk"
+private const val CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
+private const val INITIAL_DELAY_MS = 60_000L
+
+/**
+ * Polls files.<DOMAIN> — the same static host CI publishes the APK to for QR
+ * provisioning (see docs/kiosk-architecture.md) — for a newer versionCode,
+ * and if found, downloads and silently installs it via PackageInstaller.
+ * Device Owner apps may commit installs with no user-facing confirmation
+ * (see https://developer.android.com/work/dpc/build-dpc#silent_install),
+ * which is what makes unattended self-update possible at all: these tablets
+ * have no Play Store and nobody on-site to tap "install".
+ *
+ * The APK itself isn't checksummed here — Android's installer already
+ * rejects a commit whose signing certificate doesn't match the installed
+ * app's, which is the property that actually matters for an update.
+ */
+class UpdateManager(private val context: Context) {
+    private val handler = Handler(Looper.getMainLooper())
+    private var checkInFlight = false
+
+    private val checkRunnable = object : Runnable {
+        override fun run() {
+            checkForUpdate()
+            handler.postDelayed(this, CHECK_INTERVAL_MS)
+        }
+    }
+
+    fun start() {
+        handler.postDelayed(checkRunnable, INITIAL_DELAY_MS)
+    }
+
+    fun stop() {
+        handler.removeCallbacks(checkRunnable)
+    }
+
+    private fun checkForUpdate() {
+        if (checkInFlight) return
+        checkInFlight = true
+        Thread {
+            try {
+                val latestVersionCode = fetchLatestVersionCode()
+                if (latestVersionCode != null && latestVersionCode > BuildConfig.VERSION_CODE) {
+                    Log.i(TAG, "Update available: $latestVersionCode > ${BuildConfig.VERSION_CODE}")
+                    downloadAndInstall()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Update check failed", e)
+            } finally {
+                checkInFlight = false
+            }
+        }.start()
+    }
+
+    private fun fetchLatestVersionCode(): Int? {
+        val connection = URL(VERSION_URL).openConnection() as HttpURLConnection
+        connection.connectTimeout = 10_000
+        connection.readTimeout = 10_000
+        return try {
+            if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
+            val body = connection.inputStream.bufferedReader().use { it.readText() }
+            JSONObject(body).getInt("versionCode")
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun downloadAndInstall() {
+        val connection = URL(APK_URL).openConnection() as HttpURLConnection
+        connection.connectTimeout = 15_000
+        connection.readTimeout = 30_000
+        try {
+            if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+                Log.w(TAG, "APK download failed: HTTP ${connection.responseCode}")
+                return
+            }
+
+            val installer = context.packageManager.packageInstaller
+            val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+            val sessionId = installer.createSession(params)
+
+            installer.openSession(sessionId).use { session ->
+                session.openWrite("update", 0, -1).use { out ->
+                    connection.inputStream.buffered().copyTo(out)
+                    session.fsync(out)
+                }
+
+                val pendingIntent = PendingIntent.getBroadcast(
+                    context,
+                    sessionId,
+                    Intent(context, InstallResultReceiver::class.java),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+                )
+                session.commit(pendingIntent.intentSender)
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+}

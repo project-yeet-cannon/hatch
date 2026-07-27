@@ -270,9 +270,18 @@ jobs:
           RELEASE_KEY_PASSWORD=$RELEASE_KEY_PASSWORD
           EOF
 
+      - name: Compute app version
+        id: version
+        run: |
+          echo "code=$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
+          echo "name=$(git rev-list --count HEAD)-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Build signed release APK
         working-directory: apps/kiosk
-        run: ./gradlew assembleRelease
+        run: |
+          ./gradlew assembleRelease \
+            -PkioskVersionCode="${{ steps.version.outputs.code }}" \
+            -PkioskVersionName="${{ steps.version.outputs.name }}"
 
       - name: Compute signing-cert checksum
         env:
@@ -285,6 +294,15 @@ jobs:
             | openssl x509 -outform DER \
             | openssl dgst -sha256 -binary | openssl base64 | tr '+/' '-_' | tr -d '=' \
             > apps/kiosk/signature-checksum.txt
+
+      - name: Write version.json
+        # Polled by UpdateManager (apps/kiosk/app/src/.../UpdateManager.kt) so
+        # already-provisioned tablets can discover and silently self-update to
+        # this build without ever touching the QR provisioning flow again.
+        run: |
+          cat > apps/kiosk/version.json <<EOF
+          {"versionCode": ${{ steps.version.outputs.code }}, "versionName": "${{ steps.version.outputs.name }}"}
+          EOF
 
       - name: Remove keystore (no longer needed once the APK is signed)
         if: always()

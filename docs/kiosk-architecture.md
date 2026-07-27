@@ -21,6 +21,7 @@ Three components, no ViewModel/state layer — the app is a single full-screen b
   - `KioskProgressDelegate` + `scheduleRetry()` implement reconnect: on load failure, show a "Reconnecting…" overlay and retry with exponential backoff (2s → 30s cap), reset to the initial delay on next successful load.
 - **`KioskDeviceAdminReceiver`** — an otherwise-empty `DeviceAdminReceiver` subclass; it exists purely as the component name that `dpm set-device-owner` / QR provisioning targets. `device_admin.xml` requests `force-lock` and `disable-keyguard-features`, the minimum policy set Device Owner setup requires.
 - **`BootCompletedReceiver`** — relaunches `MainActivity` on `ACTION_BOOT_COMPLETED`, so a reboot or power cycle comes back straight into the kiosk with no lock screen or manual relaunch.
+- **`UpdateManager`** ([UpdateManager.kt](../apps/kiosk/app/src/main/java/family/landis/aeriekiosk/UpdateManager.kt)) — started from `MainActivity.onCreate`, polls `https://files.${DOMAIN}/version.json` every 6 hours (60s after launch, then on that interval) and compares `versionCode` against `BuildConfig.VERSION_CODE`. On a newer version it downloads `app-release.apk` and commits it through `PackageInstaller`. There's no Play Store on these tablets and no one on-site to tap "install" — silent commit only works because Device Owner apps are exempt from the install-confirmation UI (see [Android's DPC docs](https://developer.android.com/work/dpc/build-dpc#silent_install)). Android's own installer already refuses a commit whose signing cert doesn't match the installed app's, so the update isn't checksummed client-side beyond that. `InstallResultReceiver` just logs the commit outcome; `PackageReplacedReceiver` relaunches `MainActivity` on `ACTION_MY_PACKAGE_REPLACED`, since a silent update replaces the process without restarting it, mirroring what `BootCompletedReceiver` does for reboots.
 
 `minSdk = 28` is a hard floor, not a compatibility choice — `DevicePolicyManager#setLockTaskFeatures` (used above) only exists from API 28 on.
 
@@ -37,7 +38,8 @@ Everything after "push a keystore" is automated in [`.github/workflows/publish.y
 
 1. **`detect-kiosk-changes`** — path-filters on `apps/kiosk` via `git diff` against the previous commit, so the (slow) Android build only runs when kiosk files actually changed.
 2. **`build-and-push-kiosk-image`** (gated on the above):
-   - Writes `local.properties` from the GitHub secrets, runs `./gradlew assembleRelease` to produce a signed APK.
+   - Writes `local.properties` from the GitHub secrets, computes `versionCode`/`versionName` from `git rev-list --count HEAD`/`git rev-parse --short HEAD` (monotonic across commits to `main`, which is what `UpdateManager` on-device needs), and runs `./gradlew assembleRelease -PkioskVersionCode=... -PkioskVersionName=...` to produce a signed APK with that version baked into `BuildConfig`.
+   - Writes those same two values to `apps/kiosk/version.json` (`{"versionCode": ..., "versionName": "..."}`), published alongside the APK for `UpdateManager` to poll.
    - Computes the **signing-cert checksum** — not a whole-APK hash — while the keystore is still on disk:
      ```
      keytool -export -alias "$RELEASE_KEY_ALIAS" -keystore "$KEYSTORE_PATH" -storepass "$RELEASE_STORE_PASSWORD" -rfc \
@@ -47,7 +49,7 @@ Everything after "push a keystore" is automated in [`.github/workflows/publish.y
      ```
      This is the value Android's QR provisioning flow uses (`PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM`) to verify the downloaded APK before installing it — it's stable across rebuilds since it hashes the signing cert, not the APK bytes.
    - Deletes the keystore from the runner (`if: always()`).
-   - Builds a tiny `nginx:alpine` image ([`apps/kiosk/Dockerfile`](../apps/kiosk/Dockerfile)) that just serves the APK and the checksum file as static assets, and pushes it to `ghcr.io/eouw0o83hf/aerie-kiosk-files`.
+   - Builds a tiny `nginx:alpine` image ([`apps/kiosk/Dockerfile`](../apps/kiosk/Dockerfile)) that just serves the APK, the checksum file, and `version.json` as static assets, and pushes it to `ghcr.io/eouw0o83hf/aerie-kiosk-files`.
 3. **Deploy**: the `files` service in [`compose.prod.yml`](../compose.prod.yml) runs that image and is exposed at `https://files.${DOMAIN}` via the same Caddy-label convention as every other service (see [reverse-proxy-architecture.md](reverse-proxy-architecture.md)). No dedicated CD job is needed — `cd.yml`'s existing `docker compose pull && up -d` picks up the new image on every deploy, the same as any other service.
 
 ## Provisioning (QR, no cable)
@@ -87,3 +89,10 @@ adb shell dpm set-device-owner family.landis.aeriekiosk/.KioskDeviceAdminReceive
 ```
 
 If `dpm` complains about existing accounts, factory reset and retry — Device Owner can only be granted on a device with zero accounts configured.
+
+## Hard Device Factory Reset
+
+The Lenovo Tab devices:
+- Hold both volume buttons down
+- Push and hold power button until Lenovo logo appears
+- Keep volume buttons held down until recovery mode boots

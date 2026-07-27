@@ -22,8 +22,14 @@ android {
         // it's central to how this app locks the tablet down, not optional.
         minSdk = 28
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        // Overridden by CI (-PkioskVersionCode/-PkioskVersionName, see
+        // .github/workflows/publish.yml) with a value derived from git so it
+        // increases monotonically across releases — UpdateManager on-device
+        // compares BuildConfig.VERSION_CODE against the value CI publishes in
+        // version.json to decide whether to self-update. Local/debug builds
+        // fall back to 1 since they're never compared against.
+        versionCode = (project.findProperty("kioskVersionCode") as String?)?.toInt() ?: 1
+        versionName = project.findProperty("kioskVersionName") as String? ?: "dev"
 
         // The bare geckoview-omni artifact bundles all 4 ABIs; the kiosk
         // tablets are budget ARM devices, so x86/x86_64 just add dead weight
@@ -62,6 +68,12 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    // AGP 8+ generates no BuildConfig by default; UpdateManager reads
+    // BuildConfig.VERSION_CODE to decide whether a self-update is needed.
+    buildFeatures {
+        buildConfig = true
     }
 }
 

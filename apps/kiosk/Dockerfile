@@ -1,8 +1,10 @@
 # Packages the signed release APK (built beforehand by `./gradlew
 # assembleRelease` in CI, see .github/workflows/publish.yml) as a plain
 # static file so the `files` service in compose.prod.yml can serve it over
-# unauthed GET for the QR-provisioning download step in TODO.md.
+# unauthed GET for the QR-provisioning download step in TODO.md, and for
+# UpdateManager's self-update poll on already-provisioned tablets.
 FROM nginx:alpine
 
 COPY app/build/outputs/apk/release/app-release.apk /usr/share/nginx/html/app-release.apk
 COPY signature-checksum.txt /usr/share/nginx/html/signature-checksum.txt
+COPY version.json /usr/share/nginx/html/version.json

@@ -39,6 +39,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var reconnectingOverlay: TextView
     private val retryHandler = Handler(Looper.getMainLooper())
     private var currentRetryDelayMs = RETRY_DELAY_MS_INITIAL
+    private val updateManager = UpdateManager(this)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,6 +50,7 @@ class MainActivity : AppCompatActivity() {
         geckoSession.loadUri(DASHBOARD_URL)
 
         enterLockTaskIfDeviceOwner()
+        updateManager.start()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -152,6 +154,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         retryHandler.removeCallbacksAndMessages(null)
+        updateManager.stop()
         super.onDestroy()
     }
 }
