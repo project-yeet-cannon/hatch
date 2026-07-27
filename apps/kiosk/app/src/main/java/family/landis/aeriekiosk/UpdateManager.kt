@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -14,8 +15,16 @@ import java.net.URL
 private const val TAG = "UpdateManager"
 private const val VERSION_URL = "https://files.landis.family/version.json"
 private const val APK_URL = "https://files.landis.family/app-release.apk"
-private const val CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
-private const val INITIAL_DELAY_MS = 60_000L
+
+// Deploys often land right after a dev session, and iteration on this app
+// tends to happen in focused spurts — so check aggressively for the first
+// hour after launch, then settle down to a steady background poll. Windows
+// are measured from UpdateManager.start(), not wall-clock time of day.
+private const val FAST_WINDOW_MS = 20 * 60 * 1000L
+private const val FAST_INTERVAL_MS = 60 * 1000L
+private const val MEDIUM_WINDOW_MS = 60 * 60 * 1000L
+private const val MEDIUM_INTERVAL_MS = 5 * 60 * 1000L
+private const val STEADY_INTERVAL_MS = 6 * 60 * 60 * 1000L
 
 /**
  * Polls files.<DOMAIN> — the same static host CI publishes the APK to for QR
@@ -33,20 +42,33 @@ private const val INITIAL_DELAY_MS = 60_000L
 class UpdateManager(private val context: Context) {
     private val handler = Handler(Looper.getMainLooper())
     private var checkInFlight = false
+    private var startedAtElapsedMs = 0L
 
     private val checkRunnable = object : Runnable {
         override fun run() {
             checkForUpdate()
-            handler.postDelayed(this, CHECK_INTERVAL_MS)
+            handler.postDelayed(this, nextIntervalMs())
         }
     }
 
     fun start() {
-        handler.postDelayed(checkRunnable, INITIAL_DELAY_MS)
+        startedAtElapsedMs = SystemClock.elapsedRealtime()
+        handler.postDelayed(checkRunnable, FAST_INTERVAL_MS)
     }
 
     fun stop() {
         handler.removeCallbacks(checkRunnable)
+    }
+
+    // SystemClock.elapsedRealtime() rather than wall-clock time, so this
+    // can't be thrown off by a timezone/NTP correction mid-window.
+    private fun nextIntervalMs(): Long {
+        val sinceStart = SystemClock.elapsedRealtime() - startedAtElapsedMs
+        return when {
+            sinceStart < FAST_WINDOW_MS -> FAST_INTERVAL_MS
+            sinceStart < MEDIUM_WINDOW_MS -> MEDIUM_INTERVAL_MS
+            else -> STEADY_INTERVAL_MS
+        }
     }
 
     private fun checkForUpdate() {
