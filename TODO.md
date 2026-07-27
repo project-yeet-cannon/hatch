@@ -167,7 +167,7 @@ reading live Wi-Fi settings instead of being baked into a build artifact.
     shape, that the password comes back in plaintext (not the obfuscated DB
     value), and that the checksum matches the first item's output.
 
-- [ ] **Admin app: Provisioning page.** Add `qrcode` (pure-JS, renders
+- [x] **Admin app: Provisioning page.** Add `qrcode` (pure-JS, renders
   straight to a `<canvas>`, no network calls) as a dependency of
   `src/Aerie.Web/apps/admin`. Add `getKioskProvisioningInfo()` to
   `src/api/client.ts` (same `fetchJson` pattern as the other calls) and a

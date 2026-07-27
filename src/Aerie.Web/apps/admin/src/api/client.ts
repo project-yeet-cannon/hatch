@@ -6,6 +6,7 @@ import type {
   DeviceChannelWriteRequest,
   DeviceHistory,
   DeviceWriteRequest,
+  ProvisioningInfo,
   SiteSetting,
   UnmappedHaDevice,
   Zone,
@@ -80,3 +81,7 @@ export const deleteSetting = (key: string) =>
 // ---- Discovery ----
 
 export const getUnmappedDevices = () => fetchJson<UnmappedHaDevice[]>('/api/discovery/unmapped');
+
+// ---- Kiosk provisioning ----
+
+export const getKioskProvisioningInfo = () => fetchJson<ProvisioningInfo>('/api/kiosk/provisioning-info');

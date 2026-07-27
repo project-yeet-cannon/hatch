@@ -112,3 +112,13 @@ export interface DeviceHistory {
   deviceId: string;
   channels: ChannelHistory[];
 }
+
+export interface ProvisioningInfo {
+  signatureChecksum: string;
+  apkDownloadUrl: string;
+  deviceAdminComponentName: string;
+  wifiSsid: string;
+  wifiPassword: string;
+  wifiSecurityType: string;
+  timeZone: string;
+}
