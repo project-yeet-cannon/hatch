@@ -1,3 +1,10 @@
+# Attaches each container's Compose service name to its own log lines (via
+# the json-file driver's `attrs`), so fluent-bit can derive a `service`
+# field per line for OpenSearch. See containers/fluent-bit/service_tag.lua.
+x-logging: &container-log-tag
+  options:
+    labels: "com.docker.compose.service"
+
 services:
   db:
     image: ghcr.io/eouw0o83hf/aerie-db:latest
@@ -16,6 +23,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    logging: *container-log-tag
 
   api:
     image: ghcr.io/eouw0o83hf/aerie-api:${IMAGE_TAG:-latest}
@@ -34,6 +42,7 @@ services:
       caddy_1.@root.path: /
       caddy_1.rewrite: "@root /apps/dashboard/"
       caddy_1.reverse_proxy: "{{upstreams 8080}}"
+    logging: *container-log-tag
 
   caddy:
     image: ghcr.io/eouw0o83hf/aerie-caddy:latest
@@ -54,6 +63,7 @@ services:
     labels:
       caddy.email: ${ACME_EMAIL}
       caddy.acme_dns: route53
+    logging: *container-log-tag
 
 networks:
   local:

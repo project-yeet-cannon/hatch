@@ -27,9 +27,14 @@ public class UiLogsController(ILogger<UiLogsController> logger) : ControllerBase
                 _ => LogLevel.Information,
             };
 
+            // {Service} (rather than {App}) is deliberate: it's what promotes the
+            // originating web app into a structured "Service" property on the JSON
+            // console line (see Program.cs), which fluent-bit's service_tag.lua then
+            // reads to override the container-level default `service` (aerie-api)
+            // with the specific frontend app for these lines.
             logger.Log(
                 level,
-                "{App}[{SessionId}] {Message} ({Url}) :: {Metadata}",
+                "{Service}[{SessionId}] {Message} ({Url}) :: {Metadata}",
                 entry.App,
                 entry.SessionId,
                 entry.Message,

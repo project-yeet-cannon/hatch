@@ -1,3 +1,10 @@
+# Attaches each container's Compose service name to its own log lines (via
+# the json-file driver's `attrs`), so fluent-bit can derive a `service`
+# field per line for OpenSearch. See containers/fluent-bit/service_tag.lua.
+x-logging: &container-log-tag
+  options:
+    labels: "com.docker.compose.service"
+
 services:
   uptime-kuma:
     image: louislam/uptime-kuma:2.4.0-slim
@@ -16,6 +23,7 @@ services:
     labels:
       caddy: status.${DOMAIN}
       caddy.reverse_proxy: "{{upstreams 3001}}"
+    logging: *container-log-tag
 
   # Declarative monitors, synced continuously from ./containers/autokuma/static-monitors/.
   # Dummy admin credentials below are intentional: Kuma requires *some* login
@@ -36,6 +44,7 @@ services:
       - ./containers/autokuma/static-monitors:/static-monitors:ro
     depends_on:
       - uptime-kuma
+    logging: *container-log-tag
 
   # One-shot: first-run account setup, the Home Assistant notification
   # provider, and attaching it to every monitor. Re-runs (and re-converges)
@@ -57,6 +66,7 @@ services:
     command: sh -c "pip install --quiet --no-cache-dir -r requirements.txt && python provision.py"
     depends_on:
       - uptime-kuma
+    logging: *container-log-tag
 
   opensearch:
     image: opensearchproject/opensearch:3.7.0
@@ -74,6 +84,7 @@ services:
       - "127.0.0.1:9200:9200" # loopback-only, for setup/debug curl access
     networks:
       - observability
+    logging: *container-log-tag
 
   fluent-bit:
     image: fluent/fluent-bit:4.2.7
@@ -81,29 +92,35 @@ services:
     volumes:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - ./containers/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./containers/fluent-bit/custom_parsers.conf:/fluent-bit/etc/custom_parsers.conf:ro
+      - ./containers/fluent-bit/service_tag.lua:/fluent-bit/etc/service_tag.lua:ro
     networks:
       - observability
     depends_on:
       - opensearch
+    logging: *container-log-tag
 
   # One-shot: applies the aerie-log-retention ISM policy (30-day index
-  # autodelete) and creates the aerie-logs-* Dashboards index pattern.
-  # Both scripts are idempotent (check-then-create / overwrite=true), so
-  # it's safe to re-run on every `up -d`.
+  # autodelete), the aerie-logs index template (explicit `service` mapping),
+  # and creates the aerie-logs-* Dashboards index pattern. All three scripts
+  # are idempotent (check-then-create / overwrite=true), so it's safe to
+  # re-run on every `up -d`.
   opensearch-provision:
     image: curlimages/curl:8.11.0
     networks:
       - observability
     volumes:
       - ./containers/opensearch-provision/apply-ism-policy.sh:/apply-ism-policy.sh:ro
+      - ./containers/opensearch-provision/apply-index-template.sh:/apply-index-template.sh:ro
       - ./containers/opensearch-provision/create-index-pattern.sh:/create-index-pattern.sh:ro
-    entrypoint: ["/bin/sh", "-c", "/apply-ism-policy.sh && /create-index-pattern.sh"]
+    entrypoint: ["/bin/sh", "-c", "/apply-ism-policy.sh && /apply-index-template.sh && /create-index-pattern.sh"]
     environment:
       - OPENSEARCH_URL=http://opensearch:9200
       - DASHBOARDS_URL=http://opensearch-dashboards:5601
     depends_on:
       - opensearch
       - opensearch-dashboards
+    logging: *container-log-tag
 
   opensearch-dashboards:
     image: opensearchproject/opensearch-dashboards:3.7.0
@@ -119,6 +136,7 @@ services:
     labels:
       caddy: logs.${DOMAIN}
       caddy.reverse_proxy: "{{upstreams 5601}}"
+    logging: *container-log-tag
 
 networks:
   edge:

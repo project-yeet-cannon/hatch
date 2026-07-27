@@ -19,6 +19,16 @@ using System.Text.Json.Serialization;
 /// DI
 var builder = WebApplication.CreateBuilder(args);
 
+// Structured JSON console output outside local dev, so the fluent-bit ->
+// OpenSearch pipeline (which tails raw container stdout, see
+// containers/fluent-bit/fluent-bit.conf) can parse fields like State.Service
+// out of each line instead of scraping human-formatted text. Left as the
+// default Simple formatter in Development so `dotnet run` stays readable.
+if (!builder.Environment.IsDevelopment())
+{
+    builder.Logging.AddJsonConsole();
+}
+
 builder.Services.AddSingleton(TimeProvider.System);
 
 // .env.json is optional now that ha_host/ha_port/ha_token live in SiteSettings
