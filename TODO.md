@@ -6,7 +6,7 @@ provisioning" sections of the original plan for background.
 
 ## 1. Signing keystore (on your Mac)
 
-- [ ] Generate a local keystore (one-time; keep it **outside** the repo):
+- [x] Generate a local keystore (one-time; keep it **outside** the repo):
   ```
   keytool -genkeypair -v \
     -keystore ~/keys/aerie-kiosk-release.jks \
@@ -17,7 +17,7 @@ provisioning" sections of the original plan for background.
   somewhere durable (password manager), they're needed for every future
   signed build.
 
-- [ ] Point Gradle at it without committing secrets — add to
+- [x] Point Gradle at it without committing secrets — add to
   `apps/kiosk/local.properties` (already gitignored):
   ```
   RELEASE_STORE_FILE=/Users/nathan/keys/aerie-kiosk-release.jks
@@ -26,12 +26,12 @@ provisioning" sections of the original plan for background.
   RELEASE_KEY_PASSWORD=<your key password>
   ```
 
-- [ ] Once the keystore exists, wire a `signingConfig` into
+- [x] Once the keystore exists, wire a `signingConfig` into
   `apps/kiosk/app/build.gradle.kts` that reads those four properties, so
   `./gradlew assembleRelease` produces an installable signed APK instead of
   the current unsigned one.
 
-- [ ] Build the signed release APK:
+- [x] Build the signed release APK:
   ```
   cd apps/kiosk && ./gradlew assembleRelease
   ```
