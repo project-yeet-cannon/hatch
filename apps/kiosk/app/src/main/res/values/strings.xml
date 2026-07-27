@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Aerie Kiosk</string>
+    <string name="reconnecting_message">Reconnecting…</string>
+</resources>

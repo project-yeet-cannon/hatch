@@ -57,3 +57,40 @@ jobs:
       - name: Build
         working-directory: src/Aerie.Web/apps/${{ matrix.app }}
         run: npm run build
+
+  detect-kiosk-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      kiosk-changed: ${{ steps.filter.outputs.kiosk }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check for changes under apps/kiosk
+        id: filter
+        run: |
+          if git diff --quiet HEAD~1 HEAD -- apps/kiosk; then
+            echo "kiosk=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "kiosk=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  kiosk:
+    needs: detect-kiosk-changes
+    if: needs.detect-kiosk-changes.outputs.kiosk-changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Lint and build
+        working-directory: apps/kiosk
+        run: ./gradlew lint assembleDebug
