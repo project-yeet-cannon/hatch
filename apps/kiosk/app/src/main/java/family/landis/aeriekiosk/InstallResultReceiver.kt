@@ -16,13 +16,25 @@ private const val TAG = "InstallResultReceiver"
  * handled separately by PackageReplacedReceiver.
  */
 class InstallResultReceiver : BroadcastReceiver() {
+
+    companion object {
+        const val EXTRA_TARGET_VERSION_CODE = "family.landis.aeriekiosk.extra.TARGET_VERSION_CODE"
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
         val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
+        val targetVersionCode = intent.getIntExtra(EXTRA_TARGET_VERSION_CODE, -1)
+
         if (status == PackageInstaller.STATUS_SUCCESS) {
             Log.i(TAG, "Update installed successfully")
+            KioskLogger.info("Update installed successfully", mapOf("targetVersionCode" to targetVersionCode))
         } else {
             Log.w(TAG, "Update install failed: status=$status message=$message")
+            KioskLogger.warn(
+                "Update install failed",
+                mapOf("targetVersionCode" to targetVersionCode, "status" to status, "message" to message),
+            )
         }
     }
 }

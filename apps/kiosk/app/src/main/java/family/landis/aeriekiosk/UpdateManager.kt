@@ -55,12 +55,21 @@ class UpdateManager(private val context: Context) {
         Thread {
             try {
                 val latestVersionCode = fetchLatestVersionCode()
-                if (latestVersionCode != null && latestVersionCode > BuildConfig.VERSION_CODE) {
+                if (latestVersionCode == null) {
+                    KioskLogger.warn("Update check: version.json unreadable")
+                } else if (latestVersionCode > BuildConfig.VERSION_CODE) {
                     Log.i(TAG, "Update available: $latestVersionCode > ${BuildConfig.VERSION_CODE}")
-                    downloadAndInstall()
+                    KioskLogger.info(
+                        "Update check: newer version available",
+                        mapOf("currentVersionCode" to BuildConfig.VERSION_CODE, "latestVersionCode" to latestVersionCode),
+                    )
+                    downloadAndInstall(latestVersionCode)
+                } else {
+                    KioskLogger.info("Update check: already up to date", mapOf("versionCode" to BuildConfig.VERSION_CODE))
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Update check failed", e)
+                KioskLogger.warn("Update check failed", mapOf("error" to e.message))
             } finally {
                 checkInFlight = false
             }
@@ -80,13 +89,19 @@ class UpdateManager(private val context: Context) {
         }
     }
 
-    private fun downloadAndInstall() {
+    private fun downloadAndInstall(targetVersionCode: Int) {
+        KioskLogger.info("Downloading update", mapOf("targetVersionCode" to targetVersionCode))
+
         val connection = URL(APK_URL).openConnection() as HttpURLConnection
         connection.connectTimeout = 15_000
         connection.readTimeout = 30_000
         try {
             if (connection.responseCode != HttpURLConnection.HTTP_OK) {
                 Log.w(TAG, "APK download failed: HTTP ${connection.responseCode}")
+                KioskLogger.warn(
+                    "Update download failed",
+                    mapOf("targetVersionCode" to targetVersionCode, "httpStatus" to connection.responseCode),
+                )
                 return
             }
 
@@ -103,9 +118,13 @@ class UpdateManager(private val context: Context) {
                 val pendingIntent = PendingIntent.getBroadcast(
                     context,
                     sessionId,
-                    Intent(context, InstallResultReceiver::class.java),
+                    Intent(context, InstallResultReceiver::class.java).putExtra(
+                        InstallResultReceiver.EXTRA_TARGET_VERSION_CODE,
+                        targetVersionCode,
+                    ),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
                 )
+                KioskLogger.info("Installing update", mapOf("targetVersionCode" to targetVersionCode))
                 session.commit(pendingIntent.intentSender)
             }
         } finally {

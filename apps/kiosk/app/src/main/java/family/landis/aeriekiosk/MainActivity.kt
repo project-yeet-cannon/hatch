@@ -51,6 +51,11 @@ class MainActivity : AppCompatActivity() {
 
         enterLockTaskIfDeviceOwner()
         updateManager.start()
+
+        KioskLogger.info(
+            "Kiosk app started",
+            mapOf("versionCode" to BuildConfig.VERSION_CODE, "versionName" to BuildConfig.VERSION_NAME),
+        )
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -153,6 +158,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        KioskLogger.info("Kiosk app stopping")
         retryHandler.removeCallbacksAndMessages(null)
         updateManager.stop()
         super.onDestroy()
