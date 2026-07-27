@@ -24,6 +24,14 @@ const FIELDS: FieldDef[] = [
     type: 'password',
     help: 'Long-lived access token. Stored obfuscated; leave blank to keep the current value.',
   },
+  { key: 'KioskWifiSsid', label: 'Kiosk Wi-Fi SSID', type: 'text', help: 'Wi-Fi network the kiosk tablet joins during QR provisioning' },
+  { key: 'KioskWifiSecurityType', label: 'Kiosk Wi-Fi security type', type: 'text', help: 'WPA, WEP, or blank for an open network' },
+  {
+    key: 'KioskWifiPassword',
+    label: 'Kiosk Wi-Fi password',
+    type: 'password',
+    help: 'Stored obfuscated; leave blank to keep the current value.',
+  },
 ];
 
 const PASSWORD_KEYS = new Set(FIELDS.filter((f) => f.type === 'password').map((f) => f.key));

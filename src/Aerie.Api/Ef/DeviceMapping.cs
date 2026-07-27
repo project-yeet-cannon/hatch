@@ -111,6 +111,11 @@ public static class SiteSettingKeys
     public const string HomeAssistantHost = "HomeAssistantHost";
     public const string HomeAssistantPort = "HomeAssistantPort";
     public const string HomeAssistantToken = "HomeAssistantToken";
+
+    /// <summary>Wi-Fi credentials handed to the kiosk tablet's QR provisioning payload - see KioskProvisioningController.</summary>
+    public const string KioskWifiSsid = "KioskWifiSsid";
+    public const string KioskWifiPassword = "KioskWifiPassword";
+    public const string KioskWifiSecurityType = "KioskWifiSecurityType";
 }
 
 /// <summary>A single numeric sample from a DeviceChannel. Replaces the wide EfEnvironmentReading table - every sample is "channel X had value V at time T."</summary>

@@ -106,7 +106,7 @@ reading live Wi-Fi settings instead of being baked into a build artifact.
     `keytool -export -alias aerie-kiosk -keystore ~/keys/aerie-kiosk-release.jks -rfc | openssl x509 -outform DER | openssl dgst -sha256 -binary | openssl base64 | tr '+/' '-_' | tr -d '='`
     run — they must match (same signing key).
 
-- [ ] **Wi-Fi credentials as `SiteSettings`.** Add `KioskWifiSsid`,
+- [x] **Wi-Fi credentials as `SiteSettings`.** Add `KioskWifiSsid`,
   `KioskWifiPassword`, `KioskWifiSecurityType` to `SiteSettingKeys` in
   `src/Aerie.Api/Ef/DeviceMapping.cs`, next to the existing `HomeAssistant*`
   keys. In `src/Aerie.Api/Controllers/SettingsController.cs`, extend the

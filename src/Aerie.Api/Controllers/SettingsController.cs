@@ -30,7 +30,9 @@ public class SettingsController(AerieContext db, IHomeAssistantConnectionManager
     [HttpPut("{key}")]
     public async Task<ActionResult<SiteSettingDto>> Upsert(string key, SiteSettingWriteRequest request, CancellationToken ct)
     {
-        var value = key == SiteSettingKeys.HomeAssistantToken ? SecretObfuscator.Obfuscate(request.Value) : request.Value;
+        var value = key is SiteSettingKeys.HomeAssistantToken or SiteSettingKeys.KioskWifiPassword
+            ? SecretObfuscator.Obfuscate(request.Value)
+            : request.Value;
 
         var setting = await db.SiteSettings.FirstOrDefaultAsync(s => s.Key == key, ct);
         if (setting is null)
@@ -60,7 +62,7 @@ public class SettingsController(AerieContext db, IHomeAssistantConnectionManager
         return NoContent();
     }
 
-    /// <summary>HomeAssistantToken is stored obfuscated, not encrypted, so it's still redacted before it leaves the API - no reason to hand back something trivially reversible.</summary>
+    /// <summary>HomeAssistantToken and KioskWifiPassword are stored obfuscated, not encrypted, so they're still redacted before leaving the API - no reason to hand back something trivially reversible.</summary>
     private static string Redact(string key, string value) =>
-        key == SiteSettingKeys.HomeAssistantToken && value.Length > 0 ? "••••••••" : value;
+        key is SiteSettingKeys.HomeAssistantToken or SiteSettingKeys.KioskWifiPassword && value.Length > 0 ? "••••••••" : value;
 }
