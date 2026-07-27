@@ -113,6 +113,11 @@ builder.Services.AddTransient<IAerieJob, SampleChannels>();
 builder.Services.AddTransient<BackfillChannelHistory>();
 builder.Services.AddTransient<JobsInit>();
 
+// Reaches the `files` container (kiosk APK + signature checksum) over the
+// internal `edge` Docker network, the same network `api` and `files` share
+// in compose.prod.yml - see KioskProvisioningController.
+builder.Services.AddHttpClient("KioskFiles", c => c.BaseAddress = new Uri("http://files/"));
+
 // API / HTTP
 builder.Services.AddHealthChecks();
 builder.Services.AddEndpointsApiExplorer();

@@ -32,6 +32,7 @@ services:
       - edge
     environment:
       - DOTNET_ENVIRONMENT=Docker
+      - DOMAIN=${DOMAIN}
     depends_on:
       db:
         condition: service_healthy

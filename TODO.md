@@ -125,7 +125,7 @@ reading live Wi-Fi settings instead of being baked into a build artifact.
     confirm `GET /api/settings` redacts the password field like
     `HomeAssistantToken` does.
 
-- [ ] **`Aerie.Api`: same-origin provisioning-info endpoint.** Add
+- [x] **`Aerie.Api`: same-origin provisioning-info endpoint.** Add
   `- DOMAIN=${DOMAIN}` to the `api` service's `environment:` list in
   `compose.prod.yml` (the value is already supplied by `cd.yml` at deploy
   time; this hands it to the running process too, not just Caddy's label
