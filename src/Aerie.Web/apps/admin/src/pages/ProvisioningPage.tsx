@@ -8,7 +8,7 @@ function buildProvisioningPayload(info: ProvisioningInfo): Record<string, string
   const payload: Record<string, string | boolean> = {
     'android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME': info.deviceAdminComponentName,
     'android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION': info.apkDownloadUrl,
-    'android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM': info.signatureChecksum,
+    'android.app.extra.PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM': info.signatureChecksum,
     'android.app.extra.PROVISIONING_WIFI_SSID': info.wifiSsid,
     'android.app.extra.PROVISIONING_LOCALE': 'en_US',
     'android.app.extra.PROVISIONING_TIME_ZONE': info.timeZone,
