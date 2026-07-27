@@ -1,0 +1,89 @@
+# Kiosk App Architecture
+
+## Summary
+
+`apps/kiosk` is an Android app (`family.landis.aeriekiosk`) that turns a tablet into a locked-down, always-on display for the dashboard at `https://kiosk.${DOMAIN}`. It runs as Android **Device Owner** in **lock task (kiosk) mode**, so there's no status bar, no recents/home escape route, and no way back to stock Android without a factory reset. It survives reboots and network drops on its own.
+
+Three things had to come together to make this work end-to-end without ever plugging the tablet into a computer:
+
+- **Rendering**: the tablets run Android 9 with a WebView stuck on Chrome 74 (2019), too old to parse the dashboard's bundle. The app embeds [GeckoView](https://github.com/mozilla/geckoview) instead — Firefox's engine, bundled and updated independently of the OS.
+- **Distribution**: CI builds and signs the release APK and publishes it as a static file over the same reverse proxy every other app uses, rather than as a manual local build.
+- **Provisioning**: Android's QR-code "no-touch" provisioning flow installs the app, sets Wi-Fi, and grants Device Owner in one scan at first boot — no `adb`/USB required, unless the tablet's setup wizard doesn't offer a QR scanner.
+
+## Runtime (`apps/kiosk/app`)
+
+Three components, no ViewModel/state layer — the app is a single full-screen browser pinned to one origin:
+
+- **`MainActivity`** ([MainActivity.kt](../apps/kiosk/app/src/main/java/family/landis/aeriekiosk/MainActivity.kt)) creates a `GeckoView`/`GeckoSession` pointed at `DASHBOARD_URL` (`https://kiosk.landis.family/`) and:
+  - Hides system bars on create and whenever the window regains focus.
+  - If the app is Device Owner (`DevicePolicyManager.isDeviceOwnerApp`), calls `setLockTaskFeatures(..., LOCK_TASK_FEATURE_NONE)` and `startLockTask()`. `NONE` is deliberate — the API's default feature set still permits pulling down the notification shade and reaching recents, both escape routes this app exists to close.
+  - `KioskNavigationDelegate` denies any navigation whose host isn't `DASHBOARD_HOST`, so a stray link or redirect can never take the session off-origin.
+  - `KioskProgressDelegate` + `scheduleRetry()` implement reconnect: on load failure, show a "Reconnecting…" overlay and retry with exponential backoff (2s → 30s cap), reset to the initial delay on next successful load.
+- **`KioskDeviceAdminReceiver`** — an otherwise-empty `DeviceAdminReceiver` subclass; it exists purely as the component name that `dpm set-device-owner` / QR provisioning targets. `device_admin.xml` requests `force-lock` and `disable-keyguard-features`, the minimum policy set Device Owner setup requires.
+- **`BootCompletedReceiver`** — relaunches `MainActivity` on `ACTION_BOOT_COMPLETED`, so a reboot or power cycle comes back straight into the kiosk with no lock screen or manual relaunch.
+
+`minSdk = 28` is a hard floor, not a compatibility choice — `DevicePolicyManager#setLockTaskFeatures` (used above) only exists from API 28 on.
+
+## Build & signing
+
+- A release keystore is generated once, locally, and kept **outside the repo** (`~/keys/aerie-kiosk-release.jks`). `apps/kiosk/local.properties` (gitignored) points Gradle at it via four properties (`RELEASE_STORE_FILE`, `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`), read in [`app/build.gradle.kts`](../apps/kiosk/app/build.gradle.kts) to conditionally define a `release` `signingConfig` — debug builds and CI checkouts without the keystore still work, they just produce an unsigned APK.
+- The same four values live as GitHub repo secrets/variables (`KIOSK_RELEASE_KEYSTORE_BASE64`, `KIOSK_RELEASE_STORE_PASSWORD`, `KIOSK_RELEASE_KEY_ALIAS` (variable, not secret), `KIOSK_RELEASE_KEY_PASSWORD`), so CI can reconstruct `local.properties` from a base64-encoded keystore without the file ever touching the repo.
+- `compileSdk` is pinned to 34 and GeckoView to `133.0.20241209150345` (Dec 2024) — see the comments in `build.gradle.kts` — because newer GeckoView releases bump transitive `androidx.core`/`media3` deps past what this project's AGP/compileSdk combination supports. Bump both together, not independently.
+- ABI filters are limited to `armeabi-v7a`/`arm64-v8a` — the tablets are budget ARM devices, so bundling x86/x86_64 (as the bare `geckoview-omni` artifact does by default) is dead weight.
+
+## CI/CD: build → sign → publish
+
+Everything after "push a keystore" is automated in [`.github/workflows/publish.yml`](../.github/workflows/publish.yml):
+
+1. **`detect-kiosk-changes`** — path-filters on `apps/kiosk` via `git diff` against the previous commit, so the (slow) Android build only runs when kiosk files actually changed.
+2. **`build-and-push-kiosk-image`** (gated on the above):
+   - Writes `local.properties` from the GitHub secrets, runs `./gradlew assembleRelease` to produce a signed APK.
+   - Computes the **signing-cert checksum** — not a whole-APK hash — while the keystore is still on disk:
+     ```
+     keytool -export -alias "$RELEASE_KEY_ALIAS" -keystore "$KEYSTORE_PATH" -storepass "$RELEASE_STORE_PASSWORD" -rfc \
+       | openssl x509 -outform DER \
+       | openssl dgst -sha256 -binary | openssl base64 | tr '+/' '-_' | tr -d '=' \
+       > apps/kiosk/signature-checksum.txt
+     ```
+     This is the value Android's QR provisioning flow uses (`PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM`) to verify the downloaded APK before installing it — it's stable across rebuilds since it hashes the signing cert, not the APK bytes.
+   - Deletes the keystore from the runner (`if: always()`).
+   - Builds a tiny `nginx:alpine` image ([`apps/kiosk/Dockerfile`](../apps/kiosk/Dockerfile)) that just serves the APK and the checksum file as static assets, and pushes it to `ghcr.io/eouw0o83hf/aerie-kiosk-files`.
+3. **Deploy**: the `files` service in [`compose.prod.yml`](../compose.prod.yml) runs that image and is exposed at `https://files.${DOMAIN}` via the same Caddy-label convention as every other service (see [reverse-proxy-architecture.md](reverse-proxy-architecture.md)). No dedicated CD job is needed — `cd.yml`'s existing `docker compose pull && up -d` picks up the new image on every deploy, the same as any other service.
+
+## Provisioning (QR, no cable)
+
+Android's "no-touch" provisioning lets a QR code scanned during initial device setup join Wi-Fi, download and verify a DPC APK, install it, and set it as Device Owner in one step. That QR payload is generated **live** by the admin app rather than baked into a build artifact, so changing Wi-Fi credentials never requires a new release:
+
+- **Wi-Fi credentials as `SiteSettings`**: `KioskWifiSsid` / `KioskWifiPassword` / `KioskWifiSecurityType` (`SiteSettingKeys` in [`DeviceMapping.cs`](../src/Aerie.Api/Ef/DeviceMapping.cs)) are edited on the admin Settings page like any other setting. `KioskWifiPassword` gets the same obfuscate-at-rest / redact-on-`GET` treatment as `HomeAssistantToken` (`SettingsController.cs`) — obfuscation, not encryption, sufficient since it's not exposed generically.
+- **`GET /api/kiosk/provisioning-info`** ([`KioskProvisioningController.cs`](../src/Aerie.Api/Controllers/KioskProvisioningController.cs)) assembles everything the QR payload needs: the signing checksum (fetched from the `files` container over the internal `edge` Docker network via a named `KioskFiles` `HttpClient`, `Program.cs`), the APK URL, the fixed device-admin component name, and the Wi-Fi/timezone settings — with the password **deobfuscated** back to plaintext, since the QR payload needs the real value. No auth: same same-origin, no-CORS precedent as `UiLogsController`, and nothing here is more sensitive than what `HomeAssistantConnectionManager` already handles.
+- **Admin Provisioning page** ([`ProvisioningPage.tsx`](../src/Aerie.Web/apps/admin/src/pages/ProvisioningPage.tsx)) fetches that endpoint, and — if Wi-Fi is configured — builds the Android provisioning extras object and renders it as a QR code on-canvas via the pure-JS `qrcode` package (no network calls of its own). If `wifiSsid` is empty, it prompts to configure Settings first instead of rendering a broken QR. A "Copy JSON" button covers the manual/`adb` fallback path.
+- The extras payload:
+  ```json
+  {
+    "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": "family.landis.aeriekiosk/.KioskDeviceAdminReceiver",
+    "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": "https://files.<DOMAIN>/app-release.apk",
+    "android.app.extra.PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM": "<from signature-checksum.txt>",
+    "android.app.extra.PROVISIONING_WIFI_SSID": "...",
+    "android.app.extra.PROVISIONING_WIFI_SECURITY_TYPE": "...",
+    "android.app.extra.PROVISIONING_WIFI_PASSWORD": "...",
+    "android.app.extra.PROVISIONING_LOCALE": "en_US",
+    "android.app.extra.PROVISIONING_TIME_ZONE": "...",
+    "android.app.extra.PROVISIONING_SKIP_ENCRYPTION": true,
+    "android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED": true
+  }
+  ```
+  The Wi-Fi security/password keys are omitted entirely (not sent blank) for an open network — Android's provisioning contract requires their absence, not an empty string.
+
+See the README for the step-by-step device install process built on top of this.
+
+## Manual fallback (USB/adb)
+
+Some budget/non-GMS-certified tablets never offer a QR scanner during setup. In that case, before any account is added on the device:
+
+```
+adb devices
+adb install -r app-release.apk
+adb shell dpm set-device-owner family.landis.aeriekiosk/.KioskDeviceAdminReceiver
+```
+
+If `dpm` complains about existing accounts, factory reset and retry — Device Owner can only be granted on a device with zero accounts configured.

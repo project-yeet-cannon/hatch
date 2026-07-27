@@ -1,229 +1,79 @@
-# Kiosk app: signing & provisioning
+# Host & Container Metrics Architecture
 
-Outstanding steps to get `apps/kiosk` onto the tablet as a locked-down Device
-Owner kiosk. See the "Build & signing" and "Deployment & Device Owner
-provisioning" sections of the original plan for background.
+A metrics/dashboard stack for the home cluster (host-level CPU/RAM/disk/network across every server, plus per-container utilization with clear "top consumers" visibility), delivered as a new `compose.metrics.yml` merged alongside `compose.prod.yml` and `compose.observability.yml`, following the same decoupled-compose-file pattern as [`docs/monitoring-alerting-architecture.md`](docs/monitoring-alerting-architecture.md). This was explicitly called out as a deferred Phase 5 in that doc ("Metrics/dashboards ... not part of the original ask").
 
-## 1. Signing keystore (on your Mac)
+Proposed decisions for this round:
 
-- [x] Generate a local keystore (one-time; keep it **outside** the repo):
-  ```
-  keytool -genkeypair -v \
-    -keystore ~/keys/aerie-kiosk-release.jks \
-    -alias aerie-kiosk \
-    -keyalg RSA -keysize 2048 -validity 10000
-  ```
-  Pick a keystore password and key password when prompted — save them
-  somewhere durable (password manager), they're needed for every future
-  signed build.
+- **Metrics store + dashboards**: Prometheus + Grafana, not OpenSearch/Dashboards. Metrics are numeric time series, a different shape than the log/text data OpenSearch is already handling — Prometheus is purpose-built for scrape-based collection and Grafana's panel types (especially "top N by value") solve the top-consumer requirement close to out-of-the-box via community dashboards, where Dashboards' visualization builder would fight us for the same result.
+- **Host metrics**: `node_exporter` on every host in the cluster.
+- **Container metrics**: `cAdvisor` on every host that runs Docker containers.
+- **Scrape topology**: one central Prometheus (living on the primary Aerie host) polls every host's `node_exporter`/`cAdvisor` over the LAN. Static scrape targets (`prometheus.yml`), not service discovery — homelab scale doesn't need it, and it keeps config in git instead of a discovery mechanism.
+- **Dashboards**: Grafana, provisioned from files (datasource + dashboard JSON committed to the repo), not clicked through — same "reproducible, no manual UI setup" bar as the logging/Kuma stack.
+- **Exposure**: `metrics.${DOMAIN}` via the existing Caddy/`edge` pattern from [`docs/reverse-proxy-architecture.md`](docs/reverse-proxy-architecture.md). Unlike OpenSearch Dashboards/Kuma, Grafana's own auth stays **on** by default (real admin account, not disabled) — it's the one UI in this stack with meaningful config (alert rules, provisioning) worth actually gating, and unlike Kuma it isn't a hard technical requirement, just a reasonable default given it costs nothing extra.
 
-- [x] Point Gradle at it without committing secrets — add to
-  `apps/kiosk/local.properties` (already gitignored):
-  ```
-  RELEASE_STORE_FILE=/Users/nathan/keys/aerie-kiosk-release.jks
-  RELEASE_STORE_PASSWORD=<your keystore password>
-  RELEASE_KEY_ALIAS=aerie-kiosk
-  RELEASE_KEY_PASSWORD=<your key password>
-  ```
+## Open questions to resolve before Phase 1
 
-- [x] Once the keystore exists, wire a `signingConfig` into
-  `apps/kiosk/app/build.gradle.kts` that reads those four properties, so
-  `./gradlew assembleRelease` produces an installable signed APK instead of
-  the current unsigned one.
+- [ ] **Enumerate every host in the cluster.** This repo's compose files currently describe one server. List every additional machine that should show up on this dashboard (NAS, Pi, pfSense box, secondary compute, etc.) and for each: does it run Docker already, or is it bare-metal/appliance-only?
+- [ ] For any non-Docker host (e.g. a Synology NAS, pfSense), decide the collection method per-host — most have either a native `node_exporter` package/binary or a vendor-specific exporter (e.g. Synology's SNMP, a pfSense `node_exporter` pkg). These won't follow the "add a compose service" pattern below and need a one-off install step each.
+- [ ] Confirm free RAM across the cluster for Prometheus (retention-dependent, budget ~1-2GB for a homelab-scale TSDB) + Grafana (~150MB) on the primary host, and ~negligible for `node_exporter`/`cAdvisor` on each satellite host.
 
-## 2. Build, sign, and publish in GitHub Actions
+## Implementation Progress
 
-Building and signing now happens in CI instead of on your Mac, and the
-result is published straight to your compose stack — see
-`build-and-push-kiosk-image` in `.github/workflows/publish.yml`, the
-`files` service in `compose.prod.yml`, and `apps/kiosk/Dockerfile`.
+Same process as `docs/monitoring-alerting-architecture.md`: implemented one checklist item at a time, each independently verifiable/committed before moving to the next. Item tags: `[code]` (Claude does directly), `[manual]` (needs the live hosts or a web UI), `[verify]` (checkpoint, usually needs the user to confirm observed behavior).
 
-- [x] Add a `detect-kiosk-changes` + `build-and-push-kiosk-image` job to
-  `.github/workflows/publish.yml` that builds a signed release APK with
-  `./gradlew assembleRelease` (using a `local.properties` written from GitHub
-  secrets/variables, not the committed keystore) and bakes it into a tiny `nginx:alpine`
-  image (`apps/kiosk/Dockerfile`) pushed to
-  `ghcr.io/eouw0o83hf/aerie-kiosk-files`.
-- [x] Add a `files` service to `compose.prod.yml` running that image,
-  exposed at `https://files.${DOMAIN}` via the existing Caddy labels — no
-  new CD job needed, since `cd.yml`'s existing `docker compose pull && up -d`
-  already picks up the new image on every deploy.
-- [x] One-time setup: add three repo secrets so CI can sign the APK without
-  the keystore ever touching the repo, plus one repo variable for the key
-  alias (not a secret, since it's just a label and it's useful to be able to
-  read it back later):
-  ```
-  KIOSK_RELEASE_KEYSTORE_BASE64   # secret — base64 -i ~/keys/aerie-kiosk-release.jks
-  KIOSK_RELEASE_STORE_PASSWORD    # secret
-  KIOSK_RELEASE_KEY_ALIAS         # variable — aerie-kiosk
-  KIOSK_RELEASE_KEY_PASSWORD      # secret
-  ```
-  ```
-  gh secret set KIOSK_RELEASE_KEYSTORE_BASE64 --repo <owner>/<repo> --body "$(base64 -i ~/keys/aerie-kiosk-release.jks)"
-  gh secret set KIOSK_RELEASE_STORE_PASSWORD --repo <owner>/<repo>
-  gh variable set KIOSK_RELEASE_KEY_ALIAS --repo <owner>/<repo> --body "aerie-kiosk"
-  gh secret set KIOSK_RELEASE_KEY_PASSWORD --repo <owner>/<repo>
-  ```
-- [x] Push a change under `apps/kiosk` (or re-run the workflow manually) and
-  confirm `Build and publish containers` → `build-and-push-kiosk-image`
-  succeeds, then confirm the `Deploy` workflow run after it picks up the new
-  `files` service.
-- [x] Confirm `https://files.${DOMAIN}/app-release.apk` downloads the signed
-  APK from your LAN.
+### Checklist
 
-## 3. Tablet provisioning (QR code, no cable)
+#### Prerequisites
 
-Android supports scanning a QR code during initial setup that joins Wi-Fi,
-downloads the DPC APK, verifies it, installs it, and sets it as Device Owner
-— all without adb or USB.
+- [ ] `[manual]` Resolve the open questions above (host inventory + collection method per host).
+- [ ] `[manual]` Confirm free RAM per host (see above).
 
-This is automated inline with the rest of the CI/CD flow: the DPC
-signing-cert checksum is computed by CI when the APK is signed, and the QR
-code itself is generated on demand by a Provisioning page in the admin app,
-reading live Wi-Fi settings instead of being baked into a build artifact.
+#### Phase 1 — Host + container metrics collection
 
-- [x] **CI: compute & publish the signing-cert checksum.** In
-  `build-and-push-kiosk-image` (`.github/workflows/publish.yml`), add a step
-  after "Build signed release APK" and before "Remove keystore" (keystore
-  must still be on disk) that runs:
-  ```
-  keytool -export -alias "$RELEASE_KEY_ALIAS" -keystore "$KEYSTORE_PATH" \
-      -storepass "$RELEASE_STORE_PASSWORD" -rfc \
-    | openssl x509 -outform DER \
-    | openssl dgst -sha256 -binary | openssl base64 | tr '+/' '-_' | tr -d '=' \
-    > apps/kiosk/signature-checksum.txt
-  ```
-  reusing the `KIOSK_RELEASE_KEY_ALIAS` / `KIOSK_RELEASE_STORE_PASSWORD`
-  values already loaded as env in that job. Then add
-  `COPY apps/kiosk/signature-checksum.txt /usr/share/nginx/html/signature-checksum.txt`
-  to `apps/kiosk/Dockerfile`, next to the APK `COPY`. This publishes
-  `PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM` (hash of the signing cert —
-  stable across rebuilds, not a whole-APK hash).
-  - Verify: push a no-op change under `apps/kiosk` (or dispatch the workflow
-    manually), confirm the image builds/pushes, then after the next deploy
-    `curl https://files.$DOMAIN/signature-checksum.txt` and compare it
-    against a one-off local
-    `keytool -export -alias aerie-kiosk -keystore ~/keys/aerie-kiosk-release.jks -rfc | openssl x509 -outform DER | openssl dgst -sha256 -binary | openssl base64 | tr '+/' '-_' | tr -d '='`
-    run — they must match (same signing key).
+- [ ] `[code]` 1. Add `node-exporter` service to `compose.metrics.yml` (or the relevant compose file per host) — host CPU/RAM/disk/network.
+- [ ] `[code]` 2. Add `cadvisor` service alongside it on every Docker host — per-container CPU/RAM/network/block IO. Needs read access to `/var/run/docker.sock`, `/sys/fs/cgroup`, `/var/lib/docker` (read-only mounts).
+- [ ] `[manual]` 3. For non-Docker hosts identified above, install the appropriate exporter natively.
+- [ ] `[verify]` 4. `curl` each host's `node-exporter:9100/metrics` and `cadvisor:8080/metrics` and confirm real data.
 
-- [x] **Wi-Fi credentials as `SiteSettings`.** Add `KioskWifiSsid`,
-  `KioskWifiPassword`, `KioskWifiSecurityType` to `SiteSettingKeys` in
-  `src/Aerie.Api/Ef/DeviceMapping.cs`, next to the existing `HomeAssistant*`
-  keys. In `src/Aerie.Api/Controllers/SettingsController.cs`, extend the
-  obfuscate-on-write check (currently `key == SiteSettingKeys.HomeAssistantToken`)
-  and the `Redact` helper to also cover `KioskWifiPassword`, so it's
-  obfuscated at rest and redacted on generic `GET /api/settings` — identical
-  treatment to `HomeAssistantToken`. In
-  `src/Aerie.Web/apps/admin/src/pages/SettingsPage.tsx`, append three entries
-  to the `FIELDS` array: SSID (text), Wi-Fi security type (text; help text
-  noting `WPA`/`WEP`/blank for open), Wi-Fi password (`type: 'password'`,
-  same "stored obfuscated, leave blank to keep current value" help text as
-  the HA token). No other admin changes needed — the page is already generic
-  over `FIELDS`.
-  - Verify: `npm run build` in `apps/admin`; run the API locally, confirm
-    the three new fields appear on the Settings page, save values, and
-    confirm `GET /api/settings` redacts the password field like
-    `HomeAssistantToken` does.
+#### Phase 2 — Central Prometheus
 
-- [x] **`Aerie.Api`: same-origin provisioning-info endpoint.** Add
-  `- DOMAIN=${DOMAIN}` to the `api` service's `environment:` list in
-  `compose.prod.yml` (the value is already supplied by `cd.yml` at deploy
-  time; this hands it to the running process too, not just Caddy's label
-  interpolation). In `Program.cs`, register a named HTTP client pointed at
-  the `files` container over the internal `edge` Docker network (`api` and
-  `files` are already on that network together, same as how `db` is reached
-  by service name):
-  ```csharp
-  builder.Services.AddHttpClient("KioskFiles", c => c.BaseAddress = new Uri("http://files/"));
-  ```
-  Add `Controllers/KioskProvisioningController.cs` exposing
-  `GET /api/kiosk/provisioning-info`, no auth needed (nothing here is more
-  sensitive than what `HomeAssistantConnectionManager` already handles
-  internally; mirrors `UiLogsController`'s same-origin, no-CORS precedent).
-  Reads `KioskWifiSsid` / `KioskWifiSecurityType` / `KioskWifiPassword`
-  (deobfuscated via `SecretObfuscator.Deobfuscate`, same pattern as
-  `HomeAssistantConnectionManager.ApplyAsync`) and `TimeZone` directly off
-  `AerieContext.SiteSettings`, and the checksum from
-  `http://files/signature-checksum.txt`, returning:
-  ```json
-  {
-    "signatureChecksum": "<from http://files/signature-checksum.txt>",
-    "apkDownloadUrl": "https://files.<DOMAIN>/app-release.apk",
-    "deviceAdminComponentName": "family.landis.aeriekiosk/.KioskDeviceAdminReceiver",
-    "wifiSsid": "<KioskWifiSsid setting>",
-    "wifiPassword": "<KioskWifiPassword setting, deobfuscated>",
-    "wifiSecurityType": "<KioskWifiSecurityType setting>",
-    "timeZone": "<TimeZone setting>"
-  }
-  ```
-  `apkDownloadUrl` built from `IConfiguration["DOMAIN"]`; component name is a
-  constant matching `applicationId`/`namespace` in
-  `apps/kiosk/app/build.gradle.kts` and `KioskDeviceAdminReceiver.kt`. If
-  `KioskWifiSsid` isn't set yet, return the fields as empty strings rather
-  than erroring — the admin page (next item) handles that state.
-  - Verify: run the API locally (or temporarily point the HttpClient at
-    `https://files.$DOMAIN` for a manual check), save Wi-Fi settings from the
-    previous item, hit `/api/kiosk/provisioning-info`, confirm the JSON
-    shape, that the password comes back in plaintext (not the obfuscated DB
-    value), and that the checksum matches the first item's output.
+- [ ] `[code]` 1. Add `prometheus` service to `compose.metrics.yml` on the primary host, with a committed `containers/prometheus/prometheus.yml` listing static scrape targets for every host's `node-exporter`/`cadvisor`.
+- [ ] `[code]` 2. Retention/storage volume (`prometheus_data`), sane retention window (e.g. 15-30d — cluster-scale metrics don't need OpenSearch's 30d log retention reasoning, just enough for trend dashboards).
+- [ ] `[verify]` 3. Prometheus's own targets page (`/targets`, loopback-only like OpenSearch's 9200) shows every host `UP`.
 
-- [x] **Admin app: Provisioning page.** Add `qrcode` (pure-JS, renders
-  straight to a `<canvas>`, no network calls) as a dependency of
-  `src/Aerie.Web/apps/admin`. Add `getKioskProvisioningInfo()` to
-  `src/api/client.ts` (same `fetchJson` pattern as the other calls) and a
-  matching type to `src/types.ts`. Add `src/pages/ProvisioningPage.tsx`,
-  wired into `App.tsx`'s nav and `Routes` at `/provisioning`, following the
-  existing pages' layout conventions. On mount, fetch the provisioning info;
-  if `wifiSsid` comes back empty, show a prompt/link to configure it on
-  Settings first instead of rendering a QR. Otherwise assemble the
-  provisioning JSON object (same shape as the old hand-built
-  `provisioning.json` above, e.g.
-  `android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME`,
-  `..._SIGNATURE_CHECKSUM`, `..._WIFI_SSID`, etc. — see
-  `docs/` or prior git history for the full extras list if needed) from the
-  response and render it via
-  `QRCode.toCanvas(canvasRef, JSON.stringify(payload), ...)` into an
-  on-screen canvas, plus a small display of which SSID/APK it's encoding so
-  it's obvious at a glance if Settings need updating first. Add a "Copy
-  JSON" convenience button for the USB/adb fallback path.
-  - Verify: `npm run dev` in `apps/admin`, open `/provisioning`, confirm it
-    loads the Wi-Fi info saved in the previous item and renders a live QR;
-    `npm run lint && npm run build` clean. UI/browser verification of the
-    actual tablet scan is left to you, not automated here.
+#### Phase 3 — Grafana dashboards
 
-- [ ] **Retire this note.** Once the above is deployed and confirmed working
-  end-to-end, delete this note — the checklist above fully replaces the old
-  curl/openssl/`jq`/`qrencode` workflow it superseded.
+- [ ] `[code]` 1. Add `grafana` service to `compose.metrics.yml`, joined to `edge` for `metrics.${DOMAIN}`.
+- [ ] `[code]` 2. Provision the Prometheus datasource from a committed YAML file (`containers/grafana/provisioning/datasources/`), not clicked through.
+- [ ] `[code]` 3. Provision two dashboards from committed JSON (`containers/grafana/provisioning/dashboards/`): a well-known community "Node Exporter Full" dashboard (per-host CPU/RAM/disk/network) and a "Docker/cAdvisor" dashboard with a top-consumers-by-CPU and top-consumers-by-RAM panel (sorted table/bar gauge, cluster-wide).
+- [ ] `[manual]` 4. First-run: set a real Grafana admin password (env var at deploy time, same GitHub Actions secrets pattern as `HA_TOKEN`).
+- [ ] `[code]` 5. Caddy subdomain `metrics.${DOMAIN}` (label pair on the `grafana` service, matching the existing pattern — no other wiring needed per `reverse-proxy-architecture.md`).
+- [ ] `[verify]` 6. Load `metrics.${DOMAIN}`, confirm both dashboards populate with live data and the top-consumers panel correctly highlights the heaviest containers.
 
-- [ ] **Factory reset the tablet.** On the Welcome/language-select screen of
-  setup (before signing in to anything), tap the same spot on the screen 6
-  times to launch the QR provisioning scanner. (Exact trigger screen varies
-  slightly by OEM/Android version.)
-- [ ] Scan the QR shown on the admin Provisioning page
-  (`home.$DOMAIN/apps/admin/provisioning`, display it on your Mac or phone).
-  The tablet should join Wi-Fi, download the APK, verify the checksum,
-  install it, and set it as Device Owner automatically.
-- [ ] If the setup wizard never offers a QR scanner at all (some
-  budget/non-GMS-certified tablets omit it), fall back to the manual
-  USB/adb method:
-  ```
-  adb devices                                                  # confirm device visible
-  adb install -r /tmp/app-release.apk
-  adb shell dpm set-device-owner family.landis.aeriekiosk/.KioskDeviceAdminReceiver
-  ```
-  This must happen before any account is added — if `dpm` complains about
-  existing accounts, factory reset again and retry.
-- [ ] Launch the app once (from the tablet, or connect wireless adb —
-  Settings → Developer options → Wireless debugging — and run
-  `adb shell am start -n family.landis.aeriekiosk/.MainActivity`). It should
-  load the dashboard fullscreen and lock itself in — no status bar, no way
-  to swipe to recents/home.
-- [ ] **Verify lockdown**: try swiping from every edge, holding the
-  power/volume buttons, etc. — confirm there's no path back to stock
-  Android.
-- [ ] **Verify boot persistence**: reboot the tablet (`adb reboot` or power
-  cycle) and confirm it comes back up straight into the kiosk with no lock
-  screen.
-- [ ] **Verify reconnect behavior**: toggle Wi-Fi off/on and confirm the
-  "Reconnecting…" overlay appears and the dashboard reloads automatically
-  once connectivity returns.
+#### Phase 4 — Alerting tie-in (optional, later)
+
+- [ ] `[manual]` Decide whether threshold alerts (host disk >90%, container OOM-killed, sustained CPU saturation) route through Grafana's own alerting or reuse the existing Home Assistant notify webhook pattern from `monitoring-alerting-architecture.md` Phase 4, for one consistent "alerts hit your phone" path instead of two.
+
+## Architecture (proposed)
+
+```text
+[each cluster host] --node_exporter (9100)--\
+                     --cAdvisor (8080)--------\
+                                                >--- Prometheus (primary host, scrapes all) --- Grafana (metrics.${DOMAIN})
+[non-Docker hosts]   --native exporter--------/
+```
+
+## Components (proposed)
+
+| Service | Image | Role | Runs on |
+| --- | --- | --- | --- |
+| `node-exporter` | `prom/node-exporter` | Host CPU/RAM/disk/network metrics | every host |
+| `cadvisor` | `gcr.io/cadvisor/cadvisor` | Per-container CPU/RAM/network/IO metrics | every Docker host |
+| `prometheus` | `prom/prometheus` | Central scrape + TSDB storage | primary host |
+| `grafana` | `grafana/grafana` | Dashboards, incl. top-consumers view | primary host |
+
+## Deferred / not in this round
+
+- Alerting integration (Phase 4 above) — functional value depends on the base dashboards existing first.
+- Long-term metrics retention / downsampling beyond Prometheus's local TSDB (e.g. Thanos/Mimir) — unnecessary at homelab scale.
+- Auth hardening beyond Grafana's own login (e.g. Caddy `basic_auth` in front of it) — revisit only if this stack's exposure model changes, same trigger condition as `monitoring-alerting-architecture.md`'s deferred auth item.
