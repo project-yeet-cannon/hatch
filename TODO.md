@@ -48,7 +48,7 @@ result is published straight to your compose stack — see
   exposed at `https://files.${DOMAIN}` via the existing Caddy labels — no
   new CD job needed, since `cd.yml`'s existing `docker compose pull && up -d`
   already picks up the new image on every deploy.
-- [ ] One-time setup: add three repo secrets so CI can sign the APK without
+- [x] One-time setup: add three repo secrets so CI can sign the APK without
   the keystore ever touching the repo, plus one repo variable for the key
   alias (not a secret, since it's just a label and it's useful to be able to
   read it back later):
@@ -64,7 +64,7 @@ result is published straight to your compose stack — see
   gh variable set KIOSK_RELEASE_KEY_ALIAS --repo <owner>/<repo> --body "aerie-kiosk"
   gh secret set KIOSK_RELEASE_KEY_PASSWORD --repo <owner>/<repo>
   ```
-- [ ] Push a change under `apps/kiosk` (or re-run the workflow manually) and
+- [x] Push a change under `apps/kiosk` (or re-run the workflow manually) and
   confirm `Build and publish containers` → `build-and-push-kiosk-image`
   succeeds, then confirm the `Deploy` workflow run after it picks up the new
   `files` service.
@@ -77,55 +77,132 @@ Android supports scanning a QR code during initial setup that joins Wi-Fi,
 downloads the DPC APK, verifies it, installs it, and sets it as Device Owner
 — all without adb or USB.
 
-- [ ] Compute the APK's checksum (SHA-256, base64url-encoded, no padding)
-  from the copy the tablet will actually fetch:
+This is automated inline with the rest of the CI/CD flow: the DPC
+signing-cert checksum is computed by CI when the APK is signed, and the QR
+code itself is generated on demand by a Provisioning page in the admin app,
+reading live Wi-Fi settings instead of being baked into a build artifact.
+
+- [ ] **CI: compute & publish the signing-cert checksum.** In
+  `build-and-push-kiosk-image` (`.github/workflows/publish.yml`), add a step
+  after "Build signed release APK" and before "Remove keystore" (keystore
+  must still be on disk) that runs:
   ```
-  curl -fsSL https://files.${DOMAIN}/app-release.apk -o /tmp/app-release.apk
-  openssl dgst -sha256 -binary /tmp/app-release.apk \
-    | openssl base64 | tr '+/' '-_' | tr -d '='
+  keytool -export -alias "$RELEASE_KEY_ALIAS" -keystore "$KEYSTORE_PATH" \
+      -storepass "$RELEASE_STORE_PASSWORD" -rfc \
+    | openssl x509 -outform DER \
+    | openssl dgst -sha256 -binary | openssl base64 | tr '+/' '-_' | tr -d '=' \
+    > apps/kiosk/signature-checksum.txt
   ```
-- [ ] Build the provisioning JSON (fill in your checksum, Wi-Fi creds,
-  timezone). Save as e.g. `provisioning.json` — **do not commit this file**,
-  it contains your Wi-Fi password:
+  reusing the `KIOSK_RELEASE_KEY_ALIAS` / `KIOSK_RELEASE_STORE_PASSWORD`
+  values already loaded as env in that job. Then add
+  `COPY apps/kiosk/signature-checksum.txt /usr/share/nginx/html/signature-checksum.txt`
+  to `apps/kiosk/Dockerfile`, next to the APK `COPY`. This publishes
+  `PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM` (hash of the signing cert —
+  stable across rebuilds, not a whole-APK hash).
+  - Verify: push a no-op change under `apps/kiosk` (or dispatch the workflow
+    manually), confirm the image builds/pushes, then after the next deploy
+    `curl https://files.$DOMAIN/signature-checksum.txt` and compare it
+    against a one-off local
+    `keytool -export -alias aerie-kiosk -keystore ~/keys/aerie-kiosk-release.jks -rfc | openssl x509 -outform DER | openssl dgst -sha256 -binary | openssl base64 | tr '+/' '-_' | tr -d '='`
+    run — they must match (same signing key).
+
+- [ ] **Wi-Fi credentials as `SiteSettings`.** Add `KioskWifiSsid`,
+  `KioskWifiPassword`, `KioskWifiSecurityType` to `SiteSettingKeys` in
+  `src/Aerie.Api/Ef/DeviceMapping.cs`, next to the existing `HomeAssistant*`
+  keys. In `src/Aerie.Api/Controllers/SettingsController.cs`, extend the
+  obfuscate-on-write check (currently `key == SiteSettingKeys.HomeAssistantToken`)
+  and the `Redact` helper to also cover `KioskWifiPassword`, so it's
+  obfuscated at rest and redacted on generic `GET /api/settings` — identical
+  treatment to `HomeAssistantToken`. In
+  `src/Aerie.Web/apps/admin/src/pages/SettingsPage.tsx`, append three entries
+  to the `FIELDS` array: SSID (text), Wi-Fi security type (text; help text
+  noting `WPA`/`WEP`/blank for open), Wi-Fi password (`type: 'password'`,
+  same "stored obfuscated, leave blank to keep current value" help text as
+  the HA token). No other admin changes needed — the page is already generic
+  over `FIELDS`.
+  - Verify: `npm run build` in `apps/admin`; run the API locally, confirm
+    the three new fields appear on the Settings page, save values, and
+    confirm `GET /api/settings` redacts the password field like
+    `HomeAssistantToken` does.
+
+- [ ] **`Aerie.Api`: same-origin provisioning-info endpoint.** Add
+  `- DOMAIN=${DOMAIN}` to the `api` service's `environment:` list in
+  `compose.prod.yml` (the value is already supplied by `cd.yml` at deploy
+  time; this hands it to the running process too, not just Caddy's label
+  interpolation). In `Program.cs`, register a named HTTP client pointed at
+  the `files` container over the internal `edge` Docker network (`api` and
+  `files` are already on that network together, same as how `db` is reached
+  by service name):
+  ```csharp
+  builder.Services.AddHttpClient("KioskFiles", c => c.BaseAddress = new Uri("http://files/"));
+  ```
+  Add `Controllers/KioskProvisioningController.cs` exposing
+  `GET /api/kiosk/provisioning-info`, no auth needed (nothing here is more
+  sensitive than what `HomeAssistantConnectionManager` already handles
+  internally; mirrors `UiLogsController`'s same-origin, no-CORS precedent).
+  Reads `KioskWifiSsid` / `KioskWifiSecurityType` / `KioskWifiPassword`
+  (deobfuscated via `SecretObfuscator.Deobfuscate`, same pattern as
+  `HomeAssistantConnectionManager.ApplyAsync`) and `TimeZone` directly off
+  `AerieContext.SiteSettings`, and the checksum from
+  `http://files/signature-checksum.txt`, returning:
   ```json
   {
-    "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": "family.landis.aeriekiosk/.KioskDeviceAdminReceiver",
-    "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": "https://files.landis.family/app-release.apk",
-    "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM": "<checksum from above>",
-    "android.app.extra.PROVISIONING_WIFI_SSID": "<your SSID>",
-    "android.app.extra.PROVISIONING_WIFI_PASSWORD": "<your Wi-Fi password>",
-    "android.app.extra.PROVISIONING_WIFI_SECURITY_TYPE": "WPA",
-    "android.app.extra.PROVISIONING_LOCALE": "en_US",
-    "android.app.extra.PROVISIONING_TIME_ZONE": "America/New_York",
-    "android.app.extra.PROVISIONING_SKIP_ENCRYPTION": true,
-    "android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED": true
+    "signatureChecksum": "<from http://files/signature-checksum.txt>",
+    "apkDownloadUrl": "https://files.<DOMAIN>/app-release.apk",
+    "deviceAdminComponentName": "family.landis.aeriekiosk/.KioskDeviceAdminReceiver",
+    "wifiSsid": "<KioskWifiSsid setting>",
+    "wifiPassword": "<KioskWifiPassword setting, deobfuscated>",
+    "wifiSecurityType": "<KioskWifiSecurityType setting>",
+    "timeZone": "<TimeZone setting>"
   }
   ```
-  `PROVISIONING_WIFI_SECURITY_TYPE` is `"WPA"` for WPA/WPA2-PSK networks,
-  `"WEP"` for WEP, or omit the key entirely for an open network.
+  `apkDownloadUrl` built from `IConfiguration["DOMAIN"]`; component name is a
+  constant matching `applicationId`/`namespace` in
+  `apps/kiosk/app/build.gradle.kts` and `KioskDeviceAdminReceiver.kt`. If
+  `KioskWifiSsid` isn't set yet, return the fields as empty strings rather
+  than erroring — the admin page (next item) handles that state.
+  - Verify: run the API locally (or temporarily point the HttpClient at
+    `https://files.$DOMAIN` for a manual check), save Wi-Fi settings from the
+    previous item, hit `/api/kiosk/provisioning-info`, confirm the JSON
+    shape, that the password comes back in plaintext (not the obfuscated DB
+    value), and that the checksum matches the first item's output.
 
-  If `PACKAGE_CHECKSUM` (hash of the whole APK file) gets rejected on-device,
-  fall back to `android.app.extra.PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM`
-  (hash of the signing cert instead — survives future rebuilds without
-  changing):
-  ```
-  keytool -export -alias aerie-kiosk -keystore ~/keys/aerie-kiosk-release.jks -rfc \
-    | openssl x509 -outform DER \
-    | openssl dgst -sha256 -binary | openssl base64 | tr '+/' '-_' | tr -d '='
-  ```
-- [ ] Generate the QR code **locally** (never paste the JSON into a
-  web-based QR generator — it contains your Wi-Fi password):
-  ```
-  brew install qrencode   # one-time
-  jq -c . provisioning.json | qrencode -o kiosk-provision-qr.png -l L -s 10
-  ```
+- [ ] **Admin app: Provisioning page.** Add `qrcode` (pure-JS, renders
+  straight to a `<canvas>`, no network calls) as a dependency of
+  `src/Aerie.Web/apps/admin`. Add `getKioskProvisioningInfo()` to
+  `src/api/client.ts` (same `fetchJson` pattern as the other calls) and a
+  matching type to `src/types.ts`. Add `src/pages/ProvisioningPage.tsx`,
+  wired into `App.tsx`'s nav and `Routes` at `/provisioning`, following the
+  existing pages' layout conventions. On mount, fetch the provisioning info;
+  if `wifiSsid` comes back empty, show a prompt/link to configure it on
+  Settings first instead of rendering a QR. Otherwise assemble the
+  provisioning JSON object (same shape as the old hand-built
+  `provisioning.json` above, e.g.
+  `android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME`,
+  `..._SIGNATURE_CHECKSUM`, `..._WIFI_SSID`, etc. — see
+  `docs/` or prior git history for the full extras list if needed) from the
+  response and render it via
+  `QRCode.toCanvas(canvasRef, JSON.stringify(payload), ...)` into an
+  on-screen canvas, plus a small display of which SSID/APK it's encoding so
+  it's obvious at a glance if Settings need updating first. Add a "Copy
+  JSON" convenience button for the USB/adb fallback path.
+  - Verify: `npm run dev` in `apps/admin`, open `/provisioning`, confirm it
+    loads the Wi-Fi info saved in the previous item and renders a live QR;
+    `npm run lint && npm run build` clean. UI/browser verification of the
+    actual tablet scan is left to you, not automated here.
+
+- [ ] **Retire this note.** Once the above is deployed and confirmed working
+  end-to-end, delete this note — the checklist above fully replaces the old
+  curl/openssl/`jq`/`qrencode` workflow it superseded.
+
 - [ ] **Factory reset the tablet.** On the Welcome/language-select screen of
   setup (before signing in to anything), tap the same spot on the screen 6
   times to launch the QR provisioning scanner. (Exact trigger screen varies
   slightly by OEM/Android version.)
-- [ ] Scan `kiosk-provision-qr.png` (display it on your Mac or phone). The
-  tablet should join Wi-Fi, download the APK, verify the checksum, install
-  it, and set it as Device Owner automatically.
+- [ ] Scan the QR shown on the admin Provisioning page
+  (`home.$DOMAIN/apps/admin/provisioning`, display it on your Mac or phone).
+  The tablet should join Wi-Fi, download the APK, verify the checksum,
+  install it, and set it as Device Owner automatically.
 - [ ] If the setup wizard never offers a QR scanner at all (some
   budget/non-GMS-certified tablets omit it), fall back to the manual
   USB/adb method:
