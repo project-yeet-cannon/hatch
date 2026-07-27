@@ -31,40 +31,113 @@ provisioning" sections of the original plan for background.
   `./gradlew assembleRelease` produces an installable signed APK instead of
   the current unsigned one.
 
-- [x] Build the signed release APK:
-  ```
-  cd apps/kiosk && ./gradlew assembleRelease
-  ```
-  Output: `apps/kiosk/app/build/outputs/apk/release/app-release.apk`
+## 2. Build, sign, and publish in GitHub Actions
 
-## 2. Tablet provisioning (physical device)
+Building and signing now happens in CI instead of on your Mac, and the
+result is published straight to your compose stack — see
+`build-and-push-kiosk-image` in `.github/workflows/publish.yml`, the
+`files` service in `compose.prod.yml`, and `apps/kiosk/Dockerfile`.
 
-- [ ] **Factory reset the tablet.** During setup, when it asks to sign in,
-  choose "Skip" — do **not** add a Google account. (Device Owner
-  provisioning fails if any account exists; you'd have to reset again.)
-- [ ] Enable Developer Options: Settings → About tablet → tap "Build number"
-  7 times.
-- [ ] Enable USB debugging: Settings → System → Developer options → USB
-  debugging.
-- [ ] Connect the tablet to your Mac (USB, or `adb connect <tablet-ip>` over
-  Wi-Fi) and confirm it's visible:
+- [x] Add a `detect-kiosk-changes` + `build-and-push-kiosk-image` job to
+  `.github/workflows/publish.yml` that builds a signed release APK with
+  `./gradlew assembleRelease` (using a `local.properties` written from GitHub
+  secrets/variables, not the committed keystore) and bakes it into a tiny `nginx:alpine`
+  image (`apps/kiosk/Dockerfile`) pushed to
+  `ghcr.io/eouw0o83hf/aerie-kiosk-files`.
+- [x] Add a `files` service to `compose.prod.yml` running that image,
+  exposed at `https://files.${DOMAIN}` via the existing Caddy labels — no
+  new CD job needed, since `cd.yml`'s existing `docker compose pull && up -d`
+  already picks up the new image on every deploy.
+- [ ] One-time setup: add three repo secrets so CI can sign the APK without
+  the keystore ever touching the repo, plus one repo variable for the key
+  alias (not a secret, since it's just a label and it's useful to be able to
+  read it back later):
   ```
-  adb devices
+  KIOSK_RELEASE_KEYSTORE_BASE64   # secret — base64 -i ~/keys/aerie-kiosk-release.jks
+  KIOSK_RELEASE_STORE_PASSWORD    # secret
+  KIOSK_RELEASE_KEY_ALIAS         # variable — aerie-kiosk
+  KIOSK_RELEASE_KEY_PASSWORD      # secret
   ```
-  Accept the "Allow USB debugging" prompt that appears on the tablet screen.
-- [ ] Install the signed APK:
   ```
-  adb install -r apps/kiosk/app/build/outputs/apk/release/app-release.apk
+  gh secret set KIOSK_RELEASE_KEYSTORE_BASE64 --repo <owner>/<repo> --body "$(base64 -i ~/keys/aerie-kiosk-release.jks)"
+  gh secret set KIOSK_RELEASE_STORE_PASSWORD --repo <owner>/<repo>
+  gh variable set KIOSK_RELEASE_KEY_ALIAS --repo <owner>/<repo> --body "aerie-kiosk"
+  gh secret set KIOSK_RELEASE_KEY_PASSWORD --repo <owner>/<repo>
   ```
-- [ ] Set the app as Device Owner (must happen **before** any account is
-  added, and before you've done anything else with the tablet post-reset):
+- [ ] Push a change under `apps/kiosk` (or re-run the workflow manually) and
+  confirm `Build and publish containers` → `build-and-push-kiosk-image`
+  succeeds, then confirm the `Deploy` workflow run after it picks up the new
+  `files` service.
+- [ ] Confirm `https://files.${DOMAIN}/app-release.apk` downloads the signed
+  APK from your LAN.
+
+## 3. Tablet provisioning (QR code, no cable)
+
+Android supports scanning a QR code during initial setup that joins Wi-Fi,
+downloads the DPC APK, verifies it, installs it, and sets it as Device Owner
+— all without adb or USB.
+
+- [ ] Compute the APK's checksum (SHA-256, base64url-encoded, no padding)
+  from the copy the tablet will actually fetch:
   ```
+  curl -fsSL https://files.${DOMAIN}/app-release.apk -o /tmp/app-release.apk
+  openssl dgst -sha256 -binary /tmp/app-release.apk \
+    | openssl base64 | tr '+/' '-_' | tr -d '='
+  ```
+- [ ] Build the provisioning JSON (fill in your checksum, Wi-Fi creds,
+  timezone). Save as e.g. `provisioning.json` — **do not commit this file**,
+  it contains your Wi-Fi password:
+  ```json
+  {
+    "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": "family.landis.aeriekiosk/.KioskDeviceAdminReceiver",
+    "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": "https://files.landis.family/app-release.apk",
+    "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM": "<checksum from above>",
+    "android.app.extra.PROVISIONING_WIFI_SSID": "<your SSID>",
+    "android.app.extra.PROVISIONING_WIFI_PASSWORD": "<your Wi-Fi password>",
+    "android.app.extra.PROVISIONING_WIFI_SECURITY_TYPE": "WPA",
+    "android.app.extra.PROVISIONING_LOCALE": "en_US",
+    "android.app.extra.PROVISIONING_TIME_ZONE": "America/New_York",
+    "android.app.extra.PROVISIONING_SKIP_ENCRYPTION": true,
+    "android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED": true
+  }
+  ```
+  `PROVISIONING_WIFI_SECURITY_TYPE` is `"WPA"` for WPA/WPA2-PSK networks,
+  `"WEP"` for WEP, or omit the key entirely for an open network.
+
+  If `PACKAGE_CHECKSUM` (hash of the whole APK file) gets rejected on-device,
+  fall back to `android.app.extra.PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM`
+  (hash of the signing cert instead — survives future rebuilds without
+  changing):
+  ```
+  keytool -export -alias aerie-kiosk -keystore ~/keys/aerie-kiosk-release.jks -rfc \
+    | openssl x509 -outform DER \
+    | openssl dgst -sha256 -binary | openssl base64 | tr '+/' '-_' | tr -d '='
+  ```
+- [ ] Generate the QR code **locally** (never paste the JSON into a
+  web-based QR generator — it contains your Wi-Fi password):
+  ```
+  brew install qrencode   # one-time
+  jq -c . provisioning.json | qrencode -o kiosk-provision-qr.png -l L -s 10
+  ```
+- [ ] **Factory reset the tablet.** On the Welcome/language-select screen of
+  setup (before signing in to anything), tap the same spot on the screen 6
+  times to launch the QR provisioning scanner. (Exact trigger screen varies
+  slightly by OEM/Android version.)
+- [ ] Scan `kiosk-provision-qr.png` (display it on your Mac or phone). The
+  tablet should join Wi-Fi, download the APK, verify the checksum, install
+  it, and set it as Device Owner automatically.
+- [ ] If the setup wizard never offers a QR scanner at all (some
+  budget/non-GMS-certified tablets omit it), fall back to the manual
+  USB/adb method:
+  ```
+  adb devices                                                  # confirm device visible
+  adb install -r /tmp/app-release.apk
   adb shell dpm set-device-owner family.landis.aeriekiosk/.KioskDeviceAdminReceiver
   ```
-  It should print `Success: Device owner set...`. If it instead complains
-  about existing accounts or users, you'll need to factory reset again and
-  skip account setup more carefully.
-- [ ] Launch the app once (from the tablet, or
+  This must happen before any account is added — if `dpm` complains about
+  existing accounts, factory reset again and retry.
+- [ ] Launch the app once (from the tablet, or connect wireless adb —
+  Settings → Developer options → Wireless debugging — and run
   `adb shell am start -n family.landis.aeriekiosk/.MainActivity`). It should
   load the dashboard fullscreen and lock itself in — no status bar, no way
   to swipe to recents/home.

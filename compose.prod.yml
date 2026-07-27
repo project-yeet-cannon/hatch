@@ -44,6 +44,15 @@ services:
       caddy_1.reverse_proxy: "{{upstreams 8080}}"
     logging: *container-log-tag
 
+  files:
+    image: ghcr.io/eouw0o83hf/aerie-kiosk-files:latest
+    networks:
+      - edge
+    labels:
+      caddy: files.${DOMAIN}
+      caddy.reverse_proxy: "{{upstreams 80}}"
+    logging: *container-log-tag
+
   caddy:
     image: ghcr.io/eouw0o83hf/aerie-caddy:latest
     restart: always
