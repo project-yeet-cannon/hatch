@@ -61,6 +61,11 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    # Local network DNS doesn't resolve public zones (e.g. Route53 NS/SOA),
+    # which breaks certmagic's DNS-01 zone lookup for ACME challenges.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - caddy_data:/data
