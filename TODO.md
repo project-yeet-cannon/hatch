@@ -68,7 +68,7 @@ result is published straight to your compose stack — see
   confirm `Build and publish containers` → `build-and-push-kiosk-image`
   succeeds, then confirm the `Deploy` workflow run after it picks up the new
   `files` service.
-- [ ] Confirm `https://files.${DOMAIN}/app-release.apk` downloads the signed
+- [x] Confirm `https://files.${DOMAIN}/app-release.apk` downloads the signed
   APK from your LAN.
 
 ## 3. Tablet provisioning (QR code, no cable)
@@ -82,7 +82,7 @@ signing-cert checksum is computed by CI when the APK is signed, and the QR
 code itself is generated on demand by a Provisioning page in the admin app,
 reading live Wi-Fi settings instead of being baked into a build artifact.
 
-- [ ] **CI: compute & publish the signing-cert checksum.** In
+- [x] **CI: compute & publish the signing-cert checksum.** In
   `build-and-push-kiosk-image` (`.github/workflows/publish.yml`), add a step
   after "Build signed release APK" and before "Remove keystore" (keystore
   must still be on disk) that runs:

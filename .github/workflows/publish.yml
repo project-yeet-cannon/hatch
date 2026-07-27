@@ -274,6 +274,18 @@ jobs:
         working-directory: apps/kiosk
         run: ./gradlew assembleRelease
 
+      - name: Compute signing-cert checksum
+        env:
+          RELEASE_KEY_ALIAS: ${{ vars.KIOSK_RELEASE_KEY_ALIAS }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.KIOSK_RELEASE_STORE_PASSWORD }}
+        run: |
+          KEYSTORE_PATH="$RUNNER_TEMP/aerie-kiosk-release.jks"
+          keytool -export -alias "$RELEASE_KEY_ALIAS" -keystore "$KEYSTORE_PATH" \
+              -storepass "$RELEASE_STORE_PASSWORD" -rfc \
+            | openssl x509 -outform DER \
+            | openssl dgst -sha256 -binary | openssl base64 | tr '+/' '-_' | tr -d '=' \
+            > apps/kiosk/signature-checksum.txt
+
       - name: Remove keystore (no longer needed once the APK is signed)
         if: always()
         run: rm -f "$RUNNER_TEMP/aerie-kiosk-release.jks"

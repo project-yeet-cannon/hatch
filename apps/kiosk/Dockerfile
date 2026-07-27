@@ -5,3 +5,4 @@
 FROM nginx:alpine
 
 COPY app/build/outputs/apk/release/app-release.apk /usr/share/nginx/html/app-release.apk
+COPY signature-checksum.txt /usr/share/nginx/html/signature-checksum.txt
