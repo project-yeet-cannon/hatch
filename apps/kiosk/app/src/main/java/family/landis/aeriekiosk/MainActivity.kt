@@ -3,21 +3,24 @@ package family.landis.aeriekiosk
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import org.mozilla.geckoview.AllowOrDeny
+import org.mozilla.geckoview.GeckoResult
+import org.mozilla.geckoview.GeckoRuntime
+import org.mozilla.geckoview.GeckoSession
+import org.mozilla.geckoview.GeckoView
+import org.mozilla.geckoview.WebRequestError
 
 private const val DASHBOARD_URL = "https://kiosk.landis.family/"
 private const val DASHBOARD_HOST = "kiosk.landis.family"
@@ -26,7 +29,13 @@ private const val RETRY_DELAY_MS_MAX = 30_000L
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var webView: WebView
+    companion object {
+        // GeckoRuntime may only be created once per process, so it's held here
+        // rather than on the activity, which can be recreated.
+        private var runtime: GeckoRuntime? = null
+    }
+
+    private lateinit var geckoSession: GeckoSession
     private lateinit var reconnectingOverlay: TextView
     private val retryHandler = Handler(Looper.getMainLooper())
     private var currentRetryDelayMs = RETRY_DELAY_MS_INITIAL
@@ -37,7 +46,7 @@ class MainActivity : AppCompatActivity() {
         hideSystemBars()
 
         setContentView(buildContentView())
-        webView.loadUrl(DASHBOARD_URL)
+        geckoSession.loadUri(DASHBOARD_URL)
 
         enterLockTaskIfDeviceOwner()
     }
@@ -75,12 +84,20 @@ class MainActivity : AppCompatActivity() {
     private fun buildContentView(): FrameLayout {
         val root = FrameLayout(this)
 
-        webView = WebView(this).apply {
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            webViewClient = KioskWebViewClient()
+        val geckoRuntime = runtime ?: GeckoRuntime.create(this).also { runtime = it }
+        geckoSession = GeckoSession().apply {
+            navigationDelegate = KioskNavigationDelegate()
+            progressDelegate = KioskProgressDelegate()
+            // Empty delegate works around GeckoView bug 1758212, where content
+            // never renders without one registered, even a no-op.
+            setContentDelegate(object : GeckoSession.ContentDelegate {})
+            open(geckoRuntime)
         }
-        root.addView(webView, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+
+        val geckoView = GeckoView(this).apply {
+            setSession(geckoSession)
+        }
+        root.addView(geckoView, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
 
         reconnectingOverlay = TextView(this).apply {
             text = getString(R.string.reconnecting_message)
@@ -98,35 +115,39 @@ class MainActivity : AppCompatActivity() {
         return root
     }
 
-    private inner class KioskWebViewClient : WebViewClient() {
-
-        // Keeps the WebView pinned to the dashboard's own origin so there's no way
-        // to navigate (via a stray link, redirect, etc.) to a different site.
-        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-            return request.url.host != DASHBOARD_HOST
+    // Keeps the session pinned to the dashboard's own origin so there's no way
+    // to navigate (via a stray link, redirect, etc.) to a different site.
+    private inner class KioskNavigationDelegate : GeckoSession.NavigationDelegate {
+        override fun onLoadRequest(
+            session: GeckoSession,
+            request: GeckoSession.NavigationDelegate.LoadRequest,
+        ): GeckoResult<AllowOrDeny> {
+            val allowed = Uri.parse(request.uri).host == DASHBOARD_HOST
+            return GeckoResult.fromValue(if (allowed) AllowOrDeny.ALLOW else AllowOrDeny.DENY)
         }
 
-        override fun onPageFinished(view: WebView, url: String?) {
-            super.onPageFinished(view, url)
+        override fun onLoadError(
+            session: GeckoSession,
+            uri: String?,
+            error: WebRequestError,
+        ): GeckoResult<String> {
+            scheduleRetry()
+            return GeckoResult.fromValue(null)
+        }
+    }
+
+    private inner class KioskProgressDelegate : GeckoSession.ProgressDelegate {
+        override fun onPageStop(session: GeckoSession, success: Boolean) {
+            if (!success) return
             currentRetryDelayMs = RETRY_DELAY_MS_INITIAL
             reconnectingOverlay.visibility = View.GONE
         }
+    }
 
-        override fun onReceivedError(
-            view: WebView,
-            request: WebResourceRequest,
-            error: WebResourceError,
-        ) {
-            super.onReceivedError(view, request, error)
-            if (!request.isForMainFrame) return
-            scheduleRetry()
-        }
-
-        private fun scheduleRetry() {
-            reconnectingOverlay.visibility = View.VISIBLE
-            retryHandler.postDelayed({ webView.loadUrl(DASHBOARD_URL) }, currentRetryDelayMs)
-            currentRetryDelayMs = (currentRetryDelayMs * 2).coerceAtMost(RETRY_DELAY_MS_MAX)
-        }
+    private fun scheduleRetry() {
+        reconnectingOverlay.visibility = View.VISIBLE
+        retryHandler.postDelayed({ geckoSession.loadUri(DASHBOARD_URL) }, currentRetryDelayMs)
+        currentRetryDelayMs = (currentRetryDelayMs * 2).coerceAtMost(RETRY_DELAY_MS_MAX)
     }
 
     override fun onDestroy() {

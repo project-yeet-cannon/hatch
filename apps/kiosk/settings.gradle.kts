@@ -11,6 +11,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // GeckoView (Firefox's engine, embedded standalone) - only published here.
+        maven { url = uri("https://maven.mozilla.org/maven2/") }
     }
 }
 

@@ -4,7 +4,10 @@
   },
   "permissions": {
     "allow": [
-      "Bash(unset -f node npm npx)"
+      "Bash(unset -f node npm npx)",
+      "Bash(curl -s -o /dev/null -w \"logs.landis.family -> HTTP %{http_code}\\\\n\" https://logs.landis.family/ --max-time 5)",
+      "WebFetch(domain:firefox-source-docs.mozilla.org)",
+      "WebFetch(domain:mozilla.github.io)"
     ]
   }
 }
