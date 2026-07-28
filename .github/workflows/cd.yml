@@ -51,7 +51,7 @@ jobs:
       # not the real host's). Install-if-missing, then converge the service
       # state on every deploy — same idempotency bar as kuma-provision.
       - name: Ensure windows_exporter is installed and running
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
           $version = "0.31.8"
