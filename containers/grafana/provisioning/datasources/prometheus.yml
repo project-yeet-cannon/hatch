@@ -4,6 +4,10 @@ apiVersion: 1
 
 datasources:
   - name: Prometheus
+    # Fixed uid so provisioned dashboard JSON (containers/grafana/provisioning/dashboards)
+    # can reference this datasource directly instead of via Grafana's
+    # pick-a-datasource template variable.
+    uid: prometheus
     type: prometheus
     access: proxy
     # Both services share the `metrics` bridge network (compose.metrics.yml),

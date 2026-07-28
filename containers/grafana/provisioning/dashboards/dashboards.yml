@@ -1,0 +1,14 @@
+# File-provisioned dashboards, applied on every Grafana start — see
+# TODO.md's "provisioned from files, not clicked through" decision. Grafana
+# polls this directory and loads/updates any *.json dashboard it finds.
+apiVersion: 1
+
+providers:
+  - name: metrics
+    folder: ""
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false
