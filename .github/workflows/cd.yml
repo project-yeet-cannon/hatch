@@ -57,10 +57,16 @@ jobs:
           $version = "0.31.8"
           if (-not (Get-Service -Name windows_exporter -ErrorAction SilentlyContinue)) {
             $msiPath = Join-Path $env:TEMP "windows_exporter-$version-amd64.msi"
+            $logPath = Join-Path $env:TEMP "windows_exporter-install.log"
             $msiUrl = "https://github.com/prometheus-community/windows_exporter/releases/download/v$version/windows_exporter-$version-amd64.msi"
             Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath
-            Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /qn" -Wait
+            $proc = Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /qn /L*V `"$logPath`"" -Wait -PassThru
+            if ($proc.ExitCode -ne 0) {
+              Get-Content $logPath -Tail 40 -ErrorAction SilentlyContinue | Write-Output
+              throw "windows_exporter install failed with exit code $($proc.ExitCode)"
+            }
             Remove-Item $msiPath -ErrorAction SilentlyContinue
+            Remove-Item $logPath -ErrorAction SilentlyContinue
           }
           Set-Service -Name windows_exporter -StartupType Automatic
           if ((Get-Service -Name windows_exporter).Status -ne 'Running') {
