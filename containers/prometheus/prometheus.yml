@@ -1,0 +1,19 @@
+# Static scrape targets only (no service discovery) — see TODO.md's
+# "Scrape topology" decision. node-exporter/cadvisor run with
+# network_mode: host on the primary host, so they're reached via the
+# host-gateway address rather than a Docker network alias.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: node-exporter
+    static_configs:
+      - targets: ["host.docker.internal:9100"]
+
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["host.docker.internal:8080"]

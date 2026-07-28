@@ -33,12 +33,12 @@ Same process as `docs/monitoring-alerting-architecture.md`: implemented one chec
 - [x] `[code]` 1. Add `node-exporter` service to `compose.metrics.yml` (or the relevant compose file per host) — host CPU/RAM/disk/network.
 - [x] `[code]` 2. Add `cadvisor` service alongside it on every Docker host — per-container CPU/RAM/network/block IO. Needs read access to `/var/run/docker.sock`, `/sys/fs/cgroup`, `/var/lib/docker` (read-only mounts).
 - [x] `[manual]` 3. For non-Docker hosts identified above, install the appropriate exporter natively.
-- [ ] `[verify]` 4. `curl` each host's `node-exporter:9100/metrics` and `cadvisor:8080/metrics` and confirm real data.
+- [x] `[verify]` 4. `curl` each host's `node-exporter:9100/metrics` and `cadvisor:8080/metrics` and confirm real data.
 
 #### Phase 2 — Central Prometheus
 
-- [ ] `[code]` 1. Add `prometheus` service to `compose.metrics.yml` on the primary host, with a committed `containers/prometheus/prometheus.yml` listing static scrape targets for every host's `node-exporter`/`cadvisor`.
-- [ ] `[code]` 2. Retention/storage volume (`prometheus_data`), sane retention window (e.g. 15-30d — cluster-scale metrics don't need OpenSearch's 30d log retention reasoning, just enough for trend dashboards).
+- [x] `[code]` 1. Add `prometheus` service to `compose.metrics.yml` on the primary host, with a committed `containers/prometheus/prometheus.yml` listing static scrape targets for every host's `node-exporter`/`cadvisor`.
+- [x] `[code]` 2. Retention/storage volume (`prometheus_data`), sane retention window (e.g. 15-30d — cluster-scale metrics don't need OpenSearch's 30d log retention reasoning, just enough for trend dashboards).
 - [ ] `[verify]` 3. Prometheus's own targets page (`/targets`, loopback-only like OpenSearch's 9200) shows every host `UP`.
 
 #### Phase 3 — Grafana dashboards
