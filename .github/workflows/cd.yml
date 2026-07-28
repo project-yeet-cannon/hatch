@@ -29,6 +29,7 @@ jobs:
           sparse-checkout: |
             compose.prod.yml
             compose.observability.yml
+            compose.metrics.yml
             containers/kuma-provision
             containers/autokuma
             containers/fluent-bit
