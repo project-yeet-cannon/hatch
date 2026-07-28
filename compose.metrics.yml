@@ -26,7 +26,13 @@ services:
     logging: *container-log-tag
 
   cadvisor:
-    image: ghcr.io/google/cadvisor:0.56.0
+    # Pinned to the linux/amd64 manifest digest rather than the `0.56.0` tag.
+    # The tag's manifest list also carries BuildKit provenance/SBOM entries
+    # tagged platform unknown/unknown (no filesystem layers); some Docker/
+    # containerd versions mis-resolve those instead of the real per-arch
+    # manifest, producing a container with no /usr/bin/entrypoint.sh at all.
+    # Pinning by digest skips that resolution step.
+    image: ghcr.io/google/cadvisor@sha256:4fc8189f80011fbbbdfdc3933741a84a34d4ac382d49deb2fbc59d815a69cfef
     restart: always
     network_mode: host
     # Only per-container stats are needed here — node-exporter above already
