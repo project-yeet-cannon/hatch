@@ -24,3 +24,17 @@ services:
       - --path.rootfs=/host/root
       - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
     logging: *container-log-tag
+
+  cadvisor:
+    image: ghcr.io/google/cadvisor:0.56.0
+    restart: always
+    network_mode: host
+    # Only per-container stats are needed here — node-exporter above already
+    # covers host-level CPU/RAM/disk/network — so this skips the classic
+    # /rootfs and full /sys bind mounts and only grants the three paths
+    # cAdvisor needs for container-level cgroup/storage stats.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    logging: *container-log-tag

@@ -31,7 +31,7 @@ Same process as `docs/monitoring-alerting-architecture.md`: implemented one chec
 #### Phase 1 — Host + container metrics collection
 
 - [x] `[code]` 1. Add `node-exporter` service to `compose.metrics.yml` (or the relevant compose file per host) — host CPU/RAM/disk/network.
-- [ ] `[code]` 2. Add `cadvisor` service alongside it on every Docker host — per-container CPU/RAM/network/block IO. Needs read access to `/var/run/docker.sock`, `/sys/fs/cgroup`, `/var/lib/docker` (read-only mounts).
+- [x] `[code]` 2. Add `cadvisor` service alongside it on every Docker host — per-container CPU/RAM/network/block IO. Needs read access to `/var/run/docker.sock`, `/sys/fs/cgroup`, `/var/lib/docker` (read-only mounts).
 - [ ] `[manual]` 3. For non-Docker hosts identified above, install the appropriate exporter natively.
 - [ ] `[verify]` 4. `curl` each host's `node-exporter:9100/metrics` and `cadvisor:8080/metrics` and confirm real data.
 
@@ -68,7 +68,7 @@ Same process as `docs/monitoring-alerting-architecture.md`: implemented one chec
 | Service | Image | Role | Runs on |
 | --- | --- | --- | --- |
 | `node-exporter` | `prom/node-exporter` | Host CPU/RAM/disk/network metrics | every host |
-| `cadvisor` | `gcr.io/cadvisor/cadvisor` | Per-container CPU/RAM/network/IO metrics | every Docker host |
+| `cadvisor` | `ghcr.io/google/cadvisor` | Per-container CPU/RAM/network/IO metrics | every Docker host |
 | `prometheus` | `prom/prometheus` | Central scrape + TSDB storage | primary host |
 | `grafana` | `grafana/grafana` | Dashboards, incl. top-consumers view | primary host |
 
