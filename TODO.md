@@ -13,9 +13,9 @@ Proposed decisions for this round:
 
 ## Open questions to resolve before Phase 1
 
-- [ ] **Enumerate every host in the cluster.** This repo's compose files currently describe one server. List every additional machine that should show up on this dashboard (NAS, Pi, pfSense box, secondary compute, etc.) and for each: does it run Docker already, or is it bare-metal/appliance-only?
-- [ ] For any non-Docker host (e.g. a Synology NAS, pfSense), decide the collection method per-host — most have either a native `node_exporter` package/binary or a vendor-specific exporter (e.g. Synology's SNMP, a pfSense `node_exporter` pkg). These won't follow the "add a compose service" pattern below and need a one-off install step each.
-- [ ] Confirm free RAM across the cluster for Prometheus (retention-dependent, budget ~1-2GB for a homelab-scale TSDB) + Grafana (~150MB) on the primary host, and ~negligible for `node_exporter`/`cAdvisor` on each satellite host.
+- [x] **Enumerate every host in the cluster.** Resolved 2026-07-27: scoping to just the primary Aerie host for now (single Docker host, matching what `compose.prod.yml` already describes). Additional hosts can be added later as a follow-up, not blocking this round.
+- [x] For any non-Docker host — n/a this round, see above.
+- [x] Confirm free RAM on the primary host — confirmed 2026-07-27, plenty of headroom for Prometheus + Grafana + node-exporter/cAdvisor.
 
 ## Implementation Progress
 
@@ -25,12 +25,12 @@ Same process as `docs/monitoring-alerting-architecture.md`: implemented one chec
 
 #### Prerequisites
 
-- [ ] `[manual]` Resolve the open questions above (host inventory + collection method per host).
-- [ ] `[manual]` Confirm free RAM per host (see above).
+- [x] `[manual]` Resolve the open questions above (host inventory + collection method per host).
+- [x] `[manual]` Confirm free RAM per host (see above).
 
 #### Phase 1 — Host + container metrics collection
 
-- [ ] `[code]` 1. Add `node-exporter` service to `compose.metrics.yml` (or the relevant compose file per host) — host CPU/RAM/disk/network.
+- [x] `[code]` 1. Add `node-exporter` service to `compose.metrics.yml` (or the relevant compose file per host) — host CPU/RAM/disk/network.
 - [ ] `[code]` 2. Add `cadvisor` service alongside it on every Docker host — per-container CPU/RAM/network/block IO. Needs read access to `/var/run/docker.sock`, `/sys/fs/cgroup`, `/var/lib/docker` (read-only mounts).
 - [ ] `[manual]` 3. For non-Docker hosts identified above, install the appropriate exporter natively.
 - [ ] `[verify]` 4. `curl` each host's `node-exporter:9100/metrics` and `cadvisor:8080/metrics` and confirm real data.

@@ -1,0 +1,26 @@
+# Attaches each container's Compose service name to its own log lines (via
+# the json-file driver's `attrs`), so fluent-bit can derive a `service`
+# field per line for OpenSearch. See containers/fluent-bit/service_tag.lua.
+x-logging: &container-log-tag
+  options:
+    labels: "com.docker.compose.service"
+
+services:
+  node-exporter:
+    image: prom/node-exporter:v1.9.1
+    restart: always
+    # Host-level metrics require reading the host's own /proc, /sys, and
+    # root filesystem — mounted read-only and pointed at via --path.* flags
+    # rather than running with --pid host/--net host.
+    pid: host
+    network_mode: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host/root
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    logging: *container-log-tag
