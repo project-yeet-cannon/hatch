@@ -45,6 +45,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Host-level metrics run natively on Windows (not in Docker Desktop —
+      # see TODO.md Phase 3's "Blocked on 2026-07-28" note: a container's
+      # /proc, /sys, and root filesystem under the WSL2 backend are the VM's,
+      # not the real host's). Install-if-missing, then converge the service
+      # state on every deploy — same idempotency bar as kuma-provision.
+      - name: Ensure windows_exporter is installed and running
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "0.31.8"
+          if (-not (Get-Service -Name windows_exporter -ErrorAction SilentlyContinue)) {
+            $msiPath = Join-Path $env:TEMP "windows_exporter-$version-amd64.msi"
+            $msiUrl = "https://github.com/prometheus-community/windows_exporter/releases/download/v$version/windows_exporter-$version-amd64.msi"
+            Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath
+            Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /qn" -Wait
+            Remove-Item $msiPath -ErrorAction SilentlyContinue
+          }
+          Set-Service -Name windows_exporter -StartupType Automatic
+          if ((Get-Service -Name windows_exporter).Status -ne 'Running') {
+            Start-Service -Name windows_exporter
+          }
 
       - name: Pull and start the stack
         working-directory: .

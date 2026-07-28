@@ -6,24 +6,12 @@ x-logging: &container-log-tag
     labels: "com.docker.compose.service"
 
 services:
-  node-exporter:
-    image: prom/node-exporter:v1.9.1
-    restart: always
-    # Host-level metrics require reading the host's own /proc, /sys, and
-    # root filesystem — mounted read-only and pointed at via --path.* flags
-    # rather than running with --pid host/--net host.
-    pid: host
-    network_mode: host
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/host/root:ro
-    command:
-      - --path.procfs=/host/proc
-      - --path.sysfs=/host/sys
-      - --path.rootfs=/host/root
-      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
-    logging: *container-log-tag
+  # Host-level metrics come from windows_exporter running natively on the
+  # Windows host (installed by .github/workflows/cd.yml), not a container —
+  # under Docker Desktop's WSL2 backend, a container's /proc, /sys, and root
+  # filesystem are the VM's, not the real Windows host's, so node_exporter
+  # here could never report genuine host CPU/RAM/disk. See TODO.md Phase 3's
+  # "Blocked on 2026-07-28" note.
 
   cadvisor:
     image: ghcr.io/google/cadvisor:0.56.0
@@ -34,11 +22,16 @@ services:
     # shebang without needing a custom image.
     entrypoint: ["/bin/sh", "/usr/bin/entrypoint.sh"]
     restart: always
-    network_mode: host
-    # Only per-container stats are needed here — node-exporter above already
-    # covers host-level CPU/RAM/disk/network — so this skips the classic
-    # /rootfs and full /sys bind mounts and only grants the three paths
-    # cAdvisor needs for container-level cgroup/storage stats.
+    networks:
+      - metrics
+    # Only per-container stats are needed here — host-level CPU/RAM/disk/
+    # network comes from windows_exporter instead — so this skips the
+    # classic /rootfs and full /sys bind mounts and only grants the three
+    # paths cAdvisor needs for container-level cgroup/storage stats. Plain
+    # bridge networking (not network_mode: host): under Docker Desktop,
+    # host-mode containers sit in the WSL2 VM's own network namespace, which
+    # Prometheus can't reach via host.docker.internal — service-name
+    # resolution on the `metrics` network works regardless of host OS.
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /sys/fs/cgroup:/sys/fs/cgroup:ro
@@ -50,10 +43,9 @@ services:
     restart: always
     networks:
       - metrics
-    # node-exporter/cadvisor above use network_mode: host, so they're not
-    # reachable by container/network alias — this maps host.docker.internal
-    # to the host's real IP as seen from the bridge network (see
-    # prometheus.yml's scrape targets).
+    # windows_exporter runs natively on the Windows host, not in a
+    # container — this maps host.docker.internal to the host's real IP as
+    # seen from the bridge network (see prometheus.yml's scrape targets).
     extra_hosts:
       - host.docker.internal:host-gateway
     volumes:

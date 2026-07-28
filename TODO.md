@@ -50,6 +50,20 @@ Same process as `docs/monitoring-alerting-architecture.md`: implemented one chec
 - [x] `[code]` 5. Caddy subdomain `metrics.${DOMAIN}` (label pair on the `grafana` service, matching the existing pattern — no other wiring needed per `reverse-proxy-architecture.md`).
 - [ ] `[verify]` 6. Load `metrics.${DOMAIN}`, confirm both dashboards populate with live data and the top-consumers panel correctly highlights the heaviest containers.
 
+Blocked on 2026-07-28: the primary Aerie host turned out to be Windows Server running Docker Desktop (WSL2 backend), not bare Linux as originally scoped — the "Enumerate every host" open question above only established host *count*, not OS. This breaks two assumptions in Phases 1-3:
+
+- `network_mode: host` under Docker Desktop binds to the WSL2 VM's network namespace, not the real Windows machine, so `host.docker.internal` (Prometheus's scrape target) can't reach `node-exporter`/`cadvisor` — confirmed via `connection refused` on Prometheus's `/targets` page.
+- Even if reachable, a container's `/proc`/`/sys`/`/` under Docker Desktop are the WSL2 VM's, not the real Windows host's — `node_exporter` can structurally never report genuine Windows CPU/RAM/disk this way, only the VM's own view. `cadvisor`'s per-container stats are unaffected (sourced from the Docker daemon itself, accurate regardless of network mode).
+
+Follow-up items below fix cadvisor's reachability and replace `node_exporter` with `windows_exporter` running natively on the Windows host, matching the "correct fix" (not the Docker-Desktop-VM-passing-as-host-metrics shortcut) — same root-cause-over-bandaid bar as the rest of this stack.
+
+- [x] `[code]` 7. Fix `cadvisor` reachability: drop `network_mode: host` from `cadvisor` in `compose.metrics.yml`, join it to the `metrics` network instead, and change its scrape target in `prometheus.yml` from `host.docker.internal:8080` to `cadvisor:8080` (service-name resolution, same pattern already used for the `prometheus` job itself). No mount changes needed — `docker.sock`/`cgroup`/`docker` paths aren't network-mode-dependent.
+- [x] `[code]` 8. Remove `node-exporter` from `compose.metrics.yml` and its scrape job from `prometheus.yml` — see "Blocked" note above for why it can't report real host metrics here.
+- [x] `[code]` 9. Add a `windows_exporter` install/service step to `.github/workflows/cd.yml`'s `deploy` job, running directly on the Windows self-hosted runner host (not in Docker) — idempotent across re-deploys, same "converges on every run" bar as `kuma-provision`. Pinned to v0.31.8 (latest stable as of 2026-07-28).
+- [x] `[code]` 10. Add a `windows-exporter` scrape job to `prometheus.yml` targeting `host.docker.internal:9182` (windows_exporter's default port) — this address correctly reaches the real Windows host from a container, unlike host-network-mode containers (see item 7).
+- [x] `[code]` 11. Swap `containers/grafana/provisioning/dashboards/node-exporter-full.json` for a windows_exporter-compatible community dashboard — metric names differ (`windows_cpu_time_total` etc., not `node_cpu_seconds_total`), so the existing dashboard JSON won't render against this data source. Used community dashboard 14510 ("Windows Node 2021"), re-pointed from its original `${DS_PROMETHEUS}` import-time placeholder to the fixed `prometheus` datasource uid so it loads via file provisioning with no manual click-through; saved as `containers/grafana/provisioning/dashboards/windows-exporter.json`.
+- [ ] `[verify]` 12. Confirm `windows-exporter` and `cadvisor` both show `up` on Prometheus's `/targets` page, then reload `metrics.${DOMAIN}` and confirm both dashboards populate with live data (supersedes item 6).
+
 #### Phase 4 — Alerting tie-in (optional, later)
 
 - [ ] `[manual]` Decide whether threshold alerts (host disk >90%, container OOM-killed, sustained CPU saturation) route through Grafana's own alerting or reuse the existing Home Assistant notify webhook pattern from `monitoring-alerting-architecture.md` Phase 4, for one consistent "alerts hit your phone" path instead of two.
