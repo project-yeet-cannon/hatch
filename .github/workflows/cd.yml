@@ -56,5 +56,5 @@ jobs:
           HA_PORT: ${{ vars.HA_PORT }}
           HA_TOKEN: ${{ secrets.HA_TOKEN }}
         run: |
-          docker compose -f compose.prod.yml -f compose.observability.yml pull
-          docker compose -f compose.prod.yml -f compose.observability.yml up -d
+          docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml pull
+          docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml up -d

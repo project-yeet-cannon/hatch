@@ -32,7 +32,7 @@ Same process as `docs/monitoring-alerting-architecture.md`: implemented one chec
 
 - [x] `[code]` 1. Add `node-exporter` service to `compose.metrics.yml` (or the relevant compose file per host) — host CPU/RAM/disk/network.
 - [x] `[code]` 2. Add `cadvisor` service alongside it on every Docker host — per-container CPU/RAM/network/block IO. Needs read access to `/var/run/docker.sock`, `/sys/fs/cgroup`, `/var/lib/docker` (read-only mounts).
-- [ ] `[manual]` 3. For non-Docker hosts identified above, install the appropriate exporter natively.
+- [x] `[manual]` 3. For non-Docker hosts identified above, install the appropriate exporter natively.
 - [ ] `[verify]` 4. `curl` each host's `node-exporter:9100/metrics` and `cadvisor:8080/metrics` and confirm real data.
 
 #### Phase 2 — Central Prometheus
