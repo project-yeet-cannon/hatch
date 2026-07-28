@@ -75,6 +75,7 @@ services:
       - edge
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./containers/grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
     labels:
