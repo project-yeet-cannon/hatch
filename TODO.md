@@ -39,11 +39,11 @@ Same process as `docs/monitoring-alerting-architecture.md`: implemented one chec
 
 - [x] `[code]` 1. Add `prometheus` service to `compose.metrics.yml` on the primary host, with a committed `containers/prometheus/prometheus.yml` listing static scrape targets for every host's `node-exporter`/`cadvisor`.
 - [x] `[code]` 2. Retention/storage volume (`prometheus_data`), sane retention window (e.g. 15-30d — cluster-scale metrics don't need OpenSearch's 30d log retention reasoning, just enough for trend dashboards).
-- [ ] `[verify]` 3. Prometheus's own targets page (`/targets`, loopback-only like OpenSearch's 9200) shows every host `UP`.
+- [x] `[verify]` 3. Prometheus's own targets page (`/targets`, loopback-only like OpenSearch's 9200) shows every host `UP`.
 
 #### Phase 3 — Grafana dashboards
 
-- [ ] `[code]` 1. Add `grafana` service to `compose.metrics.yml`, joined to `edge` for `metrics.${DOMAIN}`.
+- [x] `[code]` 1. Add `grafana` service to `compose.metrics.yml`, joined to `edge` for `metrics.${DOMAIN}`.
 - [ ] `[code]` 2. Provision the Prometheus datasource from a committed YAML file (`containers/grafana/provisioning/datasources/`), not clicked through.
 - [ ] `[code]` 3. Provision two dashboards from committed JSON (`containers/grafana/provisioning/dashboards/`): a well-known community "Node Exporter Full" dashboard (per-host CPU/RAM/disk/network) and a "Docker/cAdvisor" dashboard with a top-consumers-by-CPU and top-consumers-by-RAM panel (sorted table/bar gauge, cluster-wide).
 - [ ] `[manual]` 4. First-run: set a real Grafana admin password (env var at deploy time, same GitHub Actions secrets pattern as `HA_TOKEN`).
