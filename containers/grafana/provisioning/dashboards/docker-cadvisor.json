@@ -2,11 +2,11 @@
   "id": null,
   "uid": "docker-cadvisor",
   "title": "Docker / cAdvisor",
-  "description": "Cluster-wide top-consumer view over cAdvisor's per-container metrics.",
+  "description": "Per-container CPU and memory utilization from cAdvisor.",
   "tags": ["docker", "cadvisor"],
   "timezone": "browser",
   "schemaVersion": 38,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "graphTooltip": 1,
   "time": {
@@ -17,116 +17,127 @@
   "panels": [
     {
       "id": 1,
-      "title": "Top Containers by CPU Usage",
-      "description": "sum(rate(container_cpu_usage_seconds_total[5m])) by (name, instance), top 10, expressed as % of one core.",
-      "type": "bargauge",
+      "title": "Containers",
+      "description": "One row per container: CPU as % of one core, memory usage, and memory as % of the host/VM's total memory (machine_memory_bytes).",
+      "type": "table",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 0 },
+      "gridPos": { "h": 18, "w": 24, "x": 0, "y": 0 },
       "fieldConfig": {
         "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "color": { "mode": "thresholds" },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 50 },
-              { "color": "red", "value": 90 }
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" } }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Container" },
+            "properties": [{ "id": "custom.width", "value": 300 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "CPU %" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "decimals", "value": 1 },
+              { "id": "min", "value": 0 },
+              { "id": "max", "value": 100 },
+              { "id": "color", "value": { "mode": "thresholds" } },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green", "value": null },
+                    { "color": "yellow", "value": 50 },
+                    { "color": "red", "value": 90 }
+                  ]
+                }
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Memory" },
+            "properties": [
+              { "id": "unit", "value": "bytes" },
+              { "id": "decimals", "value": 1 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Memory %" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "decimals", "value": 1 },
+              { "id": "min", "value": 0 },
+              { "id": "max", "value": 100 },
+              { "id": "color", "value": { "mode": "thresholds" } },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green", "value": null },
+                    { "color": "yellow", "value": 50 },
+                    { "color": "red", "value": 90 }
+                  ]
+                }
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } }
             ]
           }
-        },
-        "overrides": []
+        ]
       },
       "options": {
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "showUnfilled": true,
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        }
+        "showHeader": true,
+        "cellHeight": "sm",
+        "sortBy": [{ "displayName": "Memory %", "desc": true }]
       },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "topk(10, sum(rate(container_cpu_usage_seconds_total{job=\"cadvisor\", name!=\"\"}[5m])) by (name, instance)) * 100",
-          "legendFormat": "{{name}}",
-          "instant": true,
-          "format": "time_series"
-        }
-      ],
-      "transformations": [
-        {
-          "id": "reduce",
-          "options": {
-            "reducers": ["lastNotNull"],
-            "mode": "seriesToRows"
-          }
+          "expr": "sum(rate(container_cpu_usage_seconds_total{job=\"cadvisor\", name!=\"\"}[5m])) by (name) * 100",
+          "format": "table",
+          "instant": true
         },
         {
-          "id": "sortBy",
-          "options": {
-            "fields": {},
-            "sort": [{ "field": "Value", "desc": true }]
-          }
-        }
-      ]
-    },
-    {
-      "id": 2,
-      "title": "Top Containers by Memory Usage",
-      "description": "sum(container_memory_usage_bytes) by (name, instance), top 10.",
-      "type": "bargauge",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 0 },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "bytes",
-          "min": 0,
-          "color": { "mode": "thresholds" },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [{ "color": "blue", "value": null }]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "showUnfilled": true,
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
+          "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "topk(10, sum(container_memory_usage_bytes{job=\"cadvisor\", name!=\"\"}) by (name, instance))",
-          "legendFormat": "{{name}}",
-          "instant": true,
-          "format": "time_series"
+          "expr": "sum(container_memory_usage_bytes{job=\"cadvisor\", name!=\"\"}) by (name)",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(container_memory_usage_bytes{job=\"cadvisor\", name!=\"\"}) by (name) / scalar(machine_memory_bytes{job=\"cadvisor\"}) * 100",
+          "format": "table",
+          "instant": true
         }
       ],
       "transformations": [
         {
-          "id": "reduce",
-          "options": {
-            "reducers": ["lastNotNull"],
-            "mode": "seriesToRows"
-          }
+          "id": "joinByField",
+          "options": { "byField": "name", "mode": "outer" }
         },
         {
-          "id": "sortBy",
+          "id": "organize",
           "options": {
-            "fields": {},
-            "sort": [{ "field": "Value", "desc": true }]
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true
+            },
+            "indexByName": {
+              "name": 0,
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3
+            },
+            "renameByName": {
+              "name": "Container",
+              "Value #A": "CPU %",
+              "Value #B": "Memory",
+              "Value #C": "Memory %"
+            }
           }
         }
       ]
