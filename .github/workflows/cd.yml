@@ -68,9 +68,26 @@ jobs:
             Remove-Item $msiPath -ErrorAction SilentlyContinue
             Remove-Item $logPath -ErrorAction SilentlyContinue
           }
+
+          # The MSI ships an empty config.yaml, which leaves windows_exporter
+          # on its built-in default collector set (cpu, logical_disk, memory,
+          # net, os, physical_disk, service, system) — notably missing `cs`
+          # (computer_system), which the Grafana dashboard's template
+          # variables ($job/$server/$hostname/$instance) all key off via
+          # windows_cs_hostname. `[defaults]` expands to that built-in set so
+          # this adds `cs` on top rather than hand-listing every collector.
+          $configPath = "C:\Program Files\windows_exporter\config.yaml"
+          $desiredConfig = "collectors:`n  enabled: `"[defaults],cs`"`n"
+          $configChanged = -not (Test-Path $configPath) -or ((Get-Content $configPath -Raw -ErrorAction SilentlyContinue) -ne $desiredConfig)
+          if ($configChanged) {
+            Set-Content -Path $configPath -Value $desiredConfig -NoNewline
+          }
+
           Set-Service -Name windows_exporter -StartupType Automatic
           if ((Get-Service -Name windows_exporter).Status -ne 'Running') {
             Start-Service -Name windows_exporter
+          } elseif ($configChanged) {
+            Restart-Service -Name windows_exporter
           }
 
       - name: Pull and start the stack
