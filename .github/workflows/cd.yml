@@ -49,7 +49,10 @@ jobs:
       # see TODO.md Phase 3's "Blocked on 2026-07-28" note: a container's
       # /proc, /sys, and root filesystem under the WSL2 backend are the VM's,
       # not the real host's). Install-if-missing, then converge the service
-      # state on every deploy — same idempotency bar as kuma-provision.
+      # state on every deploy — same idempotency bar as kuma-provision. The
+      # Grafana dashboard's hostname template variables key off
+      # windows_os_hostname, which the `os` collector already emits as part
+      # of the built-in default set — no extra collectors needed.
       - name: Ensure windows_exporter is installed and running
         shell: powershell
         run: |
@@ -69,25 +72,9 @@ jobs:
             Remove-Item $logPath -ErrorAction SilentlyContinue
           }
 
-          # The MSI ships an empty config.yaml, which leaves windows_exporter
-          # on its built-in default collector set (cpu, logical_disk, memory,
-          # net, os, physical_disk, service, system) — notably missing `cs`
-          # (computer_system), which the Grafana dashboard's template
-          # variables ($job/$server/$hostname/$instance) all key off via
-          # windows_cs_hostname. `[defaults]` expands to that built-in set so
-          # this adds `cs` on top rather than hand-listing every collector.
-          $configPath = "C:\Program Files\windows_exporter\config.yaml"
-          $desiredConfig = "collectors:`n  enabled: `"[defaults],cs`"`n"
-          $configChanged = -not (Test-Path $configPath) -or ((Get-Content $configPath -Raw -ErrorAction SilentlyContinue) -ne $desiredConfig)
-          if ($configChanged) {
-            Set-Content -Path $configPath -Value $desiredConfig -NoNewline
-          }
-
           Set-Service -Name windows_exporter -StartupType Automatic
           if ((Get-Service -Name windows_exporter).Status -ne 'Running') {
             Start-Service -Name windows_exporter
-          } elseif ($configChanged) {
-            Restart-Service -Name windows_exporter
           }
 
       - name: Pull and start the stack

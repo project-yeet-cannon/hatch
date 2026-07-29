@@ -225,7 +225,7 @@
       ],
       "targets": [
         {
-          "expr": "windows_os_info{job=~\"$job\"} * on(instance) group_right(product) windows_cs_hostname",
+          "expr": "windows_os_info{job=~\"$job\"} * on(instance) group_right(product) windows_os_hostname",
           "format": "table",
           "instant": true,
           "interval": "",
@@ -265,7 +265,7 @@
           "refId": "I"
         },
         {
-          "expr": "windows_cs_physical_memory_bytes{job=~\"$job\"} - 0",
+          "expr": "windows_memory_physical_total_bytes{job=~\"$job\"} - 0",
           "format": "table",
           "instant": true,
           "interval": "",
@@ -273,7 +273,7 @@
           "refId": "C"
         },
         {
-          "expr": "100 - 100 * windows_os_physical_memory_free_bytes{job=~\"$job\"} / windows_cs_physical_memory_bytes{job=~\"$job\"}",
+          "expr": "100 - 100 * windows_os_physical_memory_free_bytes{job=~\"$job\"} / windows_memory_physical_total_bytes{job=~\"$job\"}",
           "format": "table",
           "instant": true,
           "interval": "",
@@ -523,7 +523,7 @@
           "application": {
             "filter": ""
           },
-          "expr": "windows_cs_physical_memory_bytes{instance=~\"$server\"}",
+          "expr": "windows_memory_physical_total_bytes{instance=~\"$server\"}",
           "functions": [],
           "group": {
             "filter": ""
@@ -2414,7 +2414,7 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "definition": "label_values(windows_cs_hostname, job)",
+        "definition": "label_values(windows_os_hostname, job)",
         "description": null,
         "error": null,
         "hide": 0,
@@ -2424,7 +2424,7 @@
         "name": "job",
         "options": [],
         "query": {
-          "query": "label_values(windows_cs_hostname, job)",
+          "query": "label_values(windows_os_hostname, job)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 1,
@@ -2444,7 +2444,7 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "definition": "label_values(windows_cs_hostname{job=~\"$job\"}, hostname)",
+        "definition": "label_values(windows_os_hostname{job=~\"$job\"}, hostname)",
         "description": null,
         "error": null,
         "hide": 0,
@@ -2454,7 +2454,7 @@
         "name": "hostname",
         "options": [],
         "query": {
-          "query": "label_values(windows_cs_hostname{job=~\"$job\"}, hostname)",
+          "query": "label_values(windows_os_hostname{job=~\"$job\"}, hostname)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 1,
@@ -2474,7 +2474,7 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "definition": "label_values(windows_cs_hostname{job=~\"$job\",hostname=~\"$hostname\"}, instance)",
+        "definition": "label_values(windows_os_hostname{job=~\"$job\",hostname=~\"$hostname\"}, instance)",
         "description": null,
         "error": null,
         "hide": 0,
@@ -2484,7 +2484,7 @@
         "name": "instance",
         "options": [],
         "query": {
-          "query": "label_values(windows_cs_hostname{job=~\"$job\",hostname=~\"$hostname\"}, instance)",
+          "query": "label_values(windows_os_hostname{job=~\"$job\",hostname=~\"$hostname\"}, instance)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 1,
@@ -2504,7 +2504,7 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "definition": "label_values(windows_cs_hostname{job=~\"$job\",instance=~\"$instance\"}, hostname)",
+        "definition": "label_values(windows_os_hostname{job=~\"$job\",instance=~\"$instance\"}, hostname)",
         "description": null,
         "error": null,
         "hide": 0,
@@ -2514,7 +2514,7 @@
         "name": "show_hostname",
         "options": [],
         "query": {
-          "query": "label_values(windows_cs_hostname{job=~\"$job\",instance=~\"$instance\"}, hostname)",
+          "query": "label_values(windows_os_hostname{job=~\"$job\",instance=~\"$instance\"}, hostname)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 1,
