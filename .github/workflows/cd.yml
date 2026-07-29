@@ -95,4 +95,5 @@ jobs:
       # Port 9090 is loopback-only (see compose.metrics.yml), reachable
       # here since this runner lives on the same host as the Docker daemon.
       - name: Reload Prometheus config
-        run: curl -sf -X POST http://localhost:9090/-/reload
+        shell: powershell
+        run: Invoke-WebRequest -Method Post -Uri http://localhost:9090/-/reload -UseBasicParsing | Out-Null
