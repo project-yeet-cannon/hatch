@@ -51,10 +51,16 @@ services:
     volumes:
       - ./containers/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
+    # --web.enable-lifecycle exposes POST /-/reload, which cd.yml calls
+    # after every deploy. Compose recreates a service only when the service
+    # definition itself changes, not when a bind-mounted file's contents
+    # change — a prometheus.yml-only edit would otherwise leave this
+    # container running its old, already-loaded config indefinitely.
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
     ports:
       - "127.0.0.1:9090:9090" # loopback-only, for setup/debug curl access
     logging: *container-log-tag
