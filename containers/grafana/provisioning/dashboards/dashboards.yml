@@ -1,6 +1,7 @@
 # File-provisioned dashboards, applied on every Grafana start — see
-# TODO.md's "provisioned from files, not clicked through" decision. Grafana
-# polls this directory and loads/updates any *.json dashboard it finds.
+# docs/metrics-architecture.md's "provisioned from files, not clicked
+# through" decision. Grafana polls this directory and loads/updates any
+# *.json dashboard it finds.
 apiVersion: 1
 
 providers:

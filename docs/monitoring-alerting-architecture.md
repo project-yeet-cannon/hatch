@@ -330,7 +330,7 @@ No UI yet — just get data flowing and durable.
 ## Deferred / not in this round
 
 - **Auth on Dashboards/OpenSearch/Kuma's Caddy front door.** When it's time: re-enable `DISABLE_SECURITY_DASHBOARDS_PLUGIN`/`DISABLE_SECURITY_PLUGIN` (OpenSearch's built-in security plugin, real accounts) *or* add a Caddy `basic_auth` label (bcrypt hash via `caddy hash-password`) in front of each `edge`-exposed service — either is a small, additive change against what's built here, not a rearchitecture.
-- **Metrics/dashboards** (Prometheus + Grafana + node-exporter/cAdvisor, or host CPU/memory/disk trends generally) — not part of the original ask (logging + status + alerting), would be a legitimate Phase 5 later if wanted.
+- **Metrics/dashboards** (Prometheus + Grafana + host/cAdvisor exporters, or host CPU/memory/disk trends generally) — not part of the original ask (logging + status + alerting). Implemented separately, see [`metrics-architecture.md`](metrics-architecture.md).
 - **SMS/text alerting** — no viable free/self-hosted path exists (would require a paid gateway like Twilio); HA notify (push) covers the "alerting channel" requirement instead.
 - **Broader homelab log ingestion** (pfSense, HA itself, NAS) — Fluent Bit's `tail` input generalizes to this later; not blocked by anything above.
 

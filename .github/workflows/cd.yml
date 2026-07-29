@@ -46,7 +46,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Host-level metrics run natively on Windows (not in Docker Desktop —
-      # see TODO.md Phase 3's "Blocked on 2026-07-28" note: a container's
+      # see docs/metrics-architecture.md's "Windows Server detour" note: a container's
       # /proc, /sys, and root filesystem under the WSL2 backend are the VM's,
       # not the real host's). Install-if-missing, then converge the service
       # state on every deploy — same idempotency bar as kuma-provision. The

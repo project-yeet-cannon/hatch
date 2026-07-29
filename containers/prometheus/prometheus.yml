@@ -1,8 +1,9 @@
-# Static scrape targets only (no service discovery) — see TODO.md's
-# "Scrape topology" decision. cadvisor is a container on the `metrics`
-# network, reached by service name. windows_exporter runs natively on the
-# Windows host (not in Docker — see TODO.md Phase 3's "Blocked on
-# 2026-07-28" note), reached via the host-gateway address instead.
+# Static scrape targets only (no service discovery) — see
+# docs/metrics-architecture.md's "Scrape topology" decision. cadvisor is a
+# container on the `metrics` network, reached by service name.
+# windows_exporter runs natively on the Windows host (not in Docker — see
+# docs/metrics-architecture.md's "Windows Server detour" note), reached via
+# the host-gateway address instead.
 global:
   scrape_interval: 15s
 

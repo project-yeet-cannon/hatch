@@ -10,8 +10,8 @@ services:
   # Windows host (installed by .github/workflows/cd.yml), not a container —
   # under Docker Desktop's WSL2 backend, a container's /proc, /sys, and root
   # filesystem are the VM's, not the real Windows host's, so node_exporter
-  # here could never report genuine host CPU/RAM/disk. See TODO.md Phase 3's
-  # "Blocked on 2026-07-28" note.
+  # here could never report genuine host CPU/RAM/disk. See
+  # docs/metrics-architecture.md's "Windows Server detour" note.
 
   cadvisor:
     image: ghcr.io/google/cadvisor:0.56.0
