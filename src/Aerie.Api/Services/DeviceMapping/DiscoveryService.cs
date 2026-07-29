@@ -62,7 +62,7 @@ public class DiscoveryService(TemplateClient template, AerieContext db) : IDisco
 
         var climateEntity = entityIds.FirstOrDefault(id => id.StartsWith("climate.", StringComparison.Ordinal));
         if (climateEntity is not null)
-            return new UnmappedHaDevice(group.Key, name, DeviceKind.Thermostat, entityIds, ThermostatChannels(climateEntity));
+            return new UnmappedHaDevice(group.Key, name, DeviceKind.Thermostat, entityIds, ThermostatChannels(climateEntity, entityIds));
 
         var switchEntity = entityIds.FirstOrDefault(id => id.StartsWith("switch.", StringComparison.Ordinal));
         if (switchEntity is not null)
@@ -74,14 +74,30 @@ public class DiscoveryService(TemplateClient template, AerieContext db) : IDisco
         return new UnmappedHaDevice(group.Key, name, kind, entityIds, sensorChannels);
     }
 
-    /// <summary>Mirrors DeviceMappingSeeder's climate.* channel set (Phase 1).</summary>
-    private static IReadOnlyList<DeviceChannelWriteRequest> ThermostatChannels(string entityId) =>
-    [
-        new(DeviceChannelMetric.Temperature, entityId, "current_temperature", ChannelDirection.Read),
-        new(DeviceChannelMetric.Humidity, entityId, "current_humidity", ChannelDirection.Read),
-        new(DeviceChannelMetric.SetpointTemperature, entityId, "temperature", ChannelDirection.ReadWrite),
-        new(DeviceChannelMetric.HvacAction, entityId, "hvac_action", ChannelDirection.Read),
-    ];
+    /// <summary>
+    /// Mirrors DeviceMappingSeeder's climate.* channel set (Phase 1), but prefers sibling
+    /// sensor.* entities for current temperature/humidity when the HA device exposes them
+    /// separately (e.g. newer Mysa baseboard thermostats) rather than as climate attributes.
+    /// </summary>
+    private static IReadOnlyList<DeviceChannelWriteRequest> ThermostatChannels(string climateEntityId, IReadOnlyList<string> entityIds)
+    {
+        var temperatureSensor = entityIds.FirstOrDefault(id =>
+            id.StartsWith("sensor.", StringComparison.Ordinal) && id.EndsWith("_temperature", StringComparison.Ordinal));
+        var humiditySensor = entityIds.FirstOrDefault(id =>
+            id.StartsWith("sensor.", StringComparison.Ordinal) && id.EndsWith("_humidity", StringComparison.Ordinal));
+
+        return
+        [
+            temperatureSensor is not null
+                ? new(DeviceChannelMetric.Temperature, temperatureSensor, null, ChannelDirection.Read)
+                : new(DeviceChannelMetric.Temperature, climateEntityId, "current_temperature", ChannelDirection.Read),
+            humiditySensor is not null
+                ? new(DeviceChannelMetric.Humidity, humiditySensor, null, ChannelDirection.Read)
+                : new(DeviceChannelMetric.Humidity, climateEntityId, "current_humidity", ChannelDirection.Read),
+            new(DeviceChannelMetric.SetpointTemperature, climateEntityId, "temperature", ChannelDirection.ReadWrite),
+            new(DeviceChannelMetric.HvacAction, climateEntityId, "hvac_action", ChannelDirection.Read),
+        ];
+    }
 
     /// <summary>A plain HA switch.* entity: bare entity state ("on"/"off"), no sub-attribute, read-write.</summary>
     private static IReadOnlyList<DeviceChannelWriteRequest> SwitchChannels(string entityId) =>
