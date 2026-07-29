@@ -107,6 +107,7 @@ builder.Services.AddScoped<IDeviceMappingSeeder, DeviceMappingSeeder>();
 builder.Services.AddScoped<IDiscoveryService, DiscoveryService>();
 builder.Services.AddScoped<IChannelHistoryWriter, ChannelHistoryWriter>();
 builder.Services.AddScoped<IHomeAssistantConnectionManager, HomeAssistantConnectionManager>();
+builder.Services.AddTransient<IHomeAssistantCommandService, HomeAssistantCommandService>();
 
 // Jobs
 builder.Services.AddTransient<IAerieJob, SampleChannels>();

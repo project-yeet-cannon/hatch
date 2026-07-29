@@ -64,6 +64,10 @@ public class DiscoveryService(TemplateClient template, AerieContext db) : IDisco
         if (climateEntity is not null)
             return new UnmappedHaDevice(group.Key, name, DeviceKind.Thermostat, entityIds, ThermostatChannels(climateEntity));
 
+        var switchEntity = entityIds.FirstOrDefault(id => id.StartsWith("switch.", StringComparison.Ordinal));
+        if (switchEntity is not null)
+            return new UnmappedHaDevice(group.Key, name, DeviceKind.SmartSwitch, entityIds, SwitchChannels(switchEntity));
+
         var sensorChannels = entityIds.Select(SensorChannel).OfType<DeviceChannelWriteRequest>().ToList();
         var kind = sensorChannels.Count > 0 ? DeviceKind.Hygrometer : (DeviceKind?)null;
 
@@ -77,6 +81,12 @@ public class DiscoveryService(TemplateClient template, AerieContext db) : IDisco
         new(DeviceChannelMetric.Humidity, entityId, "current_humidity", ChannelDirection.Read),
         new(DeviceChannelMetric.SetpointTemperature, entityId, "temperature", ChannelDirection.ReadWrite),
         new(DeviceChannelMetric.HvacAction, entityId, "hvac_action", ChannelDirection.Read),
+    ];
+
+    /// <summary>A plain HA switch.* entity: bare entity state ("on"/"off"), no sub-attribute, read-write.</summary>
+    private static IReadOnlyList<DeviceChannelWriteRequest> SwitchChannels(string entityId) =>
+    [
+        new(DeviceChannelMetric.PowerState, entityId, null, ChannelDirection.ReadWrite),
     ];
 
     /// <summary>Hygrometer-style entity: metric lives in the suffix, bare entity state (no HaAttribute) - see EnvironmentService.MapFromHa for the pattern this generalizes.</summary>

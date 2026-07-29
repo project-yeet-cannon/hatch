@@ -23,6 +23,9 @@ public record DeviceWriteRequest(string Name, DeviceKind Kind, Guid? ZoneId, str
 /// <summary>Time range for a BackfillChannelHistory job run (DevicesController.Backfill).</summary>
 public record BackfillRequest(DateTimeOffset From, DateTimeOffset To);
 
+/// <summary>Desired on/off state for a PowerState channel (DevicesController.SetPower).</summary>
+public record ChannelPowerRequest(bool On);
+
 public record SiteSettingDto(string Key, string Value);
 
 public record SiteSettingWriteRequest(string Value);

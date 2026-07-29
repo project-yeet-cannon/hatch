@@ -11,7 +11,7 @@ namespace Aerie.Api.Controllers;
 /// <summary>CRUD for Devices and their Channels, including assigning a Device to a Zone via Update (docs/device-architecture.md Phase 2).</summary>
 [ApiController]
 [Route("api/[controller]")]
-public class DevicesController(AerieContext db, IScheduler scheduler) : ControllerBase
+public class DevicesController(AerieContext db, IScheduler scheduler, IHomeAssistantCommandService command) : ControllerBase
 {
     [HttpGet]
     public async Task<IReadOnlyList<DeviceDto>> GetAll(CancellationToken ct)
@@ -114,6 +114,19 @@ public class DevicesController(AerieContext db, IScheduler scheduler) : Controll
         db.DeviceChannels.Remove(channel);
         await db.SaveChangesAsync(ct);
         return NoContent();
+    }
+
+    /// <summary>Turns a PowerState channel's underlying HA switch on/off. The channel's own Measurement/StateChange row updates on SampleChannels' next poll rather than here, matching every other ReadWrite channel's read latency.</summary>
+    [HttpPost("{id:guid}/channels/{channelId:guid}/power")]
+    public async Task<IActionResult> SetPower(Guid id, Guid channelId, ChannelPowerRequest request, CancellationToken ct)
+    {
+        var channel = await db.DeviceChannels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId && c.DeviceId == id, ct);
+        if (channel is null) return NotFound();
+        if (channel.Metric != DeviceChannelMetric.PowerState || channel.Direction != ChannelDirection.ReadWrite)
+            return BadRequest("Channel is not a writable PowerState channel");
+
+        await command.SetSwitchAsync(channel.HaEntityId, request.On);
+        return Accepted();
     }
 
     /// <summary>Triggers a one-time BackfillChannelHistory job run to pull [request.From, request.To) of HA history for this device's channels.</summary>

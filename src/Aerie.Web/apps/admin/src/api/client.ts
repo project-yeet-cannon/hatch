@@ -1,6 +1,7 @@
 import type {
   BackfillRequest,
   ChannelHistory,
+  ChannelPowerRequest,
   Device,
   DeviceChannel,
   DeviceChannelWriteRequest,
@@ -64,6 +65,9 @@ export const deleteChannel = (deviceId: string, channelId: string) =>
 
 export const triggerBackfill = (deviceId: string, request: BackfillRequest) =>
   fetchJson<void>(`/api/devices/${deviceId}/backfill`, { method: 'POST', ...asJson(request) });
+
+export const setChannelPower = (deviceId: string, channelId: string, request: ChannelPowerRequest) =>
+  fetchJson<void>(`/api/devices/${deviceId}/channels/${channelId}/power`, { method: 'POST', ...asJson(request) });
 
 export const getDeviceHistory = (deviceId: string, from?: string, to?: string, bucketMinutes?: number) =>
   fetchJson<DeviceHistory>(`/api/devices/${deviceId}/history${qs({ from, to, bucketMinutes })}`);

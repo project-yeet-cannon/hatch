@@ -25,7 +25,7 @@ export interface ZoneWriteRequest {
   included: boolean;
 }
 
-export type DeviceKind = 'Thermostat' | 'Hygrometer';
+export type DeviceKind = 'Thermostat' | 'Hygrometer' | 'SmartSwitch';
 
 export type DeviceChannelMetric =
   | 'Temperature'
@@ -33,7 +33,8 @@ export type DeviceChannelMetric =
   | 'Battery'
   | 'SetpointTemperature'
   | 'HvacAction'
-  | 'HeatingMode';
+  | 'HeatingMode'
+  | 'PowerState';
 
 export type ChannelDirection = 'Read' | 'ReadWrite';
 
@@ -76,6 +77,10 @@ export interface DeviceWriteRequest {
 export interface BackfillRequest {
   from: string;
   to: string;
+}
+
+export interface ChannelPowerRequest {
+  on: boolean;
 }
 
 export interface SiteSetting {

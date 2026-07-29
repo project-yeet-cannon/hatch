@@ -17,6 +17,7 @@ import {
   getDevices,
   getSettings,
   getZones,
+  setChannelPower,
   triggerBackfill,
   updateChannel,
   updateDevice,
@@ -59,8 +60,17 @@ const METRICS: DeviceChannelMetric[] = [
   "SetpointTemperature",
   "HvacAction",
   "HeatingMode",
+  "PowerState",
 ];
 const DIRECTIONS: ChannelDirection[] = ["Read", "ReadWrite"];
+
+function isPowerOn(channel: DeviceChannel): boolean {
+  return (channel.lastState ?? "").toLowerCase() === "on";
+}
+
+function isPowerChannel(channel: DeviceChannel): boolean {
+  return channel.metric === "PowerState" && channel.direction === "ReadWrite";
+}
 
 interface DeviceFormState {
   name: string;
@@ -329,6 +339,36 @@ export function DevicesPage() {
     }
   }
 
+  async function handleTogglePower(deviceId: string, channel: DeviceChannel) {
+    setError(null);
+    const nextOn = !isPowerOn(channel);
+    try {
+      await setChannelPower(deviceId, channel.id, { on: nextOn });
+      // The channel's own row updates on SampleChannels' next poll (~1min);
+      // reflect the commanded state locally in the meantime.
+      setDevices((prev) =>
+        prev.map((d) =>
+          d.id === deviceId
+            ? {
+                ...d,
+                channels: d.channels.map((c) =>
+                  c.id === channel.id
+                    ? {
+                        ...c,
+                        lastState: nextOn ? "on" : "off",
+                        lastValueAt: new Date().toISOString(),
+                      }
+                    : c,
+                ),
+              }
+            : d,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   function startBackfill(deviceId: string) {
     setBackfillingFor(deviceId);
     setBackfillForm(backfillPresetForm(1));
@@ -497,11 +537,21 @@ export function DevicesPage() {
                   <div className="mt-1">
                     {device.channels.map((channel) => (
                       <p
-                        className="text-muted"
+                        className="text-muted flex gap-1"
                         key={channel.id}
-                        style={{ margin: 0 }}
+                        style={{ margin: 0, alignItems: "center" }}
                       >
-                        {channel.metric}: {formatLastValue(channel)}
+                        <span>
+                          {channel.metric}: {formatLastValue(channel)}
+                        </span>
+                        {isPowerChannel(channel) && (
+                          <button
+                            className="btn-secondary"
+                            onClick={() => handleTogglePower(device.id, channel)}
+                          >
+                            Turn {isPowerOn(channel) ? "off" : "on"}
+                          </button>
+                        )}
                       </p>
                     ))}
                   </div>
@@ -683,6 +733,16 @@ export function DevicesPage() {
                           <td>{formatLastValue(channel)}</td>
                           <td>
                             <div className="flex gap-1">
+                              {isPowerChannel(channel) && (
+                                <button
+                                  className="btn-secondary"
+                                  onClick={() =>
+                                    handleTogglePower(device.id, channel)
+                                  }
+                                >
+                                  Turn {isPowerOn(channel) ? "off" : "on"}
+                                </button>
+                              )}
                               <button
                                 className="btn-secondary"
                                 onClick={() =>
@@ -807,6 +867,7 @@ function DeviceForm({
         >
           <option value="Thermostat">Thermostat</option>
           <option value="Hygrometer">Hygrometer</option>
+          <option value="SmartSwitch">Smart switch</option>
         </select>
       </div>
       <div className="field">
