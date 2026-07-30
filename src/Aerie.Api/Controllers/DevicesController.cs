@@ -13,6 +13,9 @@ namespace Aerie.Api.Controllers;
 [Route("api/[controller]")]
 public class DevicesController(AerieContext db, IScheduler scheduler, IHomeAssistantCommandService command) : ControllerBase
 {
+    /// <summary>Allowance for clock skew between this server and the client when rejecting "to" timestamps in the future.</summary>
+    private static readonly TimeSpan ClockSkewTolerance = TimeSpan.FromMinutes(20);
+
     [HttpGet]
     public async Task<IReadOnlyList<DeviceDto>> GetAll(CancellationToken ct)
     {
@@ -135,7 +138,7 @@ public class DevicesController(AerieContext db, IScheduler scheduler, IHomeAssis
     {
         if (!await db.Devices.AnyAsync(d => d.Id == id, ct)) return NotFound();
         if (request.From >= request.To) return BadRequest("from must be before to");
-        if (request.To > DateTimeOffset.UtcNow) return BadRequest("to cannot be in the future");
+        if (request.To > DateTimeOffset.UtcNow + ClockSkewTolerance) return BadRequest("to cannot be in the future");
 
         var data = new JobDataMap
         {
@@ -186,7 +189,7 @@ public class DevicesController(AerieContext db, IScheduler scheduler, IHomeAssis
         var bucket = bucketMinutes is > 0 ? TimeSpan.FromMinutes(bucketMinutes.Value) : TimeSpan.FromMinutes(15);
 
         if (resolvedFrom >= resolvedTo) error = "from must be before to";
-        else if (resolvedTo > DateTimeOffset.UtcNow) error = "to cannot be in the future";
+        else if (resolvedTo > DateTimeOffset.UtcNow + ClockSkewTolerance) error = "to cannot be in the future";
 
         return (resolvedFrom, resolvedTo, bucket);
     }
