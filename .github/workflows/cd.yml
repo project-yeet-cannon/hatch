@@ -109,16 +109,24 @@ jobs:
       # only inits a repo the first time it's ever seen — every deploy after
       # that is a no-op here. `-T` disables psuedo-TTY allocation, which
       # `exec` would otherwise fail on in a non-interactive runner.
+      #
+      # shell: powershell (not bash) — the runner service on this host runs
+      # as Local System, and `shell: bash` resolves to WSL's bash.exe stub in
+      # System32, which WSL refuses to run under Local System
+      # (WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED). The `sh -c` below still targets
+      # the Linux `backup` container, so only the outer runner shell changes.
       - name: Ensure restic repositories are initialized
         working-directory: .
-        shell: bash
+        shell: powershell
         run: |
-          docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml exec -T backup sh -c '
-            set -e
-            for REPO in "$RESTIC_REPOSITORY_LOCAL" "$RESTIC_REPOSITORY_S3"; do
-              restic -r "$REPO" snapshots >/dev/null 2>&1 || restic -r "$REPO" init
-            done
-          '
+          $script = @'
+          set -e
+          for REPO in "$RESTIC_REPOSITORY_LOCAL" "$RESTIC_REPOSITORY_S3"; do
+            restic -r "$REPO" snapshots >/dev/null 2>&1 || restic -r "$REPO" init
+          done
+          '@
+          docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml exec -T backup sh -c $script
+          if ($LASTEXITCODE -ne 0) { throw "restic init check failed with exit code $LASTEXITCODE" }
 
       # Compose only recreates a container when its own service definition
       # changes, not when a bind-mounted file's contents change — so a
