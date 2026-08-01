@@ -108,13 +108,20 @@ jobs:
       # restic errors on `init` against an already-initialized repo, so this
       # only inits a repo the first time it's ever seen — every deploy after
       # that is a no-op here. `-T` disables psuedo-TTY allocation, which
-      # `exec` would otherwise fail on in a non-interactive runner.
+      # `exec` would otherwise fail on in a non-interactive runner (and is
+      # what makes piping the script into stdin below work cleanly).
       #
       # shell: powershell (not bash) — the runner service on this host runs
       # as Local System, and `shell: bash` resolves to WSL's bash.exe stub in
       # System32, which WSL refuses to run under Local System
-      # (WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED). The `sh -c` below still targets
-      # the Linux `backup` container, so only the outer runner shell changes.
+      # (WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED). The script is piped into `sh`'s
+      # stdin rather than passed via `sh -c $script`, since a multi-line
+      # PowerShell string handed to a native command as an unquoted argument
+      # gets mangled when Windows PowerShell builds the process command
+      # line — it arrives at `sh` fragmented, e.g. as `set: line 0: illegal
+      # option -`. Piping avoids Win32 command-line quoting entirely; the
+      # target is still the Linux `backup` container, only the outer runner
+      # shell changes.
       - name: Ensure restic repositories are initialized
         working-directory: .
         shell: powershell
@@ -125,7 +132,7 @@ jobs:
             restic -r "$REPO" snapshots >/dev/null 2>&1 || restic -r "$REPO" init
           done
           '@
-          docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml exec -T backup sh -c $script
+          $script | docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml exec -T backup sh
           if ($LASTEXITCODE -ne 0) { throw "restic init check failed with exit code $LASTEXITCODE" }
 
       # Compose only recreates a container when its own service definition
