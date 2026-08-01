@@ -5,6 +5,11 @@ name: Build and publish containers
 # image optimistically and only pushes it once CI reports success for the
 # same commit (see .github/actions/wait-for-ci). This assumes main usually
 # builds cleanly; if CI fails, the already-built image is simply discarded.
+#
+# Note for any job below that uses sparse-checkout: a local `uses: ./path`
+# action is resolved from the workspace on disk, not fetched, so every such
+# job must also list .github/actions/wait-for-ci in its sparse-checkout or it
+# fails with "Can't find 'action.yml' ... under .github/actions/wait-for-ci".
 on:
   push:
     branches: [main]
@@ -99,6 +104,7 @@ jobs:
         with:
           sparse-checkout: |
             containers/aerie-db
+            .github/actions/wait-for-ci
 
       - name: Log in to the Container registry
         uses: docker/login-action@v2
@@ -174,6 +180,7 @@ jobs:
         with:
           sparse-checkout: |
             containers/backup
+            .github/actions/wait-for-ci
 
       - name: Log in to the Container registry
         uses: docker/login-action@v2
@@ -249,6 +256,7 @@ jobs:
         with:
           sparse-checkout: |
             containers/caddy
+            .github/actions/wait-for-ci
 
       - name: Log in to the Container registry
         uses: docker/login-action@v2
