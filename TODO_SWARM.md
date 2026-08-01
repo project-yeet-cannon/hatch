@@ -243,7 +243,7 @@ after it.*
       `containers/backup/scripts/verify-restore.sh`, weekly via cron, using
       `initdb`/`pg_ctl` from the image's own postgres install (no extra
       container or docker-socket access needed)
-- [ ] Write `docs/disaster-recovery.md`
+- [x] Write `docs/disaster-recovery.md`
 - [ ] **Perform one full restore onto a scratch VM**
 
 > **Gate:** do not start Phase 1 until a restore has actually been performed.
