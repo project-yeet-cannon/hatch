@@ -8,8 +8,8 @@ name: Build and publish containers
 #
 # Note for any job below that uses sparse-checkout: a local `uses: ./path`
 # action is resolved from the workspace on disk, not fetched, so every such
-# job must also list .github/actions/wait-for-ci in its sparse-checkout or it
-# fails with "Can't find 'action.yml' ... under .github/actions/wait-for-ci".
+# job must also list the action's directory in its sparse-checkout or it fails
+# with "Can't find 'action.yml' ... under .github/actions/<name>".
 on:
   push:
     branches: [main]
@@ -68,25 +68,29 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: read
     outputs:
-      db-changed: ${{ steps.filter.outputs.db }}
+      db-changed: ${{ steps.filter.outputs.changed }}
 
     steps:
       - name: Checkout repository
+        # fetch-depth: 0 - the diff is taken against whatever commit produced
+        # the currently published image, which can be arbitrarily far back.
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           sparse-checkout: |
             containers/aerie-db
+            .github/actions/detect-image-changes
 
       - name: Check for changes under containers/aerie-db
         id: filter
-        run: |
-          if git diff --quiet HEAD~1 HEAD -- containers/aerie-db; then
-            echo "db=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "db=true" >> "$GITHUB_OUTPUT"
-          fi
+        uses: ./.github/actions/detect-image-changes
+        with:
+          image: ghcr.io/eouw0o83hf/aerie-db
+          path: containers/aerie-db
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
 
   build-and-push-db-image:
     needs: detect-db-changes
@@ -144,25 +148,27 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: read
     outputs:
-      backup-changed: ${{ steps.filter.outputs.backup }}
+      backup-changed: ${{ steps.filter.outputs.changed }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           sparse-checkout: |
             containers/backup
+            .github/actions/detect-image-changes
 
       - name: Check for changes under containers/backup
         id: filter
-        run: |
-          if git diff --quiet HEAD~1 HEAD -- containers/backup; then
-            echo "backup=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "backup=true" >> "$GITHUB_OUTPUT"
-          fi
+        uses: ./.github/actions/detect-image-changes
+        with:
+          image: ghcr.io/eouw0o83hf/aerie-backup
+          path: containers/backup
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
 
   build-and-push-backup-image:
     needs: detect-backup-changes
@@ -220,25 +226,27 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: read
     outputs:
-      caddy-changed: ${{ steps.filter.outputs.caddy }}
+      caddy-changed: ${{ steps.filter.outputs.changed }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           sparse-checkout: |
             containers/caddy
+            .github/actions/detect-image-changes
 
       - name: Check for changes under containers/caddy
         id: filter
-        run: |
-          if git diff --quiet HEAD~1 HEAD -- containers/caddy; then
-            echo "caddy=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "caddy=true" >> "$GITHUB_OUTPUT"
-          fi
+        uses: ./.github/actions/detect-image-changes
+        with:
+          image: ghcr.io/eouw0o83hf/aerie-caddy
+          path: containers/caddy
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
 
   build-and-push-caddy-image:
     needs: detect-caddy-changes
@@ -296,25 +304,27 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: read
     outputs:
-      kiosk-changed: ${{ steps.filter.outputs.kiosk }}
+      kiosk-changed: ${{ steps.filter.outputs.changed }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           sparse-checkout: |
             apps/kiosk
+            .github/actions/detect-image-changes
 
       - name: Check for changes under apps/kiosk
         id: filter
-        run: |
-          if git diff --quiet HEAD~1 HEAD -- apps/kiosk; then
-            echo "kiosk=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "kiosk=true" >> "$GITHUB_OUTPUT"
-          fi
+        uses: ./.github/actions/detect-image-changes
+        with:
+          image: ghcr.io/eouw0o83hf/aerie-kiosk-files
+          path: apps/kiosk
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
 
   build-and-push-kiosk-image:
     needs: detect-kiosk-changes

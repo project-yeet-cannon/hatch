@@ -103,11 +103,20 @@ jobs:
             Start-Service -Name windows_exporter
           }
 
+      # The exit-code checks are load-bearing: this runs under PowerShell, where
+      # a multi-line `run:` only surfaces the *last* command's exit code. Without
+      # them a failed `pull` (e.g. "Error manifest unknown" for an image whose
+      # publish job never pushed) is masked by a successful `up -d`, and the
+      # deploy silently proceeds against whatever stale container is already
+      # running - the failure only shows up later, in whichever step first tries
+      # to use the new image.
       - name: Pull and start the stack
         working-directory: .
         run: |
           docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml pull
+          if ($LASTEXITCODE -ne 0) { throw "docker compose pull failed with exit code $LASTEXITCODE" }
           docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml up -d
+          if ($LASTEXITCODE -ne 0) { throw "docker compose up failed with exit code $LASTEXITCODE" }
 
       # The init logic itself lives in the image, at scripts/init-repos.sh, and
       # is invoked here by path. Do NOT inline it back into this file: shell

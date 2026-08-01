@@ -1,0 +1,97 @@
+name: Detect image changes
+description: >
+  Decides whether a path-filtered image needs rebuilding by diffing its build
+  path against the commit that produced the image currently published as
+  :latest — not against HEAD~1. A HEAD~1 diff only asks "did this commit touch
+  the directory", so a publish that fails after the build step (CI gate, push
+  error, cancelled run) is never retried: the next commit doesn't touch the
+  directory, the job is skipped, and the registry stays permanently behind the
+  source with nothing failing to say so. Anchoring on what is actually
+  published makes the next push to any part of the repo re-attempt the build,
+  so a transient publish failure heals itself.
+inputs:
+  image:
+    description: Image reference without a tag, e.g. ghcr.io/owner/name
+    required: true
+  path:
+    description: Repo-relative build path whose changes should trigger a rebuild
+    required: true
+  registry:
+    description: Registry host to authenticate against
+    required: false
+    default: ghcr.io
+  registry-username:
+    description: Username for the registry (needs pull access to `image`)
+    required: true
+  registry-password:
+    description: Password/token for the registry
+    required: true
+outputs:
+  changed:
+    description: "'true' if the image must be rebuilt, 'false' if it is up to date"
+    value: ${{ steps.detect.outputs.changed }}
+runs:
+  using: composite
+  steps:
+    - name: Log in to the container registry
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        REGISTRY_USERNAME: ${{ inputs.registry-username }}
+        REGISTRY_PASSWORD: ${{ inputs.registry-password }}
+      run: printf '%s' "$REGISTRY_PASSWORD" | docker login "$REGISTRY" -u "$REGISTRY_USERNAME" --password-stdin
+
+    - name: Compare build path against the published image
+      id: detect
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        BUILD_PATH: ${{ inputs.path }}
+      run: |
+        set -uo pipefail
+
+        # docker/metadata-action stamps org.opencontainers.image.revision with
+        # the building commit's SHA and build-push-action bakes it into the
+        # image config, so a published image carries its own provenance. Any
+        # failure below (package never published, tag deleted, label absent,
+        # registry hiccup) falls through to changed=true: rebuilding an image
+        # that didn't need it is cheap and self-correcting, whereas skipping
+        # one that did need it leaves production silently stale.
+        #
+        # `json .Image` + jq rather than a `{{ index .Image.Config.Labels ... }}`
+        # template: .Image is the image config for a single-platform image but a
+        # map keyed by platform ("linux/amd64", ...) for a multi-platform one,
+        # and the direct template silently resolves to nil on the latter. The
+        # recursive-descent search finds the Labels object under either shape.
+        image_json=$(docker buildx imagetools inspect "$IMAGE:latest" --format '{{ json .Image }}' 2>&1) || {
+          echo "Could not read $IMAGE:latest ($image_json) - rebuilding."
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        }
+
+        published_rev=$(printf '%s' "$image_json" | jq -r '
+          [ .. | objects | select(has("Labels"))
+            | .Labels["org.opencontainers.image.revision"] // empty ] | first // empty')
+
+        if [ -z "$published_rev" ]; then
+          echo "::warning::$IMAGE:latest carries no org.opencontainers.image.revision label - rebuilding."
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # A rev that isn't an ancestor here means history moved under us (force
+        # push, or an image published from a branch that never landed); there is
+        # no meaningful diff to take, so rebuild.
+        if ! git merge-base --is-ancestor "$published_rev" HEAD 2>/dev/null; then
+          echo "Published revision $published_rev is not an ancestor of HEAD - rebuilding."
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        if git diff --quiet "$published_rev" HEAD -- "$BUILD_PATH"; then
+          echo "$BUILD_PATH unchanged since published revision $published_rev - skipping build."
+          echo "changed=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "$BUILD_PATH changed since published revision $published_rev - rebuilding."
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+        fi
