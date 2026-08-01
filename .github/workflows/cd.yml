@@ -18,8 +18,33 @@ jobs:
     # [self-hosted, home-server]) if the runner has one configured.
     runs-on: self-hosted
 
+    # Job-level, not step-level: every `docker compose` invocation here
+    # interpolates these into the compose files, and a step that omits them
+    # doesn't fail — it silently resolves them to empty strings (visible only
+    # as "variable is not set" warnings). Declaring them once for the job means
+    # a new compose step can't accidentally run against blank config.
     env:
       DOCKER_HOST: tcp://localhost:2375
+      IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ACME_EMAIL: ${{ vars.ACME_EMAIL }}
+      DOMAIN: ${{ vars.DOMAIN }}
+      HA_HOST: ${{ vars.HA_HOST }}
+      HA_PORT: ${{ vars.HA_PORT }}
+      HA_TOKEN: ${{ secrets.HA_TOKEN }}
+      # Dedicated to the `backup` service's aerie-restic IAM user — kept
+      # separate from AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY above (which
+      # are Route53 credentials for caddy) so a leak of one doesn't expose
+      # the other. See compose.backup.yml, which maps these into the
+      # container's own AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY.
+      RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+      RESTIC_AWS_ACCESS_KEY_ID: ${{ secrets.RESTIC_AWS_ACCESS_KEY_ID }}
+      RESTIC_AWS_SECRET_ACCESS_KEY: ${{ secrets.RESTIC_AWS_SECRET_ACCESS_KEY }}
+      RESTIC_S3_REPOSITORY: ${{ vars.RESTIC_S3_REPOSITORY }}
+      RESTIC_AWS_REGION: ${{ vars.RESTIC_AWS_REGION }}
+      TZ: ${{ vars.TZ }}
 
     steps:
       - name: Checkout compose files
@@ -80,59 +105,32 @@ jobs:
 
       - name: Pull and start the stack
         working-directory: .
-        env:
-          IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ vars.AWS_REGION }}
-          ACME_EMAIL: ${{ vars.ACME_EMAIL }}
-          DOMAIN: ${{ vars.DOMAIN }}
-          HA_HOST: ${{ vars.HA_HOST }}
-          HA_PORT: ${{ vars.HA_PORT }}
-          HA_TOKEN: ${{ secrets.HA_TOKEN }}
-          # Dedicated to the `backup` service's aerie-restic IAM user — kept
-          # separate from AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY above (which
-          # are Route53 credentials for caddy) so a leak of one doesn't expose
-          # the other. See compose.backup.yml, which maps these into the
-          # container's own AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY.
-          RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
-          RESTIC_AWS_ACCESS_KEY_ID: ${{ secrets.RESTIC_AWS_ACCESS_KEY_ID }}
-          RESTIC_AWS_SECRET_ACCESS_KEY: ${{ secrets.RESTIC_AWS_SECRET_ACCESS_KEY }}
-          RESTIC_S3_REPOSITORY: ${{ vars.RESTIC_S3_REPOSITORY }}
-          RESTIC_AWS_REGION: ${{ vars.RESTIC_AWS_REGION }}
-          TZ: ${{ vars.TZ }}
         run: |
           docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml pull
           docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml up -d
 
-      # restic errors on `init` against an already-initialized repo, so this
-      # only inits a repo the first time it's ever seen — every deploy after
-      # that is a no-op here. `-T` disables psuedo-TTY allocation, which
-      # `exec` would otherwise fail on in a non-interactive runner (and is
-      # what makes piping the script into stdin below work cleanly).
+      # The init logic itself lives in the image, at scripts/init-repos.sh, and
+      # is invoked here by path. Do NOT inline it back into this file: shell
+      # source cannot survive the trip from a Windows runner into a Linux
+      # container. Passed as an argument, Windows PowerShell's Win32
+      # command-line quoting fragments it (`set: line 0: illegal option -`);
+      # piped to `sh`'s stdin, PowerShell encodes the stream as UTF-8 *with a
+      # BOM* and CRLF line endings, which `sh` reports as `﻿set: not found` and
+      # `syntax error: unexpected word (expecting "do")`. A fixed argv of plain
+      # ASCII tokens is the only form with no encoding or quoting surface.
       #
-      # shell: powershell (not bash) — the runner service on this host runs
-      # as Local System, and `shell: bash` resolves to WSL's bash.exe stub in
+      # shell: powershell (not bash) — the runner service on this host runs as
+      # Local System, and `shell: bash` resolves to WSL's bash.exe stub in
       # System32, which WSL refuses to run under Local System
-      # (WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED). The script is piped into `sh`'s
-      # stdin rather than passed via `sh -c $script`, since a multi-line
-      # PowerShell string handed to a native command as an unquoted argument
-      # gets mangled when Windows PowerShell builds the process command
-      # line — it arrives at `sh` fragmented, e.g. as `set: line 0: illegal
-      # option -`. Piping avoids Win32 command-line quoting entirely; the
-      # target is still the Linux `backup` container, only the outer runner
-      # shell changes.
+      # (WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED).
+      #
+      # `-T` disables pseudo-TTY allocation, which `exec` would otherwise fail
+      # on in a non-interactive runner.
       - name: Ensure restic repositories are initialized
         working-directory: .
         shell: powershell
         run: |
-          $script = @'
-          set -e
-          for REPO in "$RESTIC_REPOSITORY_LOCAL" "$RESTIC_REPOSITORY_S3"; do
-            restic -r "$REPO" snapshots >/dev/null 2>&1 || restic -r "$REPO" init
-          done
-          '@
-          $script | docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml exec -T backup sh
+          docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml exec -T backup /app/scripts/init-repos.sh
           if ($LASTEXITCODE -ne 0) { throw "restic init check failed with exit code $LASTEXITCODE" }
 
       # Compose only recreates a container when its own service definition

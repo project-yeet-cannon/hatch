@@ -266,6 +266,12 @@ Generated_Code/
 # because we have git ;-)
 _UpgradeReport_Files/
 Backup*/
+# ...but `Backup*/` is unanchored and, on a case-insensitive checkout
+# (core.ignorecase=true, i.e. every macOS clone), it also matches
+# containers/backup/ — the restic backup container's real source. Git won't
+# descend into an excluded directory, so the directory itself has to be
+# re-included here, not just its contents.
+!containers/backup/
 UpgradeLog*.XML
 UpgradeLog*.htm
 ServiceFabricBackup/

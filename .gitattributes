@@ -1,3 +1,8 @@
+# Scripts that run inside Linux containers must keep LF regardless of the
+# checkout platform — a CRLF-terminated `sh` script fails with obscure
+# "unexpected word" syntax errors, since the stray \r becomes part of a token.
+*.sh    text eol=lf
+
 # necessary for standard line endings for some reason
 *.cs    text
 *.json  text
