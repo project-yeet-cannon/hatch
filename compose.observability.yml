@@ -75,11 +75,17 @@ services:
       - discovery.type=single-node
       - DISABLE_SECURITY_PLUGIN=true
       - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      # Registers /mnt/snapshots as a valid `fs`-type snapshot repo location;
+      # the backup service (compose.backup.yml) shares this volume and
+      # registers the actual repo there. Without this, the snapshot API
+      # rejects any fs repo path as untrusted.
+      - path.repo=/mnt/snapshots
     ulimits:
       memlock: { soft: -1, hard: -1 }
       nofile: { soft: 65536, hard: 65536 }
     volumes:
       - opensearch_data:/usr/share/opensearch/data
+      - opensearch_snapshots:/mnt/snapshots
     ports:
       - "127.0.0.1:9200:9200" # loopback-only, for setup/debug curl access
     networks:
@@ -147,3 +153,4 @@ networks:
 volumes:
   uptime_kuma_data:
   opensearch_data:
+  opensearch_snapshots:

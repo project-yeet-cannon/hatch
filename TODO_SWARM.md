@@ -30,7 +30,7 @@ Moving Aerie from one Windows Docker host to a resilient 3-node cluster.
 | Volumes | **Longhorn**, except Postgres (see [Storage split](#storage-split)) |
 | Ingress IP | **kube-vip** ARP-mode floating VIP |
 | Backup | **restic** → local repo + **AWS S3**; CNPG WAL archiving to S3 |
-| Secrets | **SOPS + age**, encrypted in git |
+| Secrets | **SOPS + age**, encrypted in git (Phase 0's restic secrets are a scoped exception — see Phase 0) |
 | HA required | Postgres, API, kiosk `files`, ingress |
 | HA *not* required | Observability — reschedule-on-failure is acceptable |
 | Sequencing | **Backup + DR first**, on the current host, before any cluster work |
@@ -218,19 +218,38 @@ This step must not be skipped.
 *No cluster involved. Delivers goals 4 and 5 immediately and de-risks everything
 after it.*
 
-- [ ] restic repos: local (second disk) + AWS S3
-- [ ] Generate the repo password, store in SOPS, and **print it once for offline
-      storage** — a backup you can't decrypt isn't one
-- [ ] Back up correctly per service, not by copying volume directories:
+- [x] restic repos: local (second disk) + AWS S3 — `containers/backup/`
+      (built on `postgres:18.4-alpine` for a version-matched `pg_dumpall`),
+      wired in as `compose.backup.yml`. `cd.yml` inits both repos idempotently
+      on every deploy (`restic snapshots` fails → `restic init`)
+- [x] Generate the repo password, store as a **GitHub Actions secret**
+      (`RESTIC_PASSWORD`), and **print it once for offline storage** — a
+      backup you can't decrypt isn't one. *(Scoped deviation from the SOPS +
+      age decision above: Phase 0 needed a secret store before Phase 2 exists
+      to provide one. GitHub Actions secrets match the pattern already used
+      for the Route53/HA credentials — `RESTIC_PASSWORD` /
+      `RESTIC_AWS_ACCESS_KEY_ID` / `RESTIC_AWS_SECRET_ACCESS_KEY`, kept
+      separate from caddy's Route53 credentials via a dedicated `aerie-restic`
+      IAM user, scoped to only the backup bucket — and get replaced by SOPS +
+      age when Phase 2 lands.)*
+- [x] Back up correctly per service, not by copying volume directories:
       `pg_dumpall` for Postgres, `sqlite3 .backup` for Grafana and Kuma, the
-      OpenSearch snapshot API, the Prometheus TSDB snapshot endpoint
-- [ ] Retention `--keep-daily 7 --keep-weekly 4 --keep-monthly 12`, scheduled
-- [ ] Restore-verification job: restore the newest snapshot into a scratch
-      Postgres and run a sanity query. Untested backups are not backups
+      OpenSearch snapshot API, the Prometheus TSDB snapshot endpoint —
+      `containers/backup/scripts/backup.sh`, daily via cron (supercronic)
+- [x] Retention `--keep-daily 7 --keep-weekly 4 --keep-monthly 12`, scheduled —
+      same script, run against both repos after every backup
+- [x] Restore-verification job: restore the newest snapshot into a scratch
+      Postgres and run a sanity query. Untested backups are not backups —
+      `containers/backup/scripts/verify-restore.sh`, weekly via cron, using
+      `initdb`/`pg_ctl` from the image's own postgres install (no extra
+      container or docker-socket access needed)
 - [ ] Write `docs/disaster-recovery.md`
 - [ ] **Perform one full restore onto a scratch VM**
 
 > **Gate:** do not start Phase 1 until a restore has actually been performed.
+> The weekly verification job above proves the backup *contents* are valid —
+> it restores into a throwaway Postgres inside the backup container, not a
+> standalone VM, so it does not by itself satisfy this gate.
 
 ### Phase 1 — Node substrate
 
@@ -323,9 +342,12 @@ after it.*
 
 Ranked by what actually bites:
 
-1. **Secrets can't stay in GitHub Actions env.** Today a rotation requires a
-   deploy, and DR requires manually re-entering everything. SOPS + age in git is
-   what makes goal 5 and "release as a product" achievable at all. Also replace
+1. **Secrets can't stay in GitHub Actions env — for the platform long-term.**
+   Today a rotation requires a deploy, and DR requires manually re-entering
+   everything. SOPS + age in git is what makes goal 5 and "release as a
+   product" achievable at all. (Phase 0's restic secrets are a deliberate,
+   scoped exception — see Phase 0 — this critique still fully applies from
+   Phase 2 onward.) Also replace
    `SecretObfuscator`'s XOR (`src/Aerie.Api/Common/SecretObfuscator.cs:10-32`) —
    it's obfuscation, not encryption, and it guards the HA token and kiosk Wi-Fi
    password.
