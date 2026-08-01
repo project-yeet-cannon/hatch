@@ -111,6 +111,7 @@ jobs:
       # `exec` would otherwise fail on in a non-interactive runner.
       - name: Ensure restic repositories are initialized
         working-directory: .
+        shell: bash
         run: |
           docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml exec -T backup sh -c '
             set -e
