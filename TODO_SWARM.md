@@ -244,7 +244,7 @@ after it.*
       `initdb`/`pg_ctl` from the image's own postgres install (no extra
       container or docker-socket access needed)
 - [x] Write `docs/disaster-recovery.md`
-- [ ] **Perform one full restore onto a scratch VM**
+- [ ] **Perform one full restore onto a scratch VM**. user question - can i deploy using GitHub Actions instead of manually setting stuff up? I want to use the process as much as possible
 
 > **Gate:** do not start Phase 1 until a restore has actually been performed.
 > The weekly verification job above proves the backup *contents* are valid —

@@ -1,0 +1,43 @@
+#cloud-config
+# Rendered by New-AerieVM.ps1 — __TOKENS__ are substituted, not meant to be
+# edited by hand and reused.
+
+hostname: __HOSTNAME__
+fqdn: __FQDN__
+manage_etc_hosts: true
+
+users:
+  - default
+  - name: __USERNAME__
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: 'ALL=(ALL) NOPASSWD:ALL'
+    ssh_authorized_keys:
+      - __SSH_KEY__
+
+ssh_pwauth: false
+package_update: true
+package_upgrade: true
+packages:
+__PACKAGES__
+
+# cloud-init installs the chrony client itself; pfSense is the source of
+# truth for time here (TODO_SWARM.md Phase 1) — the Hyper-V "Time
+# Synchronization" integration service is disabled separately by
+# New-AerieVM.ps1 so it can't fight this.
+ntp:
+  enabled: true
+  ntp_client: chrony
+  servers:
+    - __NTP_SERVER__
+
+runcmd:
+__RUNCMD__
+
+# package_upgrade can pull a new kernel; reboot once so the VM is already
+# running on it before anyone depends on this node, instead of finding out
+# during the next unrelated reboot.
+power_state:
+  mode: reboot
+  condition: true
+  message: Rebooting after first-boot provisioning
