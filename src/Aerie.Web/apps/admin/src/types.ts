@@ -34,7 +34,9 @@ export type DeviceChannelMetric =
   | 'SetpointTemperature'
   | 'HvacAction'
   | 'HeatingMode'
-  | 'PowerState';
+  | 'PowerState'
+  | 'HvacMode'
+  | 'FanMode';
 
 export type ChannelDirection = 'Read' | 'ReadWrite';
 
@@ -47,6 +49,7 @@ export interface DeviceChannel {
   lastValue: number | null;
   lastState: string | null;
   lastValueAt: string | null;
+  availableOptions: string[] | null;
 }
 
 export interface DeviceChannelWriteRequest {
@@ -54,6 +57,7 @@ export interface DeviceChannelWriteRequest {
   haEntityId: string;
   haAttribute: string | null;
   direction: ChannelDirection;
+  availableOptions: string[] | null;
 }
 
 export interface Device {
@@ -81,6 +85,14 @@ export interface BackfillRequest {
 
 export interface ChannelPowerRequest {
   on: boolean;
+}
+
+export interface ChannelModeRequest {
+  mode: string;
+}
+
+export interface ChannelSetpointRequest {
+  temperature: number;
 }
 
 export interface SiteSetting {

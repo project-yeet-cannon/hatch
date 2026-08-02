@@ -1,6 +1,7 @@
 using Aerie.Api.Ef;
 using Aerie.Api.Jobs;
 using Aerie.Api.Models.DeviceMapping;
+using Aerie.Api.Services.Dashboard;
 using Aerie.Api.Services.DeviceMapping;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -11,7 +12,9 @@ namespace Aerie.Api.Controllers;
 /// <summary>CRUD for Devices and their Channels, including assigning a Device to a Zone via Update (docs/device-architecture.md Phase 2).</summary>
 [ApiController]
 [Route("api/[controller]")]
-public class DevicesController(AerieContext db, IScheduler scheduler, IHomeAssistantCommandService command) : ControllerBase
+public class DevicesController(
+    AerieContext db, IScheduler scheduler, IHomeAssistantCommandService command, IHomeAssistantStateReader stateReader
+) : ControllerBase
 {
     /// <summary>Allowance for clock skew between this server and the client when rejecting "to" timestamps in the future.</summary>
     private static readonly TimeSpan ClockSkewTolerance = TimeSpan.FromMinutes(20);
@@ -88,6 +91,7 @@ public class DevicesController(AerieContext db, IScheduler scheduler, IHomeAssis
             HaEntityId = request.HaEntityId,
             HaAttribute = request.HaAttribute,
             Direction = request.Direction,
+            AvailableOptions = ChannelOptionsJson.Serialize(request.AvailableOptions),
         };
         db.DeviceChannels.Add(channel);
         await db.SaveChangesAsync(ct);
@@ -104,6 +108,7 @@ public class DevicesController(AerieContext db, IScheduler scheduler, IHomeAssis
         channel.HaEntityId = request.HaEntityId;
         channel.HaAttribute = request.HaAttribute;
         channel.Direction = request.Direction;
+        channel.AvailableOptions = ChannelOptionsJson.Serialize(request.AvailableOptions);
         await db.SaveChangesAsync(ct);
         var latest = await ChannelLatestValues.GetLatestAsync(db, [channel.Id], ct);
         return ToDto(channel, latest.GetValueOrDefault(channel.Id));
@@ -130,6 +135,56 @@ public class DevicesController(AerieContext db, IScheduler scheduler, IHomeAssis
 
         await command.SetSwitchAsync(channel.HaEntityId, request.On);
         return Accepted();
+    }
+
+    /// <summary>Writes a SetpointTemperature channel's underlying HA climate entity setpoint. Same read-latency note as SetPower - the channel's own Measurement row updates on SampleChannels' next poll.</summary>
+    [HttpPost("{id:guid}/channels/{channelId:guid}/setpoint")]
+    public async Task<IActionResult> SetSetpoint(Guid id, Guid channelId, ChannelSetpointRequest request, CancellationToken ct)
+    {
+        var channel = await db.DeviceChannels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId && c.DeviceId == id, ct);
+        if (channel is null) return NotFound();
+        if (channel.Metric != DeviceChannelMetric.SetpointTemperature || channel.Direction != ChannelDirection.ReadWrite)
+            return BadRequest("Channel is not a writable SetpointTemperature channel");
+
+        await command.SetTemperatureAsync(channel.HaEntityId, request.Temperature);
+        return Accepted();
+    }
+
+    /// <summary>Writes a HvacMode or FanMode channel's underlying HA climate mode. Rejects a mode outside the channel's AvailableOptions (when known) before calling HA, rather than forwarding whatever the client sent.</summary>
+    [HttpPost("{id:guid}/channels/{channelId:guid}/mode")]
+    public async Task<IActionResult> SetMode(Guid id, Guid channelId, ChannelModeRequest request, CancellationToken ct)
+    {
+        var channel = await db.DeviceChannels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId && c.DeviceId == id, ct);
+        if (channel is null) return NotFound();
+        if (channel.Metric is not (DeviceChannelMetric.HvacMode or DeviceChannelMetric.FanMode) || channel.Direction != ChannelDirection.ReadWrite)
+            return BadRequest("Channel is not a writable HvacMode or FanMode channel");
+
+        var options = ChannelOptionsJson.Deserialize(channel.AvailableOptions);
+        if (options is not null && !options.Contains(request.Mode))
+            return BadRequest($"'{request.Mode}' is not one of this channel's available options: {string.Join(", ", options)}");
+
+        await (channel.Metric == DeviceChannelMetric.HvacMode
+            ? command.SetHvacModeAsync(channel.HaEntityId, request.Mode)
+            : command.SetFanModeAsync(channel.HaEntityId, request.Mode));
+        return Accepted();
+    }
+
+    /// <summary>Re-reads a HvacMode/FanMode channel's AvailableOptions from HA's live hvac_modes/fan_modes attributes - for a hand-added channel that skipped Discovery, or one whose supported modes changed in HA after import.</summary>
+    [HttpPost("{id:guid}/channels/{channelId:guid}/refresh-options")]
+    public async Task<ActionResult<DeviceChannelDto>> RefreshOptions(Guid id, Guid channelId, CancellationToken ct)
+    {
+        var channel = await db.DeviceChannels.FirstOrDefaultAsync(c => c.Id == channelId && c.DeviceId == id, ct);
+        if (channel is null) return NotFound();
+        if (channel.Metric is not (DeviceChannelMetric.HvacMode or DeviceChannelMetric.FanMode))
+            return BadRequest("Channel is not a HvacMode or FanMode channel");
+
+        var state = await stateReader.TryGetStateAsync(channel.HaEntityId, ct);
+        var attribute = channel.Metric == DeviceChannelMetric.HvacMode ? "hvac_modes" : "fan_modes";
+        channel.AvailableOptions = ChannelOptionsJson.Serialize(ThermostatChannelBuilder.ReadOptions(state, attribute));
+        await db.SaveChangesAsync(ct);
+
+        var latest = await ChannelLatestValues.GetLatestAsync(db, [channel.Id], ct);
+        return ToDto(channel, latest.GetValueOrDefault(channel.Id));
     }
 
     /// <summary>Triggers a one-time BackfillChannelHistory job run to pull [request.From, request.To) of HA history for this device's channels.</summary>
@@ -199,5 +254,6 @@ public class DevicesController(AerieContext db, IScheduler scheduler, IHomeAssis
         d.Channels.Select(c => ToDto(c, latest.GetValueOrDefault(c.Id))).ToList());
 
     private static DeviceChannelDto ToDto(EfDeviceChannel c, ChannelLatestValue latest) =>
-        new(c.Id, c.Metric, c.HaEntityId, c.HaAttribute, c.Direction, latest.Value, latest.State, latest.Timestamp);
+        new(c.Id, c.Metric, c.HaEntityId, c.HaAttribute, c.Direction, latest.Value, latest.State, latest.Timestamp,
+            ChannelOptionsJson.Deserialize(c.AvailableOptions));
 }

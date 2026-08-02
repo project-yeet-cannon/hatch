@@ -12,9 +12,16 @@ public record ZoneWriteRequest(string Name, ZoneKind Kind, decimal? ComfortLowF,
 
 public record DeviceChannelDto(
     Guid Id, DeviceChannelMetric Metric, string HaEntityId, string? HaAttribute, ChannelDirection Direction,
-    decimal? LastValue, string? LastState, DateTimeOffset? LastValueAt);
+    decimal? LastValue, string? LastState, DateTimeOffset? LastValueAt, IReadOnlyList<string>? AvailableOptions);
 
-public record DeviceChannelWriteRequest(DeviceChannelMetric Metric, string HaEntityId, string? HaAttribute, ChannelDirection Direction);
+public record DeviceChannelWriteRequest(
+    DeviceChannelMetric Metric, string HaEntityId, string? HaAttribute, ChannelDirection Direction, IReadOnlyList<string>? AvailableOptions = null);
+
+/// <summary>Desired value for a HvacMode/FanMode channel (DevicesController.SetMode). Must be one of the channel's AvailableOptions when populated.</summary>
+public record ChannelModeRequest(string Mode);
+
+/// <summary>Desired setpoint for a SetpointTemperature channel (DevicesController.SetSetpoint).</summary>
+public record ChannelSetpointRequest(decimal Temperature);
 
 public record DeviceDto(Guid Id, string Name, DeviceKind Kind, Guid? ZoneId, string? HaDeviceId, bool Enabled, IReadOnlyList<DeviceChannelDto> Channels);
 

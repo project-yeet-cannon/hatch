@@ -1,5 +1,6 @@
 using Aerie.Api.Ef;
 using Aerie.Api.Models.DeviceMapping;
+using Aerie.Api.Services.Dashboard;
 using HADotNet.Core.Clients;
 using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json;
@@ -19,7 +20,7 @@ public interface IDiscoveryService
 /// websocket device-registry API) and diffs it against Devices already imported
 /// into Aerie, so the admin import flow (Phase 3) can show what's left to map.
 /// </summary>
-public class DiscoveryService(TemplateClient template, AerieContext db) : IDiscoveryService
+public class DiscoveryService(TemplateClient template, AerieContext db, IHomeAssistantStateReader stateReader) : IDiscoveryService
 {
     // Grouping is computed HA-side via device_id()/device_attr() rather than
     // fetched entity-by-entity, since the HA REST API has no bulk device-registry
@@ -47,22 +48,26 @@ public class DiscoveryService(TemplateClient template, AerieContext db) : IDisco
             .ToListAsync(ct);
         var mapped = mappedHaDeviceIds.ToHashSet();
 
-        return rows
+        var suggestions = await Task.WhenAll(rows
             .GroupBy(r => r.DeviceId)
             .Where(g => !mapped.Contains(g.Key))
-            .Select(BuildSuggestion)
-            .OrderBy(d => d.SuggestedName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+            .Select(g => BuildSuggestion(g, ct)));
+
+        return suggestions.OrderBy(d => d.SuggestedName, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    private static UnmappedHaDevice BuildSuggestion(IGrouping<string, EntityDeviceRow> group)
+    private async Task<UnmappedHaDevice> BuildSuggestion(IGrouping<string, EntityDeviceRow> group, CancellationToken ct)
     {
         var entityIds = group.Select(r => r.EntityId).OrderBy(id => id, StringComparer.Ordinal).ToList();
         var name = group.Select(r => r.DeviceName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n)) ?? group.Key;
 
         var climateEntity = entityIds.FirstOrDefault(id => id.StartsWith("climate.", StringComparison.Ordinal));
         if (climateEntity is not null)
-            return new UnmappedHaDevice(group.Key, name, DeviceKind.Thermostat, entityIds, ThermostatChannels(climateEntity, entityIds));
+        {
+            var climateState = await stateReader.TryGetStateAsync(climateEntity, ct);
+            return new UnmappedHaDevice(group.Key, name, DeviceKind.Thermostat, entityIds,
+                ThermostatChannelBuilder.Build(climateEntity, entityIds, climateState));
+        }
 
         var switchEntity = entityIds.FirstOrDefault(id => id.StartsWith("switch.", StringComparison.Ordinal));
         if (switchEntity is not null)
@@ -72,31 +77,6 @@ public class DiscoveryService(TemplateClient template, AerieContext db) : IDisco
         var kind = sensorChannels.Count > 0 ? DeviceKind.Hygrometer : (DeviceKind?)null;
 
         return new UnmappedHaDevice(group.Key, name, kind, entityIds, sensorChannels);
-    }
-
-    /// <summary>
-    /// Mirrors DeviceMappingSeeder's climate.* channel set (Phase 1), but prefers sibling
-    /// sensor.* entities for current temperature/humidity when the HA device exposes them
-    /// separately (e.g. newer Mysa baseboard thermostats) rather than as climate attributes.
-    /// </summary>
-    private static IReadOnlyList<DeviceChannelWriteRequest> ThermostatChannels(string climateEntityId, IReadOnlyList<string> entityIds)
-    {
-        var temperatureSensor = entityIds.FirstOrDefault(id =>
-            id.StartsWith("sensor.", StringComparison.Ordinal) && id.EndsWith("_temperature", StringComparison.Ordinal));
-        var humiditySensor = entityIds.FirstOrDefault(id =>
-            id.StartsWith("sensor.", StringComparison.Ordinal) && id.EndsWith("_humidity", StringComparison.Ordinal));
-
-        return
-        [
-            temperatureSensor is not null
-                ? new(DeviceChannelMetric.Temperature, temperatureSensor, null, ChannelDirection.Read)
-                : new(DeviceChannelMetric.Temperature, climateEntityId, "current_temperature", ChannelDirection.Read),
-            humiditySensor is not null
-                ? new(DeviceChannelMetric.Humidity, humiditySensor, null, ChannelDirection.Read)
-                : new(DeviceChannelMetric.Humidity, climateEntityId, "current_humidity", ChannelDirection.Read),
-            new(DeviceChannelMetric.SetpointTemperature, climateEntityId, "temperature", ChannelDirection.ReadWrite),
-            new(DeviceChannelMetric.HvacAction, climateEntityId, "hvac_action", ChannelDirection.Read),
-        ];
     }
 
     /// <summary>A plain HA switch.* entity: bare entity state ("on"/"off"), no sub-attribute, read-write.</summary>

@@ -1,7 +1,9 @@
 import type {
   BackfillRequest,
   ChannelHistory,
+  ChannelModeRequest,
   ChannelPowerRequest,
+  ChannelSetpointRequest,
   Device,
   DeviceChannel,
   DeviceChannelWriteRequest,
@@ -68,6 +70,12 @@ export const triggerBackfill = (deviceId: string, request: BackfillRequest) =>
 
 export const setChannelPower = (deviceId: string, channelId: string, request: ChannelPowerRequest) =>
   fetchJson<void>(`/api/devices/${deviceId}/channels/${channelId}/power`, { method: 'POST', ...asJson(request) });
+export const setChannelSetpoint = (deviceId: string, channelId: string, request: ChannelSetpointRequest) =>
+  fetchJson<void>(`/api/devices/${deviceId}/channels/${channelId}/setpoint`, { method: 'POST', ...asJson(request) });
+export const setChannelMode = (deviceId: string, channelId: string, request: ChannelModeRequest) =>
+  fetchJson<void>(`/api/devices/${deviceId}/channels/${channelId}/mode`, { method: 'POST', ...asJson(request) });
+export const refreshChannelOptions = (deviceId: string, channelId: string) =>
+  fetchJson<DeviceChannel>(`/api/devices/${deviceId}/channels/${channelId}/refresh-options`, { method: 'POST' });
 
 export const getDeviceHistory = (deviceId: string, from?: string, to?: string, bucketMinutes?: number) =>
   fetchJson<DeviceHistory>(`/api/devices/${deviceId}/history${qs({ from, to, bucketMinutes })}`);

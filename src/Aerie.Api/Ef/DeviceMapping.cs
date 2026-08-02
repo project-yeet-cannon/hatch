@@ -58,7 +58,10 @@ public class EfDevice
     public List<EfDeviceChannel> Channels { get; set; } = [];
 }
 
-public enum DeviceChannelMetric { Temperature, Humidity, Battery, SetpointTemperature, HvacAction, HeatingMode, PowerState }
+// New values must be appended at the end - the column stores the enum's
+// underlying int, so inserting elsewhere would silently remap every existing
+// row's Metric to the wrong value.
+public enum DeviceChannelMetric { Temperature, Humidity, Battery, SetpointTemperature, HvacAction, HeatingMode, PowerState, HvacMode, FanMode }
 
 public enum ChannelDirection { Read, ReadWrite }
 
@@ -84,6 +87,15 @@ public class EfDeviceChannel
     public string? HaAttribute { get; set; }
 
     public ChannelDirection Direction { get; set; }
+
+    /// <summary>
+    /// JSON-encoded array of legal values for a mode channel (HvacMode's
+    /// "heat"/"cool"/"auto"/"off", FanMode's "auto"/"on"/"circulate"...), as
+    /// last reported by HA's hvac_modes/fan_modes attributes. Null for
+    /// non-mode channels and for hand-added mode channels that haven't been
+    /// through discovery or a manual refresh yet.
+    /// </summary>
+    public string? AvailableOptions { get; set; }
 }
 
 /// <summary>Admin-editable scalar settings, replacing the "Dashboard" appsettings section. See SiteSettingKeys for the keys currently in use.</summary>

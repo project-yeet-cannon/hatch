@@ -17,7 +17,10 @@ import {
   getDevices,
   getSettings,
   getZones,
+  refreshChannelOptions,
+  setChannelMode,
   setChannelPower,
+  setChannelSetpoint,
   triggerBackfill,
   updateChannel,
   updateDevice,
@@ -61,6 +64,8 @@ const METRICS: DeviceChannelMetric[] = [
   "HvacAction",
   "HeatingMode",
   "PowerState",
+  "HvacMode",
+  "FanMode",
 ];
 const DIRECTIONS: ChannelDirection[] = ["Read", "ReadWrite"];
 
@@ -70,6 +75,14 @@ function isPowerOn(channel: DeviceChannel): boolean {
 
 function isPowerChannel(channel: DeviceChannel): boolean {
   return channel.metric === "PowerState" && channel.direction === "ReadWrite";
+}
+
+function isModeChannel(channel: DeviceChannel): boolean {
+  return (channel.metric === "HvacMode" || channel.metric === "FanMode") && channel.direction === "ReadWrite";
+}
+
+function isSetpointChannel(channel: DeviceChannel): boolean {
+  return channel.metric === "SetpointTemperature" && channel.direction === "ReadWrite";
 }
 
 interface DeviceFormState {
@@ -109,6 +122,10 @@ interface ChannelFormState {
   haEntityId: string;
   haAttribute: string;
   direction: ChannelDirection;
+  // Not editable through this generic form (see ModeControl's "Refresh options"
+  // for how it's populated) - carried through untouched so editing a mode
+  // channel's entity/attribute/direction here doesn't wipe its known options.
+  availableOptions: string[] | null;
 }
 
 const emptyChannelForm = (): ChannelFormState => ({
@@ -116,6 +133,7 @@ const emptyChannelForm = (): ChannelFormState => ({
   haEntityId: "",
   haAttribute: "",
   direction: "Read",
+  availableOptions: null,
 });
 
 const toChannelForm = (channel: DeviceChannel): ChannelFormState => ({
@@ -123,6 +141,7 @@ const toChannelForm = (channel: DeviceChannel): ChannelFormState => ({
   haEntityId: channel.haEntityId,
   haAttribute: channel.haAttribute ?? "",
   direction: channel.direction,
+  availableOptions: channel.availableOptions,
 });
 
 const toChannelRequest = (
@@ -132,6 +151,7 @@ const toChannelRequest = (
   haEntityId: form.haEntityId.trim(),
   haAttribute: form.haAttribute.trim() === "" ? null : form.haAttribute.trim(),
   direction: form.direction,
+  availableOptions: form.availableOptions,
 });
 
 export function DevicesPage() {
@@ -369,6 +389,72 @@ export function DevicesPage() {
     }
   }
 
+  async function handleSetMode(deviceId: string, channel: DeviceChannel, mode: string) {
+    setError(null);
+    try {
+      await setChannelMode(deviceId, channel.id, { mode });
+      setDevices((prev) =>
+        prev.map((d) =>
+          d.id === deviceId
+            ? {
+                ...d,
+                channels: d.channels.map((c) =>
+                  c.id === channel.id
+                    ? { ...c, lastState: mode, lastValueAt: new Date().toISOString() }
+                    : c,
+                ),
+              }
+            : d,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleSetSetpoint(
+    deviceId: string,
+    channel: DeviceChannel,
+    temperature: number,
+  ) {
+    setError(null);
+    try {
+      await setChannelSetpoint(deviceId, channel.id, { temperature });
+      setDevices((prev) =>
+        prev.map((d) =>
+          d.id === deviceId
+            ? {
+                ...d,
+                channels: d.channels.map((c) =>
+                  c.id === channel.id
+                    ? { ...c, lastValue: temperature, lastValueAt: new Date().toISOString() }
+                    : c,
+                ),
+              }
+            : d,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleRefreshOptions(deviceId: string, channel: DeviceChannel) {
+    setError(null);
+    try {
+      const updated = await refreshChannelOptions(deviceId, channel.id);
+      setDevices((prev) =>
+        prev.map((d) =>
+          d.id === deviceId
+            ? { ...d, channels: d.channels.map((c) => (c.id === channel.id ? updated : c)) }
+            : d,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   function startBackfill(deviceId: string) {
     setBackfillingFor(deviceId);
     setBackfillForm(backfillPresetForm(1));
@@ -551,6 +637,21 @@ export function DevicesPage() {
                           >
                             Turn {isPowerOn(channel) ? "off" : "on"}
                           </button>
+                        )}
+                        {isModeChannel(channel) && (
+                          <ModeControl
+                            deviceId={device.id}
+                            channel={channel}
+                            onSetMode={handleSetMode}
+                            onRefreshOptions={handleRefreshOptions}
+                          />
+                        )}
+                        {isSetpointChannel(channel) && (
+                          <SetpointControl
+                            deviceId={device.id}
+                            channel={channel}
+                            onSetSetpoint={handleSetSetpoint}
+                          />
                         )}
                       </p>
                     ))}
@@ -742,6 +843,21 @@ export function DevicesPage() {
                                 >
                                   Turn {isPowerOn(channel) ? "off" : "on"}
                                 </button>
+                              )}
+                              {isModeChannel(channel) && (
+                                <ModeControl
+                                  deviceId={device.id}
+                                  channel={channel}
+                                  onSetMode={handleSetMode}
+                                  onRefreshOptions={handleRefreshOptions}
+                                />
+                              )}
+                              {isSetpointChannel(channel) && (
+                                <SetpointControl
+                                  deviceId={device.id}
+                                  channel={channel}
+                                  onSetSetpoint={handleSetSetpoint}
+                                />
                               )}
                               <button
                                 className="btn-secondary"
@@ -963,5 +1079,98 @@ function ChannelForm({
         </select>
       </div>
     </div>
+  );
+}
+
+/** A HvacMode/FanMode channel's live control: a constrained dropdown when AvailableOptions is known (the normal case, populated by Discovery), otherwise a free-text fallback for a hand-added channel plus a way to fetch its real options from HA. */
+function ModeControl({
+  deviceId,
+  channel,
+  onSetMode,
+  onRefreshOptions,
+}: {
+  deviceId: string;
+  channel: DeviceChannel;
+  onSetMode: (deviceId: string, channel: DeviceChannel, mode: string) => void;
+  onRefreshOptions: (deviceId: string, channel: DeviceChannel) => void;
+}) {
+  const [draft, setDraft] = useState(channel.lastState ?? "");
+
+  if (channel.availableOptions && channel.availableOptions.length > 0) {
+    return (
+      <select
+        value={channel.lastState ?? ""}
+        onChange={(e) => onSetMode(deviceId, channel, e.target.value)}
+      >
+        <option value="" disabled>
+          Select…
+        </option>
+        {channel.availableOptions.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  return (
+    <span className="flex gap-1" style={{ alignItems: "center" }}>
+      <input
+        type="text"
+        value={draft}
+        placeholder="mode"
+        style={{ width: "6rem" }}
+        onChange={(e) => setDraft(e.target.value)}
+      />
+      <button
+        className="btn-secondary"
+        disabled={!draft.trim()}
+        onClick={() => onSetMode(deviceId, channel, draft.trim())}
+      >
+        Set
+      </button>
+      <button
+        className="btn-secondary"
+        onClick={() => onRefreshOptions(deviceId, channel)}
+      >
+        Refresh options
+      </button>
+    </span>
+  );
+}
+
+/** A SetpointTemperature channel's live control: a number field plus an explicit Set button, unlike ModeControl's auto-submitting dropdown, since a stray keystroke here shouldn't immediately push a new setpoint to HA. */
+function SetpointControl({
+  deviceId,
+  channel,
+  onSetSetpoint,
+}: {
+  deviceId: string;
+  channel: DeviceChannel;
+  onSetSetpoint: (deviceId: string, channel: DeviceChannel, temperature: number) => void;
+}) {
+  const [draft, setDraft] = useState(
+    channel.lastValue !== null ? String(channel.lastValue) : "",
+  );
+  const parsed = Number(draft);
+  const valid = draft.trim() !== "" && !Number.isNaN(parsed);
+
+  return (
+    <span className="flex gap-1" style={{ alignItems: "center" }}>
+      <input
+        type="number"
+        value={draft}
+        style={{ width: "5rem" }}
+        onChange={(e) => setDraft(e.target.value)}
+      />
+      <button
+        className="btn-secondary"
+        disabled={!valid}
+        onClick={() => onSetSetpoint(deviceId, channel, parsed)}
+      >
+        Set
+      </button>
+    </span>
   );
 }

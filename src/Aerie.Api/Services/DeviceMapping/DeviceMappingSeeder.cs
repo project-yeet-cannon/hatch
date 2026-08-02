@@ -27,7 +27,9 @@ public interface IDeviceMappingSeeder
 /// stay in Dashboard config, unmigrated, until an admin imports them as a
 /// Zone(Kind=Outside) + Device.
 /// </summary>
-public class DeviceMappingSeeder(AerieContext db, IOptions<DashboardOptions> options, ISecrets secrets) : IDeviceMappingSeeder
+public class DeviceMappingSeeder(
+    AerieContext db, IOptions<DashboardOptions> options, ISecrets secrets, IHomeAssistantStateReader stateReader
+) : IDeviceMappingSeeder
 {
     public async Task SeedAsync(CancellationToken ct = default)
     {
@@ -82,11 +84,20 @@ public class DeviceMappingSeeder(AerieContext db, IOptions<DashboardOptions> opt
             };
             db.Devices.Add(device);
 
-            db.DeviceChannels.AddRange(
-                new EfDeviceChannel { Device = device, Metric = DeviceChannelMetric.Temperature, HaEntityId = entityId, HaAttribute = "current_temperature", Direction = ChannelDirection.Read },
-                new EfDeviceChannel { Device = device, Metric = DeviceChannelMetric.Humidity, HaEntityId = entityId, HaAttribute = "current_humidity", Direction = ChannelDirection.Read },
-                new EfDeviceChannel { Device = device, Metric = DeviceChannelMetric.SetpointTemperature, HaEntityId = entityId, HaAttribute = "temperature", Direction = ChannelDirection.ReadWrite },
-                new EfDeviceChannel { Device = device, Metric = DeviceChannelMetric.HvacAction, HaEntityId = entityId, HaAttribute = "hvac_action", Direction = ChannelDirection.Read });
+            // No sibling entities to check here (unlike Discovery, which groups by HA
+            // device) - this is a flat list of already-known climate.* entity ids, so
+            // temperature/humidity always come from the climate entity's own attributes.
+            var climateState = await stateReader.TryGetStateAsync(entityId, ct);
+            var channels = ThermostatChannelBuilder.Build(entityId, [], climateState);
+            db.DeviceChannels.AddRange(channels.Select(c => new EfDeviceChannel
+            {
+                Device = device,
+                Metric = c.Metric,
+                HaEntityId = c.HaEntityId,
+                HaAttribute = c.HaAttribute,
+                Direction = c.Direction,
+                AvailableOptions = ChannelOptionsJson.Serialize(c.AvailableOptions),
+            }));
         }
 
         await db.SaveChangesAsync(ct);
