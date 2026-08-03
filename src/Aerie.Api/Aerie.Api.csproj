@@ -53,6 +53,16 @@
     <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/admin"/>
   </Target>
 
+  <ItemGroup>
+    <ModelerSource Include="../Aerie.Web/apps/modeler/src/**/*.*;../Aerie.Web/apps/modeler/index.html;../Aerie.Web/apps/modeler/package.json;../Aerie.Web/apps/modeler/vite.config.ts"/>
+  </ItemGroup>
+
+  <Target Name="BuildModeler" BeforeTargets="Build" Condition="'$(SkipModelerBuild)' != 'true'"
+          Inputs="@(ModelerSource)" Outputs="wwwroot/apps/modeler/index.html">
+    <Exec Command="npm install" WorkingDirectory="../Aerie.Web/apps/modeler" Condition="!Exists('../Aerie.Web/apps/modeler/node_modules')"/>
+    <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/modeler"/>
+  </Target>
+
   <!-- Apps landing page (../Aerie.Web/index.html) - just a static file, no build step needed. -->
   <Target Name="CopyAppsIndex" BeforeTargets="Build"
           Inputs="../Aerie.Web/index.html" Outputs="wwwroot/apps/index.html">

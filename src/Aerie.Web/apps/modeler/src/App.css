@@ -1,0 +1,48 @@
+.modeler-app {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.modeler-loading {
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+.modeler-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.modeler-save-status {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  padding-top: 4px;
+}
+
+.modeler-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.modeler-placeholder {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modeler-crash-note {
+  margin: 24px;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--danger-bg);
+  color: var(--danger-ink);
+}
