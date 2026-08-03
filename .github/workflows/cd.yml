@@ -150,6 +150,10 @@ jobs:
 
           # `tailscale up` flags aren't cumulative — every call must restate
           # the full desired flag set, or an omitted flag resets to default.
+          # --unattended must be restated too: TS_UNATTENDEDMODE=always at
+          # install time makes it a persistent non-default setting, and
+          # `tailscale up` refuses to run if any non-default flag goes
+          # unmentioned.
           # --authkey is included only on first auth: re-passing it on every
           # deploy is tempting for idempotency, but tailscaled unconditionally
           # attempts to register with a supplied key even when a valid
@@ -159,9 +163,9 @@ jobs:
           # actually needed it.
           $status = & $tailscaleExe status --json | ConvertFrom-Json
           if ($status.BackendState -ne "Running") {
-            & $tailscaleExe up --authkey=$env:TAILSCALE_AUTH_KEY --advertise-routes=$env:TAILSCALE_ADVERTISE_ROUTES --accept-routes=false --hostname=aerie-prod
+            & $tailscaleExe up --authkey=$env:TAILSCALE_AUTH_KEY --advertise-routes=$env:TAILSCALE_ADVERTISE_ROUTES --accept-routes=false --hostname=aerie-prod --unattended
           } else {
-            & $tailscaleExe up --advertise-routes=$env:TAILSCALE_ADVERTISE_ROUTES --accept-routes=false --hostname=aerie-prod
+            & $tailscaleExe up --advertise-routes=$env:TAILSCALE_ADVERTISE_ROUTES --accept-routes=false --hostname=aerie-prod --unattended
           }
           if ($LASTEXITCODE -ne 0) { throw "tailscale up failed with exit code $LASTEXITCODE" }
 
