@@ -133,7 +133,7 @@ public class DevicesController(
         if (channel.Metric != DeviceChannelMetric.PowerState || channel.Direction != ChannelDirection.ReadWrite)
             return BadRequest("Channel is not a writable PowerState channel");
 
-        await command.SetSwitchAsync(channel.HaEntityId, request.On);
+        await command.SetPowerAsync(channel.HaEntityId, request.On);
         return Accepted();
     }
 
@@ -185,6 +185,18 @@ public class DevicesController(
 
         var latest = await ChannelLatestValues.GetLatestAsync(db, [channel.Id], ct);
         return ToDto(channel, latest.GetValueOrDefault(channel.Id));
+    }
+
+    /// <summary>Activates a Scene channel's underlying HA scene. Scenes are stateless triggers - there's no resulting channel value to reflect, unlike SetPower/SetSetpoint/SetMode.</summary>
+    [HttpPost("{id:guid}/channels/{channelId:guid}/trigger-scene")]
+    public async Task<IActionResult> TriggerScene(Guid id, Guid channelId, CancellationToken ct)
+    {
+        var channel = await db.DeviceChannels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId && c.DeviceId == id, ct);
+        if (channel is null) return NotFound();
+        if (channel.Metric != DeviceChannelMetric.Scene) return BadRequest("Channel is not a Scene channel");
+
+        await command.TriggerSceneAsync(channel.HaEntityId);
+        return Accepted();
     }
 
     /// <summary>Triggers a one-time BackfillChannelHistory job run to pull [request.From, request.To) of HA history for this device's channels.</summary>

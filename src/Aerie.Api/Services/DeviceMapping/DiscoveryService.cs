@@ -73,6 +73,10 @@ public class DiscoveryService(TemplateClient template, AerieContext db, IHomeAss
         if (switchEntity is not null)
             return new UnmappedHaDevice(group.Key, name, DeviceKind.SmartSwitch, entityIds, SwitchChannels(switchEntity));
 
+        var lightEntity = entityIds.FirstOrDefault(id => id.StartsWith("light.", StringComparison.Ordinal));
+        if (lightEntity is not null)
+            return new UnmappedHaDevice(group.Key, name, DeviceKind.Light, entityIds, LightChannelBuilder.Build(lightEntity, entityIds));
+
         var sensorChannels = entityIds.Select(SensorChannel).OfType<DeviceChannelWriteRequest>().ToList();
         var kind = sensorChannels.Count > 0 ? DeviceKind.Hygrometer : (DeviceKind?)null;
 

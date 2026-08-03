@@ -22,6 +22,7 @@ import {
   setChannelPower,
   setChannelSetpoint,
   triggerBackfill,
+  triggerScene,
   updateChannel,
   updateDevice,
 } from "../api/client";
@@ -66,6 +67,7 @@ const METRICS: DeviceChannelMetric[] = [
   "PowerState",
   "HvacMode",
   "FanMode",
+  "Scene",
 ];
 const DIRECTIONS: ChannelDirection[] = ["Read", "ReadWrite"];
 
@@ -83,6 +85,15 @@ function isModeChannel(channel: DeviceChannel): boolean {
 
 function isSetpointChannel(channel: DeviceChannel): boolean {
   return channel.metric === "SetpointTemperature" && channel.direction === "ReadWrite";
+}
+
+function isSceneChannel(channel: DeviceChannel): boolean {
+  return channel.metric === "Scene" && channel.direction === "ReadWrite";
+}
+
+/** "scene.basement_hallway_rolling_hills" -> "basement hallway rolling hills" - readable enough without a dedicated display-name field. */
+function sceneLabel(channel: DeviceChannel): string {
+  return channel.haEntityId.replace(/^scene\./, "").replace(/_/g, " ");
 }
 
 interface DeviceFormState {
@@ -439,6 +450,15 @@ export function DevicesPage() {
     }
   }
 
+  async function handleTriggerScene(deviceId: string, channel: DeviceChannel) {
+    setError(null);
+    try {
+      await triggerScene(deviceId, channel.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function handleRefreshOptions(deviceId: string, channel: DeviceChannel) {
     setError(null);
     try {
@@ -653,6 +673,14 @@ export function DevicesPage() {
                             onSetSetpoint={handleSetSetpoint}
                           />
                         )}
+                        {isSceneChannel(channel) && (
+                          <button
+                            className="btn-secondary"
+                            onClick={() => handleTriggerScene(device.id, channel)}
+                          >
+                            Activate: {sceneLabel(channel)}
+                          </button>
+                        )}
                       </p>
                     ))}
                   </div>
@@ -859,6 +887,16 @@ export function DevicesPage() {
                                   onSetSetpoint={handleSetSetpoint}
                                 />
                               )}
+                              {isSceneChannel(channel) && (
+                                <button
+                                  className="btn-secondary"
+                                  onClick={() =>
+                                    handleTriggerScene(device.id, channel)
+                                  }
+                                >
+                                  Activate: {sceneLabel(channel)}
+                                </button>
+                              )}
                               <button
                                 className="btn-secondary"
                                 onClick={() =>
@@ -984,6 +1022,7 @@ function DeviceForm({
           <option value="Thermostat">Thermostat</option>
           <option value="Hygrometer">Hygrometer</option>
           <option value="SmartSwitch">Smart switch</option>
+          <option value="Light">Light</option>
         </select>
       </div>
       <div className="field">

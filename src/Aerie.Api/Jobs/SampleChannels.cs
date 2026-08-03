@@ -37,7 +37,9 @@ public class SampleChannels(TimeProvider t, HistoryClient haHistory, AerieContex
         var channels = await db.DeviceChannels
             .AsNoTracking()
             .Include(c => c.Device)
-            .Where(c => c.Device!.Enabled)
+            // Scene channels are stateless triggers - HA reports their "state" as a last-activated
+            // timestamp, which would otherwise get polled and written as junk StateChange rows.
+            .Where(c => c.Device!.Enabled && c.Metric != DeviceChannelMetric.Scene)
             .ToListAsync();
         var channelLoadTime = t.GetUtcNow() - channelLoadStart;
         logger.LogInformation("Loaded {ChannelCount} enabled channels in {ElapsedMs}ms", channels.Count, channelLoadTime.TotalMilliseconds);

@@ -112,6 +112,8 @@ export function DiscoveryPage() {
                   </option>
                   <option value="Thermostat">Thermostat</option>
                   <option value="Hygrometer">Hygrometer</option>
+                  <option value="SmartSwitch">Smart switch</option>
+                  <option value="Light">Light</option>
                 </select>
               </div>
             </div>

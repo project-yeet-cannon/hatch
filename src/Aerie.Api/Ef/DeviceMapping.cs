@@ -30,7 +30,7 @@ public class EfZone
     public bool Included { get; set; } = true;
 }
 
-public enum DeviceKind { Thermostat, Hygrometer, SmartSwitch }
+public enum DeviceKind { Thermostat, Hygrometer, SmartSwitch, Light }
 
 /// <summary>
 /// A physical device mapped in from Home Assistant. May back onto one HA
@@ -61,7 +61,7 @@ public class EfDevice
 // New values must be appended at the end - the column stores the enum's
 // underlying int, so inserting elsewhere would silently remap every existing
 // row's Metric to the wrong value.
-public enum DeviceChannelMetric { Temperature, Humidity, Battery, SetpointTemperature, HvacAction, HeatingMode, PowerState, HvacMode, FanMode }
+public enum DeviceChannelMetric { Temperature, Humidity, Battery, SetpointTemperature, HvacAction, HeatingMode, PowerState, HvacMode, FanMode, Scene }
 
 public enum ChannelDirection { Read, ReadWrite }
 

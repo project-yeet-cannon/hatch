@@ -76,6 +76,8 @@ export const setChannelMode = (deviceId: string, channelId: string, request: Cha
   fetchJson<void>(`/api/devices/${deviceId}/channels/${channelId}/mode`, { method: 'POST', ...asJson(request) });
 export const refreshChannelOptions = (deviceId: string, channelId: string) =>
   fetchJson<DeviceChannel>(`/api/devices/${deviceId}/channels/${channelId}/refresh-options`, { method: 'POST' });
+export const triggerScene = (deviceId: string, channelId: string) =>
+  fetchJson<void>(`/api/devices/${deviceId}/channels/${channelId}/trigger-scene`, { method: 'POST' });
 
 export const getDeviceHistory = (deviceId: string, from?: string, to?: string, bucketMinutes?: number) =>
   fetchJson<DeviceHistory>(`/api/devices/${deviceId}/history${qs({ from, to, bucketMinutes })}`);
