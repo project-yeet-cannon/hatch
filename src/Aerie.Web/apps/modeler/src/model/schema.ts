@@ -1,9 +1,11 @@
+import { applyRigidTransform2D, fitRigidTransform2D } from './geometry';
+
 // The persisted shape of a project: what's saved to IndexedDB on every
 // mutation and what an exported .aeriemodel.json file contains. Bump
 // SCHEMA_VERSION whenever this shape changes in a way old files can't be
 // read as-is, and add a branch to migrateProjectDocument below to upgrade
 // them rather than rejecting them.
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export interface Point2 {
   x: number;
@@ -20,6 +22,34 @@ export interface WallSegment {
   measuredLength?: number;
 }
 
+export type OpeningKind = 'door' | 'archway';
+
+/** A door or archway cut into a floorPlan wall. Windows are deferred (see TODO_MODELING.md). */
+export interface Opening {
+  id: string;
+  wallId: string;
+  /** Meters from wall.start along the centerline to the opening's midpoint. */
+  offset: number;
+  /** Meters. */
+  width: number;
+  /** Meters above the floor to the top of the opening. */
+  headHeight: number;
+  kind: OpeningKind;
+}
+
+export type CeilingProfileKind = 'flat' | 'shed' | 'gable';
+
+/** A room's vertical shape: a flat ceiling at wallHeight, or a shed/gable roof rising from wallHeight (the eave line) to ridgeHeight. */
+export interface CeilingProfile {
+  kind: CeilingProfileKind;
+  /** Meters above the room's floor, to the eave line (flat ceilings only have this). */
+  wallHeight: number;
+  /** Meters above the room's floor, to the ridge. Only meaningful for 'shed'/'gable'. */
+  ridgeHeight?: number;
+}
+
+export const DEFAULT_CEILING_PROFILE: CeilingProfile = { kind: 'flat', wallHeight: 2.4 };
+
 // Rooms themselves are derived at runtime from closed loops in a sketch's
 // wall graph (see model/roomDetection.ts) rather than stored directly - but
 // a user-given name needs to survive re-derivation as walls are edited. Each
@@ -30,6 +60,23 @@ export interface RoomLabel {
   id: string;
   name: string;
   seed: Point2;
+  /** Manually-entered ceiling shape; may be overridden per-field by an elevation binding (see model/elevation.ts). Absent means DEFAULT_CEILING_PROFILE. */
+  ceilingProfile?: CeilingProfile;
+  /** Marks this room as an open shaft (stairwell, double-height void) rather than a floor that carries a ceiling into the room above. */
+  stairwellVoid?: boolean;
+}
+
+/**
+ * Binds a dimension line drawn in an elevation sketch to a specific room's
+ * ceiling height, so a measurement taken from a side view (e.g. "eave to
+ * ridge") drives the 3D model instead of a manually-typed number. See
+ * model/elevation.ts for how bindings are resolved against a solved sketch.
+ */
+export interface ElevationBinding {
+  id: string;
+  wallId: string;
+  roomLabelId: string;
+  target: 'wallHeight' | 'ridgeHeight';
 }
 
 export type SketchKind = 'floorPlan' | 'elevation';
@@ -38,10 +85,14 @@ export interface Sketch {
   id: string;
   name: string;
   kind: SketchKind;
-  /** floorPlan sketches sharing a floorIndex are candidates for merging (step 4). */
+  /** floorPlan sketches sharing a floorIndex are candidates for merging (step 4); an elevation sketch's floorIndex is the floor it primarily elevates. */
   floorIndex: number;
   walls: WallSegment[];
   roomLabels: RoomLabel[];
+  /** floorPlan sketches only. */
+  openings: Opening[];
+  /** elevation sketches only; targets rooms by RoomLabel id, which may live in any sketch. */
+  elevationBindings: ElevationBinding[];
   createdAt: string;
   updatedAt: string;
 }
@@ -65,15 +116,17 @@ export function createId(): string {
   return crypto.randomUUID();
 }
 
-export function createEmptySketch(name: string, floorIndex = 0): Sketch {
+export function createEmptySketch(name: string, floorIndex = 0, kind: SketchKind = 'floorPlan'): Sketch {
   const now = new Date().toISOString();
   return {
     id: createId(),
     name,
-    kind: 'floorPlan',
+    kind,
     floorIndex,
     walls: [],
     roomLabels: [],
+    openings: [],
+    elevationBindings: [],
     createdAt: now,
     updatedAt: now,
   };
@@ -117,6 +170,12 @@ export function migrateProjectDocument(raw: unknown): ProjectDocument {
   if (version === 2) {
     // Walls gained an optional measuredLength; existing walls are valid as-is with it absent.
     version = 3;
+  }
+
+  if (version === 3) {
+    // Sketches gained openings + elevationBindings arrays; rooms gained optional ceilingProfile/stairwellVoid.
+    sketches = sketches.map((sketch) => ({ ...sketch, openings: sketch.openings ?? [], elevationBindings: sketch.elevationBindings ?? [] }));
+    version = 4;
   }
 
   if (version !== SCHEMA_VERSION) {
@@ -212,22 +271,173 @@ export function withWallPositionsUpdated(project: ProjectDocument, sketchId: str
   }));
 }
 
-/** Renames an existing room label (`labelId` set) or creates a new one for a just-named, previously-unlabeled room. */
-export function withRoomNamed(project: ProjectDocument, sketchId: string, labelId: string | null, seed: Point2, name: string): ProjectDocument {
+/** Patches an existing room label (`labelId` set) or creates a new one seeded at `seed`, carrying `defaults` merged under `patch`. Shared by every room-label setter below so a not-yet-named room can still receive a ceiling profile or void flag. */
+function updateRoomLabel(
+  project: ProjectDocument,
+  sketchId: string,
+  labelId: string | null,
+  seed: Point2,
+  defaults: Pick<RoomLabel, 'name'>,
+  patch: Partial<Omit<RoomLabel, 'id' | 'seed'>>,
+): ProjectDocument {
   const now = new Date().toISOString();
   return updateSketch(project, sketchId, (sketch) => {
     if (labelId) {
       return {
         ...sketch,
-        roomLabels: sketch.roomLabels.map((label) => (label.id === labelId ? { ...label, name } : label)),
+        roomLabels: sketch.roomLabels.map((label) => (label.id === labelId ? { ...label, ...patch } : label)),
         updatedAt: now,
       };
     }
-    const label: RoomLabel = { id: createId(), name, seed };
+    const label: RoomLabel = { id: createId(), seed, ...defaults, ...patch };
     return { ...sketch, roomLabels: [...sketch.roomLabels, label], updatedAt: now };
   });
 }
 
+/** Renames an existing room label (`labelId` set) or creates a new one for a just-named, previously-unlabeled room. */
+export function withRoomNamed(project: ProjectDocument, sketchId: string, labelId: string | null, seed: Point2, name: string): ProjectDocument {
+  return updateRoomLabel(project, sketchId, labelId, seed, { name }, { name });
+}
+
+/** Sets a room's ceiling shape. `labelId` null creates an unnamed label (e.g. the user opened the room panel before naming it). */
+export function withRoomCeilingProfileSet(
+  project: ProjectDocument,
+  sketchId: string,
+  labelId: string | null,
+  seed: Point2,
+  ceilingProfile: CeilingProfile,
+): ProjectDocument {
+  return updateRoomLabel(project, sketchId, labelId, seed, { name: '' }, { ceilingProfile });
+}
+
+/** Marks/unmarks a room as an open shaft (stairwell, double-height void) that doesn't carry a ceiling into the floor above. */
+export function withRoomStairwellVoidSet(project: ProjectDocument, sketchId: string, labelId: string | null, seed: Point2, stairwellVoid: boolean): ProjectDocument {
+  return updateRoomLabel(project, sketchId, labelId, seed, { name: '' }, { stairwellVoid });
+}
+
 export function withDefaultWallThicknessSet(project: ProjectDocument, thickness: number): ProjectDocument {
   return { ...project, settings: { ...project.settings, defaultWallThickness: thickness } };
+}
+
+/** Adds a door/archway opening to a floorPlan sketch's wall. */
+export function withOpeningAdded(project: ProjectDocument, sketchId: string, opening: Opening): ProjectDocument {
+  const now = new Date().toISOString();
+  return updateSketch(project, sketchId, (sketch) => ({ ...sketch, openings: [...sketch.openings, opening], updatedAt: now }));
+}
+
+export function withOpeningRemoved(project: ProjectDocument, sketchId: string, openingId: string): ProjectDocument {
+  const now = new Date().toISOString();
+  return updateSketch(project, sketchId, (sketch) => ({
+    ...sketch,
+    openings: sketch.openings.filter((opening) => opening.id !== openingId),
+    updatedAt: now,
+  }));
+}
+
+export function withOpeningUpdated(project: ProjectDocument, sketchId: string, openingId: string, patch: Partial<Pick<Opening, 'offset' | 'width' | 'headHeight' | 'kind'>>): ProjectDocument {
+  const now = new Date().toISOString();
+  return updateSketch(project, sketchId, (sketch) => ({
+    ...sketch,
+    openings: sketch.openings.map((opening) => (opening.id === openingId ? { ...opening, ...patch } : opening)),
+    updatedAt: now,
+  }));
+}
+
+/** Removes any opening left dangling by a wall deletion (e.g. via withWallsRemoved). Call after removing walls. */
+export function withOpeningsForWallsRemoved(project: ProjectDocument, sketchId: string, wallIds: readonly string[]): ProjectDocument {
+  const idSet = new Set(wallIds);
+  const now = new Date().toISOString();
+  return updateSketch(project, sketchId, (sketch) => ({
+    ...sketch,
+    openings: sketch.openings.filter((opening) => !idSet.has(opening.wallId)),
+    updatedAt: now,
+  }));
+}
+
+/** Creates and appends a new sketch (a new floor's plan, another partial sketch of an existing floor, or an elevation), returning the updated project and the new sketch's id. */
+export function withSketchAdded(project: ProjectDocument, name: string, floorIndex: number, kind: SketchKind = 'floorPlan'): { project: ProjectDocument; sketchId: string } {
+  const sketch = createEmptySketch(name, floorIndex, kind);
+  return { project: { ...project, sketches: [...project.sketches, sketch] }, sketchId: sketch.id };
+}
+
+export function withSketchRenamed(project: ProjectDocument, sketchId: string, name: string): ProjectDocument {
+  const now = new Date().toISOString();
+  return updateSketch(project, sketchId, (sketch) => ({ ...sketch, name, updatedAt: now }));
+}
+
+export function withSketchRemoved(project: ProjectDocument, sketchId: string): ProjectDocument {
+  return { ...project, sketches: project.sketches.filter((sketch) => sketch.id !== sketchId) };
+}
+
+/** Sets (or, with `null`, clears) an elevation sketch's binding of `wallId`'s solved length to a room's ceiling height (see model/elevation.ts). */
+export function withElevationBindingSet(project: ProjectDocument, sketchId: string, wallId: string, roomLabelId: string, target: ElevationBinding['target']): ProjectDocument {
+  const now = new Date().toISOString();
+  return updateSketch(project, sketchId, (sketch) => {
+    const withoutExisting = sketch.elevationBindings.filter((binding) => binding.wallId !== wallId);
+    const binding: ElevationBinding = { id: createId(), wallId, roomLabelId, target };
+    return { ...sketch, elevationBindings: [...withoutExisting, binding], updatedAt: now };
+  });
+}
+
+export function withElevationBindingRemoved(project: ProjectDocument, sketchId: string, wallId: string): ProjectDocument {
+  const now = new Date().toISOString();
+  return updateSketch(project, sketchId, (sketch) => ({
+    ...sketch,
+    elevationBindings: sketch.elevationBindings.filter((binding) => binding.wallId !== wallId),
+    updatedAt: now,
+  }));
+}
+
+/** Removes any binding left dangling by a dimension-line deletion in an elevation sketch. Call after removing walls. */
+export function withElevationBindingsForWallsRemoved(project: ProjectDocument, sketchId: string, wallIds: readonly string[]): ProjectDocument {
+  const idSet = new Set(wallIds);
+  const now = new Date().toISOString();
+  return updateSketch(project, sketchId, (sketch) => ({
+    ...sketch,
+    elevationBindings: sketch.elevationBindings.filter((binding) => !idSet.has(binding.wallId)),
+    updatedAt: now,
+  }));
+}
+
+/**
+ * Merges `sourceSketchId` into `targetSketchId` (both must be floorPlan
+ * sketches on the same floor): applies the least-squares rigid transform
+ * (see model/geometry.ts fitRigidTransform2D) that best maps each
+ * `correspondences[i].source` point onto its `.target` point, transforms the
+ * source sketch's walls/openings/room-label seeds into the target's
+ * coordinate frame, and appends them to the target sketch. The source sketch
+ * is then removed. Needs at least one correspondence pair; two or more
+ * pin down rotation as well as translation.
+ */
+export function withSketchesMerged(
+  project: ProjectDocument,
+  targetSketchId: string,
+  sourceSketchId: string,
+  correspondences: readonly { source: Point2; target: Point2 }[],
+): ProjectDocument {
+  const source = project.sketches.find((sketch) => sketch.id === sourceSketchId);
+  if (!source || correspondences.length === 0) return project;
+
+  const transform = fitRigidTransform2D(
+    correspondences.map((c) => c.source),
+    correspondences.map((c) => c.target),
+  );
+
+  const transformedWalls = source.walls.map((wall) => ({
+    ...wall,
+    start: applyRigidTransform2D(wall.start, transform),
+    end: applyRigidTransform2D(wall.end, transform),
+  }));
+  const transformedLabels = source.roomLabels.map((label) => ({ ...label, seed: applyRigidTransform2D(label.seed, transform) }));
+
+  const now = new Date().toISOString();
+  const merged = updateSketch(project, targetSketchId, (sketch) => ({
+    ...sketch,
+    walls: [...sketch.walls, ...transformedWalls],
+    roomLabels: [...sketch.roomLabels, ...transformedLabels],
+    openings: [...sketch.openings, ...source.openings],
+    updatedAt: now,
+  }));
+
+  return withSketchRemoved(merged, sourceSketchId);
 }

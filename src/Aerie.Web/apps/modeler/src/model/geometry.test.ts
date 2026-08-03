@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyRigidTransform2D,
   distance,
+  fitRigidTransform2D,
   nearestPoint,
   nearestPointOnSegment,
   snapDrawPoint,
   snapToAngle,
   snapToGrid,
 } from './geometry';
+import type { Point2 } from './schema';
 
 describe('snapToGrid', () => {
   it('rounds to the nearest grid step', () => {
@@ -91,5 +94,56 @@ describe('nearestPointOnSegment', () => {
     const result = nearestPointOnSegment({ x: 1, y: 1 }, { x: 5, y: 5 }, { x: 5, y: 5 });
     expect(result.point).toEqual({ x: 5, y: 5 });
     expect(Number.isFinite(result.distance)).toBe(true);
+  });
+});
+
+describe('fitRigidTransform2D / applyRigidTransform2D', () => {
+  function applyAll(points: readonly Point2[], transform: ReturnType<typeof fitRigidTransform2D>): Point2[] {
+    return points.map((p) => applyRigidTransform2D(p, transform));
+  }
+
+  it('recovers a pure translation from two point pairs', () => {
+    const from: Point2[] = [{ x: 0, y: 0 }, { x: 2, y: 0 }];
+    const to: Point2[] = [{ x: 5, y: 3 }, { x: 7, y: 3 }];
+    const transform = fitRigidTransform2D(from, to);
+    expect(transform.rotationRadians).toBeCloseTo(0, 5);
+    const mapped = applyAll(from, transform);
+    expect(mapped[0].x).toBeCloseTo(5, 5);
+    expect(mapped[0].y).toBeCloseTo(3, 5);
+    expect(mapped[1].x).toBeCloseTo(7, 5);
+    expect(mapped[1].y).toBeCloseTo(3, 5);
+  });
+
+  it('recovers a 90-degree rotation plus translation exactly for a 2-point fit', () => {
+    const from: Point2[] = [{ x: 0, y: 0 }, { x: 1, y: 0 }];
+    const to: Point2[] = [{ x: 4, y: 4 }, { x: 4, y: 5 }]; // same edge, rotated 90deg CCW and translated
+    const transform = fitRigidTransform2D(from, to);
+    const mapped = applyAll(from, transform);
+    expect(mapped[0].x).toBeCloseTo(4, 5);
+    expect(mapped[0].y).toBeCloseTo(4, 5);
+    expect(mapped[1].x).toBeCloseTo(4, 5);
+    expect(mapped[1].y).toBeCloseTo(5, 5);
+  });
+
+  it('finds a best-fit (not necessarily exact) transform for more than two noisy pairs', () => {
+    const from: Point2[] = [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 0, y: 2 }];
+    const to: Point2[] = [{ x: 10, y: 10 }, { x: 12, y: 10.05 }, { x: 9.98, y: 12 }];
+    const transform = fitRigidTransform2D(from, to);
+    const mapped = applyAll(from, transform);
+    for (let i = 0; i < mapped.length; i++) {
+      expect(mapped[i].x).toBeCloseTo(to[i].x, 0);
+      expect(mapped[i].y).toBeCloseTo(to[i].y, 0);
+    }
+  });
+
+  it('leaves rotation at zero for a single point pair (only translation is determined)', () => {
+    const transform = fitRigidTransform2D([{ x: 1, y: 1 }], [{ x: 3, y: 5 }]);
+    expect(transform.rotationRadians).toBe(0);
+    expect(applyRigidTransform2D({ x: 1, y: 1 }, transform)).toEqual({ x: 3, y: 5 });
+  });
+
+  it('throws on mismatched or empty point lists', () => {
+    expect(() => fitRigidTransform2D([], [])).toThrow();
+    expect(() => fitRigidTransform2D([{ x: 0, y: 0 }], [])).toThrow();
   });
 });

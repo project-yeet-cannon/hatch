@@ -104,6 +104,62 @@ export function snapDrawPoint(
   return { point: snapToGrid(raw), kind: 'grid' };
 }
 
+export interface RigidTransform2D {
+  rotationRadians: number;
+  translation: Point2;
+}
+
+/**
+ * Least-squares rigid transform (rotation + translation, no scale/reflection)
+ * mapping `from[i]` onto `to[i]` as closely as possible - used to merge a
+ * partial sketch into another sketch's coordinate frame from a handful of
+ * user-pinned "this is the same corner" point pairs (see
+ * model/schema.ts withSketchesMerged). Equivalent to 2D orthogonal Procrustes
+ * / Kabsch, computed in closed form (no SVD needed in 2D): center both point
+ * sets, then the optimal rotation is the argument of
+ * sum(conj(from_i) * to_i) treating each centered point as a complex number.
+ * With a single pair, rotation is left at 0 (only translation is
+ * determined); callers should ask for at least two pairs when rotation
+ * matters.
+ */
+export function fitRigidTransform2D(from: readonly Point2[], to: readonly Point2[]): RigidTransform2D {
+  if (from.length === 0 || from.length !== to.length) {
+    throw new Error('fitRigidTransform2D requires equal-length, non-empty point lists.');
+  }
+
+  const n = from.length;
+  const centroidFrom = from.reduce((sum, p) => addV(sum, p), { x: 0, y: 0 });
+  centroidFrom.x /= n;
+  centroidFrom.y /= n;
+  const centroidTo = to.reduce((sum, p) => addV(sum, p), { x: 0, y: 0 });
+  centroidTo.x /= n;
+  centroidTo.y /= n;
+
+  let sumCross = 0;
+  let sumDot = 0;
+  for (let i = 0; i < n; i++) {
+    const f = subV(from[i], centroidFrom);
+    const t = subV(to[i], centroidTo);
+    sumDot += f.x * t.x + f.y * t.y;
+    sumCross += f.x * t.y - f.y * t.x;
+  }
+
+  const rotationRadians = sumDot === 0 && sumCross === 0 ? 0 : Math.atan2(sumCross, sumDot);
+  const cos = Math.cos(rotationRadians);
+  const sin = Math.sin(rotationRadians);
+  const rotatedCentroidFrom = { x: centroidFrom.x * cos - centroidFrom.y * sin, y: centroidFrom.x * sin + centroidFrom.y * cos };
+  return { rotationRadians, translation: subV(centroidTo, rotatedCentroidFrom) };
+}
+
+export function applyRigidTransform2D(point: Point2, transform: RigidTransform2D): Point2 {
+  const cos = Math.cos(transform.rotationRadians);
+  const sin = Math.sin(transform.rotationRadians);
+  return {
+    x: point.x * cos - point.y * sin + transform.translation.x,
+    y: point.x * sin + point.y * cos + transform.translation.y,
+  };
+}
+
 export interface NearestOnSegment {
   point: Point2;
   /** 0 at `segStart`, 1 at `segEnd`. */

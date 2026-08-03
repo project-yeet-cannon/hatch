@@ -34,11 +34,111 @@
   flex: 0 0 auto;
 }
 
+.modeler-body {
+  display: flex;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .modeler-editor-card {
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   display: flex;
   padding: 12px;
+}
+
+/* Sidebar */
+.sidebar {
+  flex: 0 0 240px;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sidebar-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.sidebar-floor-group {
+  margin-bottom: 10px;
+}
+
+.sidebar-floor-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.sidebar-sketch-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.sidebar-sketch-row-active {
+  background: var(--primary-bg);
+}
+
+.sidebar-sketch-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  background: transparent;
+  padding: 6px 8px;
+  font-weight: 500;
+  color: var(--ink);
+  text-align: left;
+}
+
+.sidebar-sketch-name:hover {
+  background: var(--line);
+}
+
+.sidebar-sketch-count {
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.sidebar-sketch-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.sidebar-merge-select {
+  font-size: 11px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  max-width: 90px;
+}
+
+.sidebar-empty-hint {
+  font-size: 12px;
+}
+
+.btn-small {
+  padding: 4px 8px;
+  font-size: 12px;
 }
 
 .modeler-crash-note {
@@ -120,6 +220,7 @@
 }
 
 .editor-canvas-container {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   border: 1px solid var(--line);
@@ -131,4 +232,189 @@
 .editor-canvas {
   display: block;
   touch-action: none;
+}
+
+.editor-onion-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Room panel */
+.room-panel {
+  position: absolute;
+  transform: translate(-50%, 12px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 220px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  z-index: 10;
+}
+
+.room-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.room-panel-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.room-panel-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.room-panel-field select,
+.room-panel-field input {
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12px;
+  width: 100px;
+}
+
+.room-panel-bound-note {
+  font-size: 10px;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.room-panel-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Sketch merge view */
+.merge-canvases {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.merge-canvas-wrap h3 {
+  margin-bottom: 6px;
+}
+
+.merge-canvas {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  cursor: crosshair;
+}
+
+.merge-pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.merge-pair-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.merge-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Elevation editor */
+.elevation-body {
+  display: flex;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.elevation-canvas-container {
+  flex: 1 1 auto;
+}
+
+.elevation-binding-panel {
+  flex: 0 0 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.elevation-binding-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.elevation-binding-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.elevation-binding-form select {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.elevation-binding-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.elevation-binding-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.elevation-binding-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
 }

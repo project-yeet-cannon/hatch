@@ -1,7 +1,12 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import './App.css';
+import { ElevationEditor } from './components/ElevationEditor';
 import { FloorPlanEditor } from './components/FloorPlanEditor';
+import { ProjectSidebar } from './components/ProjectSidebar';
+import { SketchMergeView } from './components/SketchMergeView';
+import { withSketchesMerged } from './model/schema';
+import type { Sketch } from './model/schema';
 import { useProjectStore } from './state/useProjectStore';
 
 function formatSaveStatus(isSaving: boolean, savedAt: Date | null): string {
@@ -13,8 +18,19 @@ function formatSaveStatus(isSaving: boolean, savedAt: Date | null): string {
 export function App() {
   const store = useProjectStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [activeSketchId, setActiveSketchId] = useState<string | null>(null);
+  const [mergeTarget, setMergeTarget] = useState<{ targetId: string; sourceId: string } | null>(null);
 
-  if (store.status === 'loading' || !store.project) {
+  const project = store.project;
+
+  // Keep the active sketch valid as the project loads or sketches are added/removed/merged.
+  useEffect(() => {
+    if (!project) return;
+    if (activeSketchId && project.sketches.some((s) => s.id === activeSketchId)) return;
+    setActiveSketchId(project.sketches[0]?.id ?? null);
+  }, [project, activeSketchId]);
+
+  if (store.status === 'loading' || !project || !activeSketchId) {
     return (
       <div className="modeler-app modeler-loading">
         <p className="text-muted">Loading project…</p>
@@ -22,8 +38,7 @@ export function App() {
     );
   }
 
-  const project = store.project;
-  const sketch = project.sketches[0];
+  const sketch = project.sketches.find((s) => s.id === activeSketchId) ?? project.sketches[0];
 
   const handleImportChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -31,10 +46,16 @@ export function App() {
     if (!file) return;
     try {
       await store.importProject(file);
+      setActiveSketchId(null);
+      setMergeTarget(null);
     } catch (err) {
       window.alert(err instanceof Error ? err.message : 'Failed to import project file.');
     }
   };
+
+  function handleSketchCreated(created: Sketch) {
+    setActiveSketchId(created.id);
+  }
 
   return (
     <div className="modeler-app">
@@ -62,9 +83,39 @@ export function App() {
         <input ref={fileInputRef} type="file" accept="application/json,.json" hidden onChange={handleImportChange} />
       </div>
 
-      <main className="card modeler-editor-card">
-        <FloorPlanEditor project={project} sketch={sketch} update={store.update} />
-      </main>
+      <div className="modeler-body">
+        <ProjectSidebar
+          project={project}
+          activeSketchId={activeSketchId}
+          onSelectSketch={(id) => {
+            setActiveSketchId(id);
+            setMergeTarget(null);
+          }}
+          onSketchCreated={handleSketchCreated}
+          onStartMerge={(targetId, sourceId) => setMergeTarget({ targetId, sourceId })}
+          update={store.update}
+        />
+
+        <main className="card modeler-editor-card">
+          {mergeTarget ? (
+            <SketchMergeView
+              project={project}
+              targetId={mergeTarget.targetId}
+              sourceId={mergeTarget.sourceId}
+              onCancel={() => setMergeTarget(null)}
+              onConfirm={(correspondences) => {
+                store.update((p) => withSketchesMerged(p, mergeTarget.targetId, mergeTarget.sourceId, correspondences));
+                setActiveSketchId(mergeTarget.targetId);
+                setMergeTarget(null);
+              }}
+            />
+          ) : sketch.kind === 'elevation' ? (
+            <ElevationEditor project={project} sketch={sketch} update={store.update} />
+          ) : (
+            <FloorPlanEditor project={project} sketch={sketch} update={store.update} />
+          )}
+        </main>
+      </div>
     </div>
   );
 }
