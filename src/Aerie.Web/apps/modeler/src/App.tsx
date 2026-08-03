@@ -1,24 +1,8 @@
 import { useRef } from 'react';
 import type { ChangeEvent } from 'react';
 import './App.css';
-import { createId, withLastWallRemoved, withWallAdded } from './model/schema';
+import { FloorPlanEditor } from './components/FloorPlanEditor';
 import { useProjectStore } from './state/useProjectStore';
-
-function randomWall() {
-  const angle = Math.random() * Math.PI * 2;
-  const length = Math.round((2 + Math.random() * 4) * 10) / 10;
-  const originX = Math.round(Math.random() * 8 * 10) / 10;
-  const originY = Math.round(Math.random() * 8 * 10) / 10;
-  return {
-    id: createId(),
-    start: { x: originX, y: originY },
-    end: {
-      x: Math.round((originX + Math.cos(angle) * length) * 10) / 10,
-      y: Math.round((originY + Math.sin(angle) * length) * 10) / 10,
-    },
-    thickness: 0.15,
-  };
-}
 
 function formatSaveStatus(isSaving: boolean, savedAt: Date | null): string {
   if (isSaving) return 'Saving…';
@@ -78,24 +62,8 @@ export function App() {
         <input ref={fileInputRef} type="file" accept="application/json,.json" hidden onChange={handleImportChange} />
       </div>
 
-      <main className="card modeler-placeholder">
-        <h2>{sketch.name}</h2>
-        <p className="text-muted">
-          {sketch.walls.length} wall{sketch.walls.length === 1 ? '' : 's'}. The floor-plan editor (draw walls, snapping,
-          room detection) arrives in step 2 of the plan — these buttons exercise the persistence spine until then.
-        </p>
-        <div className="flex gap-2">
-          <button className="btn-primary" onClick={() => store.update((p) => withWallAdded(p, sketch.id, randomWall()))}>
-            Add wall
-          </button>
-          <button
-            className="btn-secondary"
-            onClick={() => store.update((p) => withLastWallRemoved(p, sketch.id))}
-            disabled={sketch.walls.length === 0}
-          >
-            Remove last wall
-          </button>
-        </div>
+      <main className="card modeler-editor-card">
+        <FloorPlanEditor project={project} sketch={sketch} update={store.update} />
       </main>
     </div>
   );

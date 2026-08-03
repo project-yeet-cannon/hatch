@@ -1,3 +1,4 @@
+import { migrateProjectDocument } from '../model/schema';
 import type { ProjectDocument } from '../model/schema';
 
 // Browser-only (uses the global `indexedDB`) - not unit-tested, exercised by
@@ -28,7 +29,7 @@ export async function loadActiveProject(): Promise<ProjectDocument | undefined> 
     return await new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readonly');
       const request = tx.objectStore(STORE_NAME).get(ACTIVE_PROJECT_KEY);
-      request.onsuccess = () => resolve(request.result as ProjectDocument | undefined);
+      request.onsuccess = () => resolve(request.result === undefined ? undefined : migrateProjectDocument(request.result));
       request.onerror = () => reject(request.error ?? new Error('Failed to read project from IndexedDB'));
     });
   } finally {

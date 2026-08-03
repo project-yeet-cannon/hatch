@@ -1,4 +1,4 @@
-import { SCHEMA_VERSION, type ProjectDocument } from '../model/schema';
+import { migrateProjectDocument, type ProjectDocument } from '../model/schema';
 
 export const PROJECT_FILE_EXTENSION = '.aeriemodel.json';
 
@@ -20,17 +20,18 @@ export function parseProjectFile(raw: string): ProjectDocument {
     throw new ProjectFileError('File does not contain a project object.');
   }
 
-  const doc = parsed as Partial<ProjectDocument>;
-  if (doc.schemaVersion !== SCHEMA_VERSION) {
-    throw new ProjectFileError(
-      `Unsupported schema version ${String(doc.schemaVersion)} (this build reads version ${SCHEMA_VERSION}).`,
-    );
+  let doc: ProjectDocument;
+  try {
+    doc = migrateProjectDocument(parsed);
+  } catch (err) {
+    throw new ProjectFileError(err instanceof Error ? err.message : String(err));
   }
+
   if (typeof doc.id !== 'string' || typeof doc.name !== 'string' || !Array.isArray(doc.sketches)) {
     throw new ProjectFileError('File is missing required project fields.');
   }
 
-  return doc as ProjectDocument;
+  return doc;
 }
 
 export function projectFileName(project: ProjectDocument): string {
