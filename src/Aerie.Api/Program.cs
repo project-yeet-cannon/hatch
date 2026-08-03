@@ -95,6 +95,7 @@ builder.Services.AddTransient(_ => ClientFactory.GetClient<TemplateClient>());
 
 // Services
 builder.Services.AddTransient<IEnvironmentService, EnvironmentService>();
+builder.Services.AddSingleton<IDocsService, DocsService>();
 
 // Dashboard data services
 builder.Services.AddSingleton<IForecastService, ForecastService>();
@@ -207,6 +208,10 @@ if (Directory.Exists(Path.Combine(appsPath, "admin")))
 {
     app.MapFallbackToFile("/apps/admin/{*path:nonfile}", "apps/admin/index.html");
 }
+if (Directory.Exists(Path.Combine(appsPath, "docs")))
+{
+    app.MapFallbackToFile("/apps/docs/{*path:nonfile}", "apps/docs/index.html");
+}
 
 var opt = new RewriteOptions();
 opt.AddRedirect("^$", "apps/");
@@ -215,6 +220,7 @@ opt.AddRedirect("^apps/dashboard$", "apps/dashboard/");
 opt.AddRedirect("^apps/admin$", "apps/admin/");
 opt.AddRedirect("^apps/logo$", "apps/logo/");
 opt.AddRedirect("^apps/modeler$", "apps/modeler/");
+opt.AddRedirect("^apps/docs$", "apps/docs/");
 app.UseRewriter(opt);
 
 app.UseSwagger();

@@ -22,6 +22,13 @@ RUN npm --prefix src/Aerie.Web/apps/modeler ci
 COPY src/Aerie.Web/apps/modeler src/Aerie.Web/apps/modeler
 RUN npm --prefix src/Aerie.Web/apps/modeler run build
 
+FROM node:22-alpine AS docs-build
+WORKDIR /repo
+COPY src/Aerie.Web/apps/docs/package.json src/Aerie.Web/apps/docs/package-lock.json src/Aerie.Web/apps/docs/
+RUN npm --prefix src/Aerie.Web/apps/docs ci
+COPY src/Aerie.Web/apps/docs src/Aerie.Web/apps/docs
+RUN npm --prefix src/Aerie.Web/apps/docs run build
+
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build-env
 WORKDIR /App
 
@@ -31,16 +38,20 @@ COPY . ./
 COPY --from=dashboard-build /repo/src/Aerie.Api/wwwroot/apps/dashboard ./src/Aerie.Api/wwwroot/apps/dashboard
 COPY --from=admin-build /repo/src/Aerie.Api/wwwroot/apps/admin ./src/Aerie.Api/wwwroot/apps/admin
 COPY --from=modeler-build /repo/src/Aerie.Api/wwwroot/apps/modeler ./src/Aerie.Api/wwwroot/apps/modeler
+COPY --from=docs-build /repo/src/Aerie.Api/wwwroot/apps/docs ./src/Aerie.Api/wwwroot/apps/docs
 
 # Restore as distinct layers
 RUN dotnet restore src/Aerie.Api/Aerie.Api.csproj
 
 # Build and publish a release. The SPAs (from Aerie.Web) were already built above, so skip
 # the MSBuild targets that would otherwise shell out to npm (unavailable here).
-RUN dotnet publish src/Aerie.Api/Aerie.Api.csproj -c Release -o out -p:SkipDashboardBuild=true -p:SkipAdminBuild=true -p:SkipModelerBuild=true
+RUN dotnet publish src/Aerie.Api/Aerie.Api.csproj -c Release -o out -p:SkipDashboardBuild=true -p:SkipAdminBuild=true -p:SkipModelerBuild=true -p:SkipDocsBuild=true
 
 # Build runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /App
 COPY --from=build-env /App/out .
+# Markdown source for DocsController/DocsService (Docs:Path in appsettings.Docker.json),
+# not part of the published .NET output above.
+COPY --from=build-env /App/docs ./docs
 ENTRYPOINT ["dotnet", "Aerie.Api.dll"]
