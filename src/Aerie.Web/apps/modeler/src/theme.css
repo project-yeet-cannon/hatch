@@ -17,6 +17,9 @@
   --success: #388e3c;
   --success-bg: rgba(56, 142, 60, 0.08);
   --success-ink: #1b5e20;
+  --warning: #b58900;
+  --warning-bg: rgba(181, 137, 0, 0.08);
+  --warning-ink: #7a5c00;
   --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   --transition: 200ms ease;
 }
@@ -53,6 +56,9 @@ html, body, #root {
     --success: #66bb6a;
     --success-bg: rgba(102, 187, 106, 0.12);
     --success-ink: #99e699;
+    --warning: #e0b93d;
+    --warning-bg: rgba(224, 185, 61, 0.12);
+    --warning-ink: #f0d27a;
   }
 }
 

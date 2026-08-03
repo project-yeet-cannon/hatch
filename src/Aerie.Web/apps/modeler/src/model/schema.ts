@@ -3,7 +3,7 @@
 // SCHEMA_VERSION whenever this shape changes in a way old files can't be
 // read as-is, and add a branch to migrateProjectDocument below to upgrade
 // them rather than rejecting them.
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export interface Point2 {
   x: number;
@@ -16,6 +16,8 @@ export interface WallSegment {
   end: Point2;
   /** Meters, centered on the start-end centerline. */
   thickness: number;
+  /** User-entered length in meters, if this edge has been measured (see model/solver.ts). Absent means unmeasured. */
+  measuredLength?: number;
 }
 
 // Rooms themselves are derived at runtime from closed loops in a sketch's
@@ -112,6 +114,11 @@ export function migrateProjectDocument(raw: unknown): ProjectDocument {
     version = 2;
   }
 
+  if (version === 2) {
+    // Walls gained an optional measuredLength; existing walls are valid as-is with it absent.
+    version = 3;
+  }
+
   if (version !== SCHEMA_VERSION) {
     throw new Error(`Unsupported schema version ${String(doc.schemaVersion)} (this build reads version ${SCHEMA_VERSION}).`);
   }
@@ -170,6 +177,37 @@ export function withVertexMoved(project: ProjectDocument, sketchId: string, from
       start: pointsEqual(wall.start, from) ? to : wall.start,
       end: pointsEqual(wall.end, from) ? to : wall.end,
     })),
+    updatedAt: now,
+  }));
+}
+
+/** Sets (or, with `null`, clears) a wall's user-entered length, the input to the dimension solver (model/solver.ts). */
+export function withWallLengthSet(project: ProjectDocument, sketchId: string, wallId: string, measuredLength: number | null): ProjectDocument {
+  const now = new Date().toISOString();
+  return updateSketch(project, sketchId, (sketch) => ({
+    ...sketch,
+    walls: sketch.walls.map((wall) => {
+      if (wall.id !== wallId) return wall;
+      if (measuredLength === null) {
+        const { measuredLength: _drop, ...rest } = wall;
+        return rest;
+      }
+      return { ...wall, measuredLength };
+    }),
+    updatedAt: now,
+  }));
+}
+
+/** Overwrites wall start/end points with solved positions (see model/solver.ts), keyed by wall id; walls not present in `solvedWalls` are untouched. */
+export function withWallPositionsUpdated(project: ProjectDocument, sketchId: string, solvedWalls: readonly WallSegment[]): ProjectDocument {
+  const now = new Date().toISOString();
+  const byId = new Map(solvedWalls.map((wall) => [wall.id, wall]));
+  return updateSketch(project, sketchId, (sketch) => ({
+    ...sketch,
+    walls: sketch.walls.map((wall) => {
+      const solved = byId.get(wall.id);
+      return solved ? { ...wall, start: solved.start, end: solved.end } : wall;
+    }),
     updatedAt: now,
   }));
 }

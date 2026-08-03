@@ -8,6 +8,8 @@ import {
   withRoomNamed,
   withVertexMoved,
   withWallAdded,
+  withWallLengthSet,
+  withWallPositionsUpdated,
   withWallSplit,
   withWallsRemoved,
 } from './schema';
@@ -67,7 +69,7 @@ describe('migrateProjectDocument', () => {
       sketches: [{ id: 's1', name: 'Ground Floor', kind: 'floorPlan', floorIndex: 0, walls: [WALL], createdAt: 'now', updatedAt: 'now' }],
     };
     const migrated = migrateProjectDocument(legacy);
-    expect(migrated.schemaVersion).toBe(2);
+    expect(migrated.schemaVersion).toBe(SCHEMA_VERSION);
     expect(migrated.sketches[0].roomLabels).toEqual([]);
     expect(migrated.sketches[0].walls).toEqual([WALL]);
   });
@@ -186,5 +188,43 @@ describe('withDefaultWallThicknessSet', () => {
   it('updates the project settings', () => {
     const next = withDefaultWallThicknessSet(createEmptyProject(), 0.2);
     expect(next.settings.defaultWallThickness).toBe(0.2);
+  });
+});
+
+describe('withWallLengthSet', () => {
+  it('sets a measured length on the target wall only', () => {
+    const project = createEmptyProject();
+    const sketchId = project.sketches[0].id;
+    const second: WallSegment = { ...WALL, id: 'w2' };
+    const withTwoWalls = withWallAdded(withWallAdded(project, sketchId, WALL), sketchId, second);
+
+    const next = withWallLengthSet(withTwoWalls, sketchId, WALL.id, 3.2);
+
+    expect(next.sketches[0].walls[0].measuredLength).toBe(3.2);
+    expect(next.sketches[0].walls[1].measuredLength).toBeUndefined();
+  });
+
+  it('clears a measured length when passed null', () => {
+    const project = createEmptyProject();
+    const sketchId = project.sketches[0].id;
+    const measured = withWallLengthSet(withWallAdded(project, sketchId, WALL), sketchId, WALL.id, 3.2);
+
+    const cleared = withWallLengthSet(measured, sketchId, WALL.id, null);
+
+    expect(cleared.sketches[0].walls[0].measuredLength).toBeUndefined();
+  });
+});
+
+describe('withWallPositionsUpdated', () => {
+  it('overwrites start/end for walls present in the solved set, leaving others alone', () => {
+    const project = createEmptyProject();
+    const sketchId = project.sketches[0].id;
+    const second: WallSegment = { id: 'w2', start: { x: 3, y: 0 }, end: { x: 3, y: 4 }, thickness: 0.15 };
+    const withTwoWalls = withWallAdded(withWallAdded(project, sketchId, WALL), sketchId, second);
+
+    const next = withWallPositionsUpdated(withTwoWalls, sketchId, [{ ...WALL, end: { x: 3.1, y: 0 } }]);
+
+    expect(next.sketches[0].walls[0].end).toEqual({ x: 3.1, y: 0 });
+    expect(next.sketches[0].walls[1]).toEqual(second);
   });
 });

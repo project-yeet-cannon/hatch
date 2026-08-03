@@ -4,8 +4,20 @@ import { defaultCamera, fitCamera, panBy, screenToWorld, worldToScreen, zoomAt }
 import type { Camera } from '../editor/camera';
 import { distance, nearestPoint, nearestPointOnSegment, snapDrawPoint } from '../model/geometry';
 import { detectRooms, matchRoomLabel, pointInPolygon } from '../model/roomDetection';
-import { createId, withDefaultWallThicknessSet, withRoomNamed, withVertexMoved, withWallAdded, withWallSplit, withWallsRemoved } from '../model/schema';
+import {
+  createId,
+  withDefaultWallThicknessSet,
+  withRoomNamed,
+  withVertexMoved,
+  withWallAdded,
+  withWallLengthSet,
+  withWallPositionsUpdated,
+  withWallSplit,
+  withWallsRemoved,
+} from '../model/schema';
 import type { Point2, ProjectDocument, Sketch, WallSegment } from '../model/schema';
+import { solveSketch } from '../model/solver';
+import type { EdgeStatus } from '../model/solver';
 
 interface FloorPlanEditorProps {
   project: ProjectDocument;
@@ -103,6 +115,16 @@ export function FloorPlanEditor({ project, sketch, update }: FloorPlanEditorProp
   const rooms = useMemo(() => detectRooms(sketch.walls), [sketch.walls]);
   const vertices = useMemo(() => collectVertices(sketch.walls), [sketch.walls]);
 
+  // The dimension solver: sketch.walls is the initial guess, measuredLength values are the known
+  // inputs, and the result gives every wall a measured/derived/estimated status plus a solved
+  // length for display. Solving is read-only here - it doesn't move the walls the user is
+  // interacting with, only "Apply solved geometry" below writes the solved positions back.
+  const solution = useMemo(() => solveSketch(sketch.walls), [sketch.walls]);
+  const solvedRooms = useMemo(() => detectRooms(solution.walls), [solution.walls]);
+  const totalArea = useMemo(() => solvedRooms.reduce((sum, room) => sum + room.area, 0), [solvedRooms]);
+
+  const singleSelectedWall = selectedWallIds.size === 1 ? sketch.walls.find((w) => selectedWallIds.has(w.id)) ?? null : null;
+
   // Reset drawing/selection state when switching sketches so stale ids from
   // a different wall set can't linger.
   useEffect(() => {
@@ -192,6 +214,7 @@ export function FloorPlanEditor({ project, sketch, update }: FloorPlanEditorProp
       primary: styles.getPropertyValue('--primary').trim() || '#06c',
       primaryBg: styles.getPropertyValue('--primary-bg').trim() || 'rgba(0,102,204,0.08)',
       success: styles.getPropertyValue('--success').trim() || '#388e3c',
+      warning: styles.getPropertyValue('--warning').trim() || '#b58900',
     };
 
     ctx.clearRect(0, 0, viewport.width, viewport.height);
@@ -203,7 +226,7 @@ export function FloorPlanEditor({ project, sketch, update }: FloorPlanEditorProp
     }
 
     for (const wall of sketch.walls) {
-      drawWall(ctx, camera, wall, selectedWallIds.has(wall.id), colors);
+      drawWall(ctx, camera, wall, selectedWallIds.has(wall.id), solution.statuses.get(wall.id), solution.lengths.get(wall.id), colors);
     }
 
     for (const vertex of vertices) {
@@ -221,7 +244,7 @@ export function FloorPlanEditor({ project, sketch, update }: FloorPlanEditorProp
       const snap = snapDrawPoint(cursorWorld, drawStart, vertices, vertexTolerance);
       drawGhostWall(ctx, camera, drawStart, snap.point, project.settings.defaultWallThickness, colors);
     }
-  }, [camera, viewport, sketch.walls, sketch.roomLabels, rooms, vertices, selectedWallIds, draggingVertex, dragPreview, tool, drawStart, cursorWorld, project.settings.defaultWallThickness]);
+  }, [camera, viewport, sketch.walls, sketch.roomLabels, rooms, vertices, selectedWallIds, draggingVertex, dragPreview, tool, drawStart, cursorWorld, project.settings.defaultWallThickness, solution]);
 
   function getCanvasPoint(e: ReactPointerEvent | ReactWheelEvent): Point2 {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -384,14 +407,31 @@ export function FloorPlanEditor({ project, sketch, update }: FloorPlanEditorProp
         >
           Delete selected
         </button>
+        {singleSelectedWall && (
+          <DimensionInput
+            wall={singleSelectedWall}
+            solvedLength={solution.lengths.get(singleSelectedWall.id) ?? 0}
+            status={solution.statuses.get(singleSelectedWall.id)}
+            onSet={(length) => update((p) => withWallLengthSet(p, sketch.id, singleSelectedWall.id, length))}
+          />
+        )}
+        <button
+          className="btn-secondary"
+          onClick={() => update((p) => withWallPositionsUpdated(p, sketch.id, solution.walls))}
+          disabled={sketch.walls.length === 0}
+          title="Reshape the drawing to match the solved dimensions"
+        >
+          Apply solved geometry
+        </button>
         <span className="text-muted editor-status">
-          {sketch.walls.length} wall{sketch.walls.length === 1 ? '' : 's'} · {rooms.length} room{rooms.length === 1 ? '' : 's'} detected
+          {sketch.walls.length} wall{sketch.walls.length === 1 ? '' : 's'} · {rooms.length} room{rooms.length === 1 ? '' : 's'} detected ·{' '}
+          {totalArea.toFixed(1)} m² total (solved)
         </span>
       </div>
       <p className="text-muted editor-hint">
         {tool === 'wall'
           ? 'Click to start a wall, click again to place each corner (chains continue automatically). Esc cancels. Space-drag or middle-drag to pan, scroll to zoom.'
-          : 'Drag a corner to move it, click a wall to select (Del to remove), click inside a room to name it.'}
+          : 'Drag a corner to move it, click a wall to select and set its real length (Del to remove), click inside a room to name it. Green = measured, blue = derived from other measurements, amber = estimated from the sketch.'}
       </p>
       <div ref={containerRef} className="editor-canvas-container">
         <canvas
@@ -408,6 +448,49 @@ export function FloorPlanEditor({ project, sketch, update }: FloorPlanEditorProp
   );
 }
 
+interface DimensionInputProps {
+  wall: WallSegment;
+  solvedLength: number;
+  status: EdgeStatus | undefined;
+  onSet: (length: number | null) => void;
+}
+
+/** Shown in the toolbar when exactly one wall is selected: lets the user type its real-world length (a "measurement") or clear a previously entered one back to a solver estimate. */
+function DimensionInput({ wall, solvedLength, status, onSet }: DimensionInputProps) {
+  const [draft, setDraft] = useState(() => (wall.measuredLength ?? solvedLength).toFixed(2));
+
+  useEffect(() => {
+    setDraft((wall.measuredLength ?? solvedLength).toFixed(2));
+  }, [wall.id, wall.measuredLength, solvedLength]);
+
+  function commit() {
+    const value = Number(draft);
+    if (Number.isFinite(value) && value > 0) onSet(value);
+  }
+
+  return (
+    <label className="editor-dimension" title={`Status: ${status ?? 'estimated'}`}>
+      Wall length (m)
+      <input
+        type="number"
+        min={0.05}
+        step={0.01}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit();
+        }}
+      />
+      {wall.measuredLength !== undefined && (
+        <button className="btn-secondary" onClick={() => onSet(null)}>
+          Clear
+        </button>
+      )}
+    </label>
+  );
+}
+
 interface CanvasColors {
   ink: string;
   muted: string;
@@ -415,6 +498,14 @@ interface CanvasColors {
   primary: string;
   primaryBg: string;
   success: string;
+  warning: string;
+}
+
+function statusColor(status: EdgeStatus | undefined, colors: CanvasColors): string {
+  if (status === 'measured') return colors.success;
+  if (status === 'derived') return colors.primary;
+  if (status === 'estimated') return colors.warning;
+  return colors.ink;
 }
 
 function drawGrid(ctx: CanvasRenderingContext2D, camera: Camera, viewport: { width: number; height: number }, lineColor: string) {
@@ -471,16 +562,32 @@ function drawRoom(
   ctx.fillText(`${room.area.toFixed(1)} m²`, center.x, center.y + 9);
 }
 
-function drawWall(ctx: CanvasRenderingContext2D, camera: Camera, wall: WallSegment, selected: boolean, colors: CanvasColors) {
+function drawWall(
+  ctx: CanvasRenderingContext2D,
+  camera: Camera,
+  wall: WallSegment,
+  selected: boolean,
+  status: EdgeStatus | undefined,
+  solvedLength: number | undefined,
+  colors: CanvasColors,
+) {
   const start = worldToScreen(camera, wall.start);
   const end = worldToScreen(camera, wall.end);
-  ctx.strokeStyle = selected ? colors.primary : colors.ink;
-  ctx.lineWidth = Math.max(2, wall.thickness * camera.zoom);
+  ctx.strokeStyle = selected ? colors.primary : statusColor(status, colors);
+  ctx.lineWidth = selected ? Math.max(3, wall.thickness * camera.zoom + 1) : Math.max(2, wall.thickness * camera.zoom);
   ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(start.x, start.y);
   ctx.lineTo(end.x, end.y);
   ctx.stroke();
+
+  if (solvedLength === undefined) return;
+  const mid = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+  ctx.font = '11px Manrope, sans-serif';
+  ctx.fillStyle = statusColor(status, colors);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(`${solvedLength.toFixed(2)} m`, mid.x, mid.y - 4);
 }
 
 function drawVertex(ctx: CanvasRenderingContext2D, camera: Camera, point: Point2, active: boolean, colors: CanvasColors) {
