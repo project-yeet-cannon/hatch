@@ -43,7 +43,7 @@ export function DiscoveryPage() {
 
   async function importDevice(device: UnmappedHaDevice) {
     const draft = drafts[device.haDeviceId];
-    if (!draft || !draft.kind || !draft.name.trim()) return;
+    if (!draft || !draft.name.trim()) return;
 
     setImportingId(device.haDeviceId);
     setError(null);
@@ -51,7 +51,7 @@ export function DiscoveryPage() {
     try {
       const created = await createDevice({
         name: draft.name.trim(),
-        kind: draft.kind,
+        kind: draft.kind === "" ? null : draft.kind,
         zoneId: null,
         haDeviceId: device.haDeviceId,
         enabled: true,
@@ -105,11 +105,9 @@ export function DiscoveryPage() {
                 <label className="field-label">Kind</label>
                 <select
                   value={draft.kind}
-                  onChange={(e) => updateDraft(device.haDeviceId, { kind: e.target.value as DeviceKind })}
+                  onChange={(e) => updateDraft(device.haDeviceId, { kind: e.target.value as DeviceKind | "" })}
                 >
-                  <option value="" disabled>
-                    Select a kind…
-                  </option>
+                  <option value="">Unset</option>
                   <option value="Thermostat">Thermostat</option>
                   <option value="Hygrometer">Hygrometer</option>
                   <option value="SmartSwitch">Smart switch</option>
@@ -145,7 +143,7 @@ export function DiscoveryPage() {
 
             <button
               className="btn-primary"
-              disabled={!draft.kind || !draft.name.trim() || importingId === device.haDeviceId}
+              disabled={!draft.name.trim() || importingId === device.haDeviceId}
               onClick={() => importDevice(device)}
             >
               {importingId === device.haDeviceId ? 'Importing…' : 'Import as Device'}

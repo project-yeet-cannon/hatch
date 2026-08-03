@@ -64,7 +64,7 @@ export interface DeviceChannelWriteRequest {
 export interface Device {
   id: string;
   name: string;
-  kind: DeviceKind;
+  kind: DeviceKind | null;
   zoneId: string | null;
   haDeviceId: string | null;
   enabled: boolean;
@@ -73,7 +73,7 @@ export interface Device {
 
 export interface DeviceWriteRequest {
   name: string;
-  kind: DeviceKind;
+  kind: DeviceKind | null;
   zoneId: string | null;
   haDeviceId: string | null;
   enabled: boolean;

@@ -23,9 +23,9 @@ public record ChannelModeRequest(string Mode);
 /// <summary>Desired setpoint for a SetpointTemperature channel (DevicesController.SetSetpoint).</summary>
 public record ChannelSetpointRequest(decimal Temperature);
 
-public record DeviceDto(Guid Id, string Name, DeviceKind Kind, Guid? ZoneId, string? HaDeviceId, bool Enabled, IReadOnlyList<DeviceChannelDto> Channels);
+public record DeviceDto(Guid Id, string Name, DeviceKind? Kind, Guid? ZoneId, string? HaDeviceId, bool Enabled, IReadOnlyList<DeviceChannelDto> Channels);
 
-public record DeviceWriteRequest(string Name, DeviceKind Kind, Guid? ZoneId, string? HaDeviceId, bool Enabled);
+public record DeviceWriteRequest(string Name, DeviceKind? Kind, Guid? ZoneId, string? HaDeviceId, bool Enabled);
 
 /// <summary>Time range for a BackfillChannelHistory job run (DevicesController.Backfill).</summary>
 public record BackfillRequest(DateTimeOffset From, DateTimeOffset To);

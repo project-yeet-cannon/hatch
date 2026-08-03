@@ -98,7 +98,7 @@ function sceneLabel(channel: DeviceChannel): string {
 
 interface DeviceFormState {
   name: string;
-  kind: DeviceKind;
+  kind: DeviceKind | "";
   zoneId: string;
   haDeviceId: string;
   enabled: boolean;
@@ -106,7 +106,7 @@ interface DeviceFormState {
 
 const emptyDeviceForm = (): DeviceFormState => ({
   name: "",
-  kind: "Thermostat",
+  kind: "",
   zoneId: "",
   haDeviceId: "",
   enabled: true,
@@ -114,7 +114,7 @@ const emptyDeviceForm = (): DeviceFormState => ({
 
 const toDeviceForm = (device: Device): DeviceFormState => ({
   name: device.name,
-  kind: device.kind,
+  kind: device.kind ?? "",
   zoneId: device.zoneId ?? "",
   haDeviceId: device.haDeviceId ?? "",
   enabled: device.enabled,
@@ -122,7 +122,7 @@ const toDeviceForm = (device: Device): DeviceFormState => ({
 
 const toDeviceRequest = (form: DeviceFormState): DeviceWriteRequest => ({
   name: form.name.trim(),
-  kind: form.kind,
+  kind: form.kind === "" ? null : form.kind,
   zoneId: form.zoneId === "" ? null : form.zoneId,
   haDeviceId: form.haDeviceId.trim() === "" ? null : form.haDeviceId.trim(),
   enabled: form.enabled,
@@ -637,7 +637,7 @@ export function DevicesPage() {
                   )}
                 </p>
                 <p className="text-muted">
-                  {device.kind} · {zoneName(device.zoneId)}
+                  {[device.kind, zoneName(device.zoneId)].filter(Boolean).join(" · ")}
                 </p>
                 {device.channels.length > 0 && (
                   <div className="mt-1">
@@ -1016,9 +1016,10 @@ function DeviceForm({
         <select
           value={form.kind}
           onChange={(e) =>
-            onChange({ ...form, kind: e.target.value as DeviceKind })
+            onChange({ ...form, kind: e.target.value as DeviceKind | "" })
           }
         >
+          <option value="">Unset</option>
           <option value="Thermostat">Thermostat</option>
           <option value="Hygrometer">Hygrometer</option>
           <option value="SmartSwitch">Smart switch</option>

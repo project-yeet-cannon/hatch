@@ -45,7 +45,9 @@ public class EfDevice
     public Guid Id { get; set; }
 
     public required string Name { get; set; }
-    public DeviceKind Kind { get; set; }
+
+    /// <summary>Optional - most control/UI behavior is driven by DeviceChannel.Metric/Direction, not Kind, so it's only worth setting where the distinction is actually meaningful (e.g. to pick a suggested channel set during Discovery import).</summary>
+    public DeviceKind? Kind { get; set; }
 
     public Guid? ZoneId { get; set; }
     public EfZone? Zone { get; set; }
