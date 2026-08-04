@@ -10,6 +10,8 @@ import type {
   DeviceHistory,
   DeviceWriteRequest,
   ProvisioningInfo,
+  Routine,
+  RoutineWriteRequest,
   SiteSetting,
   UnmappedHaDevice,
   Zone,
@@ -83,6 +85,17 @@ export const getDeviceHistory = (deviceId: string, from?: string, to?: string, b
   fetchJson<DeviceHistory>(`/api/devices/${deviceId}/history${qs({ from, to, bucketMinutes })}`);
 export const getChannelHistory = (deviceId: string, channelId: string, from?: string, to?: string, bucketMinutes?: number) =>
   fetchJson<ChannelHistory>(`/api/devices/${deviceId}/channels/${channelId}/history${qs({ from, to, bucketMinutes })}`);
+
+// ---- Routines ----
+
+export const getRoutines = () => fetchJson<Routine[]>('/api/routines');
+export const getRoutine = (id: string) => fetchJson<Routine>(`/api/routines/${id}`);
+export const createRoutine = (request: RoutineWriteRequest) =>
+  fetchJson<Routine>('/api/routines', { method: 'POST', ...asJson(request) });
+export const updateRoutine = (id: string, request: RoutineWriteRequest) =>
+  fetchJson<Routine>(`/api/routines/${id}`, { method: 'PUT', ...asJson(request) });
+export const deleteRoutine = (id: string) => fetchJson<void>(`/api/routines/${id}`, { method: 'DELETE' });
+export const triggerRoutine = (id: string) => fetchJson<void>(`/api/routines/${id}/trigger`, { method: 'POST' });
 
 // ---- Settings ----
 

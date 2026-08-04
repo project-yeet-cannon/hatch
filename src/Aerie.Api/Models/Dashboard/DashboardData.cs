@@ -50,9 +50,13 @@ public record OutsideClimate(
 /// </summary>
 public record SunEvents(DateTimeOffset Dawn, DateTimeOffset Sunrise, DateTimeOffset Sunset, DateTimeOffset Dusk);
 
+/// <summary>A Routine as shown on the kiosk - just enough to render a tap-to-trigger button; see RoutinesController for the full admin-editable shape.</summary>
+public record RoutineSummary(Guid Id, string Name, string? Description);
+
 public record DashboardData(
     DateTimeOffset GeneratedAt,
     string Timezone,
     IReadOnlyList<ZoneClimate> Zones,
     OutsideClimate Outside,
-    SunEvents SunEvents);
+    SunEvents SunEvents,
+    IReadOnlyList<RoutineSummary> Routines);

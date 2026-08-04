@@ -131,6 +131,40 @@ export interface DeviceHistory {
   channels: ChannelHistory[];
 }
 
+export type RoutineActionKind = 'SetPower' | 'SetTemperature' | 'SetHvacMode' | 'SetFanMode' | 'TriggerScene';
+
+export interface RoutineAction {
+  id: string;
+  channelId: string;
+  kind: RoutineActionKind;
+  value: string | null;
+  sortOrder: number;
+}
+
+export interface RoutineActionWriteRequest {
+  channelId: string;
+  kind: RoutineActionKind;
+  value: string | null;
+  sortOrder: number;
+}
+
+export interface Routine {
+  id: string;
+  name: string;
+  description: string | null;
+  sortOrder: number;
+  included: boolean;
+  actions: RoutineAction[];
+}
+
+export interface RoutineWriteRequest {
+  name: string;
+  description: string | null;
+  sortOrder: number;
+  included: boolean;
+  actions: RoutineActionWriteRequest[];
+}
+
 export interface ProvisioningInfo {
   signatureChecksum: string;
   apkDownloadUrl: string;

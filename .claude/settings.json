@@ -1,10 +1,6 @@
 {
-  "env": {
-    "PATH": "/Users/nathan/.nvm/versions/node/v22.23.1/bin:/usr/local/opt/ruby/bin:/usr/local/lib/ruby/gems/3.1.0/bin:/Users/nathan/Library/Python/3.8/bin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/Library/Apple/usr/bin:/usr/local/MacGPG2/bin:/usr/local/share/dotnet:~/.dotnet/tools:/usr/local/go/bin:/Library/Frameworks/Mono.framework/Versions/Current/Commands:/Users/nathan/.dotnet/tools"
-  },
   "permissions": {
     "allow": [
-      "Bash(unset -f node npm npx)",
       "Bash(curl -s -o /dev/null -w \"logs.landis.family -> HTTP %{http_code}\\\\n\" https://logs.landis.family/ --max-time 5)",
       "WebFetch(domain:firefox-source-docs.mozilla.org)",
       "WebFetch(domain:mozilla.github.io)"

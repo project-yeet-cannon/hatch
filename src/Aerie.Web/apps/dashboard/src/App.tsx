@@ -8,6 +8,7 @@ import { getCircadianPhase, resolveThemeStyle } from './lib/circadianTheme';
 import { circadianTokens } from './theme/tokens';
 import { ZoneCard } from './components/ZoneCard';
 import { OutsideCard } from './components/OutsideCard';
+import { RoutinesSection } from './components/RoutinesSection';
 import { DashboardSkeleton } from './components/DashboardSkeleton';
 import { clientLogger } from './lib/clientLogger';
 
@@ -78,12 +79,15 @@ export function App() {
           </div>
         </div>
         {data ? (
-          <div className="hf-zones">
-            <OutsideCard outside={data.outside} timeZone={data.timezone} />
-            {data.zones.map((zone, i) => (
-              <ZoneCard key={zone.id} zone={zone} timeZone={data.timezone} defaultOpen={i === 0} />
-            ))}
-          </div>
+          <>
+            <div className="hf-zones">
+              <OutsideCard outside={data.outside} timeZone={data.timezone} />
+              {data.zones.map((zone, i) => (
+                <ZoneCard key={zone.id} zone={zone} timeZone={data.timezone} defaultOpen={i === 0} />
+              ))}
+            </div>
+            {data.routines.length > 0 && <RoutinesSection routines={data.routines} />}
+          </>
         ) : error ? (
           <div className="hf-note" role="alert" style={{ margin: 0 }}>
             Couldn’t load dashboard data — {error}

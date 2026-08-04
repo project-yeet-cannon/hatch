@@ -5,6 +5,7 @@ import type {
   DashboardDataSource,
   HourlyOutside,
   OutsideClimate,
+  RoutineSummary,
   SunEvents,
   TempPoint,
   ZoneClimate,
@@ -48,6 +49,10 @@ function xExtreme(date: Date): DailyExtreme {
 
 function xComfortRange(): ComfortRange {
   return { lowF: NUM, highF: NUM };
+}
+
+function xRoutine(index: number): RoutineSummary {
+  return { id: `${X}-${index}`, name: X_LONG, description: X_LONG };
 }
 
 function xZone(index: number, now: Date): ZoneClimate {
@@ -113,6 +118,7 @@ export class TestDataSource implements DashboardDataSource {
       zones: [1, 2, 3].map((i) => xZone(i, now)),
       outside: xOutside(now),
       sunEvents: xSunEvents(now),
+      routines: [1, 2].map((i) => xRoutine(i)),
     };
   }
 }

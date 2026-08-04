@@ -5,6 +5,7 @@ import type {
   DashboardDataSource,
   HourlyOutside,
   OutsideClimate,
+  RoutineSummary,
   SunEvents,
   TempPoint,
   ZoneClimate,
@@ -30,6 +31,11 @@ const ZONE_CURVES: Record<string, { name: string; curve: DiurnalCurve }> = {
 
 const INDOOR_COMFORT_RANGE: ComfortRange = { lowF: 68, highF: 71 };
 const OUTSIDE_CURVE: DiurnalCurve = { meanF: 58, amplitudeF: 9, peakHour: 14 };
+
+const ROUTINES: RoutineSummary[] = [
+  { id: 'night-mode', name: 'Night mode', description: 'Basement night lights + bedroom white noise' },
+  { id: 'max-ac', name: 'Max AC', description: 'Radiators off, AC down, fans on' },
+];
 
 function buildSeries(now: Date, curve: DiurnalCurve): { history: TempPoint[]; forecast: TempPoint[] } {
   const history: TempPoint[] = [];
@@ -154,6 +160,7 @@ export class MockDashboardDataSource implements DashboardDataSource {
       zones,
       outside: buildOutside(now, zones, sunEvents),
       sunEvents,
+      routines: ROUTINES,
     };
   }
 }

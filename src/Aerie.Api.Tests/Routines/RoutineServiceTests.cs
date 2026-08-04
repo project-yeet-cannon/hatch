@@ -1,0 +1,69 @@
+using Aerie.Api.Ef;
+using Aerie.Api.Services.Routines;
+using Microsoft.EntityFrameworkCore;
+
+namespace Aerie.Api.Tests.Routines;
+
+/// <summary>Covers RoutineService.GetRoutinesAsync's Included/SortOrder filtering against an EF Core InMemory database.</summary>
+public class RoutineServiceTests
+{
+    private static IDbContextFactory<AerieContext> NewFactory() =>
+        new TestDbContextFactory(new DbContextOptionsBuilder<AerieContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+
+    [Fact]
+    public async Task GetRoutinesAsync_ExcludesRoutines_WhereIncludedIsFalse()
+    {
+        var factory = NewFactory();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.Routines.AddRange(
+                new EfRoutine { Id = Guid.NewGuid(), Name = "Night mode", SortOrder = 0, Included = true },
+                new EfRoutine { Id = Guid.NewGuid(), Name = "Hidden", SortOrder = 1, Included = false });
+            await db.SaveChangesAsync();
+        }
+
+        var result = await new RoutineService(factory).GetRoutinesAsync(CancellationToken.None);
+
+        Assert.Single(result);
+        Assert.Equal("Night mode", result[0].Name);
+    }
+
+    [Fact]
+    public async Task GetRoutinesAsync_OrdersBySortOrder_ThenName()
+    {
+        var factory = NewFactory();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.Routines.AddRange(
+                new EfRoutine { Id = Guid.NewGuid(), Name = "Max AC", SortOrder = 1, Included = true },
+                new EfRoutine { Id = Guid.NewGuid(), Name = "Night mode", SortOrder = 0, Included = true },
+                new EfRoutine { Id = Guid.NewGuid(), Name = "Arrival", SortOrder = 1, Included = true });
+            await db.SaveChangesAsync();
+        }
+
+        var result = await new RoutineService(factory).GetRoutinesAsync(CancellationToken.None);
+
+        Assert.Equal(["Night mode", "Arrival", "Max AC"], result.Select(r => r.Name));
+    }
+
+    [Fact]
+    public async Task GetRoutinesAsync_MapsDescription_IncludingNull()
+    {
+        var factory = NewFactory();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.Routines.Add(new EfRoutine { Id = Guid.NewGuid(), Name = "Night mode", Description = "Dims the house", SortOrder = 0, Included = true });
+            await db.SaveChangesAsync();
+        }
+
+        var result = await new RoutineService(factory).GetRoutinesAsync(CancellationToken.None);
+
+        Assert.Equal("Dims the house", result[0].Description);
+    }
+
+    private sealed class TestDbContextFactory(DbContextOptions<AerieContext> options) : IDbContextFactory<AerieContext>
+    {
+        public AerieContext CreateDbContext() => new(options);
+        public Task<AerieContext> CreateDbContextAsync(CancellationToken ct = default) => Task.FromResult(new AerieContext(options));
+    }
+}

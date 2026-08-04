@@ -80,6 +80,13 @@ export interface SunEvents {
   dusk: string;
 }
 
+/** A Routine as shown on the kiosk - just enough to render a tap-to-trigger button. */
+export interface RoutineSummary {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
 export interface DashboardData {
   /** ISO 8601 timestamp of when this snapshot was produced. */
   generatedAt: string;
@@ -88,6 +95,7 @@ export interface DashboardData {
   zones: ZoneClimate[];
   outside: OutsideClimate;
   sunEvents: SunEvents;
+  routines: RoutineSummary[];
 }
 
 /** Anything that can produce a dashboard snapshot — mock today, a live API later. */

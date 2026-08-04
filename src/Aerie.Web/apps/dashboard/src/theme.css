@@ -272,6 +272,53 @@ body {
   width: 100%;
   border-radius: 12px;
 }
+.hf-routines {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.hf-routine-btn {
+  flex: 1 1 calc(50% - 10px);
+  min-width: 140px;
+  min-height: 64px;
+  border-radius: var(--r);
+  background: var(--card);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 700;
+  padding: 14px 16px;
+  cursor: pointer;
+  text-align: left;
+  transition: opacity 0.15s, box-shadow 0.15s;
+}
+.hf-routine-btn:active {
+  box-shadow: var(--shadow);
+}
+.hf-routine-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.hf-routine-desc {
+  display: block;
+  font-family: var(--ui);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.hf-routine-status {
+  display: block;
+  font-family: var(--ui);
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 6px;
+}
+.hf-routine-status.hf-routine-error {
+  color: var(--warm-ink);
+}
+
 .hf-skel.hf-xax {
   height: 9px;
   width: 55%;

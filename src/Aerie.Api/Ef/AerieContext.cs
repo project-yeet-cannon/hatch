@@ -14,6 +14,9 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
     public DbSet<EfMeasurement> Measurements => Set<EfMeasurement>();
     public DbSet<EfStateChange> StateChanges => Set<EfStateChange>();
 
+    public DbSet<EfRoutine> Routines => Set<EfRoutine>();
+    public DbSet<EfRoutineAction> RoutineActions => Set<EfRoutineAction>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<EfEnvironmentReading>();
@@ -44,6 +47,18 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
             .HasOne(s => s.Channel)
             .WithMany()
             .HasForeignKey(s => s.ChannelId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<EfRoutineAction>()
+            .HasOne(a => a.Routine)
+            .WithMany(r => r.Actions)
+            .HasForeignKey(a => a.RoutineId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<EfRoutineAction>()
+            .HasOne(a => a.Channel)
+            .WithMany()
+            .HasForeignKey(a => a.ChannelId)
             .OnDelete(DeleteBehavior.Cascade);
 
         base.OnModelCreating(modelBuilder);
