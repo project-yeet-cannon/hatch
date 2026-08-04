@@ -1,4 +1,4 @@
-import { createEmptySketch, withSketchRemoved, withSketchRenamed } from '../model/schema';
+import { createEmptySketch, floorLabel, withSketchRemoved, withSketchRenamed } from '../model/schema';
 import type { ProjectDocument, Sketch } from '../model/schema';
 
 interface ProjectSidebarProps {
@@ -8,11 +8,6 @@ interface ProjectSidebarProps {
   onSketchCreated: (sketch: Sketch) => void;
   onStartMerge: (targetId: string, sourceId: string) => void;
   update: (mutate: (project: ProjectDocument) => ProjectDocument) => void;
-}
-
-function floorLabel(floorIndex: number): string {
-  if (floorIndex === 0) return 'Ground floor';
-  return floorIndex > 0 ? `Floor ${floorIndex}` : `Basement ${Math.abs(floorIndex)}`;
 }
 
 export function ProjectSidebar({ project, activeSketchId, onSelectSketch, onSketchCreated, onStartMerge, update }: ProjectSidebarProps) {

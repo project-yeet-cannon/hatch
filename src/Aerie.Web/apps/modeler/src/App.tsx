@@ -5,6 +5,7 @@ import { ElevationEditor } from './components/ElevationEditor';
 import { FloorPlanEditor } from './components/FloorPlanEditor';
 import { ProjectSidebar } from './components/ProjectSidebar';
 import { SketchMergeView } from './components/SketchMergeView';
+import { Viewer3D } from './components/Viewer3D';
 import { withSketchesMerged } from './model/schema';
 import type { Sketch } from './model/schema';
 import { useProjectStore } from './state/useProjectStore';
@@ -20,6 +21,7 @@ export function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeSketchId, setActiveSketchId] = useState<string | null>(null);
   const [mergeTarget, setMergeTarget] = useState<{ targetId: string; sourceId: string } | null>(null);
+  const [show3D, setShow3D] = useState(false);
 
   const project = store.project;
 
@@ -81,6 +83,9 @@ export function App() {
           Import project
         </button>
         <input ref={fileInputRef} type="file" accept="application/json,.json" hidden onChange={handleImportChange} />
+        <button className={show3D ? 'btn-primary' : 'btn-secondary'} onClick={() => setShow3D((v) => !v)}>
+          {show3D ? 'Back to 2D' : '3D view'}
+        </button>
       </div>
 
       <div className="modeler-body">
@@ -90,6 +95,7 @@ export function App() {
           onSelectSketch={(id) => {
             setActiveSketchId(id);
             setMergeTarget(null);
+            setShow3D(false);
           }}
           onSketchCreated={handleSketchCreated}
           onStartMerge={(targetId, sourceId) => setMergeTarget({ targetId, sourceId })}
@@ -97,7 +103,9 @@ export function App() {
         />
 
         <main className="card modeler-editor-card">
-          {mergeTarget ? (
+          {show3D ? (
+            <Viewer3D project={project} />
+          ) : mergeTarget ? (
             <SketchMergeView
               project={project}
               targetId={mergeTarget.targetId}

@@ -6,7 +6,7 @@ Everything runs client-side — there is no API dependency. A project is a singl
 
 ## Status
 
-Step 2 of the plan: the 2D floor-plan editor. A canvas sketcher lets you draw wall centerlines (with endpoint/angle/grid snapping and automatic splitting at T-junctions), pan/zoom, select and move corners, delete walls, and name rooms that are auto-detected from closed loops in the wall graph. Steps 3+ (an explicit dimension/constraint solver, openings, multi-floor/elevation views, 3D generation, and exports) haven't started.
+Step 5 of the plan: 3D generation and viewer. Steps 1-4 cover persistence, the 2D floor-plan editor, the dimension/constraint solver, and openings/multi-floor/elevation views. Step 5 adds `manifold-3d`-based CSG solid generation (per-room air volumes with flat/shed/gable ceilings, wall solids with door/archway cutouts) and a three.js viewer with per-floor isolation and an air-volume/walls toggle, regenerated on demand from whatever's currently drawn. Step 6 (exports: STL/OBJ/GLB/topology JSON) and Step 7 (CFD validation round-trip) haven't started.
 
 ## Development
 
@@ -55,8 +55,11 @@ npm run lint
 - `src/model/schema.ts` — the `ProjectDocument` type (versioned) and its factory/mutators. This is the single source of truth persisted to IndexedDB and to exported `.aeriemodel.json` files. `migrateProjectDocument` upgrades documents from older schema versions on load.
 - `src/model/geometry.ts` — pure vector math and the snapping logic (endpoint, common-angle, grid) used while drawing.
 - `src/model/roomDetection.ts` — derives rooms from the wall graph via planar-face tracing (closed loops = rooms), plus matching a persisted room name back to its re-derived polygon.
-- `src/editor/camera.ts` — pure pan/zoom/screen-world transform math for the canvas.
+- `src/model/solidGeneration.ts` — pure, unit-tested per-floor layout computation (room/wall/ceiling resolution, Z stacking) plus the `manifold-3d`-backed solid generation that turns that layout into air-volume and wall meshes. See its doc comments for the current simplifications (centerline-based room volumes, no wall-thickness inset yet).
+- `src/model/manifoldRuntime.ts` — loads and caches the `manifold-3d` WASM module, wrapped for automatic CSG object cleanup (the WASM heap isn't garbage-collected by JS).
+- `src/editor/camera.ts` — pure pan/zoom/screen-world transform math for the 2D canvas.
 - `src/components/FloorPlanEditor.tsx` — the canvas sketcher: drawing, snapping, pan/zoom, select/move/delete, room naming. Not unit-tested (canvas/pointer interaction — see Testing below); exercised by hand.
+- `src/components/Viewer3D.tsx` — the three.js 3D view: regenerates the solids on demand, per-floor visibility and air-volume/walls toggles. Not unit-tested for the same reason as FloorPlanEditor.
 - `src/persistence/db.ts` — thin IndexedDB adapter (load/save the one active project).
 - `src/persistence/history.ts` — in-memory undo/redo stack over document snapshots.
 - `src/persistence/projectFile.ts` — serialize/parse for file export and import, including schema-version migration.

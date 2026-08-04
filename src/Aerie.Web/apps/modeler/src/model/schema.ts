@@ -116,6 +116,12 @@ export function createId(): string {
   return crypto.randomUUID();
 }
 
+/** Human-readable label for a floorIndex (0 = ground floor, negative = basement), shared by the sidebar and 3D generation's per-floor naming. */
+export function floorLabel(floorIndex: number): string {
+  if (floorIndex === 0) return 'Ground floor';
+  return floorIndex > 0 ? `Floor ${floorIndex}` : `Basement ${Math.abs(floorIndex)}`;
+}
+
 export function createEmptySketch(name: string, floorIndex = 0, kind: SketchKind = 'floorPlan'): Sketch {
   const now = new Date().toISOString();
   return {
