@@ -18,6 +18,12 @@ public class EfRoutine
     public required string Name { get; set; }
     public string? Description { get; set; }
 
+    /// <summary>Font Awesome solid-style icon name (e.g. "lightbulb"), no "fa" prefix. Null falls back to a generic icon on the kiosk.</summary>
+    public string? Icon { get; set; }
+
+    /// <summary>Hex color (e.g. "#4b7bec") applied to the icon on the kiosk. Null falls back to the theme's ink color.</summary>
+    public string? Color { get; set; }
+
     /// <summary>Ascending display order on the dashboard.</summary>
     public int SortOrder { get; set; }
 

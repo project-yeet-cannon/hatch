@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import type { Device, DeviceChannel, DeviceChannelMetric, Routine, RoutineActionKind, RoutineWriteRequest } from '../types';
 import { createRoutine, deleteRoutine, getDevices, getRoutines, triggerRoutine, updateRoutine } from '../api/client';
+import { IconPicker } from '../components/IconPicker';
+import { iconFor } from '../lib/icons';
 
 /** Which RoutineActionKind a channel supports is fully determined by its metric - only these five ReadWrite metrics are valid Routine targets. */
 const METRIC_TO_KIND: Partial<Record<DeviceChannelMetric, RoutineActionKind>> = {
@@ -43,14 +46,20 @@ interface ActionFormRow {
 interface RoutineFormState {
   name: string;
   description: string;
+  icon: string;
+  color: string;
   sortOrder: string;
   included: boolean;
   actions: ActionFormRow[];
 }
 
+const DEFAULT_ROUTINE_COLOR = '#4b7bec';
+
 const emptyForm = (nextSortOrder: number): RoutineFormState => ({
   name: '',
   description: '',
+  icon: '',
+  color: DEFAULT_ROUTINE_COLOR,
   sortOrder: String(nextSortOrder),
   included: true,
   actions: [],
@@ -59,6 +68,8 @@ const emptyForm = (nextSortOrder: number): RoutineFormState => ({
 const toFormState = (routine: Routine): RoutineFormState => ({
   name: routine.name,
   description: routine.description ?? '',
+  icon: routine.icon ?? '',
+  color: routine.color ?? DEFAULT_ROUTINE_COLOR,
   sortOrder: String(routine.sortOrder),
   included: routine.included,
   actions: [...routine.actions].sort((a, b) => a.sortOrder - b.sortOrder).map((a) => ({ channelId: a.channelId, value: a.value ?? '' })),
@@ -79,6 +90,8 @@ function toRequest(form: RoutineFormState, channelOptions: ChannelOption[]): Rou
   return {
     name: form.name.trim(),
     description: form.description.trim() === '' ? null : form.description.trim(),
+    icon: form.icon.trim() === '' ? null : form.icon.trim(),
+    color: form.color,
     sortOrder: Number(form.sortOrder) || 0,
     included: form.included,
     actions,
@@ -259,6 +272,7 @@ export function RoutinesPage() {
             <div className="flex between" style={{ alignItems: 'flex-start' }}>
               <div>
                 <div className="flex gap-1" style={{ alignItems: 'center' }}>
+                  <FontAwesomeIcon icon={iconFor(routine.icon)} color={routine.color ?? undefined} />
                   <h3>{routine.name}</h3>
                   <span className={`badge ${routine.included ? 'badge-success' : 'badge-muted'}`}>
                     {routine.included ? 'On kiosk' : 'Hidden'}
@@ -343,6 +357,14 @@ function RoutineForm({
             <input type="checkbox" checked={form.included} onChange={(e) => onChange({ ...form, included: e.target.checked })} />
             Show on kiosk
           </label>
+        </div>
+        <div className="field">
+          <label className="field-label">Icon</label>
+          <IconPicker value={form.icon} onChange={(icon) => onChange({ ...form, icon })} />
+        </div>
+        <div className="field">
+          <label className="field-label">Color</label>
+          <input type="color" value={form.color} onChange={(e) => onChange({ ...form, color: e.target.value })} />
         </div>
       </div>
 

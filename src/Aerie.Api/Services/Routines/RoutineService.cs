@@ -19,7 +19,7 @@ public class RoutineService(IDbContextFactory<AerieContext> dbFactory) : IRoutin
             .Where(r => r.Included)
             .OrderBy(r => r.SortOrder)
             .ThenBy(r => r.Name)
-            .Select(r => new RoutineSummary(r.Id, r.Name, r.Description))
+            .Select(r => new RoutineSummary(r.Id, r.Name, r.Description, r.Icon, r.Color))
             .ToListAsync(ct);
     }
 }

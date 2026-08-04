@@ -201,6 +201,30 @@
   margin: 0;
 }
 
+/* Icon picker */
+.icon-picker-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
+.icon-picker-option {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.icon-picker-option:hover {
+  border-color: var(--line);
+}
+
 mark.search-match {
   background: var(--primary-bg);
   color: var(--primary-ink);

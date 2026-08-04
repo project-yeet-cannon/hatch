@@ -152,6 +152,8 @@ export interface Routine {
   id: string;
   name: string;
   description: string | null;
+  icon: string | null;
+  color: string | null;
   sortOrder: number;
   included: boolean;
   actions: RoutineAction[];
@@ -160,6 +162,8 @@ export interface Routine {
 export interface RoutineWriteRequest {
   name: string;
   description: string | null;
+  icon: string | null;
+  color: string | null;
   sortOrder: number;
   included: boolean;
   actions: RoutineActionWriteRequest[];

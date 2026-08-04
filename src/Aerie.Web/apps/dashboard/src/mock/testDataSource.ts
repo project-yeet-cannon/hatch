@@ -52,7 +52,7 @@ function xComfortRange(): ComfortRange {
 }
 
 function xRoutine(index: number): RoutineSummary {
-  return { id: `${X}-${index}`, name: X_LONG, description: X_LONG };
+  return { id: `${X}-${index}`, name: X_LONG, description: X_LONG, icon: 'certificate', color: '#ff00ff' };
 }
 
 function xZone(index: number, now: Date): ZoneClimate {

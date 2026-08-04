@@ -80,11 +80,13 @@ export interface SunEvents {
   dusk: string;
 }
 
-/** A Routine as shown on the kiosk - just enough to render a tap-to-trigger button. */
+/** A Routine as shown on the kiosk - just enough to render a tap-to-trigger tile. */
 export interface RoutineSummary {
   id: string;
   name: string;
   description: string | null;
+  icon: string | null;
+  color: string | null;
 }
 
 export interface DashboardData {

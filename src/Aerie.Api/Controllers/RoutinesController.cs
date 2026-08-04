@@ -43,6 +43,8 @@ public class RoutinesController(AerieContext db, IHomeAssistantCommandService co
         {
             Name = request.Name,
             Description = request.Description,
+            Icon = request.Icon,
+            Color = request.Color,
             SortOrder = request.SortOrder,
             Included = request.Included,
             Actions = request.Actions.Select(ToAction).ToList(),
@@ -60,6 +62,8 @@ public class RoutinesController(AerieContext db, IHomeAssistantCommandService co
 
         routine.Name = request.Name;
         routine.Description = request.Description;
+        routine.Icon = request.Icon;
+        routine.Color = request.Color;
         routine.SortOrder = request.SortOrder;
         routine.Included = request.Included;
 
@@ -102,7 +106,7 @@ public class RoutinesController(AerieContext db, IHomeAssistantCommandService co
     };
 
     private static RoutineDto ToDto(EfRoutine routine) => new(
-        routine.Id, routine.Name, routine.Description, routine.SortOrder, routine.Included,
+        routine.Id, routine.Name, routine.Description, routine.Icon, routine.Color, routine.SortOrder, routine.Included,
         routine.Actions
             .OrderBy(a => a.SortOrder)
             .Select(a => new RoutineActionDto(a.Id, a.ChannelId, a.Kind, a.Value, a.SortOrder))

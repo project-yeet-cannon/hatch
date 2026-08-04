@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import type { RoutineSummary } from '../types';
 import { triggerRoutine } from '../api/routinesClient';
 import { clientLogger } from '../lib/clientLogger';
+import { iconFor } from '../lib/icons';
 
 /** A tap-to-trigger button per Routine, rendered below the zones. The dashboard is otherwise pure read-only polling display, so each button owns its own pending/error state around the trigger call rather than relying on any app-wide pattern. */
 export function RoutinesSection({ routines }: { routines: RoutineSummary[] }) {
@@ -34,8 +36,9 @@ export function RoutinesSection({ routines }: { routines: RoutineSummary[] }) {
           disabled={pendingId === routine.id}
           onClick={() => handleTap(routine)}
         >
-          {pendingId === routine.id ? 'Triggering…' : routine.name}
-          {routine.description && <span className="hf-routine-desc">{routine.description}</span>}
+          <FontAwesomeIcon icon={iconFor(routine.icon)} className="hf-routine-icon" style={{ color: routine.color ?? undefined }} />
+          <span className="hf-routine-name">{routine.name}</span>
+          {pendingId === routine.id && <span className="hf-routine-status">Triggering…</span>}
           {status?.id === routine.id && <span className="hf-routine-status hf-routine-error">Couldn’t trigger — {status.error}</span>}
         </button>
       ))}

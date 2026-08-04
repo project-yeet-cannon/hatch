@@ -11,7 +11,8 @@ public record RoutineActionDto(Guid Id, Guid ChannelId, RoutineActionKind Kind, 
 public record RoutineActionWriteRequest(Guid ChannelId, RoutineActionKind Kind, string? Value, int SortOrder);
 
 public record RoutineDto(
-    Guid Id, string Name, string? Description, int SortOrder, bool Included, IReadOnlyList<RoutineActionDto> Actions);
+    Guid Id, string Name, string? Description, string? Icon, string? Color, int SortOrder, bool Included,
+    IReadOnlyList<RoutineActionDto> Actions);
 
 /// <summary>
 /// A Routine's actions are embedded and replaced wholesale on write (unlike
@@ -19,4 +20,5 @@ public record RoutineDto(
 /// *is* the routine, so the admin app edits it as one atomic form/request.
 /// </summary>
 public record RoutineWriteRequest(
-    string Name, string? Description, int SortOrder, bool Included, IReadOnlyList<RoutineActionWriteRequest> Actions);
+    string Name, string? Description, string? Icon, string? Color, int SortOrder, bool Included,
+    IReadOnlyList<RoutineActionWriteRequest> Actions);
