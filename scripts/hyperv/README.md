@@ -5,7 +5,7 @@ places: the Phase 0 scratch VM for the DR-restore gate, and the Phase 1 node
 VMs (one per Windows host). Same VM shape both times — only the cloud-init
 payload (`-ExtraPackages` / `-RunCmd`) differs.
 
-## Prerequisites
+## [x] Prerequisites
 
 - Hyper-V role enabled, run from an elevated PowerShell session
 - An **external** virtual switch already created. `-SwitchType External` isn't
@@ -21,17 +21,17 @@ payload (`-ExtraPackages` / `-RunCmd`) differs.
   `-AllowManagementOS $true` matters on these single-NIC home hosts — without
   it, creating the switch drops the host itself off the network.
 - A qemu-img Windows build, to convert the vendor qcow2 image to VHDX — grab
-  a zip from the [qemu-img-windows releases page](https://github.com/cloudbase/qemu-img-windows/releases)
+  a zip from [Cloudbase's qemu-img-windows page](https://cloudbase.it/qemu-img-windows/)
   (not scripted here: release asset URLs are versioned and change)
 - An SSH keypair to inject into the VM (`ssh-keygen -t ed25519`)
 - pfSense DHCP reservations planned per VM — the workflow below expects you
   to pick each VM's MAC address up front
 
-## One-time: build the golden image
+## [x] One-time: build the golden image
 
 ```powershell
 .\Get-GoldenImage.ps1 -Distro Debian `
-    -QemuImgZipPath C:\Downloads\qemu-img-win-x64-2_3_0.zip `
+    -QemuImgZipPath D:\qemu-img-win-x64-2_3_0.zip `
     -OutputPath D:\vm-templates\debian-13-genericcloud.vhdx
 ```
 

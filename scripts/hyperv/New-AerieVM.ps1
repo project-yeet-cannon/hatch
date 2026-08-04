@@ -95,7 +95,7 @@ if (Get-VM -Name $VMName -ErrorAction SilentlyContinue) {
 $macNormalized = ($MacAddress -replace '[:-]', '').ToUpperInvariant()
 $existingMacs = Get-VM | Get-VMNetworkAdapter | Select-Object -ExpandProperty MacAddress
 if ($existingMacs -contains $macNormalized) {
-    throw "MAC $MacAddress is already assigned to another VM on this host. DHCP reservations depend on MACs being unique — pick another."
+    throw "MAC $MacAddress is already assigned to another VM on this host. DHCP reservations depend on MACs being unique - pick another."
 }
 
 $vmDir = Join-Path $VMStoragePath $VMName
@@ -170,7 +170,7 @@ Disable-VMIntegrationService -VMName $VMName -Name 'Time Synchronization'
 Start-VM -Name $VMName
 
 Write-Host ""
-Write-Host "VM '$VMName' started. MAC $MacAddress — register the DHCP reservation on pfSense now if it isn't already."
+Write-Host "VM '$VMName' started. MAC $MacAddress - register the DHCP reservation on pfSense now if it isn't already."
 Write-Host "Cloud-init runs on first boot and reboots itself once when done; check progress with:"
 Write-Host "  vmconnect localhost $VMName"
 Write-Host "Once it's up, confirm the DHCP lease matches the reservation and SSH in as '$Username'."

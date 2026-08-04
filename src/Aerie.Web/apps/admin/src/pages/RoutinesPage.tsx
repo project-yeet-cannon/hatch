@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Device, DeviceChannel, DeviceChannelMetric, Routine, RoutineActionKind, RoutineWriteRequest } from '../types';
 import { createRoutine, deleteRoutine, getDevices, getRoutines, triggerRoutine, updateRoutine } from '../api/client';
 
@@ -306,11 +306,6 @@ function RoutineForm({
   onChange: (form: RoutineFormState) => void;
   channelOptions: ChannelOption[];
 }) {
-  const optionsByDevice = new Map<string, ChannelOption[]>();
-  for (const option of channelOptions) {
-    optionsByDevice.set(option.deviceName, [...(optionsByDevice.get(option.deviceName) ?? []), option]);
-  }
-
   function updateAction(index: number, row: ActionFormRow) {
     onChange({ ...form, actions: form.actions.map((a, i) => (i === index ? row : a)) });
   }
@@ -357,22 +352,11 @@ function RoutineForm({
         const option = channelOptions.find((o) => o.channelId === row.channelId) ?? null;
         return (
           <div className="flex gap-1 mb-1" key={index} style={{ alignItems: 'center' }}>
-            <select
+            <ChannelSelect
               value={row.channelId}
-              onChange={(e) => updateAction(index, { channelId: e.target.value, value: '' })}
-              style={{ minWidth: '16rem' }}
-            >
-              <option value="">Select a device channel…</option>
-              {[...optionsByDevice.entries()].map(([deviceName, options]) => (
-                <optgroup key={deviceName} label={deviceName}>
-                  {options.map((o) => (
-                    <option key={o.channelId} value={o.channelId}>
-                      {o.metric} ({o.haEntityId})
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
+              options={channelOptions}
+              onSelect={(channelId) => updateAction(index, { channelId, value: '' })}
+            />
             {option && <ActionValueInput option={option} value={row.value} onChange={(value) => updateAction(index, { ...row, value })} />}
             <button className="btn-secondary" disabled={index === 0} onClick={() => moveAction(index, -1)}>
               ↑
@@ -426,4 +410,133 @@ function ActionValueInput({ option, value, onChange }: { option: ChannelOption; 
     case 'TriggerScene':
       return <span className="text-muted">Activates scene</span>;
   }
+}
+
+function channelLabel(option: ChannelOption): string {
+  return `${option.deviceName} — ${option.metric} (${option.haEntityId})`;
+}
+
+/** Substring matches anywhere qualify, but matches starting at a word boundary (start of string, or after a non-alphanumeric char) rank first. */
+function searchChannelOptions(options: ChannelOption[], query: string): ChannelOption[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return options;
+  return options
+    .map((option) => {
+      const label = channelLabel(option).toLowerCase();
+      const idx = label.indexOf(q);
+      if (idx === -1) return null;
+      const atWordBoundary = idx === 0 || !/[a-z0-9]/i.test(label[idx - 1]);
+      return { option, idx, atWordBoundary };
+    })
+    .filter((m): m is { option: ChannelOption; idx: number; atWordBoundary: boolean } => m !== null)
+    .sort((a, b) => (a.atWordBoundary === b.atWordBoundary ? a.idx - b.idx : a.atWordBoundary ? -1 : 1))
+    .map((m) => m.option);
+}
+
+function HighlightedLabel({ text, query }: { text: string; query: string }) {
+  const q = query.trim();
+  if (!q) return <>{text}</>;
+  const idx = text.toLowerCase().indexOf(q.toLowerCase());
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="search-match">{text.slice(idx, idx + q.length)}</mark>
+      {text.slice(idx + q.length)}
+    </>
+  );
+}
+
+/** Searchable combobox for picking a device channel - a plain <select> was unusable once the channel list got long. */
+function ChannelSelect({
+  value,
+  options,
+  onSelect,
+}: {
+  value: string;
+  options: ChannelOption[];
+  onSelect: (channelId: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const [highlighted, setHighlighted] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const selected = options.find((o) => o.channelId === value) ?? null;
+  const results = open ? searchChannelOptions(options, query) : [];
+
+  useEffect(() => {
+    if (!open) return;
+    function onOutsideClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', onOutsideClick);
+    return () => document.removeEventListener('mousedown', onOutsideClick);
+  }, [open]);
+
+  function choose(option: ChannelOption) {
+    onSelect(option.channelId);
+    setQuery('');
+    setOpen(false);
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setOpen(true);
+      setHighlighted((i) => Math.min(i + 1, results.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlighted((i) => Math.max(i - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const option = results[highlighted];
+      if (option) choose(option);
+    } else if (e.key === 'Escape') {
+      setOpen(false);
+      setQuery('');
+    }
+  }
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', minWidth: '16rem' }}>
+      <input
+        type="text"
+        placeholder="Type to search…"
+        value={open ? query : (selected ? channelLabel(selected) : '')}
+        onFocus={() => {
+          setOpen(true);
+          setQuery('');
+          setHighlighted(0);
+        }}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setHighlighted(0);
+        }}
+        onKeyDown={onKeyDown}
+        style={{ width: '100%' }}
+      />
+      {open && (
+        <div className="card channel-select-dropdown">
+          {results.length === 0 && <p className="text-muted channel-select-empty">No matching channels.</p>}
+          {results.map((option, index) => (
+            <div
+              key={option.channelId}
+              className="channel-select-option"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                choose(option);
+              }}
+              onMouseEnter={() => setHighlighted(index)}
+              style={{ background: index === highlighted ? 'var(--primary-bg)' : 'transparent' }}
+            >
+              <HighlightedLabel text={channelLabel(option)} query={query} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }

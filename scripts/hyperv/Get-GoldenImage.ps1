@@ -14,10 +14,10 @@
 
     Requires qemu-img.exe to convert qcow2 -> vhdx; Hyper-V's own Convert-VHD
     only converts between VHD/VHDX, it doesn't read qcow2. Grab a Windows
-    build from the qemu-img-windows project's GitHub releases page
-    (https://github.com/cloudbase/qemu-img-windows/releases) and pass the
-    downloaded zip's path via -QemuImgZipPath — deliberately not
-    auto-downloaded here since release asset URLs are versioned and change.
+    build from Cloudbase's qemu-img-windows page
+    (https://cloudbase.it/qemu-img-windows/) and pass the downloaded zip's
+    path via -QemuImgZipPath — deliberately not auto-downloaded here since
+    release asset URLs are versioned and change.
 
 .EXAMPLE
     .\Get-GoldenImage.ps1 -Distro Debian -QemuImgZipPath C:\Downloads\qemu-img-win-x64-2_3_0.zip -OutputPath D:\vm-templates\debian-13-genericcloud.vhdx
@@ -70,7 +70,7 @@ try {
 
     $qemuImg = Get-ChildItem -Path $qemuImgDir -Filter 'qemu-img.exe' -Recurse | Select-Object -First 1
     if (-not $qemuImg) {
-        throw "qemu-img.exe not found inside $QemuImgZipPath — check it's the qemu-img-windows release zip, not source."
+        throw "qemu-img.exe not found inside $QemuImgZipPath - check it's the qemu-img-windows release zip, not source."
     }
 
     $rawVhdx = Join-Path $work 'image-raw.vhdx'
