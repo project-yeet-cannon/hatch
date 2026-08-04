@@ -5,8 +5,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Aerie.Api.Tests.DeviceMapping;
 
 /// <summary>
-/// Covers ChannelLatestValues.GetLatestAsync's NOT EXISTS anti-join against
-/// an EF Core InMemory database - same convention as ChannelHistoryWriterTests.
+/// Covers ChannelLatestValues.GetLatestAsync's per-channel latest-row lookups
+/// against an EF Core InMemory database - same convention as ChannelHistoryWriterTests.
 /// </summary>
 public class ChannelLatestValuesTests
 {
