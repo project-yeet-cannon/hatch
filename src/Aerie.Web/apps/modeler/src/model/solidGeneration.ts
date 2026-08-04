@@ -9,6 +9,8 @@ import type { ManifoldToplevel } from 'manifold-3d';
 // --- Pure layout computation (no WASM - unit-testable in isolation) -------
 
 export interface RoomLayout {
+  /** The matched RoomLabel's id, or a synthesized `floor{N}-room{i}` for an unnamed room (stable only within one computeBuildingLayout call - see exportGeometry.ts/topology.ts, the two consumers that need room identity). */
+  id: string;
   points: Point2[];
   area: number;
   name: string;
@@ -32,6 +34,7 @@ export interface WallLayout {
 }
 
 export interface OpeningLayout {
+  id: string;
   wallId: string;
   offset: number;
   width: number;
@@ -125,13 +128,14 @@ export function computeBuildingLayout(project: ProjectDocument): BuildingLayout 
     const walls = sketches.flatMap((sketch) => solveSketch(sketch.walls).walls);
     const roomLabels = sketches.flatMap((s) => s.roomLabels);
     const openings: OpeningLayout[] = sketches.flatMap((s) =>
-      s.openings.map((o) => ({ wallId: o.wallId, offset: o.offset, width: o.width, headHeight: o.headHeight, kind: o.kind })),
+      s.openings.map((o) => ({ id: o.id, wallId: o.wallId, offset: o.offset, width: o.width, headHeight: o.headHeight, kind: o.kind })),
     );
 
-    const rooms: RoomLayout[] = detectRooms(walls).map((room) => {
+    const rooms: RoomLayout[] = detectRooms(walls).map((room, roomIndex) => {
       const label = matchRoomLabel(roomLabels, room);
       const profile = resolveCeilingProfile(project, label?.id ?? '__none__');
       return {
+        id: label?.id ?? `floor${floorIndex}-room${roomIndex}`,
         points: room.points,
         area: room.area,
         name: label?.name || 'Room',
@@ -310,7 +314,13 @@ export interface BuildingSolids {
 
 type ManifoldSolid = InstanceType<ManifoldToplevel['Manifold']>;
 
-function meshFromManifold(manifold: ManifoldSolid): GeneratedMesh {
+/**
+ * Converts a Manifold's mesh to plain typed arrays. Exported for
+ * exportGeometry.ts, which needs the same conversion for its own
+ * whole-building solid (a separate CSG pass from the per-floor viewer solids
+ * built below - see that module for why).
+ */
+export function meshFromManifold(manifold: ManifoldSolid): GeneratedMesh {
   const mesh = manifold.getMesh();
   const numProp = mesh.numProp;
   if (numProp === 3) return { positions: mesh.vertProperties, indices: mesh.triVerts };
@@ -324,12 +334,26 @@ function meshFromManifold(manifold: ManifoldSolid): GeneratedMesh {
   return { positions, indices: mesh.triVerts };
 }
 
-function roomSolid(wasm: ManifoldToplevel, room: RoomLayout, height: number): ManifoldSolid {
+/**
+ * Builds one room's solid. `trackOriginal`, if given, is called with the
+ * Manifold `originalID()` of every leaf primitive as it's created (before
+ * any transform is applied to it - `.originalID()` only reports a real id on
+ * an untransformed, unbooleaned Manifold, but that id remains recoverable
+ * from a *result* mesh's `runOriginalID` no matter how much CSG happens to it
+ * afterward). exportGeometry.ts uses this to tag which boundary faces of the
+ * final whole-building solid came from room material vs. wall material.
+ */
+function roomSolid(wasm: ManifoldToplevel, room: RoomLayout, height: number, trackOriginal?: (id: number) => void): ManifoldSolid {
   const polygon = room.points.map((p): [number, number] => [p.x, p.y]);
-  if (room.kind === 'flat' || room.stairwellVoid) return wasm.Manifold.extrude(polygon, height);
+  if (room.kind === 'flat' || room.stairwellVoid) {
+    const solid = wasm.Manifold.extrude(polygon, height);
+    trackOriginal?.(solid.originalID());
+    return solid;
+  }
 
   const ridgeHeight = room.ridgeHeight ?? room.eaveHeight;
   const flatPart = wasm.Manifold.extrude(polygon, room.eaveHeight);
+  trackOriginal?.(flatPart.originalID());
   const wedge = buildRoofWedgeLocal(boundsOfPoints(room.points), room.eaveHeight, ridgeHeight, room.kind);
   const wedgeManifold = wasm.Manifold.ofMesh(
     new wasm.Mesh({
@@ -338,7 +362,10 @@ function roomSolid(wasm: ManifoldToplevel, room: RoomLayout, height: number): Ma
       triVerts: Uint32Array.from(wedge.triangles.flat()),
     }),
   );
-  const clipPrism = wasm.Manifold.extrude(polygon, Math.max(ridgeHeight - room.eaveHeight, 0.01)).translate(0, 0, room.eaveHeight);
+  trackOriginal?.(wedgeManifold.originalID());
+  const clipPrismRaw = wasm.Manifold.extrude(polygon, Math.max(ridgeHeight - room.eaveHeight, 0.01));
+  trackOriginal?.(clipPrismRaw.originalID());
+  const clipPrism = clipPrismRaw.translate(0, 0, room.eaveHeight);
   const roofPart = wasm.Manifold.intersection(wedgeManifold, clipPrism);
   return wasm.Manifold.union(flatPart, roofPart);
 }

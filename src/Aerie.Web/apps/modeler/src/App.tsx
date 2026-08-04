@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import './App.css';
 import { ElevationEditor } from './components/ElevationEditor';
+import { ExportPanel } from './components/ExportPanel';
 import { FloorPlanEditor } from './components/FloorPlanEditor';
 import { ProjectSidebar } from './components/ProjectSidebar';
 import { SketchMergeView } from './components/SketchMergeView';
@@ -22,6 +23,7 @@ export function App() {
   const [activeSketchId, setActiveSketchId] = useState<string | null>(null);
   const [mergeTarget, setMergeTarget] = useState<{ targetId: string; sourceId: string } | null>(null);
   const [show3D, setShow3D] = useState(false);
+  const [showExport, setShowExport] = useState(false);
 
   const project = store.project;
 
@@ -83,8 +85,23 @@ export function App() {
           Import project
         </button>
         <input ref={fileInputRef} type="file" accept="application/json,.json" hidden onChange={handleImportChange} />
-        <button className={show3D ? 'btn-primary' : 'btn-secondary'} onClick={() => setShow3D((v) => !v)}>
+        <button
+          className={show3D ? 'btn-primary' : 'btn-secondary'}
+          onClick={() => {
+            setShow3D((v) => !v);
+            setShowExport(false);
+          }}
+        >
           {show3D ? 'Back to 2D' : '3D view'}
+        </button>
+        <button
+          className={showExport ? 'btn-primary' : 'btn-secondary'}
+          onClick={() => {
+            setShowExport((v) => !v);
+            setShow3D(false);
+          }}
+        >
+          {showExport ? 'Back to 2D' : 'Export'}
         </button>
       </div>
 
@@ -96,6 +113,7 @@ export function App() {
             setActiveSketchId(id);
             setMergeTarget(null);
             setShow3D(false);
+            setShowExport(false);
           }}
           onSketchCreated={handleSketchCreated}
           onStartMerge={(targetId, sourceId) => setMergeTarget({ targetId, sourceId })}
@@ -103,7 +121,9 @@ export function App() {
         />
 
         <main className="card modeler-editor-card">
-          {show3D ? (
+          {showExport ? (
+            <ExportPanel project={project} />
+          ) : show3D ? (
             <Viewer3D project={project} />
           ) : mergeTarget ? (
             <SketchMergeView

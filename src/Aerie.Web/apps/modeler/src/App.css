@@ -455,6 +455,73 @@
   flex: 0 0 auto;
 }
 
+/* Export panel */
+.export-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.export-panel-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.export-panel-warnings {
+  font-size: 12px;
+}
+
+.export-panel-validation-ok,
+.export-panel-validation-error {
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.export-panel-validation-ok {
+  background: var(--success-bg);
+  color: var(--success-ink);
+}
+
+.export-panel-validation-error {
+  background: rgba(183, 28, 28, 0.08);
+  color: var(--danger-ink);
+}
+
+.export-panel-issue-error {
+  color: var(--danger-ink);
+}
+
+.export-panel-issue-warning {
+  color: var(--muted);
+}
+
+.export-panel-formats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.export-panel-format {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.export-panel-format p {
+  font-size: 12px;
+  margin: 2px 0 0;
+}
+
 .viewer3d-canvas-container {
   position: relative;
   flex: 1 1 auto;
