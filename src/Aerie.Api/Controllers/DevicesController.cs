@@ -21,9 +21,6 @@ public class DevicesController(
     /// <summary>Allowance for clock skew between this server and the client when rejecting "to" timestamps in the future.</summary>
     private static readonly TimeSpan ClockSkewTolerance = TimeSpan.FromMinutes(20);
 
-    /// <summary>What PlayMedia sends when the caller doesn't specify a media_content_type - every media library file this is pointed at is a music file.</summary>
-    private const string DefaultMediaContentType = "music";
-
     [HttpGet]
     public async Task<IReadOnlyList<DeviceDto>> GetAll(CancellationToken ct)
     {
@@ -218,7 +215,7 @@ public class DevicesController(
         if (error is not null) return BadRequest(error);
 
         var contentType = request.MediaContentType?.Trim();
-        await command.PlayMediaAsync(channel.HaEntityId, url!, string.IsNullOrEmpty(contentType) ? DefaultMediaContentType : contentType);
+        await command.PlayMediaAsync(channel.HaEntityId, url!, string.IsNullOrEmpty(contentType) ? MediaContentTypes.DefaultPlayMediaType : contentType);
         return Accepted();
     }
 

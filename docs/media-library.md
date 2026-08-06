@@ -52,9 +52,16 @@ Backslashes in a relative path are normalized to `/`, so pasting a share-relativ
 
 `StaticFileMiddleware` 404s any extension it can't type, and the built-in map misses several formats a music library actually holds (`.flac`, `.m4a`, `.opus`). `MediaContentTypes` adds them; anything not on that list won't be served.
 
+## In Routines
+
+A `MediaPlayback` channel is a valid Routine target via the `PlayMedia` action kind, so "Dinner" can dim the lights and start a record in one trigger.
+
+The action stores **what the admin typed** — normally the library-relative path — not the URL it resolves to. `MediaLibraryBaseUrl` changes with hostnames and proxy layout, and a routine saved a year ago shouldn't still point at whatever URL was current then, so `RoutineActionExecutor` resolves through the same `MediaLibraryUrlResolver` at trigger time. A path that no longer resolves (base URL cleared, say) throws and fails the trigger rather than sending the speaker something unfetchable.
+
+Like every other action kind, the value isn't validated at save time — a bad path surfaces when the routine runs, the same way a non-numeric `SetTemperature` value does.
+
 ## Not done yet
 
 - No directory browsing — you have to know the relative path. `UseDirectoryBrowser` on the same file provider would fix that.
-- No `PlayMedia` routine action, so speakers can't take part in Routines (`METRIC_TO_KIND` in the admin RoutinesPage has no `MediaPlayback` entry).
 - No stop/pause/volume commands — `IHomeAssistantCommandService` only has `PlayMediaAsync` on the media side.
 - The library is served without authentication to anything that can reach the API.

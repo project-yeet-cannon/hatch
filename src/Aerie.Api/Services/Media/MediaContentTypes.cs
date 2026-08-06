@@ -11,6 +11,9 @@ namespace Aerie.Api.Services.Media;
 /// </summary>
 public static class MediaContentTypes
 {
+    /// <summary>The media_content_type handed to HA's play_media when a caller doesn't pick one - every file this library holds is music. Shared by DevicesController.PlayMedia and RoutineActionExecutor.</summary>
+    public const string DefaultPlayMediaType = "music";
+
     private static readonly (string Extension, string ContentType)[] AudioTypes =
     [
         (".mp3", "audio/mpeg"),

@@ -35,7 +35,7 @@ public class EfRoutine
 
 // New values must be appended at the end - the column stores the enum's
 // underlying int, see DeviceChannelMetric for why.
-public enum RoutineActionKind { SetPower, SetTemperature, SetHvacMode, SetFanMode, TriggerScene }
+public enum RoutineActionKind { SetPower, SetTemperature, SetHvacMode, SetFanMode, TriggerScene, PlayMedia }
 
 /// <summary>
 /// One command in a Routine, executed against a DeviceChannel's underlying HA
@@ -59,7 +59,14 @@ public class EfRoutineAction
     /// <summary>
     /// Interpreted per Kind: "true"/"false" for SetPower, a decimal string for
     /// SetTemperature, the mode string for SetHvacMode/SetFanMode, null/ignored
-    /// for TriggerScene.
+    /// for TriggerScene, and a media library path (or URL, or media-source id)
+    /// for PlayMedia.
+    ///
+    /// PlayMedia deliberately stores the library-relative path rather than the
+    /// resolved URL: MediaLibraryBaseUrl changes with hostnames and proxy
+    /// layout, and a routine saved last year shouldn't still be pointing at
+    /// the URL that was current then. It's resolved at execution time - see
+    /// RoutineActionExecutor.
     /// </summary>
     public string? Value { get; set; }
 

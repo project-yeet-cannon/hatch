@@ -138,7 +138,7 @@ export interface DeviceHistory {
   channels: ChannelHistory[];
 }
 
-export type RoutineActionKind = 'SetPower' | 'SetTemperature' | 'SetHvacMode' | 'SetFanMode' | 'TriggerScene';
+export type RoutineActionKind = 'SetPower' | 'SetTemperature' | 'SetHvacMode' | 'SetFanMode' | 'TriggerScene' | 'PlayMedia';
 
 export interface RoutineAction {
   id: string;

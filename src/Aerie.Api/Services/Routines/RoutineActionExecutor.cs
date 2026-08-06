@@ -1,6 +1,7 @@
 using System.Globalization;
 using Aerie.Api.Ef;
 using Aerie.Api.Services.DeviceMapping;
+using Aerie.Api.Services.Media;
 
 namespace Aerie.Api.Services.Routines;
 
@@ -12,8 +13,9 @@ namespace Aerie.Api.Services.Routines;
 /// </summary>
 public static class RoutineActionExecutor
 {
+    /// <param name="mediaLibraryBaseUrl">The MediaLibraryBaseUrl SiteSetting, used to resolve PlayMedia actions' stored library paths. Passed in rather than read here so this stays a pure dispatcher with no DB access of its own.</param>
     public static async Task ExecuteAsync(
-        IReadOnlyList<EfRoutineAction> actions, IHomeAssistantCommandService command, CancellationToken ct)
+        IReadOnlyList<EfRoutineAction> actions, IHomeAssistantCommandService command, string? mediaLibraryBaseUrl, CancellationToken ct)
     {
         foreach (var action in actions.OrderBy(a => a.SortOrder))
         {
@@ -39,10 +41,20 @@ public static class RoutineActionExecutor
                 case RoutineActionKind.TriggerScene:
                     await command.TriggerSceneAsync(entityId);
                     break;
+                case RoutineActionKind.PlayMedia:
+                    await command.PlayMediaAsync(entityId, ResolveMedia(action, mediaLibraryBaseUrl), MediaContentTypes.DefaultPlayMediaType);
+                    break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(actions), action.Kind, "Unknown RoutineActionKind.");
             }
         }
+    }
+
+    /// <summary>Resolved here, at execution time, rather than stored resolved - see EfRoutineAction.Value. A path that no longer resolves (base URL cleared, say) fails the trigger loudly instead of silently sending the speaker something unfetchable.</summary>
+    private static string ResolveMedia(EfRoutineAction action, string? mediaLibraryBaseUrl)
+    {
+        var (url, error) = MediaLibraryUrlResolver.Resolve(action.Value, mediaLibraryBaseUrl);
+        return url ?? throw new InvalidOperationException($"RoutineAction {action.Id} can't play '{action.Value}': {error}");
     }
 
     private static bool ParseBool(string? value) =>

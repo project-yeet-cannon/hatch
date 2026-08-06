@@ -5,13 +5,14 @@ import { createRoutine, deleteRoutine, getDevices, getRoutines, triggerRoutine, 
 import { IconPicker } from '../components/IconPicker';
 import { iconFor } from '../lib/icons';
 
-/** Which RoutineActionKind a channel supports is fully determined by its metric - only these five ReadWrite metrics are valid Routine targets. */
+/** Which RoutineActionKind a channel supports is fully determined by its metric - only these six ReadWrite metrics are valid Routine targets. */
 const METRIC_TO_KIND: Partial<Record<DeviceChannelMetric, RoutineActionKind>> = {
   PowerState: 'SetPower',
   SetpointTemperature: 'SetTemperature',
   HvacMode: 'SetHvacMode',
   FanMode: 'SetFanMode',
   Scene: 'TriggerScene',
+  MediaPlayback: 'PlayMedia',
 };
 
 interface ChannelOption {
@@ -431,6 +432,19 @@ function ActionValueInput({ option, value, onChange }: { option: ChannelOption; 
       );
     case 'TriggerScene':
       return <span className="text-muted">Activates scene</span>;
+    case 'PlayMedia':
+      // Stored as typed - the API resolves it against MediaLibraryBaseUrl at
+      // trigger time, so a routine survives the base URL changing.
+      return (
+        <input
+          type="text"
+          placeholder="Miles Davis/Kind of Blue/01 So What.flac"
+          title="Path relative to the media library root. A full http(s) URL or a media-source:// id also works."
+          style={{ width: '22rem' }}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      );
   }
 }
 

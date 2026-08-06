@@ -16,7 +16,7 @@ namespace Aerie.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-public class RoutinesController(AerieContext db, IHomeAssistantCommandService command) : ControllerBase
+public class RoutinesController(AerieContext db, IHomeAssistantCommandService command, ISiteSettingsService siteSettings) : ControllerBase
 {
     [HttpGet]
     public async Task<IReadOnlyList<RoutineDto>> GetAll(CancellationToken ct)
@@ -93,7 +93,8 @@ public class RoutinesController(AerieContext db, IHomeAssistantCommandService co
             .FirstOrDefaultAsync(r => r.Id == id, ct);
         if (routine is null) return NotFound();
 
-        await RoutineActionExecutor.ExecuteAsync(routine.Actions, command, ct);
+        var settings = await siteSettings.GetAsync(ct);
+        await RoutineActionExecutor.ExecuteAsync(routine.Actions, command, settings.MediaLibraryBaseUrl, ct);
         return NoContent();
     }
 
