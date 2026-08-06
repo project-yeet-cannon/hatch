@@ -61,34 +61,58 @@ public class DiscoveryService(TemplateClient template, AerieContext db, IHomeAss
         var entityIds = group.Select(r => r.EntityId).OrderBy(id => id, StringComparer.Ordinal).ToList();
         var name = group.Select(r => r.DeviceName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n)) ?? group.Key;
 
-        var climateEntity = entityIds.FirstOrDefault(id => id.StartsWith("climate.", StringComparison.Ordinal));
-        if (climateEntity is not null)
+        if (InferKind(entityIds) is { } match)
         {
-            var climateState = await stateReader.TryGetStateAsync(climateEntity, ct);
-            return new UnmappedHaDevice(group.Key, name, DeviceKind.Thermostat, entityIds,
-                ThermostatChannelBuilder.Build(climateEntity, entityIds, climateState));
+            IReadOnlyList<DeviceChannelWriteRequest> channels = match.Kind switch
+            {
+                DeviceKind.Thermostat => ThermostatChannelBuilder.Build(
+                    match.AnchorEntityId, entityIds, await stateReader.TryGetStateAsync(match.AnchorEntityId, ct)),
+                DeviceKind.Speaker => SpeakerChannels(match.AnchorEntityId),
+                DeviceKind.SmartSwitch => SwitchChannels(match.AnchorEntityId),
+                DeviceKind.Light => LightChannelBuilder.Build(match.AnchorEntityId, entityIds),
+                DeviceKind.Camera => CameraChannelBuilder.Build(match.AnchorEntityId, entityIds),
+                _ => throw new InvalidOperationException($"InferKind returned unhandled kind {match.Kind}"),
+            };
+            return new UnmappedHaDevice(group.Key, name, match.Kind, entityIds, channels);
         }
-
-        // Checked before switch.*: a Sonos speaker's HA device also carries
-        // switch.* siblings (loudness, crossfade, TV autoplay), so sniffing for
-        // switch first would import every speaker as a SmartSwitch.
-        var mediaPlayerEntity = entityIds.FirstOrDefault(id => id.StartsWith("media_player.", StringComparison.Ordinal));
-        if (mediaPlayerEntity is not null)
-            return new UnmappedHaDevice(group.Key, name, DeviceKind.Speaker, entityIds, SpeakerChannels(mediaPlayerEntity));
-
-        var switchEntity = entityIds.FirstOrDefault(id => id.StartsWith("switch.", StringComparison.Ordinal));
-        if (switchEntity is not null)
-            return new UnmappedHaDevice(group.Key, name, DeviceKind.SmartSwitch, entityIds, SwitchChannels(switchEntity));
-
-        var lightEntity = entityIds.FirstOrDefault(id => id.StartsWith("light.", StringComparison.Ordinal));
-        if (lightEntity is not null)
-            return new UnmappedHaDevice(group.Key, name, DeviceKind.Light, entityIds, LightChannelBuilder.Build(lightEntity, entityIds));
 
         var sensorChannels = entityIds.Select(SensorChannel).OfType<DeviceChannelWriteRequest>().ToList();
         var kind = sensorChannels.Count > 0 ? DeviceKind.Hygrometer : (DeviceKind?)null;
 
         return new UnmappedHaDevice(group.Key, name, kind, entityIds, sensorChannels);
     }
+
+    /// <summary>Which entity-id-prefix-based DeviceKind a group of HA entities suggests, and the "anchor" entity that kind's channel builder is built around. Pure function of the entity-id list (no HA/DB calls) so the branch order and matches are directly unit-testable; the Hygrometer/no-kind fallback lives in BuildSuggestion since it depends on SensorChannel's per-entity mapping rather than a single anchor entity.</summary>
+    public static KindMatch? InferKind(IReadOnlyList<string> entityIds)
+    {
+        var climateEntity = entityIds.FirstOrDefault(id => id.StartsWith("climate.", StringComparison.Ordinal));
+        if (climateEntity is not null)
+            return new KindMatch(DeviceKind.Thermostat, climateEntity);
+
+        // Checked before switch.*: a Sonos speaker's HA device also carries
+        // switch.* siblings (loudness, crossfade, TV autoplay), so sniffing for
+        // switch first would import every speaker as a SmartSwitch.
+        var mediaPlayerEntity = entityIds.FirstOrDefault(id => id.StartsWith("media_player.", StringComparison.Ordinal));
+        if (mediaPlayerEntity is not null)
+            return new KindMatch(DeviceKind.Speaker, mediaPlayerEntity);
+
+        var switchEntity = entityIds.FirstOrDefault(id => id.StartsWith("switch.", StringComparison.Ordinal));
+        if (switchEntity is not null)
+            return new KindMatch(DeviceKind.SmartSwitch, switchEntity);
+
+        var lightEntity = entityIds.FirstOrDefault(id => id.StartsWith("light.", StringComparison.Ordinal));
+        if (lightEntity is not null)
+            return new KindMatch(DeviceKind.Light, lightEntity);
+
+        var cameraEntity = entityIds.FirstOrDefault(id => id.StartsWith("camera.", StringComparison.Ordinal));
+        if (cameraEntity is not null)
+            return new KindMatch(DeviceKind.Camera, cameraEntity);
+
+        return null;
+    }
+
+    /// <summary>Result of InferKind: the inferred DeviceKind and the specific entity id its channel builder should be built around.</summary>
+    public readonly record struct KindMatch(DeviceKind Kind, string AnchorEntityId);
 
     /// <summary>A plain HA switch.* entity: bare entity state ("on"/"off"), no sub-attribute, read-write.</summary>
     private static IReadOnlyList<DeviceChannelWriteRequest> SwitchChannels(string entityId) =>
