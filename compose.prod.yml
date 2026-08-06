@@ -101,6 +101,11 @@ volumes:
   # docs/media-library.md). MEDIA_LIBRARY_SHARE is the //server/share the CIFS
   # driver mounts, kept out of source as a repo variable; `:?` because an empty
   # device fails at mount time with a far less obvious error than this message.
+  #
+  # The server part must be an FQDN or an IP, never the bare hostname that works
+  # in Explorer on the host. The mount is performed by the Linux daemon VM, whose
+  # resolver does not apply the host's DNS suffix search list and speaks neither
+  # NetBIOS nor mDNS, so a bare name fails with "lookup <host> ...: no such host".
   media:
     driver: local
     driver_opts:
