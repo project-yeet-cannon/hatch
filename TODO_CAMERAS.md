@@ -23,9 +23,9 @@ Follows the existing `Device`/`DeviceChannel` model (`src/Aerie.Api/Ef/DeviceMap
 
 ### Phase 1 — Domain model
 
-- [ ] Add `Camera` to `DeviceKind` (`Ef/DeviceMapping.cs:33`)
-- [ ] Add `CameraFeed` and `MotionState` to `DeviceChannelMetric` (`Ef/DeviceMapping.cs:61`) — `CameraFeed` channel's `HaEntityId` is the `camera.*` entity; `MotionState` channel's `HaEntityId` is the sibling `binary_sensor.*_motion` entity, `HaAttribute` null, bare on/off state (fits `EfStateChange`/`ChannelValueExtractor` as-is, no extractor changes needed)
-- [ ] Confirm no EF migration is actually required (new enum members, same underlying int column, no CHECK constraint) — run `dotnet ef migrations add CameraDevices` and check the generated migration is empty/only whitespace; delete it if so
+- [x] Add `Camera` to `DeviceKind` (`Ef/DeviceMapping.cs:33`)
+- [x] Add `CameraFeed` and `MotionState` to `DeviceChannelMetric` (`Ef/DeviceMapping.cs:61`) — `CameraFeed` channel's `HaEntityId` is the `camera.*` entity; `MotionState` channel's `HaEntityId` is the sibling `binary_sensor.*_motion` entity, `HaAttribute` null, bare on/off state (fits `EfStateChange`/`ChannelValueExtractor` as-is, no extractor changes needed)
+- [x] Confirm no EF migration is actually required (new enum members, same underlying int column, no CHECK constraint) — run `dotnet ef migrations add CameraDevices` and check the generated migration is empty/only whitespace; delete it if so
 
 ### Phase 2 — Discovery/import
 

@@ -32,7 +32,7 @@ public class EfZone
 
 // Same append-only rule as DeviceChannelMetric below - the column stores the
 // enum's underlying int.
-public enum DeviceKind { Thermostat, Hygrometer, SmartSwitch, Light, Speaker }
+public enum DeviceKind { Thermostat, Hygrometer, SmartSwitch, Light, Speaker, Camera }
 
 /// <summary>
 /// A physical device mapped in from Home Assistant. May back onto one HA
@@ -65,7 +65,7 @@ public class EfDevice
 // New values must be appended at the end - the column stores the enum's
 // underlying int, so inserting elsewhere would silently remap every existing
 // row's Metric to the wrong value.
-public enum DeviceChannelMetric { Temperature, Humidity, Battery, SetpointTemperature, HvacAction, HeatingMode, PowerState, HvacMode, FanMode, Scene, MediaPlayback }
+public enum DeviceChannelMetric { Temperature, Humidity, Battery, SetpointTemperature, HvacAction, HeatingMode, PowerState, HvacMode, FanMode, Scene, MediaPlayback, CameraFeed, MotionState }
 
 public enum ChannelDirection { Read, ReadWrite }
 
