@@ -7,9 +7,9 @@ import type { ProjectDocument } from '../model/schema';
 const DB_NAME = 'aerie-modeler';
 const DB_VERSION = 1;
 const STORE_NAME = 'project';
-// The app manages exactly one active project at a time (see TODO_MODELING.md
-// - multi-project support isn't part of the spec), so it's stored under a
-// single fixed key rather than keyed by project id.
+// The app manages exactly one active project at a time - multi-project
+// support isn't part of the spec - so it's stored under a single fixed key
+// rather than keyed by project id.
 const ACTIVE_PROJECT_KEY = 'active';
 
 function openDb(): Promise<IDBDatabase> {

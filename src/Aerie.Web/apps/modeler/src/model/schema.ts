@@ -24,7 +24,7 @@ export interface WallSegment {
 
 export type OpeningKind = 'door' | 'archway';
 
-/** A door or archway cut into a floorPlan wall. Windows are deferred (see TODO_MODELING.md). */
+/** A door or archway cut into a floorPlan wall. Windows are deferred. */
 export interface Opening {
   id: string;
   wallId: string;

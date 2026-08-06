@@ -1,4 +1,4 @@
-# CFD Export Validation (TODO_MODELING.md Step 7)
+# CFD Export Validation
 
 ## Summary
 

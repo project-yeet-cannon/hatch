@@ -4,10 +4,10 @@ import type { ProjectDocument } from './schema';
 import type { ManifoldToplevel } from 'manifold-3d';
 
 /**
- * Named boundary-patch groups on the exported air-volume surface (the CFD
- * research in TODO_MODELING.md calls these "walls", "door_kitchen_hall", etc
- * - see the module doc comment below for why doors don't get their own
- * patch here).
+ * Named boundary-patch groups on the exported air-volume surface (CFD
+ * meshers like OpenFOAM assign boundary conditions per named patch, e.g.
+ * "walls", "door_kitchen_hall" - see the module doc comment below for why
+ * doors don't get their own patch here).
  */
 export const PATCH_WALLS = 'walls';
 export const PATCH_FLOOR = 'floor';
@@ -29,8 +29,9 @@ export interface ExportAirVolume {
 type ManifoldSolid = InstanceType<ManifoldToplevel['Manifold']>;
 
 /**
- * The single watertight solid CFD actually wants (see TODO_MODELING.md's CFD
- * research section): unlike the viewer's per-floor air volume in
+ * The single watertight solid CFD actually wants (interior-airflow CFD
+ * consumes the air volume, not the architectural walls - see the README's
+ * CFD research section): unlike the viewer's per-floor air volume in
  * solidGeneration.ts (extruded straight from room centerlines, so adjacent
  * rooms touch/merge at the shared wall with no separation at all), this is
  * real negative space - rooms minus the wall material between them, with

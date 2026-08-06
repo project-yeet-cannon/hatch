@@ -111,7 +111,7 @@ export function assignWallTopHeights(walls: readonly WallSegment[], rooms: reado
  * and wall heights, and floor-to-floor Z stacking) that 3D generation
  * consumes. Floors are stacked directly on top of each other by floorIndex,
  * each one's height taken from its tallest non-void room (there's no
- * separate floor-slab thickness in this model yet - see TODO_MODELING.md).
+ * separate floor-slab thickness in this model yet).
  * All floorPlan sketches sharing a floorIndex are combined as-drawn (in the
  * "shared origin" they're already meant to share - see Sketch.floorIndex);
  * unmerged partial sketches just produce disconnected wall-graph components,

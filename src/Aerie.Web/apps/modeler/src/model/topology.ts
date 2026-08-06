@@ -37,7 +37,7 @@ export interface TopologyOpeningEdge {
   roomB: string | null;
   /** Square meters: width x (headHeight - sillHeight). */
   freeArea: number;
-  /** Meters above the floor. Always 0 for doors/archways - the schema has no sill data yet (windows, which would have one, are deferred - see TODO_MODELING.md). */
+  /** Meters above the floor. Always 0 for doors/archways - the schema has no sill data yet (windows, which would have one, are deferred). */
   sillHeight: number;
   headHeight: number;
 }
@@ -51,7 +51,7 @@ export interface TopologyDocument {
   units: 'm';
   rooms: TopologyRoomNode[];
   openings: TopologyOpeningEdge[];
-  /** Reserved for the later sensor-placement feature (see TODO_MODELING.md's clarified decisions) - always empty for now. */
+  /** Reserved for the later sensor-placement feature - always empty for now. */
   sensors: never[];
 }
 
@@ -82,10 +82,10 @@ function roomsByWallId(floor: FloorLayout): Map<string, string[]> {
 }
 
 /**
- * Builds the topology JSON the Aerie climate controller consumes (spec #7's
- * "give it context for the topology of the rooms and sensors" - see
- * TODO_MODELING.md's CFD research section: no standard format fits a home
- * climate controller, so this is Aerie-specific). Pure and WASM-free, unlike
+ * Builds the topology JSON the Aerie climate controller consumes ("give it
+ * context for the topology of the rooms and sensors" - no standard format
+ * fits a home climate controller, so this is Aerie-specific; see the
+ * README's CFD research section). Pure and WASM-free, unlike
  * exportGeometry.ts's CSG pass, since a structural description of rooms and
  * openings doesn't need the actual solid geometry to exist.
  */

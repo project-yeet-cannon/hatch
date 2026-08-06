@@ -30,9 +30,9 @@ function faceNormal(positions: Float32Array, ia: number, ib: number, ic: number)
 
 /**
  * Binary STL of the whole air volume as one unnamed solid - what SimScale and
- * most generic viewers expect (see TODO_MODELING.md's CFD research: OpenFOAM
- * needs the named-patch ASCII variant below, but a plain binary STL is the
- * lowest-common-denominator format everything else reads).
+ * most generic viewers expect (see the README's CFD research section:
+ * OpenFOAM needs the named-patch ASCII variant below, but a plain binary STL
+ * is the lowest-common-denominator format everything else reads).
  */
 export function meshToBinarySTL(mesh: TriangleMesh): ArrayBuffer {
   const numTri = mesh.indices.length / 3;

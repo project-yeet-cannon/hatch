@@ -247,7 +247,7 @@ function angleWithin(angle: number, target: number, tolerance: number): boolean 
   return Math.min(diff, Math.PI * 2 - diff) <= tolerance;
 }
 
-/** Builds the auto-inferred constraint set: axis locks for near-axis walls, plus perpendicular/collinear locks between wall pairs that meet at a near-90°/near-180° corner (see architecture notes in TODO_MODELING.md). */
+/** Builds the auto-inferred constraint set: axis locks for near-axis walls, plus perpendicular/collinear locks between wall pairs that meet at a near-90°/near-180° corner. */
 function buildAutoConstraints(walls: readonly WallSegment[], graph: WallGraph): Residual[] {
   const residuals: Residual[] = [];
   const byVertex = new Map<number, { wallId: string; from: number; to: number }[]>();
@@ -332,7 +332,8 @@ function wallsFromPositions(walls: readonly WallSegment[], graph: WallGraph, pos
  * Solves the dimension/constraint system for a sketch: the drawn walls are
  * the initial guess, user-entered lengths (WallSegment.measuredLength) are
  * hard-ish targets, and near-axis/near-square relationships detected in the
- * initial guess are held as auto-inferred constraints (see TODO_MODELING.md).
+ * initial guess are held as auto-inferred constraints (nonlinear
+ * least-squares via Levenberg-Marquardt over vertex positions).
  * Returns the same walls with solved positions, plus a measured/derived/
  * estimated status and solved length per wall for UI feedback.
  */

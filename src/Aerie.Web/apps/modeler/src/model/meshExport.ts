@@ -6,9 +6,9 @@ import type { PatchedMesh } from './exportGeometry';
 /**
  * Splits the mesh's triangles by patch into sibling Mesh objects that share
  * the same position buffer (only their index arrays differ), so both
- * exporters below emit one named group per patch (spec #8's "OBJ (with
- * groups)"; GLB's per-mesh nodes are the equivalent for glTF/GLB viewers -
- * see TODO_MODELING.md's CFD research, item 5).
+ * exporters below emit one named group per patch ("OBJ (with groups)");
+ * GLB's per-mesh nodes are the equivalent for glTF/GLB viewers - see the
+ * README's CFD research section, item 5 (general CAD/viz tooling).
  */
 function buildPatchGroup(mesh: PatchedMesh): THREE.Group {
   const group = new THREE.Group();

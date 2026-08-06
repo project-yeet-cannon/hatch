@@ -12,10 +12,10 @@ interface ExportPanelProps {
 }
 
 /**
- * Spec #8: export the home in formats CFD/CAD tooling can consume, plus a
- * validator so a bad model fails here with a clear message rather than
- * inside a mesher (see TODO_MODELING.md's CFD research and exportGeometry.ts
- * for what each format is for and why doors don't get their own patch yet).
+ * Export the home in formats CFD/CAD tooling can consume, plus a validator
+ * so a bad model fails here with a clear message rather than inside a
+ * mesher (see the README's CFD research section and exportGeometry.ts for
+ * what each format is for and why doors don't get their own patch yet).
  */
 export function ExportPanel({ project }: ExportPanelProps) {
   const [mesh, setMesh] = useState<PatchedMesh | null>(null);
