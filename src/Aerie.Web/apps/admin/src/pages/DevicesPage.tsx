@@ -1077,6 +1077,7 @@ function DeviceForm({
           <option value="SmartSwitch">Smart switch</option>
           <option value="Light">Light</option>
           <option value="Speaker">Speaker</option>
+          <option value="Camera">Camera</option>
         </select>
       </div>
       <div className="field">

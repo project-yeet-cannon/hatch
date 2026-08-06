@@ -25,7 +25,7 @@ export interface ZoneWriteRequest {
   included: boolean;
 }
 
-export type DeviceKind = 'Thermostat' | 'Hygrometer' | 'SmartSwitch' | 'Light' | 'Speaker';
+export type DeviceKind = 'Thermostat' | 'Hygrometer' | 'SmartSwitch' | 'Light' | 'Speaker' | 'Camera';
 
 export type DeviceChannelMetric =
   | 'Temperature'
@@ -38,7 +38,9 @@ export type DeviceChannelMetric =
   | 'HvacMode'
   | 'FanMode'
   | 'Scene'
-  | 'MediaPlayback';
+  | 'MediaPlayback'
+  | 'CameraFeed'
+  | 'MotionState';
 
 export type ChannelDirection = 'Read' | 'ReadWrite';
 

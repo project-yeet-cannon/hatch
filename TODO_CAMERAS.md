@@ -36,8 +36,8 @@ Follows the existing `Device`/`DeviceChannel` model (`src/Aerie.Api/Ef/DeviceMap
 
 ### Phase 3 — Admin UI
 
-- [ ] Add `'Camera'` to the `DeviceKind` union and `'CameraFeed'`/`'MotionState'` to `DeviceChannelMetric` in `apps/admin/src/types.ts`
-- [ ] Add a `Camera` option to the device-kind `<select>` in both `DevicesPage.tsx` and `DiscoveryPage.tsx` (the latter was never updated for `SmartSwitch` — don't repeat that gap here)
+- [x] Add `'Camera'` to the `DeviceKind` union and `'CameraFeed'`/`'MotionState'` to `DeviceChannelMetric` in `apps/admin/src/types.ts`
+- [x] Add a `Camera` option to the device-kind `<select>` in both `DevicesPage.tsx` and `DiscoveryPage.tsx` (the latter was never updated for `SmartSwitch` — don't repeat that gap here)
 
 ### Phase 4 — HA WebSocket event listener
 
