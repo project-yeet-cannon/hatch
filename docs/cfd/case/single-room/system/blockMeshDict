@@ -1,0 +1,58 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      blockMeshDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+// Background mesh only - a coarse box comfortably containing the room STL
+// (interior bounding box x:[0.075,3.925] y:[0.075,2.925] z:[0,2.5], see
+// docs/cfd-validation.md). snappyHexMesh keeps only the cells reachable from
+// locationInMesh (inside the room) and discards everything else, including
+// this box's own boundary faces - so its exact size/resolution just needs to
+// be coarse-but-sufficient, not tight.
+
+scale   1;
+
+vertices
+(
+    (-0.2 -0.2 -0.2)
+    ( 4.2 -0.2 -0.2)
+    ( 4.2  3.2 -0.2)
+    (-0.2  3.2 -0.2)
+    (-0.2 -0.2  2.7)
+    ( 4.2 -0.2  2.7)
+    ( 4.2  3.2  2.7)
+    (-0.2  3.2  2.7)
+);
+
+blocks
+(
+    hex (0 1 2 3 4 5 6 7) (11 8 7) simpleGrading (1 1 1)
+);
+
+edges
+(
+);
+
+boundary
+(
+    outerBoundary
+    {
+        type patch;
+        faces
+        (
+            (3 7 6 2)
+            (0 4 7 3)
+            (2 6 5 1)
+            (1 5 4 0)
+            (0 3 2 1)
+            (4 5 6 7)
+        );
+    }
+);
+
+// ************************************************************************* //
