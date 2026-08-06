@@ -25,7 +25,7 @@ export interface ZoneWriteRequest {
   included: boolean;
 }
 
-export type DeviceKind = 'Thermostat' | 'Hygrometer' | 'SmartSwitch' | 'Light';
+export type DeviceKind = 'Thermostat' | 'Hygrometer' | 'SmartSwitch' | 'Light' | 'Speaker';
 
 export type DeviceChannelMetric =
   | 'Temperature'
@@ -37,7 +37,8 @@ export type DeviceChannelMetric =
   | 'PowerState'
   | 'HvacMode'
   | 'FanMode'
-  | 'Scene';
+  | 'Scene'
+  | 'MediaPlayback';
 
 export type ChannelDirection = 'Read' | 'ReadWrite';
 
@@ -94,6 +95,12 @@ export interface ChannelModeRequest {
 
 export interface ChannelSetpointRequest {
   temperature: number;
+}
+
+export interface ChannelPlayMediaRequest {
+  mediaContentId: string;
+  /** Defaults to "music" server-side when null. */
+  mediaContentType: string | null;
 }
 
 export interface SiteSetting {

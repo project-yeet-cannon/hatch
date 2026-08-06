@@ -69,6 +69,13 @@ public class DiscoveryService(TemplateClient template, AerieContext db, IHomeAss
                 ThermostatChannelBuilder.Build(climateEntity, entityIds, climateState));
         }
 
+        // Checked before switch.*: a Sonos speaker's HA device also carries
+        // switch.* siblings (loudness, crossfade, TV autoplay), so sniffing for
+        // switch first would import every speaker as a SmartSwitch.
+        var mediaPlayerEntity = entityIds.FirstOrDefault(id => id.StartsWith("media_player.", StringComparison.Ordinal));
+        if (mediaPlayerEntity is not null)
+            return new UnmappedHaDevice(group.Key, name, DeviceKind.Speaker, entityIds, SpeakerChannels(mediaPlayerEntity));
+
         var switchEntity = entityIds.FirstOrDefault(id => id.StartsWith("switch.", StringComparison.Ordinal));
         if (switchEntity is not null)
             return new UnmappedHaDevice(group.Key, name, DeviceKind.SmartSwitch, entityIds, SwitchChannels(switchEntity));
@@ -87,6 +94,12 @@ public class DiscoveryService(TemplateClient template, AerieContext db, IHomeAss
     private static IReadOnlyList<DeviceChannelWriteRequest> SwitchChannels(string entityId) =>
     [
         new(DeviceChannelMetric.PowerState, entityId, null, ChannelDirection.ReadWrite),
+    ];
+
+    /// <summary>A media_player.* entity: bare entity state ("playing"/"paused"/"idle"), no sub-attribute, read-write (DevicesController.PlayMedia). The speaker's switch.*/number.* tuning siblings (loudness, bass, balance...) are deliberately left unmapped - they're setup knobs, not things Aerie drives.</summary>
+    private static IReadOnlyList<DeviceChannelWriteRequest> SpeakerChannels(string entityId) =>
+    [
+        new(DeviceChannelMetric.MediaPlayback, entityId, null, ChannelDirection.ReadWrite),
     ];
 
     /// <summary>Hygrometer-style entity: metric lives in the suffix, bare entity state (no HaAttribute) - see EnvironmentService.MapFromHa for the pattern this generalizes.</summary>

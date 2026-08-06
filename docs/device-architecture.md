@@ -37,8 +37,8 @@ Relevant existing code as of this writing:
 
 ```text
 Zone          Id, Name, Kind (Interior | Outside), ComfortLowF/HighF, SortOrder, Included
-Device        Id, Name, Kind (Thermostat | Hygrometer | ...), ZoneId (nullable FK), HaDeviceId?, Enabled
-DeviceChannel Id, DeviceId FK, Metric (Temperature | Humidity | Battery | SetpointTemperature | HvacAction | HeatingMode),
+Device        Id, Name, Kind (Thermostat | Hygrometer | SmartSwitch | Light | Speaker | ...), ZoneId (nullable FK), HaDeviceId?, Enabled
+DeviceChannel Id, DeviceId FK, Metric (Temperature | Humidity | Battery | SetpointTemperature | HvacAction | HeatingMode | MediaPlayback | ...),
               HaEntityId, HaAttribute?, Direction (Read | ReadWrite)
 SiteSetting   Key, Value        (TimeZone, SunEntity, WeatherEntity, ComfortToleranceF, default comfort band)
 ```
@@ -90,7 +90,7 @@ The goal (from the original ask): recognize that `H5 Deck`'s separate HA entitie
 - List all HA entities (existing `EntityClient` usage).
 - Resolve each entity to its HA device via the template endpoint.
 - Group entities by HA device id.
-- Infer a suggested `Device.Kind`: a group containing a `climate.*` entity → Thermostat; a group whose entities end in temperature/humidity/battery → Hygrometer.
+- Infer a suggested `Device.Kind`: a group containing a `climate.*` entity → Thermostat; a `media_player.*` entity → Speaker; a `switch.*` entity → SmartSwitch; a `light.*` entity → Light; a group whose entities end in temperature/humidity/battery → Hygrometer. Order matters — a Sonos speaker's HA device also carries `switch.*` tuning siblings (loudness, crossfade), so `media_player.*` is sniffed before `switch.*`.
 - Present HA devices with no matching Aerie `Device.HaDeviceId` yet as "unmapped" in the admin UI, with channels pre-populated from the grouping, for one-click import.
 
 The `H# LOCATION` naming convention becomes a suggested display name for the admin to accept or edit, not something the app parses for meaning.

@@ -24,6 +24,12 @@ const FIELDS: FieldDef[] = [
     type: 'password',
     help: 'Long-lived access token. Stored obfuscated; leave blank to keep the current value.',
   },
+  {
+    key: 'MediaLibraryBaseUrl',
+    label: 'Media library base URL',
+    type: 'text',
+    help: 'Base URL speakers fetch tracks from, e.g. https://home.example.com/media. Must be reachable from the speakers themselves, and match what MediaLibrary:RootPath serves.',
+  },
   { key: 'KioskWifiSsid', label: 'Kiosk Wi-Fi SSID', type: 'text', help: 'Wi-Fi network the kiosk tablet joins during QR provisioning' },
   { key: 'KioskWifiSecurityType', label: 'Kiosk Wi-Fi security type', type: 'text', help: 'WPA, WEP, or blank for an open network' },
   {

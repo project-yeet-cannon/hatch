@@ -12,7 +12,8 @@ public record SiteSettingsSnapshot(
     string? WeatherEntity,
     decimal ComfortToleranceF,
     decimal DefaultComfortLowF,
-    decimal DefaultComfortHighF);
+    decimal DefaultComfortHighF,
+    string? MediaLibraryBaseUrl);
 
 public interface ISiteSettingsService
 {
@@ -54,7 +55,8 @@ public class SiteSettingsService(IDbContextFactory<AerieContext> dbFactory, Time
                 WeatherEntity: NullIfEmpty(values.GetValueOrDefault(SiteSettingKeys.WeatherEntity)),
                 ComfortToleranceF: ParseDecimal(values, SiteSettingKeys.ComfortToleranceF, 2m),
                 DefaultComfortLowF: ParseDecimal(values, SiteSettingKeys.DefaultComfortLowF, 68m),
-                DefaultComfortHighF: ParseDecimal(values, SiteSettingKeys.DefaultComfortHighF, 72m));
+                DefaultComfortHighF: ParseDecimal(values, SiteSettingKeys.DefaultComfortHighF, 72m),
+                MediaLibraryBaseUrl: NullIfEmpty(values.GetValueOrDefault(SiteSettingKeys.MediaLibraryBaseUrl)));
 
             cached = snapshot;
             expiresAt = time.GetUtcNow() + CacheTtl;

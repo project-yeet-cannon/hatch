@@ -136,5 +136,13 @@ public class RoutineActionExecutorTests
             Calls.Add(new Call("TriggerScene", entityId));
             return Task.CompletedTask;
         }
+
+        // No RoutineActionKind targets a MediaPlayback channel yet - only
+        // DevicesController.PlayMedia calls this.
+        public Task PlayMediaAsync(string entityId, string mediaContentId, string mediaContentType)
+        {
+            Calls.Add(new Call("PlayMedia", entityId, Mode: mediaContentId));
+            return Task.CompletedTask;
+        }
     }
 }

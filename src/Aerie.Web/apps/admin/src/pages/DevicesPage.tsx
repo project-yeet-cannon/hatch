@@ -17,6 +17,7 @@ import {
   getDevices,
   getSettings,
   getZones,
+  playChannelMedia,
   refreshChannelOptions,
   setChannelMode,
   setChannelPower,
@@ -68,6 +69,7 @@ const METRICS: DeviceChannelMetric[] = [
   "HvacMode",
   "FanMode",
   "Scene",
+  "MediaPlayback",
 ];
 const DIRECTIONS: ChannelDirection[] = ["Read", "ReadWrite"];
 
@@ -89,6 +91,10 @@ function isSetpointChannel(channel: DeviceChannel): boolean {
 
 function isSceneChannel(channel: DeviceChannel): boolean {
   return channel.metric === "Scene" && channel.direction === "ReadWrite";
+}
+
+function isMediaPlaybackChannel(channel: DeviceChannel): boolean {
+  return channel.metric === "MediaPlayback" && channel.direction === "ReadWrite";
 }
 
 /** "scene.basement_hallway_rolling_hills" -> "basement hallway rolling hills" - readable enough without a dedicated display-name field. */
@@ -459,6 +465,38 @@ export function DevicesPage() {
     }
   }
 
+  async function handlePlayMedia(
+    deviceId: string,
+    channel: DeviceChannel,
+    mediaContentId: string,
+  ) {
+    setError(null);
+    try {
+      await playChannelMedia(deviceId, channel.id, {
+        mediaContentId,
+        mediaContentType: null,
+      });
+      // Same optimism as handleTogglePower - the real state lands on
+      // SampleChannels' next poll (~1min).
+      setDevices((prev) =>
+        prev.map((d) =>
+          d.id === deviceId
+            ? {
+                ...d,
+                channels: d.channels.map((c) =>
+                  c.id === channel.id
+                    ? { ...c, lastState: "playing", lastValueAt: new Date().toISOString() }
+                    : c,
+                ),
+              }
+            : d,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function handleRefreshOptions(deviceId: string, channel: DeviceChannel) {
     setError(null);
     try {
@@ -681,6 +719,13 @@ export function DevicesPage() {
                             Activate: {sceneLabel(channel)}
                           </button>
                         )}
+                        {isMediaPlaybackChannel(channel) && (
+                          <MediaControl
+                            deviceId={device.id}
+                            channel={channel}
+                            onPlayMedia={handlePlayMedia}
+                          />
+                        )}
                       </p>
                     ))}
                   </div>
@@ -897,6 +942,13 @@ export function DevicesPage() {
                                   Activate: {sceneLabel(channel)}
                                 </button>
                               )}
+                              {isMediaPlaybackChannel(channel) && (
+                                <MediaControl
+                                  deviceId={device.id}
+                                  channel={channel}
+                                  onPlayMedia={handlePlayMedia}
+                                />
+                              )}
                               <button
                                 className="btn-secondary"
                                 onClick={() =>
@@ -1024,6 +1076,7 @@ function DeviceForm({
           <option value="Hygrometer">Hygrometer</option>
           <option value="SmartSwitch">Smart switch</option>
           <option value="Light">Light</option>
+          <option value="Speaker">Speaker</option>
         </select>
       </div>
       <div className="field">
@@ -1175,6 +1228,39 @@ function ModeControl({
         onClick={() => onRefreshOptions(deviceId, channel)}
       >
         Refresh options
+      </button>
+    </span>
+  );
+}
+
+/** A MediaPlayback channel's live control: a file location plus a Play button. Normally a path relative to the media library root, which the API expands against the MediaLibraryBaseUrl setting (see MediaLibraryUrlResolver); an http URL or media-source:// id also works and is passed through. */
+function MediaControl({
+  deviceId,
+  channel,
+  onPlayMedia,
+}: {
+  deviceId: string;
+  channel: DeviceChannel;
+  onPlayMedia: (deviceId: string, channel: DeviceChannel, mediaContentId: string) => void;
+}) {
+  const [draft, setDraft] = useState("");
+
+  return (
+    <span className="flex gap-1" style={{ alignItems: "center" }}>
+      <input
+        type="text"
+        value={draft}
+        placeholder="Miles Davis/Kind of Blue/01 So What.flac"
+        title="Path relative to the media library root. A full http(s) URL or a media-source:// id also works."
+        style={{ width: "22rem" }}
+        onChange={(e) => setDraft(e.target.value)}
+      />
+      <button
+        className="btn-secondary"
+        disabled={!draft.trim()}
+        onClick={() => onPlayMedia(deviceId, channel, draft.trim())}
+      >
+        Play
       </button>
     </span>
   );

@@ -112,6 +112,7 @@ export function DiscoveryPage() {
                   <option value="Hygrometer">Hygrometer</option>
                   <option value="SmartSwitch">Smart switch</option>
                   <option value="Light">Light</option>
+                  <option value="Speaker">Speaker</option>
                 </select>
               </div>
             </div>

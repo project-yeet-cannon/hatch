@@ -7,8 +7,9 @@ namespace Aerie.Api.Services.DeviceMapping;
 /// HomeAssistantStateReader's pattern (ServiceClient is sealed with
 /// non-virtual methods, so it can't be substituted directly in a test). The
 /// write side of every ReadWrite channel: PowerState (switch.*/light.*),
-/// SetpointTemperature/HvacMode/FanMode (climate.*), and Scene (scene.*) -
-/// see DevicesController's channel-write endpoints.
+/// SetpointTemperature/HvacMode/FanMode (climate.*), Scene (scene.*), and
+/// MediaPlayback (media_player.*) - see DevicesController's channel-write
+/// endpoints.
 /// </summary>
 public interface IHomeAssistantCommandService
 {
@@ -17,6 +18,7 @@ public interface IHomeAssistantCommandService
     Task SetHvacModeAsync(string entityId, string mode);
     Task SetFanModeAsync(string entityId, string mode);
     Task TriggerSceneAsync(string entityId);
+    Task PlayMediaAsync(string entityId, string mediaContentId, string mediaContentType);
 }
 
 public class HomeAssistantCommandService(ServiceClient service) : IHomeAssistantCommandService
@@ -36,6 +38,15 @@ public class HomeAssistantCommandService(ServiceClient service) : IHomeAssistant
 
     public Task TriggerSceneAsync(string entityId) =>
         service.CallService("scene", "turn_on", new { entity_id = entityId });
+
+    /// <summary>Plays one item on a media_player.* entity. The content id is resolved HA-side (it fetches the URL, or resolves a media-source:// id), so a network-library path only has to be reachable from the HA host, not from Aerie.</summary>
+    public Task PlayMediaAsync(string entityId, string mediaContentId, string mediaContentType) =>
+        service.CallService("media_player", "play_media", new
+        {
+            entity_id = entityId,
+            media_content_id = mediaContentId,
+            media_content_type = mediaContentType,
+        });
 
     private static string Domain(string entityId) => entityId.Split('.', 2)[0];
 }

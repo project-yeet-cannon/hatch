@@ -30,7 +30,9 @@ public class EfZone
     public bool Included { get; set; } = true;
 }
 
-public enum DeviceKind { Thermostat, Hygrometer, SmartSwitch, Light }
+// Same append-only rule as DeviceChannelMetric below - the column stores the
+// enum's underlying int.
+public enum DeviceKind { Thermostat, Hygrometer, SmartSwitch, Light, Speaker }
 
 /// <summary>
 /// A physical device mapped in from Home Assistant. May back onto one HA
@@ -63,7 +65,7 @@ public class EfDevice
 // New values must be appended at the end - the column stores the enum's
 // underlying int, so inserting elsewhere would silently remap every existing
 // row's Metric to the wrong value.
-public enum DeviceChannelMetric { Temperature, Humidity, Battery, SetpointTemperature, HvacAction, HeatingMode, PowerState, HvacMode, FanMode, Scene }
+public enum DeviceChannelMetric { Temperature, Humidity, Battery, SetpointTemperature, HvacAction, HeatingMode, PowerState, HvacMode, FanMode, Scene, MediaPlayback }
 
 public enum ChannelDirection { Read, ReadWrite }
 
@@ -125,6 +127,9 @@ public static class SiteSettingKeys
     public const string HomeAssistantHost = "HomeAssistantHost";
     public const string HomeAssistantPort = "HomeAssistantPort";
     public const string HomeAssistantToken = "HomeAssistantToken";
+
+    /// <summary>Absolute base URL speakers fetch media library tracks from, e.g. "https://home.example.com/media". Pairs with the MediaLibrary:RootPath appsettings value that decides what's served there - see MediaLibraryOptions.</summary>
+    public const string MediaLibraryBaseUrl = "MediaLibraryBaseUrl";
 
     /// <summary>Wi-Fi credentials handed to the kiosk tablet's QR provisioning payload - see KioskProvisioningController.</summary>
     public const string KioskWifiSsid = "KioskWifiSsid";

@@ -33,6 +33,15 @@ public record BackfillRequest(DateTimeOffset From, DateTimeOffset To);
 /// <summary>Desired on/off state for a PowerState channel (DevicesController.SetPower).</summary>
 public record ChannelPowerRequest(bool On);
 
+/// <summary>
+/// What to play on a MediaPlayback channel (DevicesController.PlayMedia).
+/// MediaContentId is a path relative to the media library root
+/// ("Miles Davis/Kind of Blue/01 So What.flac"), an http(s) URL, or a
+/// media-source:// id - see MediaLibraryUrlResolver, which turns the first
+/// into the second. MediaContentType defaults to "music".
+/// </summary>
+public record ChannelPlayMediaRequest(string MediaContentId, string? MediaContentType = null);
+
 public record SiteSettingDto(string Key, string Value);
 
 public record SiteSettingWriteRequest(string Value);

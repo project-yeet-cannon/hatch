@@ -3,6 +3,7 @@ using Aerie.Api.Jobs;
 using Aerie.Api.Models.DeviceMapping;
 using Aerie.Api.Services.Dashboard;
 using Aerie.Api.Services.DeviceMapping;
+using Aerie.Api.Services.Media;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Quartz;
@@ -13,11 +14,15 @@ namespace Aerie.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 public class DevicesController(
-    AerieContext db, IScheduler scheduler, IHomeAssistantCommandService command, IHomeAssistantStateReader stateReader
+    AerieContext db, IScheduler scheduler, IHomeAssistantCommandService command, IHomeAssistantStateReader stateReader,
+    ISiteSettingsService siteSettings
 ) : ControllerBase
 {
     /// <summary>Allowance for clock skew between this server and the client when rejecting "to" timestamps in the future.</summary>
     private static readonly TimeSpan ClockSkewTolerance = TimeSpan.FromMinutes(20);
+
+    /// <summary>What PlayMedia sends when the caller doesn't specify a media_content_type - every media library file this is pointed at is a music file.</summary>
+    private const string DefaultMediaContentType = "music";
 
     [HttpGet]
     public async Task<IReadOnlyList<DeviceDto>> GetAll(CancellationToken ct)
@@ -196,6 +201,24 @@ public class DevicesController(
         if (channel.Metric != DeviceChannelMetric.Scene) return BadRequest("Channel is not a Scene channel");
 
         await command.TriggerSceneAsync(channel.HaEntityId);
+        return Accepted();
+    }
+
+    /// <summary>Plays a media item on a MediaPlayback channel's underlying HA media_player entity (a Sonos speaker). MediaContentId is resolved through MediaLibraryUrlResolver first, so a library-relative path becomes a URL the speaker can fetch. Same read-latency note as SetPower - the channel's own StateChange row catches up on SampleChannels' next poll.</summary>
+    [HttpPost("{id:guid}/channels/{channelId:guid}/play-media")]
+    public async Task<IActionResult> PlayMedia(Guid id, Guid channelId, ChannelPlayMediaRequest request, CancellationToken ct)
+    {
+        var channel = await db.DeviceChannels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId && c.DeviceId == id, ct);
+        if (channel is null) return NotFound();
+        if (channel.Metric != DeviceChannelMetric.MediaPlayback || channel.Direction != ChannelDirection.ReadWrite)
+            return BadRequest("Channel is not a writable MediaPlayback channel");
+
+        var settings = await siteSettings.GetAsync(ct);
+        var (url, error) = MediaLibraryUrlResolver.Resolve(request.MediaContentId, settings.MediaLibraryBaseUrl);
+        if (error is not null) return BadRequest(error);
+
+        var contentType = request.MediaContentType?.Trim();
+        await command.PlayMediaAsync(channel.HaEntityId, url!, string.IsNullOrEmpty(contentType) ? DefaultMediaContentType : contentType);
         return Accepted();
     }
 

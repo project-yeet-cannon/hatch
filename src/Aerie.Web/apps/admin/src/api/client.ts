@@ -2,6 +2,7 @@ import type {
   BackfillRequest,
   ChannelHistory,
   ChannelModeRequest,
+  ChannelPlayMediaRequest,
   ChannelPowerRequest,
   ChannelSetpointRequest,
   Device,
@@ -78,6 +79,8 @@ export const setChannelMode = (deviceId: string, channelId: string, request: Cha
   fetchJson<void>(`/api/devices/${deviceId}/channels/${channelId}/mode`, { method: 'POST', ...asJson(request) });
 export const refreshChannelOptions = (deviceId: string, channelId: string) =>
   fetchJson<DeviceChannel>(`/api/devices/${deviceId}/channels/${channelId}/refresh-options`, { method: 'POST' });
+export const playChannelMedia = (deviceId: string, channelId: string, request: ChannelPlayMediaRequest) =>
+  fetchJson<void>(`/api/devices/${deviceId}/channels/${channelId}/play-media`, { method: 'POST', ...asJson(request) });
 export const triggerScene = (deviceId: string, channelId: string) =>
   fetchJson<void>(`/api/devices/${deviceId}/channels/${channelId}/trigger-scene`, { method: 'POST' });
 

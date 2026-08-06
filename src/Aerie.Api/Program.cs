@@ -5,6 +5,7 @@ using Aerie.Api.Models.Environment;
 using Aerie.Api.Services;
 using Aerie.Api.Services.Dashboard;
 using Aerie.Api.Services.DeviceMapping;
+using Aerie.Api.Services.Media;
 using Aerie.Api.Services.Routines;
 using HADotNet.Core;
 using HADotNet.Core.Clients;
@@ -12,6 +13,7 @@ using Microsoft.AspNetCore.Rewrite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
 using Quartz;
 using System.Text.Json.Serialization;
@@ -122,6 +124,8 @@ builder.Services.AddTransient<JobsInit>();
 // in compose.prod.yml - see KioskProvisioningController.
 builder.Services.AddHttpClient("KioskFiles", c => c.BaseAddress = new Uri("http://files/"));
 
+builder.Services.Configure<MediaLibraryOptions>(builder.Configuration.GetSection(MediaLibraryOptions.SectionName));
+
 // API / HTTP
 builder.Services.AddHealthChecks();
 builder.Services.AddEndpointsApiExplorer();
@@ -196,6 +200,30 @@ if (Directory.Exists(appsPath))
         FileProvider = appsFiles,
         RequestPath = "/apps"
     });
+}
+
+// Media library (read-only music share, served so Sonos speakers can stream
+// from it - see docs/media-library.md and DevicesController.PlayMedia). Off
+// unless MediaLibrary:RootPath is configured; a configured-but-missing path is
+// a deployment mistake worth a startup warning rather than silence, since the
+// only other symptom is every play command 404ing at the speaker.
+var mediaLibrary = app.Services.GetRequiredService<IOptions<MediaLibraryOptions>>().Value;
+if (!string.IsNullOrWhiteSpace(mediaLibrary.RootPath))
+{
+    if (Directory.Exists(mediaLibrary.RootPath))
+    {
+        app.UseStaticFiles(new StaticFileOptions
+        {
+            FileProvider = new PhysicalFileProvider(mediaLibrary.RootPath),
+            RequestPath = mediaLibrary.RequestPath,
+            ContentTypeProvider = MediaContentTypes.CreateProvider(),
+        });
+        app.Logger.LogInformation("Serving media library {RootPath} at {RequestPath}", mediaLibrary.RootPath, mediaLibrary.RequestPath);
+    }
+    else
+    {
+        app.Logger.LogWarning("MediaLibrary:RootPath {RootPath} does not exist - media library not served", mediaLibrary.RootPath);
+    }
 }
 
 app.UseAuthorization();

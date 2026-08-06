@@ -34,6 +34,11 @@ jobs:
       HA_HOST: ${{ vars.HA_HOST }}
       HA_PORT: ${{ vars.HA_PORT }}
       HA_TOKEN: ${{ secrets.HA_TOKEN }}
+      # //server/share of the music library, mounted read-only into the api
+      # container (compose.prod.yml's `media` volume) so it can be served to
+      # Sonos speakers. A variable, not a secret: it's a LAN path to a share
+      # that already allows public read. See docs/media-library.md.
+      MEDIA_LIBRARY_SHARE: ${{ vars.MEDIA_LIBRARY_SHARE }}
       # Reusable, tagged (not ephemeral) auth key — an ephemeral key would
       # de-register this node the moment the key's session ends, which is
       # wrong for a permanent subnet router. TAILSCALE_ADVERTISE_ROUTES is
