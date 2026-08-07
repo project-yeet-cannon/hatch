@@ -3,6 +3,7 @@ using Aerie.Api.Ef;
 using Aerie.Api.Jobs;
 using Aerie.Api.Models.Environment;
 using Aerie.Api.Services;
+using Aerie.Api.Services.ClimateControl;
 using Aerie.Api.Services.Dashboard;
 using Aerie.Api.Services.DeviceMapping;
 using Aerie.Api.Services.Media;
@@ -114,8 +115,14 @@ builder.Services.AddScoped<IChannelHistoryWriter, ChannelHistoryWriter>();
 builder.Services.AddScoped<IHomeAssistantConnectionManager, HomeAssistantConnectionManager>();
 builder.Services.AddTransient<IHomeAssistantCommandService, HomeAssistantCommandService>();
 
+// Every write to HA goes through IClimateCommandService, which ledgers it -
+// nothing else should be resolving IHomeAssistantCommandService directly (see
+// docs/climate-brain-architecture.md Phase 1).
+builder.Services.AddScoped<IClimateCommandService, ClimateCommandService>();
+
 // Jobs
 builder.Services.AddTransient<IAerieJob, SampleChannels>();
+builder.Services.AddTransient<IAerieJob, ReconcileCommands>();
 builder.Services.AddTransient<BackfillChannelHistory>();
 builder.Services.AddTransient<JobsInit>();
 

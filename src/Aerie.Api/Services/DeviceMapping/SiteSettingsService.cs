@@ -13,7 +13,8 @@ public record SiteSettingsSnapshot(
     decimal ComfortToleranceF,
     decimal DefaultComfortLowF,
     decimal DefaultComfortHighF,
-    string? MediaLibraryBaseUrl);
+    string? MediaLibraryBaseUrl,
+    int OverrideBackoffMinutes);
 
 public interface ISiteSettingsService
 {
@@ -56,7 +57,12 @@ public class SiteSettingsService(IDbContextFactory<AerieContext> dbFactory, Time
                 ComfortToleranceF: ParseDecimal(values, SiteSettingKeys.ComfortToleranceF, 2m),
                 DefaultComfortLowF: ParseDecimal(values, SiteSettingKeys.DefaultComfortLowF, 68m),
                 DefaultComfortHighF: ParseDecimal(values, SiteSettingKeys.DefaultComfortHighF, 72m),
-                MediaLibraryBaseUrl: NullIfEmpty(values.GetValueOrDefault(SiteSettingKeys.MediaLibraryBaseUrl)));
+                MediaLibraryBaseUrl: NullIfEmpty(values.GetValueOrDefault(SiteSettingKeys.MediaLibraryBaseUrl)),
+                // Two hours: long enough that someone who reached for the
+                // thermostat gets the evening they wanted, short enough that a
+                // one-off adjustment doesn't silently disable the controller
+                // for the rest of the week.
+                OverrideBackoffMinutes: ParseInt(values, SiteSettingKeys.OverrideBackoffMinutes, 120));
 
             cached = snapshot;
             expiresAt = time.GetUtcNow() + CacheTtl;
@@ -72,6 +78,11 @@ public class SiteSettingsService(IDbContextFactory<AerieContext> dbFactory, Time
 
     private static decimal ParseDecimal(IReadOnlyDictionary<string, string> values, string key, decimal fallback) =>
         values.TryGetValue(key, out var raw) && decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : fallback;
+
+    private static int ParseInt(IReadOnlyDictionary<string, string> values, string key, int fallback) =>
+        values.TryGetValue(key, out var raw) && int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
             ? parsed
             : fallback;
 

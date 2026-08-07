@@ -1,9 +1,10 @@
+using System.Globalization;
 using Aerie.Api.Ef;
 using Aerie.Api.Jobs;
 using Aerie.Api.Models.DeviceMapping;
+using Aerie.Api.Services.ClimateControl;
 using Aerie.Api.Services.Dashboard;
 using Aerie.Api.Services.DeviceMapping;
-using Aerie.Api.Services.Media;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Quartz;
@@ -14,8 +15,7 @@ namespace Aerie.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 public class DevicesController(
-    AerieContext db, IScheduler scheduler, IHomeAssistantCommandService command, IHomeAssistantStateReader stateReader,
-    ISiteSettingsService siteSettings
+    AerieContext db, IScheduler scheduler, IClimateCommandService commands, IHomeAssistantStateReader stateReader
 ) : ControllerBase
 {
     /// <summary>Allowance for clock skew between this server and the client when rejecting "to" timestamps in the future.</summary>
@@ -128,47 +128,35 @@ public class DevicesController(
 
     /// <summary>Turns a PowerState channel's underlying HA switch on/off. The channel's own Measurement/StateChange row updates on SampleChannels' next poll rather than here, matching every other ReadWrite channel's read latency.</summary>
     [HttpPost("{id:guid}/channels/{channelId:guid}/power")]
-    public async Task<IActionResult> SetPower(Guid id, Guid channelId, ChannelPowerRequest request, CancellationToken ct)
-    {
-        var channel = await db.DeviceChannels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId && c.DeviceId == id, ct);
-        if (channel is null) return NotFound();
-        if (channel.Metric != DeviceChannelMetric.PowerState || channel.Direction != ChannelDirection.ReadWrite)
-            return BadRequest("Channel is not a writable PowerState channel");
-
-        await command.SetPowerAsync(channel.HaEntityId, request.On);
-        return Accepted();
-    }
+    public Task<IActionResult> SetPower(Guid id, Guid channelId, ChannelPowerRequest request, CancellationToken ct) =>
+        DispatchAsync(id, channelId, CommandKind.SetPower, request.On ? "true" : "false", ct);
 
     /// <summary>Writes a SetpointTemperature channel's underlying HA climate entity setpoint. Same read-latency note as SetPower - the channel's own Measurement row updates on SampleChannels' next poll.</summary>
     [HttpPost("{id:guid}/channels/{channelId:guid}/setpoint")]
-    public async Task<IActionResult> SetSetpoint(Guid id, Guid channelId, ChannelSetpointRequest request, CancellationToken ct)
-    {
-        var channel = await db.DeviceChannels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId && c.DeviceId == id, ct);
-        if (channel is null) return NotFound();
-        if (channel.Metric != DeviceChannelMetric.SetpointTemperature || channel.Direction != ChannelDirection.ReadWrite)
-            return BadRequest("Channel is not a writable SetpointTemperature channel");
+    public Task<IActionResult> SetSetpoint(Guid id, Guid channelId, ChannelSetpointRequest request, CancellationToken ct) =>
+        DispatchAsync(id, channelId, CommandKind.SetTemperature, request.Temperature.ToString(CultureInfo.InvariantCulture), ct);
 
-        await command.SetTemperatureAsync(channel.HaEntityId, request.Temperature);
-        return Accepted();
-    }
-
-    /// <summary>Writes a HvacMode or FanMode channel's underlying HA climate mode. Rejects a mode outside the channel's AvailableOptions (when known) before calling HA, rather than forwarding whatever the client sent.</summary>
+    /// <summary>
+    /// Writes a HvacMode or FanMode channel's underlying HA climate mode. Which
+    /// of the two it is comes from the channel's own Metric rather than the
+    /// request, and a mode outside the channel's AvailableOptions is rejected
+    /// before HA is called - both now enforced by CommandExpectation.Validate,
+    /// so the control loop is held to the same rules as this endpoint.
+    /// </summary>
     [HttpPost("{id:guid}/channels/{channelId:guid}/mode")]
     public async Task<IActionResult> SetMode(Guid id, Guid channelId, ChannelModeRequest request, CancellationToken ct)
     {
-        var channel = await db.DeviceChannels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId && c.DeviceId == id, ct);
-        if (channel is null) return NotFound();
-        if (channel.Metric is not (DeviceChannelMetric.HvacMode or DeviceChannelMetric.FanMode) || channel.Direction != ChannelDirection.ReadWrite)
-            return BadRequest("Channel is not a writable HvacMode or FanMode channel");
+        var metric = await db.DeviceChannels.AsNoTracking()
+            .Where(c => c.Id == channelId && c.DeviceId == id)
+            .Select(c => (DeviceChannelMetric?)c.Metric)
+            .FirstOrDefaultAsync(ct);
 
-        var options = ChannelOptionsJson.Deserialize(channel.AvailableOptions);
-        if (options is not null && !options.Contains(request.Mode))
-            return BadRequest($"'{request.Mode}' is not one of this channel's available options: {string.Join(", ", options)}");
+        if (metric is null) return NotFound();
+        if (metric is not (DeviceChannelMetric.HvacMode or DeviceChannelMetric.FanMode))
+            return BadRequest("Channel is not a HvacMode or FanMode channel");
 
-        await (channel.Metric == DeviceChannelMetric.HvacMode
-            ? command.SetHvacModeAsync(channel.HaEntityId, request.Mode)
-            : command.SetFanModeAsync(channel.HaEntityId, request.Mode));
-        return Accepted();
+        var kind = metric == DeviceChannelMetric.HvacMode ? CommandKind.SetHvacMode : CommandKind.SetFanMode;
+        return await DispatchAsync(id, channelId, kind, request.Mode, ct);
     }
 
     /// <summary>Re-reads a HvacMode/FanMode channel's AvailableOptions from HA's live hvac_modes/fan_modes attributes - for a hand-added channel that skipped Discovery, or one whose supported modes changed in HA after import.</summary>
@@ -189,34 +177,46 @@ public class DevicesController(
         return ToDto(channel, latest.GetValueOrDefault(channel.Id));
     }
 
-    /// <summary>Activates a Scene channel's underlying HA scene. Scenes are stateless triggers - there's no resulting channel value to reflect, unlike SetPower/SetSetpoint/SetMode.</summary>
+    /// <summary>Activates a Scene channel's underlying HA scene. Scenes are stateless triggers - there's no resulting channel value to reflect, unlike SetPower/SetSetpoint/SetMode, which is also why their ledger rows never reach a confirmed state.</summary>
     [HttpPost("{id:guid}/channels/{channelId:guid}/trigger-scene")]
-    public async Task<IActionResult> TriggerScene(Guid id, Guid channelId, CancellationToken ct)
-    {
-        var channel = await db.DeviceChannels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId && c.DeviceId == id, ct);
-        if (channel is null) return NotFound();
-        if (channel.Metric != DeviceChannelMetric.Scene) return BadRequest("Channel is not a Scene channel");
+    public Task<IActionResult> TriggerScene(Guid id, Guid channelId, CancellationToken ct) =>
+        DispatchAsync(id, channelId, CommandKind.TriggerScene, null, ct);
 
-        await command.TriggerSceneAsync(channel.HaEntityId);
-        return Accepted();
-    }
-
-    /// <summary>Plays a media item on a MediaPlayback channel's underlying HA media_player entity (a Sonos speaker). MediaContentId is resolved through MediaLibraryUrlResolver first, so a library-relative path becomes a URL the speaker can fetch. Same read-latency note as SetPower - the channel's own StateChange row catches up on SampleChannels' next poll.</summary>
+    /// <summary>
+    /// Plays a media item on a MediaPlayback channel's underlying HA
+    /// media_player entity (a Sonos speaker). The library-relative path is
+    /// resolved against MediaLibraryBaseUrl inside ClimateCommandService at
+    /// dispatch time, so the ledger stores the path rather than a URL that
+    /// stops meaning anything when the hostname changes.
+    /// </summary>
     [HttpPost("{id:guid}/channels/{channelId:guid}/play-media")]
-    public async Task<IActionResult> PlayMedia(Guid id, Guid channelId, ChannelPlayMediaRequest request, CancellationToken ct)
+    public Task<IActionResult> PlayMedia(Guid id, Guid channelId, ChannelPlayMediaRequest request, CancellationToken ct) =>
+        DispatchAsync(id, channelId, CommandKind.PlayMedia, request.MediaContentId, ct);
+
+    /// <summary>
+    /// Shared tail of every channel-write endpoint: confirm the channel belongs
+    /// to this device (so a mismatched pair still 404s rather than writing to
+    /// someone else's channel), then hand off to the ledger, which owns
+    /// validation, override suppression, dispatch, and the audit row.
+    /// </summary>
+    private async Task<IActionResult> DispatchAsync(Guid deviceId, Guid channelId, CommandKind kind, string? value, CancellationToken ct)
     {
-        var channel = await db.DeviceChannels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId && c.DeviceId == id, ct);
-        if (channel is null) return NotFound();
-        if (channel.Metric != DeviceChannelMetric.MediaPlayback || channel.Direction != ChannelDirection.ReadWrite)
-            return BadRequest("Channel is not a writable MediaPlayback channel");
+        if (!await db.DeviceChannels.AsNoTracking().AnyAsync(c => c.Id == channelId && c.DeviceId == deviceId, ct))
+            return NotFound();
 
-        var settings = await siteSettings.GetAsync(ct);
-        var (url, error) = MediaLibraryUrlResolver.Resolve(request.MediaContentId, settings.MediaLibraryBaseUrl);
-        if (error is not null) return BadRequest(error);
+        var result = await commands.DispatchAsync(
+            new CommandRequest(channelId, kind, value, CommandSource.Human, "Admin UI"), ct);
 
-        var contentType = request.MediaContentType?.Trim();
-        await command.PlayMediaAsync(channel.HaEntityId, url!, string.IsNullOrEmpty(contentType) ? MediaContentTypes.DefaultPlayMediaType : contentType);
-        return Accepted();
+        return result.Outcome switch
+        {
+            CommandOutcome.Succeeded => Accepted(),
+            CommandOutcome.Rejected => BadRequest(result.Error),
+            // Unreachable today - only Controller/Experiment commands defer to
+            // an override - but mapped explicitly so it surfaces as a conflict
+            // rather than a bad gateway if that policy ever widens.
+            CommandOutcome.Suppressed => Conflict(result.Error),
+            _ => StatusCode(StatusCodes.Status502BadGateway, result.Error),
+        };
     }
 
     /// <summary>Triggers a one-time BackfillChannelHistory job run to pull [request.From, request.To) of HA history for this device's channels.</summary>

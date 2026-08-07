@@ -17,6 +17,10 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
     public DbSet<EfRoutine> Routines => Set<EfRoutine>();
     public DbSet<EfRoutineAction> RoutineActions => Set<EfRoutineAction>();
 
+    public DbSet<EfCommand> Commands => Set<EfCommand>();
+    public DbSet<EfControlDecision> ControlDecisions => Set<EfControlDecision>();
+    public DbSet<EfControlOverride> ControlOverrides => Set<EfControlOverride>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<EfEnvironmentReading>();
@@ -59,6 +63,43 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
             .HasOne(a => a.Channel)
             .WithMany()
             .HasForeignKey(a => a.ChannelId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Commands cascade with their channel, the same way Measurements and
+        // StateChanges do - a deleted channel takes both halves of its history
+        // (what we told it, what it read) with it rather than leaving one
+        // orphaned half that can never be joined against the other again.
+        modelBuilder.Entity<EfCommand>()
+            .HasOne(c => c.Channel)
+            .WithMany()
+            .HasForeignKey(c => c.ChannelId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // A decision, by contrast, is not the command's parent - it's the
+        // reasoning that happened to produce it. Deleting one leaves the
+        // actuation record intact, just unexplained.
+        modelBuilder.Entity<EfCommand>()
+            .HasOne(c => c.Decision)
+            .WithMany(d => d.Commands)
+            .HasForeignKey(c => c.DecisionId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<EfControlOverride>()
+            .HasOne(o => o.Command)
+            .WithMany()
+            .HasForeignKey(o => o.CommandId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<EfControlOverride>()
+            .HasOne(o => o.Channel)
+            .WithMany()
+            .HasForeignKey(o => o.ChannelId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<EfControlOverride>()
+            .HasOne(o => o.Device)
+            .WithMany()
+            .HasForeignKey(o => o.DeviceId)
             .OnDelete(DeleteBehavior.Cascade);
 
         base.OnModelCreating(modelBuilder);

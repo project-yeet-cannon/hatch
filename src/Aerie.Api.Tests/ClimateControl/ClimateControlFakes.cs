@@ -1,0 +1,71 @@
+using Aerie.Api.Ef;
+using Aerie.Api.Services.DeviceMapping;
+using Microsoft.EntityFrameworkCore;
+
+namespace Aerie.Api.Tests.ClimateControl;
+
+/// <summary>Shared doubles for the Phase 1 climate-control tests - see docs/climate-brain-architecture.md.</summary>
+internal static class ClimateControlFakes
+{
+    public static AerieContext NewContext() =>
+        new(new DbContextOptionsBuilder<AerieContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+
+    /// <summary>A writable channel on a device, both persisted, so the command service can resolve it.</summary>
+    public static async Task<EfDeviceChannel> AddChannelAsync(
+        AerieContext db, DeviceChannelMetric metric, string entityId,
+        ChannelDirection direction = ChannelDirection.ReadWrite, IReadOnlyList<string>? options = null)
+    {
+        var device = new EfDevice { Name = $"Device for {entityId}" };
+        db.Devices.Add(device);
+
+        var channel = new EfDeviceChannel
+        {
+            DeviceId = device.Id,
+            Device = device,
+            Metric = metric,
+            HaEntityId = entityId,
+            Direction = direction,
+            AvailableOptions = ChannelOptionsJson.Serialize(options),
+        };
+        db.DeviceChannels.Add(channel);
+        await db.SaveChangesAsync();
+        return channel;
+    }
+}
+
+internal sealed record HaCall(string Method, string EntityId, string? Argument = null);
+
+/// <summary>Records what reached Home Assistant, and can be told to throw so the Failed path is exercised.</summary>
+internal sealed class FakeHomeAssistantCommandService : IHomeAssistantCommandService
+{
+    public List<HaCall> Calls { get; } = [];
+    public Exception? ThrowOnCall { get; set; }
+
+    public Task SetPowerAsync(string entityId, bool on) => Record("SetPower", entityId, on.ToString());
+    public Task SetTemperatureAsync(string entityId, decimal temperature) => Record("SetTemperature", entityId, temperature.ToString());
+    public Task SetHvacModeAsync(string entityId, string mode) => Record("SetHvacMode", entityId, mode);
+    public Task SetFanModeAsync(string entityId, string mode) => Record("SetFanMode", entityId, mode);
+    public Task TriggerSceneAsync(string entityId) => Record("TriggerScene", entityId);
+    public Task PlayMediaAsync(string entityId, string mediaContentId, string mediaContentType) => Record("PlayMedia", entityId, mediaContentId);
+
+    private Task Record(string method, string entityId, string? argument = null)
+    {
+        if (ThrowOnCall is { } ex) throw ex;
+        Calls.Add(new HaCall(method, entityId, argument));
+        return Task.CompletedTask;
+    }
+}
+
+internal sealed class FakeSiteSettingsService(string? mediaBaseUrl = null, int overrideBackoffMinutes = 120) : ISiteSettingsService
+{
+    public Task<SiteSettingsSnapshot> GetAsync(CancellationToken ct) => Task.FromResult(new SiteSettingsSnapshot(
+        TimeZone: "America/New_York",
+        Latitude: 0,
+        Longitude: 0,
+        WeatherEntity: null,
+        ComfortToleranceF: 2m,
+        DefaultComfortLowF: 68m,
+        DefaultComfortHighF: 72m,
+        MediaLibraryBaseUrl: mediaBaseUrl,
+        OverrideBackoffMinutes: overrideBackoffMinutes));
+}

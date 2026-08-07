@@ -38,9 +38,9 @@ public class EfRoutine
 public enum RoutineActionKind { SetPower, SetTemperature, SetHvacMode, SetFanMode, TriggerScene, PlayMedia }
 
 /// <summary>
-/// One command in a Routine, executed against a DeviceChannel's underlying HA
-/// entity via IHomeAssistantCommandService - mirrors DevicesController's
-/// channel-write endpoints exactly, just batched and named.
+/// One command in a Routine, translated into a ledgered CommandRequest by
+/// RoutineCommandMapper and dispatched through IClimateCommandService - mirrors
+/// DevicesController's channel-write endpoints exactly, just batched and named.
 /// </summary>
 [Table("RoutineActions")]
 public class EfRoutineAction

@@ -1,6 +1,6 @@
 using Aerie.Api.Ef;
 using Aerie.Api.Models.Routines;
-using Aerie.Api.Services.DeviceMapping;
+using Aerie.Api.Services.ClimateControl;
 using Aerie.Api.Services.Routines;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -16,7 +16,7 @@ namespace Aerie.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-public class RoutinesController(AerieContext db, IHomeAssistantCommandService command, ISiteSettingsService siteSettings) : ControllerBase
+public class RoutinesController(AerieContext db, IClimateCommandService commands) : ControllerBase
 {
     [HttpGet]
     public async Task<IReadOnlyList<RoutineDto>> GetAll(CancellationToken ct)
@@ -84,17 +84,32 @@ public class RoutinesController(AerieContext db, IHomeAssistantCommandService co
         return NoContent();
     }
 
-    /// <summary>Runs the Routine's actions against Home Assistant now, in SortOrder.</summary>
+    /// <summary>
+    /// Runs the Routine's actions against Home Assistant now, in SortOrder,
+    /// through the command ledger - so a routine trigger is recorded action by
+    /// action with Source = Routine, the same as anything else Aerie does to
+    /// the house (docs/climate-brain-architecture.md Phase 1).
+    ///
+    /// Dispatch stops at the first action that doesn't succeed rather than
+    /// pushing on: a routine's order is meaningful, so finishing "AC down, then
+    /// fans on" after the AC step failed would leave the house in a state
+    /// nobody asked for.
+    /// </summary>
     [HttpPost("{id:guid}/trigger")]
     public async Task<IActionResult> Trigger(Guid id, CancellationToken ct)
     {
         var routine = await db.Routines.AsNoTracking()
-            .Include(r => r.Actions).ThenInclude(a => a.Channel)
+            .Include(r => r.Actions)
             .FirstOrDefaultAsync(r => r.Id == id, ct);
         if (routine is null) return NotFound();
 
-        var settings = await siteSettings.GetAsync(ct);
-        await RoutineActionExecutor.ExecuteAsync(routine.Actions, command, settings.MediaLibraryBaseUrl, ct);
+        var requests = RoutineCommandMapper.ToCommandRequests(routine.Actions, $"Routine '{routine.Name}'");
+        var results = await commands.DispatchManyAsync(requests, ct);
+
+        var failure = results.FirstOrDefault(r => !r.Succeeded);
+        if (failure.Outcome == CommandOutcome.Rejected) return BadRequest(failure.Error);
+        if (failure.Outcome == CommandOutcome.Failed) return StatusCode(StatusCodes.Status502BadGateway, failure.Error);
+
         return NoContent();
     }
 

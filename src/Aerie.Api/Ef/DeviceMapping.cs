@@ -123,6 +123,9 @@ public static class SiteSettingKeys
     public const string DefaultComfortLowF = "DefaultComfortLowF";
     public const string DefaultComfortHighF = "DefaultComfortHighF";
 
+    /// <summary>How long the controller leaves a device alone after a manual override is detected on it, in minutes. Global for now; docs/climate-brain-architecture.md Phase 2 moves it onto EfActuatorPolicy so a compressor and a fan switch can back off for different lengths of time.</summary>
+    public const string OverrideBackoffMinutes = "OverrideBackoffMinutes";
+
     /// <summary>Host/port/token used to connect the HADotNet client - see HomeAssistantConnectionManager.</summary>
     public const string HomeAssistantHost = "HomeAssistantHost";
     public const string HomeAssistantPort = "HomeAssistantPort";
