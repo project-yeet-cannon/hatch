@@ -1,0 +1,43 @@
+# Optional layer on top of compose.prod.yml: mounts the music library SMB
+# share read-only into the api container so it can be served over HTTP
+# (Sonos speakers fetch tracks themselves - see docs/media-library.md).
+#
+# Only included in the deploy when the MEDIA_LIBRARY_SHARE repo variable is
+# set (see .github/workflows/cd.yml). It's deliberately kept out of
+# compose.prod.yml: the CIFS mount is resolved and created by the Docker
+# daemon *before* any container starts, so an unresolvable or misconfigured
+# share fails `docker compose up` for the entire stack, not just the api
+# container's media serving. Leaving MEDIA_LIBRARY_SHARE unset skips this
+# file entirely and the api container starts with no media mount -
+# MediaLibraryOptions.RootPath stays unset and the API just logs a warning
+# and serves nothing (Program.cs), rather than blocking the deploy.
+services:
+  api:
+    environment:
+      # In-container mount point of the music share, not a UNC path: the API
+      # runs in a Linux container even though the host is Windows. See
+      # docs/media-library.md and MediaLibraryOptions.
+      - MediaLibrary__RootPath=/media-library
+    volumes:
+      - media:/media-library:ro
+
+volumes:
+  # MEDIA_LIBRARY_SHARE is the //server/share the CIFS driver mounts, kept
+  # out of source as a repo variable. No `:?` here - this file is only
+  # included when the variable is set (see cd.yml), so an empty value would
+  # indicate a workflow bug rather than something to surface via a mount-time
+  # error.
+  #
+  # The server part must be an FQDN or an IP, never the bare hostname that works
+  # in Explorer on the host. The mount is performed by the Linux daemon VM, whose
+  # resolver does not apply the host's DNS suffix search list and speaks neither
+  # NetBIOS nor mDNS, so a bare name fails with "lookup <host> ...: no such host".
+  media:
+    driver: local
+    driver_opts:
+      type: cifs
+      # Guest access, matching the share's public read permissions. A share
+      # that needs credentials wants username=/password= here, sourced from
+      # repo *secrets* rather than variables.
+      o: "guest,ro,vers=3.0"
+      device: "${MEDIA_LIBRARY_SHARE}"

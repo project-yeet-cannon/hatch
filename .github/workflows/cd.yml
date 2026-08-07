@@ -64,6 +64,7 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha }}
           sparse-checkout: |
             compose.prod.yml
+            compose.media.yml
             compose.observability.yml
             compose.metrics.yml
             compose.backup.yml
@@ -181,12 +182,23 @@ jobs:
       # deploy silently proceeds against whatever stale container is already
       # running - the failure only shows up later, in whichever step first tries
       # to use the new image.
+      #
+      # compose.media.yml (the CIFS mount for the music library) is layered in
+      # only when MEDIA_LIBRARY_SHARE is set. That mount is resolved by the
+      # Docker daemon before any container starts, so an unresolvable share
+      # (DNS failure, share offline, variable never configured) would otherwise
+      # fail `up` for the whole stack, not just media serving - see
+      # compose.media.yml and docs/media-library.md.
       - name: Pull and start the stack
         working-directory: .
         run: |
-          docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml pull
+          $mediaArgs = @()
+          if (-not [string]::IsNullOrWhiteSpace($env:MEDIA_LIBRARY_SHARE)) {
+            $mediaArgs = @("-f", "compose.media.yml")
+          }
+          docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml @mediaArgs pull
           if ($LASTEXITCODE -ne 0) { throw "docker compose pull failed with exit code $LASTEXITCODE" }
-          docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml up -d
+          docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml @mediaArgs up -d
           if ($LASTEXITCODE -ne 0) { throw "docker compose up failed with exit code $LASTEXITCODE" }
 
       # The init logic itself lives in the image, at scripts/init-repos.sh, and

@@ -33,12 +33,12 @@ services:
     environment:
       - DOTNET_ENVIRONMENT=Docker
       - DOMAIN=${DOMAIN}
-      # In-container mount point of the music share, not a UNC path: the API
-      # runs in a Linux container even though the host is Windows. See
-      # docs/media-library.md and MediaLibraryOptions.
-      - MediaLibrary__RootPath=/media-library
-    volumes:
-      - media:/media-library:ro
+    # The music-library mount (MediaLibrary__RootPath env + the `media`
+    # volume) lives in compose.media.yml, layered in only when
+    # MEDIA_LIBRARY_SHARE is set - see that file and docs/media-library.md.
+    # Without it, MediaLibraryOptions.RootPath stays "" and the API just
+    # skips serving the library (Program.cs), rather than the whole stack
+    # failing to come up over an unresolvable CIFS share.
     depends_on:
       db:
         condition: service_healthy
@@ -96,22 +96,3 @@ volumes:
   pgdata:
   caddy_data:
   caddy_config:
-  # The music library SMB share, mounted read-only for the api container to
-  # serve over HTTP (Sonos speakers fetch tracks themselves - see
-  # docs/media-library.md). MEDIA_LIBRARY_SHARE is the //server/share the CIFS
-  # driver mounts, kept out of source as a repo variable; `:?` because an empty
-  # device fails at mount time with a far less obvious error than this message.
-  #
-  # The server part must be an FQDN or an IP, never the bare hostname that works
-  # in Explorer on the host. The mount is performed by the Linux daemon VM, whose
-  # resolver does not apply the host's DNS suffix search list and speaks neither
-  # NetBIOS nor mDNS, so a bare name fails with "lookup <host> ...: no such host".
-  media:
-    driver: local
-    driver_opts:
-      type: cifs
-      # Guest access, matching the share's public read permissions. A share
-      # that needs credentials wants username=/password= here, sourced from
-      # repo *secrets* rather than variables.
-      o: "guest,ro,vers=3.0"
-      device: "${MEDIA_LIBRARY_SHARE:?set the MEDIA_LIBRARY_SHARE repo variable to the music share, e.g. //NAS/Music}"
