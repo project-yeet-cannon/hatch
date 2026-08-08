@@ -278,6 +278,7 @@ try {
         # ---------------------------------------------------------------- #
 
         Write-Host "Found VM '$VMName' with matching MAC from a previous run of this script - skipping Golden image and Create, picking up at Verify."
+        Write-Warning "This VM's cloud-init config (SSH key, packages, hostname, etc.) was baked in by the run that created it and is NOT re-applied now. If -SshPublicKey or other inputs changed since then - including a rotated NODE_SSH_PUBLIC_KEY/NODE_SSH_PRIVATE_KEY - this run verifies against what's already on the VM, not against today's inputs. Remove-VM and recreate it if it needs to pick up new inputs."
         $currentState = (Get-VM -Name $VMName).State
         if ($currentState -eq 'Running') {
             Write-Host "VM is already running."

@@ -137,6 +137,34 @@ function Invoke-NodeSsh {
     }
 }
 
+function Get-SshPermanentFailureReason {
+    <#
+    .SYNOPSIS
+        Classifies a failed SSH attempt's stderr as permanent (retrying won't
+        help) or transient (the ordinary "node is mid-reboot" case), and
+        returns a human-readable reason for the former or $null for the
+        latter.
+
+    .DESCRIPTION
+        Wait-AerieNodeReady polls a node that is expected to be intermittently
+        unreachable while it reboots, so by default any SSH failure is
+        treated as "still rebooting" and retried until the timeout. That's
+        wrong for a rejected key or a host-key mismatch: neither will ever
+        resolve itself by waiting, and burning the full timeout on one just
+        turns a one-line diagnosis into a 45-minute round trip.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$StdErr)
+
+    if ($StdErr -match 'Permission denied') {
+        return "the key offered wasn't accepted (Permission denied). This will not resolve by waiting."
+    }
+    if ($StdErr -match 'Host key verification failed') {
+        return 'the host key was rejected (Host key verification failed). This will not resolve by waiting.'
+    }
+    return $null
+}
+
 function Wait-AerieNodeReady {
     <#
     .SYNOPSIS
@@ -200,6 +228,10 @@ function Wait-AerieNodeReady {
 
         $probe = Invoke-NodeSsh @ssh -Command 'cat /proc/sys/kernel/random/boot_id; cloud-init status || true'
         if ($probe.ExitCode -ne 0) {
+            $permanentReason = Get-SshPermanentFailureReason -StdErr $probe.StdErr
+            if ($permanentReason) {
+                throw "SSH to $IPAddress as '$User' failed: $permanentReason If you're resuming a VM from an earlier run, remember its authorized_keys was baked in by cloud-init at creation time - a key rotated since then (e.g. a new -SshPublicKey / NODE_SSH_PUBLIC_KEY) never reaches an already-created VM. Confirm the private key matches what was actually baked in, or remove and recreate the VM.`n$($probe.StdErr)"
+            }
             # Expected while the node is mid-reboot, and on the very first
             # attempts while sshd is still coming up.
             Write-Host "  node unreachable (likely rebooting) ..."
@@ -252,6 +284,10 @@ function Wait-AerieNodeReady {
     # completed. That deserves a warning, not a failed run - whereas 255 is
     # ssh's own failure code and means we never got an answer at all.
     if ($final.ExitCode -eq 255) {
+        $permanentReason = Get-SshPermanentFailureReason -StdErr $final.StdErr
+        if ($permanentReason) {
+            throw "SSH to $IPAddress as '$User' failed: $permanentReason If you're resuming a VM from an earlier run, remember its authorized_keys was baked in by cloud-init at creation time - a key rotated since then (e.g. a new -SshPublicKey / NODE_SSH_PUBLIC_KEY) never reaches an already-created VM. Confirm the private key matches what was actually baked in, or remove and recreate the VM.`n$($final.StdErr)"
+        }
         throw "Lost the SSH connection to $IPAddress while waiting for cloud-init:`n$($final.StdErr)"
     }
     if ($final.StdOut -notmatch 'status:\s*done') {
