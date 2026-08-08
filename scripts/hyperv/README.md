@@ -69,7 +69,7 @@ them can knock the host off the network if scripted carelessly.
 ### Additionally, for flow B
 
 1. **A self-hosted Actions runner on each host**, registered with a label
-   matching the workflow's `host` choice (`hyperv-host-a` / `-b` / `-c` —
+   matching the workflow's `host` choice (`hyperv-host-0` / `-1` / `-2` —
    rename them in [`provision-node.yml`](../../.github/workflows/provision-node.yml)
    to whatever you actually use). The runner service must run as a **local
    Administrator**: the Hyper-V cmdlets and the scripts'
