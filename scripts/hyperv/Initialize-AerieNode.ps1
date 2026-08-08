@@ -131,6 +131,7 @@ function Write-Stage {
 }
 
 $tempKeyFile = $null
+$privateKeyPath = $null
 $knownHostsFile = $null
 $startedUtc = (Get-Date).ToUniversalTime()
 
@@ -167,10 +168,27 @@ try {
         if (-not $SshPrivateKey -and -not $SshPrivateKeyPath) {
             $failures.Add('Verification needs the private key: pass -SshPrivateKeyPath or -SshPrivateKey, or run with -SkipWaitForReady.')
         }
+        $privateKeyMaterialFound = $SshPrivateKey -or ($SshPrivateKeyPath -and (Test-Path $SshPrivateKeyPath -PathType Leaf))
         if ($SshPrivateKeyPath -and -not $SshPrivateKey -and -not (Test-Path $SshPrivateKeyPath -PathType Leaf)) {
             $failures.Add("SSH private key not found at '$SshPrivateKeyPath'.")
         }
-        try { Assert-OpenSshClient } catch { $failures.Add($_.Exception.Message) }
+        $opensshOk = $true
+        try { Assert-OpenSshClient } catch { $opensshOk = $false; $failures.Add($_.Exception.Message) }
+
+        # Resolved here rather than in Verify: a malformed key should fail
+        # preflight in seconds, not after a full golden-image build and VM
+        # boot. $tempKeyFile is cleaned up in the top-level `finally` no
+        # matter which stage a later failure happens in.
+        if ($privateKeyMaterialFound -and $opensshOk) {
+            try {
+                $resolvedKey = Resolve-SshPrivateKeyFile -SshPrivateKey $SshPrivateKey -SshPrivateKeyPath $SshPrivateKeyPath -VMName $VMName
+                $privateKeyPath = $resolvedKey.Path
+                $tempKeyFile = $resolvedKey.TempFile
+            }
+            catch {
+                $failures.Add($_.Exception.Message)
+            }
+        }
     }
 
     # Switch: existence alone isn't enough. An Internal or Private switch
@@ -347,20 +365,9 @@ try {
         $nodeReport = $null
     }
     else {
-        if ($SshPrivateKey) {
-            $tempKeyFile = Join-Path $env:TEMP "aerie-$VMName-$([Guid]::NewGuid().ToString('N')).key"
-            # WriteAllText rather than Set-Content, and LF rather than CRLF:
-            # OpenSSH rejects a key file with CRLF line endings, and equally
-            # rejects one whose PEM footer has no trailing newline at all.
-            # Set-Content would get both wrong. GitHub also strips the
-            # trailing newline from multi-line secrets, hence re-adding it.
-            [IO.File]::WriteAllText($tempKeyFile, ($SshPrivateKey.Replace("`r`n", "`n").TrimEnd() + "`n"))
-            Protect-PrivateKeyFile -Path $tempKeyFile
-            $privateKeyPath = $tempKeyFile
-        }
-        else {
-            $privateKeyPath = $SshPrivateKeyPath
-        }
+        # $privateKeyPath was already resolved and format-checked in
+        # Preflight (see Resolve-SshPrivateKeyFile) - preflight would have
+        # thrown before we ever got here if it didn't parse.
 
         # A throwaway known_hosts: this VM is brand new, so any key already
         # recorded for that IP belongs to something else and would only

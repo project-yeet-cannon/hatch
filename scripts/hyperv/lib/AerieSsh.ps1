@@ -12,17 +12,71 @@
 function Assert-OpenSshClient {
     <#
     .SYNOPSIS
-        Fails early with an actionable message if ssh.exe isn't installed.
+        Fails early with an actionable message if ssh.exe or ssh-keygen.exe
+        isn't installed.
     #>
-    if (-not (Get-Command ssh.exe -ErrorAction SilentlyContinue)) {
+    $missing = @('ssh.exe', 'ssh-keygen.exe') | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) }
+    if ($missing) {
         throw @"
-ssh.exe not found on PATH. The OpenSSH client is an optional Windows feature; install it with:
+$($missing -join ', ') not found on PATH. The OpenSSH client is an optional Windows feature; install it with:
 
   Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
 
 Or re-run with -SkipWaitForReady to provision the VM without post-boot verification.
 "@
     }
+}
+
+function Resolve-SshPrivateKeyFile {
+    <#
+    .SYNOPSIS
+        Materializes the private key to verify with (writing key *content* to
+        a locked-down temp file if that's what was given) and confirms
+        ssh.exe can actually parse it, before any VM work starts.
+
+    .DESCRIPTION
+        A malformed or truncated key (e.g. a mangled NODE_SSH_PRIVATE_KEY
+        secret) otherwise surfaces only after a full golden-image build and
+        VM boot, as a generic "Permission denied" from Wait-AerieNodeReady -
+        which that function then attributes to a stale authorized_keys on a
+        resumed VM, since that's the far more common cause of that message.
+        Validating the key's format up front, before it's ever used, means a
+        bad key fails in seconds with a message that actually points at the
+        key instead of at the wrong theory.
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$SshPrivateKey,
+        [string]$SshPrivateKeyPath,
+        [Parameter(Mandatory)][string]$VMName
+    )
+
+    if ($SshPrivateKey) {
+        $tempKeyFile = Join-Path $env:TEMP "aerie-$VMName-$([Guid]::NewGuid().ToString('N')).key"
+        # WriteAllText rather than Set-Content, and LF rather than CRLF:
+        # OpenSSH rejects a key file with CRLF line endings, and equally
+        # rejects one whose PEM footer has no trailing newline at all.
+        # Set-Content would get both wrong. GitHub also strips the trailing
+        # newline from multi-line secrets, hence re-adding it.
+        [IO.File]::WriteAllText($tempKeyFile, ($SshPrivateKey.Replace("`r`n", "`n").TrimEnd() + "`n"))
+        Protect-PrivateKeyFile -Path $tempKeyFile
+        $path = $tempKeyFile
+    }
+    else {
+        $path = $SshPrivateKeyPath
+        $tempKeyFile = $null
+    }
+
+    # Stdin is fed an empty line rather than left attached to the console: an
+    # encrypted key would otherwise make ssh-keygen block on a passphrase
+    # prompt that nothing here will ever answer.
+    $keygenOutput = '' | & ssh-keygen.exe -y -f $path 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        if ($tempKeyFile) { Remove-Item $tempKeyFile -Force -ErrorAction SilentlyContinue }
+        throw "The SSH private key at '$path' doesn't parse (ssh-keygen: $keygenOutput). Check -SshPrivateKey / -SshPrivateKeyPath (or the NODE_SSH_PRIVATE_KEY secret) holds a complete, unencrypted OpenSSH private key with its BEGIN/END markers intact - not truncated, not the public key, not passphrase-protected."
+    }
+
+    [pscustomobject]@{ Path = $path; TempFile = $tempKeyFile }
 }
 
 function Protect-PrivateKeyFile {
