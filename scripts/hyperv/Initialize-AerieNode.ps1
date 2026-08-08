@@ -113,7 +113,8 @@ param(
     # Forwarded to Get-GoldenImage.ps1, and only used when the template has
     # to be built on this host.
     [string]$QemuImgZipPath,
-    [string]$QemuImgSha256
+    [string]$QemuImgSha256,
+    [switch]$SkipChecksumVerification
 )
 
 $ErrorActionPreference = 'Stop'
@@ -304,6 +305,7 @@ try {
             }
             if ($QemuImgZipPath) { $goldenArgs.QemuImgZipPath = $QemuImgZipPath }
             if ($QemuImgSha256) { $goldenArgs.QemuImgSha256 = $QemuImgSha256 }
+            if ($SkipChecksumVerification) { $goldenArgs.SkipChecksumVerification = $true }
             & (Join-Path $PSScriptRoot 'Get-GoldenImage.ps1') @goldenArgs
         }
 

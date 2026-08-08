@@ -94,6 +94,11 @@ on:
         required: false
         default: false
         type: boolean
+      skip_checksum_verification:
+        description: 'Skip verifying the downloaded golden image against the vendor checksum (temporary unblock only - re-disable once the vendor issue clears)'
+        required: false
+        default: false
+        type: boolean
 
 # Two builds at once on one host would race for the same golden image file and
 # the same storage volume. Queue instead of cancelling: a cancelled run leaves
@@ -143,6 +148,7 @@ jobs:
           EXTRA_PACKAGES: ${{ inputs.extra_packages }}
           PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
           SKIP_WAIT: ${{ inputs.skip_wait }}
+          SKIP_CHECKSUM_VERIFICATION: ${{ inputs.skip_checksum_verification }}
           # The private half is used only from the host, to verify the node
           # over SSH. It is never written into the VM.
           NODE_SSH_PRIVATE_KEY: ${{ secrets.NODE_SSH_PRIVATE_KEY }}
@@ -188,6 +194,8 @@ jobs:
           }
 
           if ([bool]::Parse($env:PREFLIGHT_ONLY)) { $params.PreflightOnly = $true }
+
+          if ([bool]::Parse($env:SKIP_CHECKSUM_VERIFICATION)) { $params.SkipChecksumVerification = $true }
 
           if ([bool]::Parse($env:SKIP_WAIT)) {
             $params.SkipWaitForReady = $true

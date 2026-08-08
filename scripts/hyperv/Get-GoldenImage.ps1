@@ -70,6 +70,12 @@ param(
     # See .NOTES — trust-on-first-use pin for the qemu-img zip.
     [string]$QemuImgSha256,
 
+    # Skips verifying the downloaded distro image against the vendor's
+    # SHA512SUMS/SHA256SUMS. Off by default - only meant as a short-term
+    # unblock (e.g. while cloud.debian.org's "latest" listing is flaky);
+    # re-enable once that's sorted rather than leaving this on.
+    [switch]$SkipChecksumVerification,
+
     [int]$SizeGB = 32
 )
 
@@ -105,42 +111,48 @@ try {
     Write-Host "Downloading $ImageUrl ..."
     Invoke-WebRequest -Uri $ImageUrl -OutFile $sourceImage -UseBasicParsing
 
-    # The vendor regenerates the image files and the sums file for "latest"
-    # as a batch, then syncs them out; that sync isn't atomic from a reader's
-    # perspective, so a request can land mid-rebuild and see a sums file
-    # that's momentarily empty/partial and missing our entry. Retry a few
-    # times before concluding the image was actually renamed.
-    $maxAttempts = 5
-    $expected = $null
-    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-        Write-Host "Verifying against $checksumUrl ... (attempt $attempt/$maxAttempts)"
-        $sums = (Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing).Content
+    if ($SkipChecksumVerification) {
+        Write-Warning "Skipping $checksumAlgo verification (-SkipChecksumVerification). The downloaded image is UNVERIFIED against the vendor's published hash."
+        $expected = (Get-FileHash -Path $sourceImage -Algorithm $checksumAlgo).Hash.ToLowerInvariant()
+    }
+    else {
+        # The vendor regenerates the image files and the sums file for "latest"
+        # as a batch, then syncs them out; that sync isn't atomic from a reader's
+        # perspective, so a request can land mid-rebuild and see a sums file
+        # that's momentarily empty/partial and missing our entry. Retry a few
+        # times before concluding the image was actually renamed.
+        $maxAttempts = 5
+        $expected = $null
+        for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            Write-Host "Verifying against $checksumUrl ... (attempt $attempt/$maxAttempts)"
+            $sums = (Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing).Content
 
-        # Both formats are "<hash><whitespace>[*]<filename>"; the leading '*'
-        # is coreutils' binary-mode marker, which Ubuntu emits and Debian
-        # doesn't.
-        foreach ($line in ($sums -split "`r?`n")) {
-            if ($line -match '^([0-9a-fA-F]+)\s+\*?(.+)$' -and $Matches[2].Trim() -eq $imageName) {
-                $expected = $Matches[1].ToLowerInvariant()
-                break
+            # Both formats are "<hash><whitespace>[*]<filename>"; the leading '*'
+            # is coreutils' binary-mode marker, which Ubuntu emits and Debian
+            # doesn't.
+            foreach ($line in ($sums -split "`r?`n")) {
+                if ($line -match '^([0-9a-fA-F]+)\s+\*?(.+)$' -and $Matches[2].Trim() -eq $imageName) {
+                    $expected = $Matches[1].ToLowerInvariant()
+                    break
+                }
+            }
+
+            if ($expected) { break }
+            if ($attempt -lt $maxAttempts) {
+                Write-Warning "No $checksumAlgo entry for '$imageName' yet - the vendor's 'latest' listing may be mid-rebuild. Retrying in 15s..."
+                Start-Sleep -Seconds 15
             }
         }
-
-        if ($expected) { break }
-        if ($attempt -lt $maxAttempts) {
-            Write-Warning "No $checksumAlgo entry for '$imageName' yet - the vendor's 'latest' listing may be mid-rebuild. Retrying in 15s..."
-            Start-Sleep -Seconds 15
+        if (-not $expected) {
+            throw "No $checksumAlgo entry for '$imageName' in $checksumUrl after $maxAttempts attempts. The vendor may have renamed the image - check the cloud-image page and pass -ImageUrl explicitly."
         }
-    }
-    if (-not $expected) {
-        throw "No $checksumAlgo entry for '$imageName' in $checksumUrl after $maxAttempts attempts. The vendor may have renamed the image - check the cloud-image page and pass -ImageUrl explicitly."
-    }
 
-    $actual = (Get-FileHash -Path $sourceImage -Algorithm $checksumAlgo).Hash.ToLowerInvariant()
-    if ($actual -ne $expected) {
-        throw "$checksumAlgo mismatch for $imageName.`n  expected: $expected`n  actual:   $actual`nRefusing to build a template from an image that doesn't match the vendor's published hash."
+        $actual = (Get-FileHash -Path $sourceImage -Algorithm $checksumAlgo).Hash.ToLowerInvariant()
+        if ($actual -ne $expected) {
+            throw "$checksumAlgo mismatch for $imageName.`n  expected: $expected`n  actual:   $actual`nRefusing to build a template from an image that doesn't match the vendor's published hash."
+        }
+        Write-Host "  OK - $checksumAlgo matches the vendor's published hash."
     }
-    Write-Host "  OK - $checksumAlgo matches the vendor's published hash."
 
     # --- qemu-img ---
 
@@ -193,7 +205,7 @@ try {
         distro        = $Distro
         imageUrl      = $ImageUrl
         imageName     = $imageName
-        imageChecksum = "${checksumAlgo}:$expected"
+        imageChecksum = if ($SkipChecksumVerification) { "${checksumAlgo}:$expected (UNVERIFIED - built with -SkipChecksumVerification)" } else { "${checksumAlgo}:$expected" }
         qemuImgSource = if ($QemuImgZipPath) { $QemuImgZipPath } else { $QemuImgUrl }
         qemuImgSha256 = $zipHash
         sizeGB        = $SizeGB
