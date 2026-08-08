@@ -19,14 +19,20 @@
                       before the expensive ones.
       2. Template   - builds the golden VHDX via Get-GoldenImage.ps1 if it
                       isn't already on this host. Skipped when present.
-      3. VM         - delegates to New-AerieVM.ps1.
+      3. VM         - delegates to New-AerieVM.ps1. Stages 2-3 are replaced by
+                      a single Resume stage when a VM from a prior run of
+                      this one is found in Preflight (see Idempotency below).
       4. Verify     - waits out cloud-init and its self-reboot over SSH, then
                       prints what actually came up. Skippable.
 
-    Idempotency is deliberately shallow: an existing VM of the same name is a
-    hard error rather than something to reconcile. These are cattle, but they
-    are cattle with DHCP reservations and Longhorn disks - silently adopting
-    or recreating one is worse than making you say `Remove-VM` out loud.
+    Idempotency: an existing VM of the same name is never silently adopted or
+    recreated, but it is resumed if its MAC matches -MacAddress - that's this
+    same run's own VM continuing after an earlier failure (e.g. a cloud-init
+    verify timeout), so the Template and Create stages are skipped, the VM is
+    (re)started if it isn't running, and the run picks up at Verify. If the
+    MAC doesn't match, it's an unrelated VM that happens to share the name,
+    and that stays a hard error: `Remove-VM` it yourself or pick another
+    name.
 
 .PARAMETER ExpectedIPAddress
     The address the pfSense reservation maps -MacAddress to. Required unless
@@ -177,15 +183,30 @@ try {
         $failures.Add("Switch '$SwitchName' is $($vmSwitch.SwitchType), not External. Phase 1 needs each VM on the LAN with its own DHCP-reserved address; an $($vmSwitch.SwitchType) switch can't get one.")
     }
 
-    if (Get-VM -Name $VMName -ErrorAction SilentlyContinue) {
-        $failures.Add("A VM named '$VMName' already exists on this host. Stop and remove it first (Stop-VM -Name $VMName -TurnOff; Remove-VM -Name $VMName) or pick another name.")
-    }
-
     $macNormalized = ($MacAddress -replace '[:-]', '').ToUpperInvariant()
     if (-not $macNormalized.StartsWith('00155D')) {
         Write-Warning "MAC $MacAddress isn't in Hyper-V's 00-15-5D OUI. That's legal, but the convention keeps these distinguishable from physical NICs on the LAN."
     }
-    $existingMacs = @(Get-VM | Get-VMNetworkAdapter | Select-Object -ExpandProperty MacAddress)
+
+    # A VM of this name is only ever resumed, never silently adopted or
+    # recreated: if its MAC matches, it's this same run's own VM continuing
+    # after an earlier failure (Template/Create already happened), so the
+    # rest of preflight and the stages below treat it as a resume rather than
+    # a conflict. If the MAC doesn't match, it's an unrelated VM that happens
+    # to share the name, and that's still a hard error.
+    $existingVM = Get-VM -Name $VMName -ErrorAction SilentlyContinue
+    $resuming = $false
+    if ($existingVM) {
+        $existingVmMacs = @($existingVM | Get-VMNetworkAdapter | Select-Object -ExpandProperty MacAddress)
+        if ($existingVmMacs -notcontains $macNormalized) {
+            $failures.Add("A VM named '$VMName' already exists on this host, but its MAC ($($existingVmMacs -join ', ')) doesn't match the requested $MacAddress - this looks like an unrelated VM, not a resumable run of this one. Stop and remove it first (Stop-VM -Name $VMName -TurnOff; Remove-VM -Name $VMName) or pick another name.")
+        }
+        else {
+            $resuming = $true
+        }
+    }
+
+    $existingMacs = @(Get-VM | Where-Object { $_.Name -ne $VMName } | Get-VMNetworkAdapter | Select-Object -ExpandProperty MacAddress)
     if ($existingMacs -contains $macNormalized) {
         $failures.Add("MAC $MacAddress is already assigned to another VM on this host. DHCP reservations depend on MACs being unique.")
     }
@@ -193,8 +214,9 @@ try {
     # An answer here means something already holds the address the reservation
     # points at, so the VM would either not get it or collide with a live
     # host. Silence proves nothing (ICMP may be filtered), so this only ever
-    # fails on a positive response.
-    if ($ExpectedIPAddress -and (Test-Connection $ExpectedIPAddress -Count 2 -Quiet -ErrorAction SilentlyContinue)) {
+    # fails on a positive response - except when resuming, where our own VM
+    # answering is exactly what should happen.
+    if (-not $resuming -and $ExpectedIPAddress -and (Test-Connection $ExpectedIPAddress -Count 2 -Quiet -ErrorAction SilentlyContinue)) {
         $failures.Add("$ExpectedIPAddress already answers ping, so it isn't free. Either the reservation points at an in-use address, or a previous attempt at this VM is still running somewhere. (New-AerieVM.ps1 can be run directly to bypass this check if you know better.)")
     }
 
@@ -203,24 +225,30 @@ try {
         $GoldenImagePath = Join-Path $TemplatePath $imageFile
     }
 
-    # Free space: the OS disk is a full copy of the template (not a
-    # differencing disk), and the data disk is fixed, so both consume their
-    # full size immediately. Running out mid-copy leaves a half-built VM.
-    $templateSizeBytes = if (Test-Path $GoldenImagePath) { (Get-Item $GoldenImagePath).Length } else { 32GB }
-    $neededBytes = $templateSizeBytes + ([int64]$DataDiskSizeGB * 1GB) + 2GB
+    # Free space is only needed for a fresh OS disk copy + data disk; a
+    # resumed VM already has both, and by now may well have consumed the
+    # margin this check would otherwise demand again.
+    if (-not $resuming) {
+        # Free space: the OS disk is a full copy of the template (not a
+        # differencing disk), and the data disk is fixed, so both consume
+        # their full size immediately. Running out mid-copy leaves a
+        # half-built VM.
+        $templateSizeBytes = if (Test-Path $GoldenImagePath) { (Get-Item $GoldenImagePath).Length } else { 32GB }
+        $neededBytes = $templateSizeBytes + ([int64]$DataDiskSizeGB * 1GB) + 2GB
 
-    # -FilePath needs the path to exist, which it won't on a first run, so
-    # fall back to the drive letter the path is rooted at.
-    $volume = Get-Volume -FilePath $VMStoragePath -ErrorAction SilentlyContinue
-    if (-not $volume) {
-        $driveLetter = [IO.Path]::GetPathRoot($VMStoragePath).TrimEnd('\', ':')
-        if ($driveLetter) { $volume = Get-Volume -DriveLetter $driveLetter -ErrorAction SilentlyContinue }
-    }
-    if (-not $volume) {
-        $failures.Add("Can't inspect the volume for -VMStoragePath '$VMStoragePath'. Does that drive exist on $env:COMPUTERNAME?")
-    }
-    elseif ($volume.SizeRemaining -lt $neededBytes) {
-        $failures.Add("Not enough free space on $($volume.DriveLetter): - need ~$([math]::Round($neededBytes/1GB,1))GB (OS disk copy + ${DataDiskSizeGB}GB fixed data disk), have $([math]::Round($volume.SizeRemaining/1GB,1))GB.")
+        # -FilePath needs the path to exist, which it won't on a first run,
+        # so fall back to the drive letter the path is rooted at.
+        $volume = Get-Volume -FilePath $VMStoragePath -ErrorAction SilentlyContinue
+        if (-not $volume) {
+            $driveLetter = [IO.Path]::GetPathRoot($VMStoragePath).TrimEnd('\', ':')
+            if ($driveLetter) { $volume = Get-Volume -DriveLetter $driveLetter -ErrorAction SilentlyContinue }
+        }
+        if (-not $volume) {
+            $failures.Add("Can't inspect the volume for -VMStoragePath '$VMStoragePath'. Does that drive exist on $env:COMPUTERNAME?")
+        }
+        elseif ($volume.SizeRemaining -lt $neededBytes) {
+            $failures.Add("Not enough free space on $($volume.DriveLetter): - need ~$([math]::Round($neededBytes/1GB,1))GB (OS disk copy + ${DataDiskSizeGB}GB fixed data disk), have $([math]::Round($volume.SizeRemaining/1GB,1))GB.")
+        }
     }
 
     if ($failures.Count -gt 0) {
@@ -233,6 +261,9 @@ try {
     Write-Host "MAC:       $MacAddress  ->  switch '$SwitchName' (External)"
     Write-Host "Expecting: $(if ($ExpectedIPAddress) { $ExpectedIPAddress } else { '(not verifying - -SkipWaitForReady)' })"
     Write-Host "Template:  $GoldenImagePath"
+    if ($resuming) {
+        Write-Host "Mode:      RESUMING - VM '$VMName' already exists with matching MAC $MacAddress; Template/Create will be skipped."
+    }
     Write-Host 'Preflight OK.'
 
     if ($PreflightOnly) {
@@ -241,50 +272,67 @@ try {
         return
     }
 
-    # ---------------------------------------------------------------- #
-    Write-Stage 'Golden image'
-    # ---------------------------------------------------------------- #
+    if ($resuming) {
+        # ---------------------------------------------------------------- #
+        Write-Stage 'Resuming existing VM'
+        # ---------------------------------------------------------------- #
 
-    if (Test-Path $GoldenImagePath) {
-        Write-Host "Already present, reusing: $GoldenImagePath"
+        Write-Host "Found VM '$VMName' with matching MAC from a previous run of this script - skipping Golden image and Create, picking up at Verify."
+        $currentState = (Get-VM -Name $VMName).State
+        if ($currentState -eq 'Running') {
+            Write-Host "VM is already running."
+        }
+        else {
+            Write-Host "VM is $currentState - starting it."
+            Start-VM -Name $VMName
+        }
     }
     else {
-        Write-Host "Not on this host - building it (one-time, ~10-20 min depending on link speed)."
-        $goldenArgs = @{
-            Distro     = $Distro
-            OutputPath = $GoldenImagePath
+        # ---------------------------------------------------------------- #
+        Write-Stage 'Golden image'
+        # ---------------------------------------------------------------- #
+
+        if (Test-Path $GoldenImagePath) {
+            Write-Host "Already present, reusing: $GoldenImagePath"
         }
-        if ($QemuImgZipPath) { $goldenArgs.QemuImgZipPath = $QemuImgZipPath }
-        if ($QemuImgSha256) { $goldenArgs.QemuImgSha256 = $QemuImgSha256 }
-        & (Join-Path $PSScriptRoot 'Get-GoldenImage.ps1') @goldenArgs
-    }
+        else {
+            Write-Host "Not on this host - building it (one-time, ~10-20 min depending on link speed)."
+            $goldenArgs = @{
+                Distro     = $Distro
+                OutputPath = $GoldenImagePath
+            }
+            if ($QemuImgZipPath) { $goldenArgs.QemuImgZipPath = $QemuImgZipPath }
+            if ($QemuImgSha256) { $goldenArgs.QemuImgSha256 = $QemuImgSha256 }
+            & (Join-Path $PSScriptRoot 'Get-GoldenImage.ps1') @goldenArgs
+        }
 
-    # ---------------------------------------------------------------- #
-    Write-Stage 'Create and start the VM'
-    # ---------------------------------------------------------------- #
+        # ---------------------------------------------------------------- #
+        Write-Stage 'Create and start the VM'
+        # ---------------------------------------------------------------- #
 
-    $vmArgs = @{
-        VMName          = $VMName
-        GoldenImagePath = $GoldenImagePath
-        SwitchName      = $SwitchName
-        MacAddress      = $MacAddress
-        SshPublicKey    = $SshPublicKey
-        NtpServer       = $NtpServer
-        Distro          = $Distro
-        Username        = $Username
-        VMStoragePath   = $VMStoragePath
-        MemoryGB        = $MemoryGB
-        CPUCount        = $CPUCount
-        DataDiskSizeGB  = $DataDiskSizeGB
-    }
-    if ($Domain) { $vmArgs.Domain = $Domain }
-    if ($ExtraPackages) { $vmArgs.ExtraPackages = $ExtraPackages }
-    if ($RunCmd) { $vmArgs.RunCmd = $RunCmd }
+        $vmArgs = @{
+            VMName          = $VMName
+            GoldenImagePath = $GoldenImagePath
+            SwitchName      = $SwitchName
+            MacAddress      = $MacAddress
+            SshPublicKey    = $SshPublicKey
+            NtpServer       = $NtpServer
+            Distro          = $Distro
+            Username        = $Username
+            VMStoragePath   = $VMStoragePath
+            MemoryGB        = $MemoryGB
+            CPUCount        = $CPUCount
+            DataDiskSizeGB  = $DataDiskSizeGB
+        }
+        if ($Domain) { $vmArgs.Domain = $Domain }
+        if ($ExtraPackages) { $vmArgs.ExtraPackages = $ExtraPackages }
+        if ($RunCmd) { $vmArgs.RunCmd = $RunCmd }
 
-    if ($DataDiskSizeGB -gt 0) {
-        Write-Host "Note: the ${DataDiskSizeGB}GB data disk is fixed-size, so Hyper-V zeroes it up front. Expect this to take a while on spinning storage."
+        if ($DataDiskSizeGB -gt 0) {
+            Write-Host "Note: the ${DataDiskSizeGB}GB data disk is fixed-size, so Hyper-V zeroes it up front. Expect this to take a while on spinning storage."
+        }
+        & (Join-Path $PSScriptRoot 'New-AerieVM.ps1') @vmArgs
     }
-    & (Join-Path $PSScriptRoot 'New-AerieVM.ps1') @vmArgs
 
     # ---------------------------------------------------------------- #
     Write-Stage 'Verify'
