@@ -13,10 +13,14 @@ concurrency:
 jobs:
   deploy:
     if: github.event.workflow_run.conclusion == 'success'
-    # Runs on a self-hosted runner registered on the home server that hosts
-    # the stack. Replace `self-hosted` with a more specific label (e.g.
-    # [self-hosted, home-server]) if the runner has one configured.
-    runs-on: self-hosted
+    # Runs on the self-hosted runner registered on the home server that hosts
+    # the stack. `legacy-deployer` pins this to that one box for as long as the
+    # stack lives there: bare `self-hosted` would match any runner in the repo,
+    # so registering the first hyperv-host-* runner (see provision-node.yml)
+    # would make production deploys start landing on a fresh, empty node with
+    # no compose state and no Docker daemon on tcp://localhost:2375. Retarget
+    # this when the stack itself moves off the old host, not before.
+    runs-on: [self-hosted, legacy-deployer]
 
     # Job-level, not step-level: every `docker compose` invocation here
     # interpolates these into the compose files, and a step that omits them
