@@ -72,12 +72,12 @@ on:
       vm_storage_path:
         description: 'Where the VM and its disks live'
         required: true
-        default: 'D:\VMs'
+        default: 'D:\aerie\VMs'
         type: string
       template_path:
         description: 'Where the golden VHDX lives (built here if absent)'
         required: true
-        default: 'D:\vm-templates'
+        default: 'D:\aerie\vm-templates'
         type: string
       extra_packages:
         description: 'Extra apt packages, comma-separated (optional)'

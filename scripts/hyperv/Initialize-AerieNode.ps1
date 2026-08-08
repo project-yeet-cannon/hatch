@@ -76,8 +76,10 @@ param(
     [string]$Username = 'aerie',
 
     [string]$SwitchName = 'ExternalSwitch',
-    [string]$VMStoragePath = 'D:\VMs',
-    [string]$TemplatePath = 'D:\vm-templates',
+    # Everything Aerie puts on a host's data volume lives under D:\aerie, so
+    # the whole footprint is one directory to find, back up, or delete.
+    [string]$VMStoragePath = 'D:\aerie\VMs',
+    [string]$TemplatePath = 'D:\aerie\vm-templates',
 
     # Defaults to <TemplatePath>\<distro>.vhdx; override to share a template
     # from another volume or a UNC path.

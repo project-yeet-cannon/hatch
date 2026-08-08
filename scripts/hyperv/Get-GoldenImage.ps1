@@ -8,7 +8,7 @@
 .DESCRIPTION
     Run this ONCE (per distro), not once per host — the output VHDX has no
     per-host state baked in. Copy the resulting file to every Hyper-V host
-    that needs it (e.g. robocopy to each host's D:\vm-templates\), or run
+    that needs it (e.g. robocopy to each host's D:\aerie\vm-templates\), or run
     this script directly on each host if that's easier than moving a large
     file around. Initialize-AerieNode.ps1 calls this automatically when the
     template is missing.
@@ -33,12 +33,12 @@
 
 .EXAMPLE
     # Fully automatic — downloads a pinned qemu-img build
-    .\Get-GoldenImage.ps1 -Distro Debian -OutputPath D:\vm-templates\debian-13-genericcloud.vhdx
+    .\Get-GoldenImage.ps1 -Distro Debian -OutputPath D:\aerie\vm-templates\debian-13-genericcloud.vhdx
 
 .EXAMPLE
     # Using a qemu-img zip downloaded by hand, with the image hash pinned
     .\Get-GoldenImage.ps1 -Distro Debian -QemuImgZipPath C:\Downloads\qemu-img-win-x64-2_3_0.zip `
-        -QemuImgSha256 A1B2... -OutputPath D:\vm-templates\debian-13-genericcloud.vhdx
+        -QemuImgSha256 A1B2... -OutputPath D:\aerie\vm-templates\debian-13-genericcloud.vhdx
 #>
 #Requires -Modules Hyper-V
 [CmdletBinding()]

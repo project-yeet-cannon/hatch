@@ -30,14 +30,14 @@
 
 .EXAMPLE
     # Phase 0 scratch VM for the DR-restore gate
-    .\New-AerieVM.ps1 -VMName aerie-dr-scratch -GoldenImagePath D:\vm-templates\debian-13-genericcloud.vhdx `
+    .\New-AerieVM.ps1 -VMName aerie-dr-scratch -GoldenImagePath D:\aerie\vm-templates\debian-13-genericcloud.vhdx `
         -SwitchName ExternalSwitch -MacAddress 00-15-5D-01-02-03 `
         -SshPublicKeyPath ~\.ssh\id_ed25519.pub -NtpServer 10.0.0.1 `
         -ExtraPackages docker.io -DataDiskSizeGB 0
 
 .EXAMPLE
     # Phase 1 node VM
-    .\New-AerieVM.ps1 -VMName aerie-node-a -GoldenImagePath D:\vm-templates\debian-13-genericcloud.vhdx `
+    .\New-AerieVM.ps1 -VMName aerie-node-a -GoldenImagePath D:\aerie\vm-templates\debian-13-genericcloud.vhdx `
         -SwitchName ExternalSwitch -MacAddress 00-15-5D-01-02-04 `
         -SshPublicKeyPath ~\.ssh\id_ed25519.pub -NtpServer 10.0.0.1 `
         -MemoryGB 16 -DataDiskSizeGB 200
@@ -85,7 +85,7 @@ param(
     [string]$Domain,
     [string]$Username = 'aerie',
 
-    [string]$VMStoragePath = 'D:\VMs',
+    [string]$VMStoragePath = 'D:\aerie\VMs',
     [int]$MemoryGB = 16,
     [int]$CPUCount = 4,
 

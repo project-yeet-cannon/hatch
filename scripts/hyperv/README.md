@@ -93,6 +93,28 @@ Made up, unique on the network, prefixed `00-15-5D` (Hyper-V's OUI). The last
 three octets are used hierarchically: `[host]-[vm]-[nic]`. So host B's first
 VM's first NIC is `00-15-5D-02-01-01`.
 
+## On-disk layout
+
+Everything Aerie puts on a host lives under one root on the data volume, so the
+whole footprint is a single directory to find, back up, or delete:
+
+```text
+D:\aerie\
+  vm-templates\                        -TemplatePath — golden VHDX, shared by every VM on the host
+    debian-13-genericcloud.vhdx
+    debian-13-genericcloud.vhdx.provenance.json
+  VMs\                                 -VMStoragePath — Hyper-V config plus one directory per VM
+    aerie-node-a\
+      os-disk.vhdx                     full copy of the template, not a differencing disk
+      data-disk.vhdx                   fixed-size, unformatted; Longhorn claims it in Phase 3
+      seed.iso                         NoCloud cloud-init seed for this VM
+```
+
+Both roots are defaults, not assumptions — pass `-VMStoragePath` /
+`-TemplatePath` (or the workflow's `vm_storage_path` / `template_path`) to put
+either somewhere else, including on different volumes. Missing directories are
+created on first run.
+
 ## Flow A — on the host
 
 Elevated PowerShell, in `scripts\hyperv\`:
@@ -177,11 +199,11 @@ module has room to expand into on first boot. It runs automatically when the
 template is missing, or on its own:
 
 ```powershell
-.\Get-GoldenImage.ps1 -Distro Debian -OutputPath D:\vm-templates\debian-13-genericcloud.vhdx
+.\Get-GoldenImage.ps1 -Distro Debian -OutputPath D:\aerie\vm-templates\debian-13-genericcloud.vhdx
 ```
 
 The output has no per-host state baked in, so building it once and
-`robocopy`-ing it to the other hosts' `D:\vm-templates\` is faster than
+`robocopy`-ing it to the other hosts' `D:\aerie\vm-templates\` is faster than
 rebuilding per host. A `.provenance.json` is written alongside it recording
 which image, which hash, and which converter produced it.
 
