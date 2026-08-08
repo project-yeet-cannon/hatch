@@ -1,0 +1,202 @@
+# Provision a Hyper-V node VM (TODO_SWARM.md Phase 1)
+#
+# Manual-only, one host per run. This workflow is deliberately thin: it checks
+# out the repo on the target Hyper-V host and hands every decision to
+# scripts/hyperv/Initialize-AerieNode.ps1, which is also the supported way to
+# do this by hand in an elevated PowerShell session on the host. Neither path
+# is a fallback for the other - they are the same code, and any logic added
+# here instead of in the script would exist on only one of them.
+#
+# Billing: `runs-on` pins `self-hosted`, so runs never land on a GitHub-hosted
+# runner and never consume Actions minutes, however long the 200GB fixed-disk
+# zeroing takes.
+#
+# Runner requirements on each Hyper-V host:
+#   - Windows runner service running as a local Administrator (the Hyper-V
+#     cmdlets and `#Requires -RunAsAdministrator` both demand it; membership
+#     in Hyper-V Administrators alone is not enough)
+#   - labelled to match the `host` choice below, plus `self-hosted`
+#   - OpenSSH client present:
+#       Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
+name: Provision node VM
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: 'Hyper-V host to build on (must match a runner label)'
+        required: true
+        type: choice
+        options:
+          - hyperv-host-a
+          - hyperv-host-b
+          - hyperv-host-c
+      vm_name:
+        description: 'VM name, also the guest hostname (e.g. aerie-node-a)'
+        required: true
+        type: string
+      mac_address:
+        description: 'MAC for the DHCP reservation, 00-15-5D-<host>-<vm>-<nic>'
+        required: true
+        type: string
+      expected_ip:
+        description: 'The LAN address pfSense reserves for that MAC. Register the reservation BEFORE running.'
+        required: true
+        type: string
+      memory_gb:
+        description: 'RAM in GB (TODO_SWARM.md: 16 / 24 / 24 across the three hosts)'
+        required: true
+        default: '16'
+        type: string
+      data_disk_gb:
+        description: 'Fixed Longhorn data disk in GB. 0 skips it.'
+        required: true
+        default: '200'
+        type: string
+      cpu_count:
+        description: 'vCPU count'
+        required: true
+        default: '4'
+        type: string
+      distro:
+        description: 'Guest distro'
+        required: true
+        default: Debian
+        type: choice
+        options: [Debian, Ubuntu]
+      switch_name:
+        description: 'Existing external virtual switch on the host'
+        required: true
+        default: ExternalSwitch
+        type: string
+      vm_storage_path:
+        description: 'Where the VM and its disks live'
+        required: true
+        default: 'D:\VMs'
+        type: string
+      template_path:
+        description: 'Where the golden VHDX lives (built here if absent)'
+        required: true
+        default: 'D:\vm-templates'
+        type: string
+      extra_packages:
+        description: 'Extra apt packages, comma-separated (optional)'
+        required: false
+        default: ''
+        type: string
+      preflight_only:
+        description: 'Check the host is ready and stop without building anything'
+        required: false
+        default: false
+        type: boolean
+      skip_wait:
+        description: 'Skip post-boot verification (does NOT prove the DHCP reservation works)'
+        required: false
+        default: false
+        type: boolean
+
+# Two builds at once on one host would race for the same golden image file and
+# the same storage volume. Queue instead of cancelling: a cancelled run leaves
+# a half-created VM behind that the next run then refuses to overwrite.
+concurrency:
+  group: provision-node-${{ inputs.host }}
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    name: ${{ inputs.vm_name }} on ${{ inputs.host }}
+    runs-on: [self-hosted, '${{ inputs.host }}']
+
+    # Generous on purpose. A fixed 200GB VHDX is zeroed up front, the golden
+    # image may need building on a first run, and cloud-init does a full
+    # package upgrade plus a reboot. Failing at 6h means something hung.
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out provisioning scripts
+        uses: actions/checkout@v4
+        with:
+          # Nothing here talks to git afterwards, and this is a long-lived
+          # self-hosted workspace - don't leave a credential in it.
+          persist-credentials: false
+
+      - name: Provision node
+        shell: powershell
+        env:
+          # Every input arrives as an environment variable rather than being
+          # interpolated into the script body below. `${{ }}` substitution
+          # happens before PowerShell parses anything, so an input containing
+          # a quote would otherwise break out of its string literal and run as
+          # code - on an Administrator shell, on a hypervisor. Dispatch inputs
+          # only come from users with write access, but the whole point of
+          # this file is that it stays safe to hand to someone else.
+          VM_NAME: ${{ inputs.vm_name }}
+          MAC_ADDRESS: ${{ inputs.mac_address }}
+          EXPECTED_IP: ${{ inputs.expected_ip }}
+          DISTRO: ${{ inputs.distro }}
+          SWITCH_NAME: ${{ inputs.switch_name }}
+          VM_STORAGE_PATH: ${{ inputs.vm_storage_path }}
+          TEMPLATE_PATH: ${{ inputs.template_path }}
+          MEMORY_GB: ${{ inputs.memory_gb }}
+          CPU_COUNT: ${{ inputs.cpu_count }}
+          DATA_DISK_GB: ${{ inputs.data_disk_gb }}
+          EXTRA_PACKAGES: ${{ inputs.extra_packages }}
+          PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
+          SKIP_WAIT: ${{ inputs.skip_wait }}
+          # The private half is used only from the host, to verify the node
+          # over SSH. It is never written into the VM.
+          NODE_SSH_PRIVATE_KEY: ${{ secrets.NODE_SSH_PRIVATE_KEY }}
+          # Public key, NTP source and domain aren't secret; they're variables
+          # so they stay identical across all three hosts without being
+          # retyped per run.
+          NODE_SSH_PUBLIC_KEY: ${{ vars.NODE_SSH_PUBLIC_KEY }}
+          NTP_SERVER: ${{ vars.NTP_SERVER }}
+          DOMAIN: ${{ vars.DOMAIN }}
+          # Optional: pins the qemu-img download when the golden image has to
+          # be built. See Get-GoldenImage.ps1's .NOTES.
+          QEMU_IMG_SHA256: ${{ vars.QEMU_IMG_SHA256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+
+          foreach ($required in 'NODE_SSH_PUBLIC_KEY', 'NTP_SERVER') {
+            if (-not (Get-Item "env:$required" -ErrorAction SilentlyContinue).Value) {
+              throw "Repository variable $required is not set. Add it under Settings > Secrets and variables > Actions > Variables."
+            }
+          }
+
+          $params = @{
+            VMName            = $env:VM_NAME
+            MacAddress        = $env:MAC_ADDRESS
+            ExpectedIPAddress = $env:EXPECTED_IP
+            NtpServer         = $env:NTP_SERVER
+            Distro            = $env:DISTRO
+            SwitchName        = $env:SWITCH_NAME
+            VMStoragePath     = $env:VM_STORAGE_PATH
+            TemplatePath      = $env:TEMPLATE_PATH
+            MemoryGB          = [int]$env:MEMORY_GB
+            CPUCount          = [int]$env:CPU_COUNT
+            DataDiskSizeGB    = [int]$env:DATA_DISK_GB
+            SshPublicKey      = $env:NODE_SSH_PUBLIC_KEY
+          }
+
+          if ($env:DOMAIN) { $params.Domain = $env:DOMAIN }
+          if ($env:QEMU_IMG_SHA256) { $params.QemuImgSha256 = $env:QEMU_IMG_SHA256 }
+
+          if ($env:EXTRA_PACKAGES -and $env:EXTRA_PACKAGES.Trim()) {
+            $params.ExtraPackages = @($env:EXTRA_PACKAGES -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+          }
+
+          if ([bool]::Parse($env:PREFLIGHT_ONLY)) { $params.PreflightOnly = $true }
+
+          if ([bool]::Parse($env:SKIP_WAIT)) {
+            $params.SkipWaitForReady = $true
+          }
+          elseif (-not (Get-Item 'env:NODE_SSH_PRIVATE_KEY' -ErrorAction SilentlyContinue).Value) {
+            throw "Secret NODE_SSH_PRIVATE_KEY is not set, so the node can't be verified after boot. Add the secret, or re-run with skip_wait."
+          }
+          else {
+            $params.SshPrivateKey = $env:NODE_SSH_PRIVATE_KEY
+          }
+
+          & .\scripts\hyperv\Initialize-AerieNode.ps1 @params

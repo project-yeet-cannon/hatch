@@ -6,6 +6,11 @@
     -RunCmd / -ExtraPackages payloads. See TODO_SWARM.md.
 
 .DESCRIPTION
+    Initialize-AerieNode.ps1 is the usual entry point - it preflights the
+    host, builds the golden image if needed, calls this, and then verifies the
+    result over SSH. Call this directly when you deliberately want to skip
+    those checks.
+
     Per run, this:
       - copies the golden VHDX into a fresh per-VM OS disk (a full copy, not
         a differencing disk — so the golden template can be moved or deleted
@@ -39,7 +44,7 @@
 #>
 #Requires -Modules Hyper-V
 #Requires -RunAsAdministrator
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'KeyPath')]
 param(
     [Parameter(Mandatory)]
     [string]$VMName,
@@ -59,9 +64,16 @@ param(
     [ValidatePattern('^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$')]
     [string]$MacAddress,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = 'KeyPath')]
     [ValidateScript({ Test-Path $_ -PathType Leaf })]
     [string]$SshPublicKeyPath,
+
+    # The key material itself, for callers that hold it in a variable rather
+    # than a file — GitHub Actions passes vars.NODE_SSH_PUBLIC_KEY straight
+    # through instead of staging a temp file on the runner.
+    [Parameter(Mandatory, ParameterSetName = 'KeyLiteral')]
+    [ValidatePattern('^(ssh-(rsa|ed25519)|ecdsa-sha2-\S+)\s+\S+')]
+    [string]$SshPublicKey,
 
     [Parameter(Mandatory)]
     [string]$NtpServer,
@@ -116,7 +128,7 @@ if ($DataDiskSizeGB -gt 0) {
 $seedSrc = Join-Path $vmDir 'seed-src'
 New-Item -ItemType Directory -Path $seedSrc -Force | Out-Null
 
-$sshKey = (Get-Content -Path $SshPublicKeyPath -Raw).Trim()
+$sshKey = if ($SshPublicKey) { $SshPublicKey.Trim() } else { (Get-Content -Path $SshPublicKeyPath -Raw).Trim() }
 $fqdn = if ($Domain) { "$Hostname.$Domain" } else { $Hostname }
 $instanceId = [Guid]::NewGuid().ToString()
 
@@ -126,13 +138,13 @@ $packagesBlock = ($packages | ForEach-Object { "  - $_" }) -join "`n"
 $runcmdBlock = if ($RunCmd.Count -gt 0) { ($RunCmd | ForEach-Object { "  - $_" }) -join "`n" } else { "  - 'true'" }
 
 $userData = Get-Content -Path (Join-Path $PSScriptRoot 'cloud-init\user-data.tmpl.yaml') -Raw
-$userData = $userData.Replace('__HOSTNAME__', $Hostname) `
-    .Replace('__FQDN__', $fqdn) `
-    .Replace('__USERNAME__', $Username) `
-    .Replace('__SSH_KEY__', $sshKey) `
-    .Replace('__PACKAGES__', $packagesBlock) `
-    .Replace('__NTP_SERVER__', $NtpServer) `
-    .Replace('__RUNCMD__', $runcmdBlock)
+$userData = $userData.Replace('__HOSTNAME__', $Hostname)
+$userData = $userData.Replace('__FQDN__', $fqdn)
+$userData = $userData.Replace('__USERNAME__', $Username)
+$userData = $userData.Replace('__SSH_KEY__', $sshKey)
+$userData = $userData.Replace('__PACKAGES__', $packagesBlock)
+$userData = $userData.Replace('__NTP_SERVER__', $NtpServer)
+$userData = $userData.Replace('__RUNCMD__', $runcmdBlock)
 Set-Content -Path (Join-Path $seedSrc 'user-data') -Value $userData -NoNewline
 
 $metaData = Get-Content -Path (Join-Path $PSScriptRoot 'cloud-init\meta-data.tmpl.yaml') -Raw
@@ -146,8 +158,7 @@ Remove-Item -Path $seedSrc -Recurse -Force
 # --- Create the VM ---
 
 Write-Host "Creating VM '$VMName' ..."
-New-VM -Name $VMName -Generation 2 -MemoryStartupBytes ([int64]$MemoryGB * 1GB) `
-    -VHDPath $osDiskPath -SwitchName $SwitchName -Path $VMStoragePath | Out-Null
+New-VM -Name $VMName -Generation 2 -MemoryStartupBytes ([int64]$MemoryGB * 1GB) -VHDPath $osDiskPath -SwitchName $SwitchName -Path $VMStoragePath | Out-Null
 
 Set-VMProcessor -VMName $VMName -Count $CPUCount
 Set-VMMemory -VMName $VMName -DynamicMemoryEnabled $false

@@ -1,0 +1,399 @@
+<#
+.SYNOPSIS
+    End-to-end provisioning of one Aerie node VM on the Hyper-V host it's run
+    from: preflight -> golden image -> VM -> wait for cloud-init -> report.
+
+.DESCRIPTION
+    This is the single entry point for TODO_SWARM.md Phase 1, and it is the
+    same code path whether you run it by hand in an elevated session on the
+    host or trigger .github/workflows/provision-node.yml. The workflow is a
+    thin wrapper that checks out the repo and invokes this script - it holds
+    no provisioning logic of its own, so the two paths can't drift.
+
+    Everything needed lives under scripts\hyperv\, with no references outside
+    it. Copying just that directory to a host is a supported way to run this.
+
+    Stages:
+      1. Preflight  - refuses to start unless the host, switch, MAC, name,
+                      free space and target IP all check out. Cheap failures
+                      before the expensive ones.
+      2. Template   - builds the golden VHDX via Get-GoldenImage.ps1 if it
+                      isn't already on this host. Skipped when present.
+      3. VM         - delegates to New-AerieVM.ps1.
+      4. Verify     - waits out cloud-init and its self-reboot over SSH, then
+                      prints what actually came up. Skippable.
+
+    Idempotency is deliberately shallow: an existing VM of the same name is a
+    hard error rather than something to reconcile. These are cattle, but they
+    are cattle with DHCP reservations and Longhorn disks - silently adopting
+    or recreating one is worse than making you say `Remove-VM` out loud.
+
+.PARAMETER ExpectedIPAddress
+    The address the pfSense reservation maps -MacAddress to. Required unless
+    -SkipWaitForReady, because verification is what proves the reservation
+    was actually configured correctly - the single most common Phase 1
+    failure, and invisible if you only check that the VM booted.
+
+.EXAMPLE
+    # Manual, on the host, in an elevated session
+    .\Initialize-AerieNode.ps1 -VMName aerie-node-a -MacAddress 00-15-5D-01-02-04 `
+        -ExpectedIPAddress 10.0.0.21 -NtpServer 10.0.0.1 -Domain landis.family `
+        -MemoryGB 16 -DataDiskSizeGB 200 `
+        -SshPublicKeyPath ~\.ssh\id_ed25519.pub -SshPrivateKeyPath ~\.ssh\id_ed25519
+
+.EXAMPLE
+    # Check the host is ready without building anything
+    .\Initialize-AerieNode.ps1 -VMName aerie-node-a -MacAddress 00-15-5D-01-02-04 `
+        -ExpectedIPAddress 10.0.0.21 -NtpServer 10.0.0.1 `
+        -SshPublicKeyPath ~\.ssh\id_ed25519.pub -PreflightOnly
+#>
+#Requires -Modules Hyper-V
+#Requires -RunAsAdministrator
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)]
+    [ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$')]
+    [string]$VMName,
+
+    # Locally administered, Hyper-V's assigned OUI. TODO_SWARM.md Phase 1
+    # wants DHCP reservations keyed to these, so they're chosen up front
+    # rather than drawn from Hyper-V's dynamic pool. Convention is
+    # 00-15-5D-<host>-<vm>-<nic>.
+    [Parameter(Mandatory)]
+    [ValidatePattern('^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$')]
+    [string]$MacAddress,
+
+    [ValidatePattern('^(\d{1,3}\.){3}\d{1,3}$')]
+    [string]$ExpectedIPAddress,
+
+    [Parameter(Mandatory)]
+    [string]$NtpServer,
+
+    [ValidateSet('Debian', 'Ubuntu')]
+    [string]$Distro = 'Debian',
+
+    [string]$Domain,
+    [string]$Username = 'aerie',
+
+    [string]$SwitchName = 'ExternalSwitch',
+    [string]$VMStoragePath = 'D:\VMs',
+    [string]$TemplatePath = 'D:\vm-templates',
+
+    # Defaults to <TemplatePath>\<distro>.vhdx; override to share a template
+    # from another volume or a UNC path.
+    [string]$GoldenImagePath,
+
+    [int]$MemoryGB = 16,
+    [int]$CPUCount = 4,
+    [int]$DataDiskSizeGB = 200,
+
+    [string[]]$ExtraPackages = @(),
+    [string[]]$RunCmd = @(),
+
+    # Public half is injected by cloud-init; private half is used only to
+    # verify the result and is never written to the VM.
+    [string]$SshPublicKeyPath,
+    [string]$SshPublicKey,
+    [string]$SshPrivateKeyPath,
+    [string]$SshPrivateKey,
+
+    [switch]$SkipWaitForReady,
+    [int]$ReadyTimeoutMinutes = 45,
+
+    [switch]$PreflightOnly,
+
+    # Forwarded to Get-GoldenImage.ps1, and only used when the template has
+    # to be built on this host.
+    [string]$QemuImgZipPath,
+    [string]$QemuImgSha256
+)
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+. (Join-Path $PSScriptRoot 'lib\AerieSsh.ps1')
+
+$script:StageNumber = 0
+function Write-Stage {
+    param([string]$Message)
+    $script:StageNumber++
+    Write-Host ''
+    Write-Host "=== [$script:StageNumber] $Message ===" -ForegroundColor Cyan
+}
+
+$tempKeyFile = $null
+$knownHostsFile = $null
+$startedUtc = (Get-Date).ToUniversalTime()
+
+try {
+    # ---------------------------------------------------------------- #
+    Write-Stage 'Preflight'
+    # ---------------------------------------------------------------- #
+
+    $hostname = $VMName.ToLowerInvariant()
+    $failures = New-Object Collections.Generic.List[string]
+
+    # Resolve the key material first: everything else is cheap to check, but
+    # a missing key only surfaces after the template build without this.
+    if (-not $SshPublicKey -and -not $SshPublicKeyPath) {
+        $failures.Add('No SSH public key: pass -SshPublicKeyPath or -SshPublicKey. Without it the VM boots with no way in.')
+    }
+    elseif (-not $SshPublicKey) {
+        if (-not (Test-Path $SshPublicKeyPath -PathType Leaf)) {
+            $failures.Add("SSH public key not found at '$SshPublicKeyPath'.")
+        }
+        else {
+            $SshPublicKey = (Get-Content -Path $SshPublicKeyPath -Raw).Trim()
+        }
+    }
+    if ($SshPublicKey -and $SshPublicKey -notmatch '^(ssh-(rsa|ed25519)|ecdsa-sha2-\S+)\s+\S+') {
+        $failures.Add("The SSH public key doesn't look like an OpenSSH public key. Did a private key get passed by mistake?")
+    }
+
+    $waiting = -not $SkipWaitForReady
+    if ($waiting) {
+        if (-not $ExpectedIPAddress) {
+            $failures.Add('-ExpectedIPAddress is required unless -SkipWaitForReady. It is the address the pfSense reservation maps -MacAddress to, and checking it is how this run proves the reservation works.')
+        }
+        if (-not $SshPrivateKey -and -not $SshPrivateKeyPath) {
+            $failures.Add('Verification needs the private key: pass -SshPrivateKeyPath or -SshPrivateKey, or run with -SkipWaitForReady.')
+        }
+        if ($SshPrivateKeyPath -and -not $SshPrivateKey -and -not (Test-Path $SshPrivateKeyPath -PathType Leaf)) {
+            $failures.Add("SSH private key not found at '$SshPrivateKeyPath'.")
+        }
+        try { Assert-OpenSshClient } catch { $failures.Add($_.Exception.Message) }
+    }
+
+    # Switch: existence alone isn't enough. An Internal or Private switch
+    # would let the VM build and boot, then leave it unreachable from the LAN
+    # with no DHCP - a failure that looks like a DHCP problem for an hour.
+    $vmSwitch = Get-VMSwitch -Name $SwitchName -ErrorAction SilentlyContinue
+    if (-not $vmSwitch) {
+        $failures.Add("No virtual switch named '$SwitchName' on $env:COMPUTERNAME. Create one bound to a physical NIC:`n      Get-NetAdapter -Physical | Where-Object Status -eq 'Up'`n      New-VMSwitch -Name $SwitchName -NetAdapterName '<adapter>' -AllowManagementOS `$true")
+    }
+    elseif ($vmSwitch.SwitchType -ne 'External') {
+        $failures.Add("Switch '$SwitchName' is $($vmSwitch.SwitchType), not External. Phase 1 needs each VM on the LAN with its own DHCP-reserved address; an $($vmSwitch.SwitchType) switch can't get one.")
+    }
+
+    if (Get-VM -Name $VMName -ErrorAction SilentlyContinue) {
+        $failures.Add("A VM named '$VMName' already exists on this host. Stop and remove it first (Stop-VM -Name $VMName -TurnOff; Remove-VM -Name $VMName) or pick another name.")
+    }
+
+    $macNormalized = ($MacAddress -replace '[:-]', '').ToUpperInvariant()
+    if (-not $macNormalized.StartsWith('00155D')) {
+        Write-Warning "MAC $MacAddress isn't in Hyper-V's 00-15-5D OUI. That's legal, but the convention keeps these distinguishable from physical NICs on the LAN."
+    }
+    $existingMacs = @(Get-VM | Get-VMNetworkAdapter | Select-Object -ExpandProperty MacAddress)
+    if ($existingMacs -contains $macNormalized) {
+        $failures.Add("MAC $MacAddress is already assigned to another VM on this host. DHCP reservations depend on MACs being unique.")
+    }
+
+    # An answer here means something already holds the address the reservation
+    # points at, so the VM would either not get it or collide with a live
+    # host. Silence proves nothing (ICMP may be filtered), so this only ever
+    # fails on a positive response.
+    if ($ExpectedIPAddress -and (Test-Connection $ExpectedIPAddress -Count 2 -Quiet -ErrorAction SilentlyContinue)) {
+        $failures.Add("$ExpectedIPAddress already answers ping, so it isn't free. Either the reservation points at an in-use address, or a previous attempt at this VM is still running somewhere. (New-AerieVM.ps1 can be run directly to bypass this check if you know better.)")
+    }
+
+    if (-not $GoldenImagePath) {
+        $imageFile = if ($Distro -eq 'Debian') { 'debian-13-genericcloud.vhdx' } else { 'ubuntu-24.04-server-cloudimg.vhdx' }
+        $GoldenImagePath = Join-Path $TemplatePath $imageFile
+    }
+
+    # Free space: the OS disk is a full copy of the template (not a
+    # differencing disk), and the data disk is fixed, so both consume their
+    # full size immediately. Running out mid-copy leaves a half-built VM.
+    $templateSizeBytes = if (Test-Path $GoldenImagePath) { (Get-Item $GoldenImagePath).Length } else { 32GB }
+    $neededBytes = $templateSizeBytes + ([int64]$DataDiskSizeGB * 1GB) + 2GB
+
+    # -FilePath needs the path to exist, which it won't on a first run, so
+    # fall back to the drive letter the path is rooted at.
+    $volume = Get-Volume -FilePath $VMStoragePath -ErrorAction SilentlyContinue
+    if (-not $volume) {
+        $driveLetter = [IO.Path]::GetPathRoot($VMStoragePath).TrimEnd('\', ':')
+        if ($driveLetter) { $volume = Get-Volume -DriveLetter $driveLetter -ErrorAction SilentlyContinue }
+    }
+    if (-not $volume) {
+        $failures.Add("Can't inspect the volume for -VMStoragePath '$VMStoragePath'. Does that drive exist on $env:COMPUTERNAME?")
+    }
+    elseif ($volume.SizeRemaining -lt $neededBytes) {
+        $failures.Add("Not enough free space on $($volume.DriveLetter): - need ~$([math]::Round($neededBytes/1GB,1))GB (OS disk copy + ${DataDiskSizeGB}GB fixed data disk), have $([math]::Round($volume.SizeRemaining/1GB,1))GB.")
+    }
+
+    if ($failures.Count -gt 0) {
+        $detail = ($failures | ForEach-Object { "  - $_" }) -join "`n"
+        throw "Preflight failed on $env:COMPUTERNAME with $($failures.Count) problem(s):`n$detail"
+    }
+
+    Write-Host "Host:      $env:COMPUTERNAME"
+    Write-Host "VM:        $VMName ($MemoryGB GB RAM, $CPUCount vCPU, ${DataDiskSizeGB}GB data disk)"
+    Write-Host "MAC:       $MacAddress  ->  switch '$SwitchName' (External)"
+    Write-Host "Expecting: $(if ($ExpectedIPAddress) { $ExpectedIPAddress } else { '(not verifying - -SkipWaitForReady)' })"
+    Write-Host "Template:  $GoldenImagePath"
+    Write-Host 'Preflight OK.'
+
+    if ($PreflightOnly) {
+        Write-Host ''
+        Write-Host '-PreflightOnly: stopping here without creating anything.' -ForegroundColor Yellow
+        return
+    }
+
+    # ---------------------------------------------------------------- #
+    Write-Stage 'Golden image'
+    # ---------------------------------------------------------------- #
+
+    if (Test-Path $GoldenImagePath) {
+        Write-Host "Already present, reusing: $GoldenImagePath"
+    }
+    else {
+        Write-Host "Not on this host - building it (one-time, ~10-20 min depending on link speed)."
+        $goldenArgs = @{
+            Distro     = $Distro
+            OutputPath = $GoldenImagePath
+        }
+        if ($QemuImgZipPath) { $goldenArgs.QemuImgZipPath = $QemuImgZipPath }
+        if ($QemuImgSha256) { $goldenArgs.QemuImgSha256 = $QemuImgSha256 }
+        & (Join-Path $PSScriptRoot 'Get-GoldenImage.ps1') @goldenArgs
+    }
+
+    # ---------------------------------------------------------------- #
+    Write-Stage 'Create and start the VM'
+    # ---------------------------------------------------------------- #
+
+    $vmArgs = @{
+        VMName          = $VMName
+        GoldenImagePath = $GoldenImagePath
+        SwitchName      = $SwitchName
+        MacAddress      = $MacAddress
+        SshPublicKey    = $SshPublicKey
+        NtpServer       = $NtpServer
+        Distro          = $Distro
+        Username        = $Username
+        VMStoragePath   = $VMStoragePath
+        MemoryGB        = $MemoryGB
+        CPUCount        = $CPUCount
+        DataDiskSizeGB  = $DataDiskSizeGB
+    }
+    if ($Domain) { $vmArgs.Domain = $Domain }
+    if ($ExtraPackages) { $vmArgs.ExtraPackages = $ExtraPackages }
+    if ($RunCmd) { $vmArgs.RunCmd = $RunCmd }
+
+    if ($DataDiskSizeGB -gt 0) {
+        Write-Host "Note: the ${DataDiskSizeGB}GB data disk is fixed-size, so Hyper-V zeroes it up front. Expect this to take a while on spinning storage."
+    }
+    & (Join-Path $PSScriptRoot 'New-AerieVM.ps1') @vmArgs
+
+    # ---------------------------------------------------------------- #
+    Write-Stage 'Verify'
+    # ---------------------------------------------------------------- #
+
+    if ($SkipWaitForReady) {
+        Write-Host '-SkipWaitForReady: not waiting for cloud-init.'
+        Write-Host "Watch it yourself with:  vmconnect localhost $VMName"
+        $nodeReport = $null
+    }
+    else {
+        if ($SshPrivateKey) {
+            $tempKeyFile = Join-Path $env:TEMP "aerie-$VMName-$([Guid]::NewGuid().ToString('N')).key"
+            # WriteAllText rather than Set-Content, and LF rather than CRLF:
+            # OpenSSH rejects a key file with CRLF line endings, and equally
+            # rejects one whose PEM footer has no trailing newline at all.
+            # Set-Content would get both wrong. GitHub also strips the
+            # trailing newline from multi-line secrets, hence re-adding it.
+            [IO.File]::WriteAllText($tempKeyFile, ($SshPrivateKey.Replace("`r`n", "`n").TrimEnd() + "`n"))
+            Protect-PrivateKeyFile -Path $tempKeyFile
+            $privateKeyPath = $tempKeyFile
+        }
+        else {
+            $privateKeyPath = $SshPrivateKeyPath
+        }
+
+        # A throwaway known_hosts: this VM is brand new, so any key already
+        # recorded for that IP belongs to something else and would only
+        # produce a spurious host-key-changed failure.
+        $knownHostsFile = Join-Path $env:TEMP "aerie-$VMName-$([Guid]::NewGuid().ToString('N')).known_hosts"
+
+        $nodeReport = Wait-AerieNodeReady `
+            -IPAddress $ExpectedIPAddress `
+            -User $Username `
+            -KeyPath $privateKeyPath `
+            -KnownHostsFile $knownHostsFile `
+            -ExpectedHostname $VMName `
+            -TimeoutMinutes $ReadyTimeoutMinutes
+
+        Write-Host ''
+        Write-Host $nodeReport.Report
+
+        # The reservation is the thing most likely to be wrong, so confirm the
+        # machine answering at that address is actually the one just built
+        # rather than assuming a reachable host is the right host.
+        if ($nodeReport.Report -notmatch [regex]::Escape($hostname)) {
+            throw "Something answered at $ExpectedIPAddress but didn't identify as '$hostname'. That usually means the DHCP reservation for $MacAddress points somewhere else, or another host holds this address."
+        }
+    }
+
+    # ---------------------------------------------------------------- #
+    Write-Stage 'Done'
+    # ---------------------------------------------------------------- #
+
+    $elapsed = [math]::Round(((Get-Date).ToUniversalTime() - $startedUtc).TotalMinutes, 1)
+    Write-Host "Node '$VMName' provisioned on $env:COMPUTERNAME in ${elapsed} min." -ForegroundColor Green
+    if (-not $SkipWaitForReady) {
+        Write-Host "  ssh $Username@$ExpectedIPAddress"
+    }
+    Write-Host ''
+    Write-Host 'Phase 1 checklist for this node - confirm and tick off in TODO_SWARM.md:'
+    Write-Host '  - external switch, DHCP-reserved LAN address    (verified above)'
+    Write-Host '  - MAC spoofing on the vNIC                      (set by New-AerieVM.ps1)'
+    Write-Host '  - second fixed VHDX for Longhorn                ' -NoNewline
+    Write-Host $(if ($DataDiskSizeGB -gt 0) { "(${DataDiskSizeGB}GB, unformatted - Longhorn claims it in Phase 3)" } else { '(SKIPPED - -DataDiskSizeGB 0)' })
+    Write-Host '  - autostart + Shut Down stop action             (set by New-AerieVM.ps1)'
+    Write-Host '  - NTP from pfSense                              ' -NoNewline
+    Write-Host "($NtpServer - see chrony output above)"
+    Write-Host '  - stagger Windows Update reboots across hosts   (host policy, still manual)'
+
+    # A no-op outside Actions, which is the point: the manual and CI paths run
+    # the same script and only differ in whether this variable is set.
+    if ($env:GITHUB_STEP_SUMMARY) {
+        # Backticks are PowerShell's escape character, so markdown's code
+        # fences and inline code spans are far easier to read as variables
+        # than as doubled-up escapes inside the here-string.
+        $tick = [char]0x60
+        $fence = "$tick$tick$tick"
+        $address = if ($ExpectedIPAddress) { "$tick$ExpectedIPAddress$tick" } else { '_not verified_' }
+
+        $lines = @(
+            "## Node $tick$VMName$tick provisioned"
+            ''
+            '| | |'
+            '|---|---|'
+            "| Hyper-V host | $tick$env:COMPUTERNAME$tick |"
+            "| MAC | $tick$MacAddress$tick |"
+            "| Address | $address |"
+            "| Distro | $Distro |"
+            "| Resources | ${MemoryGB}GB RAM, $CPUCount vCPU, ${DataDiskSizeGB}GB data disk |"
+            "| Elapsed | ${elapsed} min |"
+            ''
+        )
+        if ($nodeReport) {
+            $lines += @(
+                '<details><summary>Node report</summary>'
+                ''
+                $fence
+                $nodeReport.Report.TrimEnd()
+                $fence
+                ''
+                '</details>'
+            )
+        }
+        else {
+            $lines += "Provisioned with $tick-SkipWaitForReady$tick; cloud-init was not verified."
+        }
+        Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ($lines -join "`n")
+    }
+}
+finally {
+    if ($tempKeyFile) { Remove-Item $tempKeyFile -Force -ErrorAction SilentlyContinue }
+    if ($knownHostsFile) { Remove-Item $knownHostsFile -Force -ErrorAction SilentlyContinue }
+}

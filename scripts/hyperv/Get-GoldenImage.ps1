@@ -10,27 +10,41 @@
     per-host state baked in. Copy the resulting file to every Hyper-V host
     that needs it (e.g. robocopy to each host's D:\vm-templates\), or run
     this script directly on each host if that's easier than moving a large
-    file around.
+    file around. Initialize-AerieNode.ps1 calls this automatically when the
+    template is missing.
 
     Requires qemu-img.exe to convert qcow2 -> vhdx; Hyper-V's own Convert-VHD
-    only converts between VHD/VHDX, it doesn't read qcow2. Grab a Windows
-    build from Cloudbase's qemu-img-windows page
-    (https://cloudbase.it/qemu-img-windows/) and pass the downloaded zip's
-    path via -QemuImgZipPath — deliberately not auto-downloaded here since
-    release asset URLs are versioned and change.
+    only converts between VHD/VHDX, it doesn't read qcow2. With no qemu-img
+    arguments this downloads the pinned Cloudbase build (-QemuImgUrl); pass
+    -QemuImgZipPath to use a zip you downloaded yourself instead.
+
+.NOTES
+    Integrity checking is deliberately asymmetric, because the two upstreams
+    differ in what they publish:
+
+    - The distro image is verified against the vendor's own SHA512SUMS /
+      SHA256SUMS file, fetched from the same directory. Fully automatic, and
+      it fails the run on mismatch.
+    - Cloudbase publishes no checksum file, so qemu-img gets trust-on-first-
+      use pinning instead: the first run prints the hash, and passing it back
+      as -QemuImgSha256 (the workflow reads vars.QEMU_IMG_SHA256) verifies it
+      from then on. Without that variable the download is unverified — which
+      is why the script says so loudly rather than quietly proceeding.
 
 .EXAMPLE
-    .\Get-GoldenImage.ps1 -Distro Debian -QemuImgZipPath C:\Downloads\qemu-img-win-x64-2_3_0.zip -OutputPath D:\vm-templates\debian-13-genericcloud.vhdx
+    # Fully automatic — downloads a pinned qemu-img build
+    .\Get-GoldenImage.ps1 -Distro Debian -OutputPath D:\vm-templates\debian-13-genericcloud.vhdx
+
+.EXAMPLE
+    # Using a qemu-img zip downloaded by hand, with the image hash pinned
+    .\Get-GoldenImage.ps1 -Distro Debian -QemuImgZipPath C:\Downloads\qemu-img-win-x64-2_3_0.zip `
+        -QemuImgSha256 A1B2... -OutputPath D:\vm-templates\debian-13-genericcloud.vhdx
 #>
 #Requires -Modules Hyper-V
 [CmdletBinding()]
 param(
     [ValidateSet('Debian', 'Ubuntu')]
     [string]$Distro = 'Debian',
-
-    [Parameter(Mandatory)]
-    [ValidateScript({ Test-Path $_ -PathType Leaf })]
-    [string]$QemuImgZipPath,
 
     [Parameter(Mandatory)]
     [string]$OutputPath,
@@ -41,10 +55,32 @@ param(
     # current path.
     [string]$ImageUrl,
 
+    # A qemu-img-windows zip already on disk. Takes precedence over
+    # -QemuImgUrl; supply it when the host has no internet path to
+    # cloudbase.it, or when you want a specific build.
+    [ValidateScript({ Test-Path $_ -PathType Leaf })]
+    [string]$QemuImgZipPath,
+
+    # Cloudbase's release assets are versioned, so this is pinned rather than
+    # resolved to "latest" — a silently-newer converter is exactly the kind
+    # of thing that turns a reproducible template into an irreproducible one.
+    # If it 404s, check https://cloudbase.it/qemu-img-windows/ and bump it.
+    [string]$QemuImgUrl = 'https://cloudbase.it/downloads/qemu-img-win-x64-2_3_0.zip',
+
+    # See .NOTES — trust-on-first-use pin for the qemu-img zip.
+    [string]$QemuImgSha256,
+
     [int]$SizeGB = 32
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Windows PowerShell 5.1 renders a progress bar for every chunk Invoke-WebRequest
+# receives, which costs far more than the download itself on a ~400MB image
+# (minutes vs. seconds). Also pin TLS 1.2 — 5.1 still negotiates SSL3/TLS1.0
+# by default on some Server SKUs, which these hosts reject outright.
+$ProgressPreference = 'SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 if (-not $ImageUrl) {
     $ImageUrl = switch ($Distro) {
@@ -53,25 +89,76 @@ if (-not $ImageUrl) {
     }
 }
 
+# Both vendors publish a sums file next to the images; only the algorithm and
+# filename differ.
+$checksumFile = if ($Distro -eq 'Debian') { 'SHA512SUMS' } else { 'SHA256SUMS' }
+$checksumAlgo = if ($Distro -eq 'Debian') { 'SHA512' } else { 'SHA256' }
+$checksumUrl = ($ImageUrl -replace '/[^/]+$', "/$checksumFile")
+
 $work = Join-Path $env:TEMP "aerie-golden-image-$(Get-Date -Format yyyyMMddHHmmss)"
 New-Item -ItemType Directory -Path $work | Out-Null
 
 try {
-    $sourceImage = Join-Path $work ([IO.Path]::GetFileName($ImageUrl))
-    Write-Host "Downloading $ImageUrl ..."
-    Invoke-WebRequest -Uri $ImageUrl -OutFile $sourceImage
+    $imageName = [IO.Path]::GetFileName($ImageUrl)
+    $sourceImage = Join-Path $work $imageName
 
-    Write-Host "SHA256 of downloaded image (record this alongside the template for provenance):"
-    Get-FileHash -Path $sourceImage -Algorithm SHA256 | Format-List
+    Write-Host "Downloading $ImageUrl ..."
+    Invoke-WebRequest -Uri $ImageUrl -OutFile $sourceImage -UseBasicParsing
+
+    Write-Host "Verifying against $checksumUrl ..."
+    $sums = (Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing).Content
+
+    # Both formats are "<hash><whitespace>[*]<filename>"; the leading '*' is
+    # coreutils' binary-mode marker, which Ubuntu emits and Debian doesn't.
+    $expected = $null
+    foreach ($line in ($sums -split "`r?`n")) {
+        if ($line -match '^([0-9a-fA-F]+)\s+\*?(.+)$' -and $Matches[2].Trim() -eq $imageName) {
+            $expected = $Matches[1].ToLowerInvariant()
+            break
+        }
+    }
+    if (-not $expected) {
+        throw "No $checksumAlgo entry for '$imageName' in $checksumUrl. The vendor may have renamed the image - check the cloud-image page and pass -ImageUrl explicitly."
+    }
+
+    $actual = (Get-FileHash -Path $sourceImage -Algorithm $checksumAlgo).Hash.ToLowerInvariant()
+    if ($actual -ne $expected) {
+        throw "$checksumAlgo mismatch for $imageName.`n  expected: $expected`n  actual:   $actual`nRefusing to build a template from an image that doesn't match the vendor's published hash."
+    }
+    Write-Host "  OK - $checksumAlgo matches the vendor's published hash."
+
+    # --- qemu-img ---
+
+    if ($QemuImgZipPath) {
+        $zip = $QemuImgZipPath
+        Write-Host "Using qemu-img zip: $zip"
+    }
+    else {
+        $zip = Join-Path $work 'qemu-img.zip'
+        Write-Host "Downloading qemu-img from $QemuImgUrl ..."
+        Invoke-WebRequest -Uri $QemuImgUrl -OutFile $zip -UseBasicParsing
+    }
+
+    $zipHash = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($QemuImgSha256) {
+        if ($zipHash -ne $QemuImgSha256.ToLowerInvariant()) {
+            throw "qemu-img zip SHA256 mismatch.`n  expected: $($QemuImgSha256.ToLowerInvariant())`n  actual:   $zipHash"
+        }
+        Write-Host "  OK - qemu-img zip matches the pinned SHA256."
+    }
+    else {
+        Write-Warning "qemu-img zip is UNVERIFIED (no -QemuImgSha256 given). Its SHA256 is:`n  $zipHash`nPin it - set repository variable QEMU_IMG_SHA256 to that value - so later runs are verified."
+    }
 
     $qemuImgDir = Join-Path $work 'qemu-img'
-    Write-Host "Extracting qemu-img from $QemuImgZipPath ..."
-    Expand-Archive -Path $QemuImgZipPath -DestinationPath $qemuImgDir
+    Expand-Archive -Path $zip -DestinationPath $qemuImgDir
 
     $qemuImg = Get-ChildItem -Path $qemuImgDir -Filter 'qemu-img.exe' -Recurse | Select-Object -First 1
     if (-not $qemuImg) {
-        throw "qemu-img.exe not found inside $QemuImgZipPath - check it's the qemu-img-windows release zip, not source."
+        throw "qemu-img.exe not found inside $zip - check it's the qemu-img-windows release zip, not source."
     }
+
+    # --- convert and grow ---
 
     $rawVhdx = Join-Path $work 'image-raw.vhdx'
     Write-Host "Converting qcow2 -> vhdx ..."
@@ -85,7 +172,23 @@ try {
     if ($outDir -and -not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
     Move-Item -Path $rawVhdx -Destination $OutputPath -Force
 
+    # Recorded next to the template so a host can later be asked "which image
+    # is this VM's lineage?" without re-downloading anything.
+    $provenance = [ordered]@{
+        distro        = $Distro
+        imageUrl      = $ImageUrl
+        imageName     = $imageName
+        imageChecksum = "${checksumAlgo}:$expected"
+        qemuImgSource = if ($QemuImgZipPath) { $QemuImgZipPath } else { $QemuImgUrl }
+        qemuImgSha256 = $zipHash
+        sizeGB        = $SizeGB
+        builtUtc      = (Get-Date).ToUniversalTime().ToString('o')
+        builtOn       = $env:COMPUTERNAME
+    }
+    $provenance | ConvertTo-Json | Set-Content -Path "$OutputPath.provenance.json"
+
     Write-Host "Golden image ready: $OutputPath"
+    Write-Host "Provenance:         $OutputPath.provenance.json"
 }
 finally {
     Remove-Item -Path $work -Recurse -Force -ErrorAction SilentlyContinue
