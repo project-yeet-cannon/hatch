@@ -105,20 +105,35 @@ try {
     Write-Host "Downloading $ImageUrl ..."
     Invoke-WebRequest -Uri $ImageUrl -OutFile $sourceImage -UseBasicParsing
 
-    Write-Host "Verifying against $checksumUrl ..."
-    $sums = (Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing).Content
-
-    # Both formats are "<hash><whitespace>[*]<filename>"; the leading '*' is
-    # coreutils' binary-mode marker, which Ubuntu emits and Debian doesn't.
+    # The vendor regenerates the image files and the sums file for "latest"
+    # as a batch, then syncs them out; that sync isn't atomic from a reader's
+    # perspective, so a request can land mid-rebuild and see a sums file
+    # that's momentarily empty/partial and missing our entry. Retry a few
+    # times before concluding the image was actually renamed.
+    $maxAttempts = 5
     $expected = $null
-    foreach ($line in ($sums -split "`r?`n")) {
-        if ($line -match '^([0-9a-fA-F]+)\s+\*?(.+)$' -and $Matches[2].Trim() -eq $imageName) {
-            $expected = $Matches[1].ToLowerInvariant()
-            break
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        Write-Host "Verifying against $checksumUrl ... (attempt $attempt/$maxAttempts)"
+        $sums = (Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing).Content
+
+        # Both formats are "<hash><whitespace>[*]<filename>"; the leading '*'
+        # is coreutils' binary-mode marker, which Ubuntu emits and Debian
+        # doesn't.
+        foreach ($line in ($sums -split "`r?`n")) {
+            if ($line -match '^([0-9a-fA-F]+)\s+\*?(.+)$' -and $Matches[2].Trim() -eq $imageName) {
+                $expected = $Matches[1].ToLowerInvariant()
+                break
+            }
+        }
+
+        if ($expected) { break }
+        if ($attempt -lt $maxAttempts) {
+            Write-Warning "No $checksumAlgo entry for '$imageName' yet - the vendor's 'latest' listing may be mid-rebuild. Retrying in 15s..."
+            Start-Sleep -Seconds 15
         }
     }
     if (-not $expected) {
-        throw "No $checksumAlgo entry for '$imageName' in $checksumUrl. The vendor may have renamed the image - check the cloud-image page and pass -ImageUrl explicitly."
+        throw "No $checksumAlgo entry for '$imageName' in $checksumUrl after $maxAttempts attempts. The vendor may have renamed the image - check the cloud-image page and pass -ImageUrl explicitly."
     }
 
     $actual = (Get-FileHash -Path $sourceImage -Algorithm $checksumAlgo).Hash.ToLowerInvariant()
