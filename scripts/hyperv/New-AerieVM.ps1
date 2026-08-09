@@ -18,7 +18,8 @@
       - creates a second, fixed-size VHDX for Longhorn (Phase 1) / left
         unused (Phase 0 scratch VM)
       - renders a NoCloud cloud-init seed ISO with this VM's hostname/SSH
-        key/NTP server/packages baked in
+        key/NTP server/packages baked in, plus a break-glass console password
+        for -Username (see -ConsolePassword)
       - creates a Generation 2 VM wired to an external switch with a fixed
         MAC address (so a DHCP reservation can be made ahead of first boot),
         MAC spoofing on (required for the CNI in Phase 2+), Secure Boot on
@@ -100,6 +101,16 @@ param(
     [string[]]$ExtraPackages = @(),
     [string[]]$RunCmd = @(),
 
+    # Break-glass console login. Without it a VM that never reaches the
+    # network can't be logged into at all - cloud-init locks every account's
+    # password, so `vmconnect` gives you a login prompt with no credentials
+    # that work, and screenshots of console scrollback are the only
+    # diagnostic left. ssh_pwauth stays false, so this password is rejected
+    # over SSH and is only usable at the Hyper-V console, which already
+    # requires Administrator on the host. Pass '' to leave the account
+    # password-locked and give up console access.
+    [string]$ConsolePassword = 'password',
+
     # Both required together to ship this VM's serial console to OpenSearch
     # (see the Set-VMComPort block below) - omit either to skip it, e.g. for
     # the Phase 0 scratch VM.
@@ -152,6 +163,25 @@ $packages = @('curl') + $hypervPackages + $ExtraPackages
 $packagesBlock = ($packages | ForEach-Object { "  - $_" }) -join "`n"
 $runcmdBlock = if ($RunCmd.Count -gt 0) { ($RunCmd | ForEach-Object { "  - $_" }) -join "`n" } else { "  - 'true'" }
 
+# 'type: text' hands cloud-init the plaintext and lets it hash - without it
+# cloud-init expects an already-hashed value and would set an unusable
+# password. 'expire: false' keeps the account from demanding a password
+# change at the console, which would defeat the point when you're locked out
+# and debugging. Single-quoted YAML with doubled quotes so a password
+# containing ':' or '#' can't break the document.
+$consolePasswordBlock = if ($ConsolePassword) {
+    $yamlPassword = "'" + ($ConsolePassword -replace "'", "''") + "'"
+    @"
+chpasswd:
+  expire: false
+  users:
+    - name: $Username
+      password: $yamlPassword
+      type: text
+"@
+}
+else { '' }
+
 $userData = Get-Content -Path (Join-Path $PSScriptRoot 'cloud-init\user-data.tmpl.yaml') -Raw
 $userData = $userData.Replace('__HOSTNAME__', $Hostname)
 $userData = $userData.Replace('__FQDN__', $fqdn)
@@ -160,6 +190,7 @@ $userData = $userData.Replace('__SSH_KEY__', $sshKey)
 $userData = $userData.Replace('__PACKAGES__', $packagesBlock)
 $userData = $userData.Replace('__NTP_SERVER__', $NtpServer)
 $userData = $userData.Replace('__RUNCMD__', $runcmdBlock)
+$userData = $userData.Replace('__CONSOLE_PASSWORD__', $consolePasswordBlock)
 Set-Content -Path (Join-Path $seedSrc 'user-data') -Value $userData -NoNewline
 
 $metaData = Get-Content -Path (Join-Path $PSScriptRoot 'cloud-init\meta-data.tmpl.yaml') -Raw
@@ -213,4 +244,7 @@ Write-Host ""
 Write-Host "VM '$VMName' started. MAC $MacAddress - register the DHCP reservation on pfSense now if it isn't already."
 Write-Host "Cloud-init runs on first boot and reboots itself once when done; check progress with:"
 Write-Host "  vmconnect localhost $VMName"
+if ($ConsolePassword) {
+    Write-Host "At that console, log in as '$Username' with the break-glass password (-ConsolePassword) if the VM never comes up on the network. SSH still refuses passwords."
+}
 Write-Host "Once it's up, confirm the DHCP lease matches the reservation and SSH in as '$Username'."

@@ -112,6 +112,12 @@ param(
     [string]$LogIngestUrl,
     [string]$LogIngestToken,
 
+    # Forwarded to New-AerieVM.ps1. Break-glass console login for -Username,
+    # so a VM that never reaches the network is still debuggable from
+    # `vmconnect` instead of only from screenshots of console scrollback.
+    # Console-only - ssh_pwauth stays false. Pass '' to opt out.
+    [string]$ConsolePassword = 'password',
+
     # Public half is injected by cloud-init; private half is used only to
     # verify the result and is never written to the VM.
     [string]$SshPublicKeyPath,
@@ -403,6 +409,10 @@ try {
             $vmArgs.LogIngestUrl = $LogIngestUrl
             $vmArgs.LogIngestToken = $LogIngestToken
         }
+        # Passed explicitly rather than left to New-AerieVM.ps1's own default,
+        # so -ConsolePassword '' here actually opts out instead of silently
+        # picking the default up again one script down.
+        $vmArgs.ConsolePassword = $ConsolePassword
 
         if ($DataDiskSizeGB -gt 0) {
             Write-Host "Note: the ${DataDiskSizeGB}GB data disk is fixed-size, so Hyper-V zeroes it up front. Expect this to take a while on spinning storage."
@@ -428,6 +438,10 @@ try {
         # recorded for that IP belongs to something else and would only
         # produce a spurious host-key-changed failure.
         $knownHostsFile = Join-Path $env:TEMP "aerie-$VMName-$([Guid]::NewGuid().ToString('N')).known_hosts"
+
+        if ($ConsolePassword) {
+            Write-Host "If this never comes up, log in at 'vmconnect localhost $VMName' as '$Username' with the break-glass console password and read /var/log/cloud-init-output.log."
+        }
 
         $nodeReport = Wait-AerieNodeReady `
             -IPAddress $ExpectedIPAddress `

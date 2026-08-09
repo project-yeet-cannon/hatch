@@ -170,6 +170,15 @@ post-boot report.
    stop action, and Hyper-V's Time Synchronization integration service
    disabled so it can't fight the in-guest chrony config.
 
+   The seed also sets a **break-glass console password** for the `aerie` user
+   (`-ConsolePassword`, default `password`). `ssh_pwauth` stays `false`, so it
+   is rejected over SSH and only works at the Hyper-V console — which already
+   requires Administrator on the host. Without it, a VM that never reaches the
+   network is unreachable by *any* means: cloud-init locks every account's
+   password, so `vmconnect` offers a login prompt that nothing can satisfy and
+   photographs of console scrollback become the only diagnostic. Pass
+   `-ConsolePassword ''` to opt out and accept that.
+
    If `-LogIngestUrl`/`-LogIngestToken` are supplied (flow B sets these
    automatically whenever the `VM_LOG_SHIPPER_TOKEN` secret is present — see
    above), the VM's serial console (COM1, wired to a named pipe — Hyper-V has
@@ -283,9 +292,25 @@ problem for an hour. Recreate the switch bound to a physical NIC, per the
 prerequisites.
 
 **Timed out waiting for port 22, or SSH rejects the key.** Watch the console:
-`vmconnect localhost <VMName>`. A port-22 timeout is usually the DHCP
-reservation not matching the MAC; a rejected key usually shows up as a
+`vmconnect localhost <VMName>`, and log in there as `aerie` with the
+break-glass console password (see step 3) to read
+`/var/log/cloud-init-output.log` directly. A port-22 timeout is usually the
+DHCP reservation not matching the MAC; a rejected key usually shows up as a
 cloud-init failure to apply `ssh_authorized_keys` in the console output.
+
+**`Get-VMNetworkAdapter` shows `IPAddresses : {}`.** Not conclusive on its
+own. That list is populated by the guest KVP daemon from `hyperv-daemons`,
+which cloud-init installs *over the network* — so an empty list is equally
+consistent with "no lease yet" and "cloud-init hasn't finished `apt` yet". The
+DHCP lease table on pfSense is the authoritative check for whether the VM's
+MAC ever got an address.
+
+**`systemd-ssh-generator: Failed to query local AF_VSOCK CID` on the console.**
+Harmless, and unrelated to any SSH problem you're chasing. systemd tries to
+set up its optional ssh-over-`AF_VSOCK` socket units at boot; Hyper-V exposes
+`AF_HYPERV` rather than `AF_VSOCK`, the CID query returns `EADDRNOTAVAIL`, and
+the generator skips those units. Normal `sshd` on TCP/22 is unaffected. Every
+Debian 13 guest on Hyper-V logs this.
 
 **"Something answered but didn't identify as ..."** Another host holds that
 address, or the reservation points somewhere else.
