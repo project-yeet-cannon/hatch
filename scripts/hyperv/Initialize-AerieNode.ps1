@@ -494,7 +494,8 @@ try {
     Write-Host '  - autostart + Shut Down stop action             (set by New-AerieVM.ps1)'
     Write-Host '  - NTP from pfSense                              ' -NoNewline
     Write-Host "($NtpServer - see chrony output above)"
-    Write-Host '  - stagger Windows Update reboots across hosts   (host policy, still manual)'
+    Write-Host '  - stagger Windows Update reboots across hosts   ' -NoNewline
+    Write-Host '(run the "Stagger Windows Update reboots" workflow now that this node exists)'
 
     # A no-op outside Actions, which is the point: the manual and CI paths run
     # the same script and only differ in whether this variable is set.

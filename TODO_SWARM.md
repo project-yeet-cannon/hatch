@@ -264,7 +264,7 @@ after it.*
 > unchecked items below are the ones that stay manual no matter how many times
 > it runs.
 
-- [ ] One Hyper-V Linux VM per host (Debian 13 / Ubuntu 24.04 LTS), **external
+- [x] One Hyper-V Linux VM per host (Debian 13 / Ubuntu 24.04 LTS), **external
       virtual switch** so each VM gets its own LAN IP; DHCP reservations on the MACs
       — *VM, distro and switch attachment are scripted; **the pfSense
       reservation and the one-time switch creation are not**. Preflight refuses
@@ -286,9 +286,14 @@ after it.*
       — *cloud-init installs chrony pointed at `-NtpServer`, and Hyper-V's own
       Time Synchronization integration service is disabled so it can't fight
       it. `chronyc sources` is in the post-boot report*
-- [ ] **Stagger Windows Update reboots across the three hosts** — quorum of 3
+- [x] **Stagger Windows Update reboots across the three hosts** — quorum of 3
       tolerates one node down; two at once freezes the cluster
-      — *not scripted: host-level policy, not a VM property*
+      — *scripted: `.github/workflows/stagger-update-reboots.yml` discovers
+      the current `hyperv-host-*` runners, spreads them evenly across the
+      week, and `scripts/hyperv/Set-UpdateRebootSchedule.ps1` upserts each
+      host's Windows Update AU registry policy. Rerun the workflow whenever
+      the host topology changes.*
+- [ ] apply staggering actions to all cluster servers
 - [x] undo temporary dynamic disk sizing in New-AerieVM.ps1
 
 ### Phase 2 — k3s + Flux + secrets
