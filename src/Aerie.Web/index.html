@@ -185,6 +185,18 @@
           </span>
           <span class="chev">›</span>
         </a>
+        <!-- The only entry that isn't same-origin: the file browser is its own
+             container on its own subdomain (compose.share.yml), not an SPA under
+             /apps. data-subdomain is rewritten to this page's own domain by the
+             script at the bottom, so the href below is only the fallback. -->
+        <a class="app" href="https://share.landis.family/" data-subdomain="share">
+          <span class="icon">📁</span>
+          <span class="app-info">
+            <span class="app-name">Files</span>
+            <span class="app-desc">Browse &amp; upload files on the house share</span>
+          </span>
+          <span class="chev">›</span>
+        </a>
         <a class="app" href="/swagger">
           <span class="icon">📄</span>
           <span class="app-info">
@@ -196,5 +208,26 @@
       </div>
       <footer>❤️</footer>
     </main>
+    <script>
+      // This page is a plain static file (copied to wwwroot/apps/index.html by
+      // Aerie.Api.csproj, no build step), so ${DOMAIN} can't be interpolated
+      // into cross-subdomain links the way it is in compose labels. Instead,
+      // derive them from the domain this page is already being served on -
+      // home.<domain> becomes media.<domain> - which keeps the base domain out
+      // of source and follows it if it ever changes.
+      //
+      // Skipped when the host is an IP or a single label (direct-to-container
+      // or localhost during development), where there's no domain to borrow;
+      // the hardcoded href stays as-is in that case.
+      const host = location.hostname;
+      const isIpv4 = /^\d+(\.\d+){3}$/.test(host);
+      const labels = host.split(".");
+      if (!isIpv4 && labels.length > 1) {
+        const domain = labels.slice(1).join(".");
+        for (const link of document.querySelectorAll("a[data-subdomain]")) {
+          link.href = `https://${link.dataset.subdomain}.${domain}/`;
+        }
+      }
+    </script>
   </body>
 </html>

@@ -42,13 +42,19 @@ jobs:
       # see scripts/hyperv/lib/Send-VmConsoleLog.ps1, provisioned onto each
       # Hyper-V host by provision-node.yml.
       VM_LOG_SHIPPER_TOKEN: ${{ secrets.VM_LOG_SHIPPER_TOKEN }}
-      # //server/share of the music library. compose.media.yml mounts it twice:
-      # read-only into the api container (the `media` volume) so it can be
-      # served to Sonos speakers, and read-write into the media-gui container
-      # (`media_rw`) that serves the browse/upload UI at media.${DOMAIN}. A
-      # variable, not a secret: it's a LAN path to a share that already allows
-      # public read and guest write. See docs/media-library.md.
-      MEDIA_LIBRARY_SHARE: ${{ vars.MEDIA_LIBRARY_SHARE }}
+      # //server/share of the house SMB share. compose.share.yml mounts it
+      # twice: read-write for the browse/upload GUI at share.${DOMAIN}, and
+      # read-only into the api container so a subdirectory of it can be served
+      # to Sonos speakers. A variable, not a secret: it's a LAN path to a share
+      # that already allows guest access. See docs/file-share.md.
+      SHARE_PATH: ${{ vars.SHARE_PATH }}
+      # Which subdirectory of SHARE_PATH holds the music library, e.g. "Music".
+      # Not a mount - just the tail of MediaLibrary__RootPath - so a wrong value
+      # only costs a startup warning, never a failed deploy. Leaving it unset
+      # turns media serving off without disturbing the file GUI, and keeps the
+      # share root off the API's unauthenticated /media endpoint. See
+      # docs/media-library.md.
+      MEDIA_LIBRARY_SUBPATH: ${{ vars.MEDIA_LIBRARY_SUBPATH }}
       # Reusable, tagged (not ephemeral) auth key — an ephemeral key would
       # de-register this node the moment the key's session ends, which is
       # wrong for a permanent subnet router. TAILSCALE_ADVERTISE_ROUTES is
@@ -74,7 +80,7 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha }}
           sparse-checkout: |
             compose.prod.yml
-            compose.media.yml
+            compose.share.yml
             compose.observability.yml
             compose.metrics.yml
             compose.backup.yml
@@ -193,23 +199,23 @@ jobs:
       # running - the failure only shows up later, in whichever step first tries
       # to use the new image.
       #
-      # compose.media.yml (the CIFS mounts for the music library, plus the
-      # media-gui browse/upload UI that serves it) is layered in only when
-      # MEDIA_LIBRARY_SHARE is set. Those mounts are resolved by the
-      # Docker daemon before any container starts, so an unresolvable share
-      # (DNS failure, share offline, variable never configured) would otherwise
-      # fail `up` for the whole stack, not just media serving - see
-      # compose.media.yml and docs/media-library.md.
+      # compose.share.yml (the house share's CIFS mounts - the browse/upload GUI
+      # and the api container's media serving both live there) is layered in
+      # only when SHARE_PATH is set. Those mounts are resolved by the Docker
+      # daemon before any container starts, so an unresolvable share (DNS
+      # failure, share offline, variable never configured) would otherwise fail
+      # `up` for the whole stack, not just the things that need the share - see
+      # compose.share.yml, docs/file-share.md and docs/media-library.md.
       - name: Pull and start the stack
         working-directory: .
         run: |
-          $mediaArgs = @()
-          if (-not [string]::IsNullOrWhiteSpace($env:MEDIA_LIBRARY_SHARE)) {
-            $mediaArgs = @("-f", "compose.media.yml")
+          $shareArgs = @()
+          if (-not [string]::IsNullOrWhiteSpace($env:SHARE_PATH)) {
+            $shareArgs += @("-f", "compose.share.yml")
           }
-          docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml @mediaArgs pull
+          docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml @shareArgs pull
           if ($LASTEXITCODE -ne 0) { throw "docker compose pull failed with exit code $LASTEXITCODE" }
-          docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml @mediaArgs up -d
+          docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml @shareArgs up -d
           if ($LASTEXITCODE -ne 0) { throw "docker compose up failed with exit code $LASTEXITCODE" }
 
       # The init logic itself lives in the image, at scripts/init-repos.sh, and

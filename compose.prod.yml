@@ -35,12 +35,12 @@ services:
       - DOMAIN=${DOMAIN}
       # Gates VmConsoleLogsController - see scripts/hyperv/lib/Send-VmConsoleLog.ps1.
       - VM_LOG_SHIPPER_TOKEN=${VM_LOG_SHIPPER_TOKEN}
-    # The music-library mount (MediaLibrary__RootPath env + the `media`
-    # volume) lives in compose.media.yml, layered in only when
-    # MEDIA_LIBRARY_SHARE is set - see that file and docs/media-library.md.
-    # Without it, MediaLibraryOptions.RootPath stays "" and the API just
-    # skips serving the library (Program.cs), rather than the whole stack
-    # failing to come up over an unresolvable CIFS share.
+    # The music-library mount (MediaLibrary__RootPath env + the `share_ro`
+    # volume) lives in compose.share.yml, layered in only when SHARE_PATH is
+    # set - see that file and docs/media-library.md. Without it,
+    # MediaLibraryOptions.RootPath stays "" and the API just skips serving the
+    # library (Program.cs), rather than the whole stack failing to come up over
+    # an unresolvable CIFS share.
     depends_on:
       db:
         condition: service_healthy

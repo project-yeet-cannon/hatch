@@ -1,0 +1,128 @@
+# Optional layer on top of compose.prod.yml: everything that mounts the house
+# SMB share. Two consumers, two mount modes, one share:
+#
+#   - `share`, a dufs browse/upload GUI at share.${DOMAIN}, read-write, for
+#     people. See docs/file-share.md.
+#   - `api`, which serves a subdirectory of the same share read-only over HTTP
+#     so Sonos speakers can fetch tracks from it. See docs/media-library.md.
+#
+# Only included in the deploy when the SHARE_PATH repo variable is set (see
+# .github/workflows/cd.yml). It's deliberately kept out of compose.prod.yml:
+# the CIFS mounts are resolved and created by the Docker daemon *before* any
+# container starts, so an unresolvable or misconfigured share fails
+# `docker compose up` for the entire stack (db, caddy, everything), not just
+# the two things that need it. Leaving SHARE_PATH unset skips this file
+# entirely and the rest of the stack deploys normally - share.${DOMAIN} has
+# nothing behind it and MediaLibraryOptions.RootPath stays empty, which
+# Program.cs handles by logging a warning and serving no media.
+
+# Attaches each container's Compose service name to its own log lines (via
+# the json-file driver's `attrs`), so fluent-bit can derive a `service`
+# field per line for OpenSearch. Re-declared here because YAML anchors don't
+# cross file boundaries in Compose - see containers/fluent-bit/service_tag.lua.
+x-logging: &container-log-tag
+  options:
+    labels: "com.docker.compose.service"
+
+services:
+  api:
+    environment:
+      # Which subdirectory of the share holds the music library, e.g. "Music"
+      # or "Media/Music". In-container path, not a UNC path: the API runs in a
+      # Linux container even though the host is Windows.
+      #
+      # The `:+` form is load-bearing. This path is served **unauthenticated**
+      # to anything that can reach the API (Sonos speakers can't log in), so an
+      # unset MEDIA_LIBRARY_SUBPATH must leave RootPath empty - which turns
+      # media serving off - rather than collapsing to "/share-ro/" and putting
+      # the *entire* house share on an open HTTP endpoint.
+      #
+      # Unlike the mount itself, a wrong value here is cheap: Program.cs logs
+      # "RootPath ... does not exist" at startup and serves nothing. It can't
+      # fail the deploy the way a bad device string can.
+      - MediaLibrary__RootPath=${MEDIA_LIBRARY_SUBPATH:+/share-ro/${MEDIA_LIBRARY_SUBPATH}}
+    volumes:
+      - share_ro:/share-ro:ro
+
+  # dufs: a single-binary static file server with a browse/upload UI. Named
+  # `share` after the subdomain it serves; note the unrelated `files` service in
+  # compose.prod.yml, which is the nginx that hosts the kiosk APK at
+  # files.${DOMAIN} and has nothing to do with this.
+  #
+  # Only on the `edge` network: Caddy reaches it by container name and its port
+  # is never published to the host, per docs/reverse-proxy-architecture.md.
+  share:
+    image: sigoden/dufs:v0.46.0
+    restart: always
+    networks:
+      - edge
+    # Dummy admin credentials, in source on purpose: this is a LAN-only stack
+    # with no real secrets behind it, and the same reasoning as the Uptime Kuma
+    # login in compose.observability.yml applies. Unlike those, though, this
+    # login gates *write* access to the actual share - swap it for a real
+    # credential (a GitHub Actions secret interpolated here) as soon as this
+    # subdomain holds anything worth protecting. Rule syntax is
+    # `user:pass@path:permission`; defining only this rule and no anonymous
+    # (`@`-prefixed) one means every request, read included, has to
+    # authenticate.
+    #
+    # The allow flags and the auth rule are both required: `:rw` says *who* may
+    # write, the flags say which operations exist at all. Listed individually
+    # rather than via `-A`, which would additionally enable --allow-symlink and
+    # let listings follow symlinks out of the share.
+    command:
+      - /share
+      - --auth
+      - "admin:password@/:rw"
+      - --allow-upload
+      - --allow-delete
+      - --allow-search
+      - --allow-archive
+    volumes:
+      - share:/share
+    labels:
+      caddy: share.${DOMAIN}
+      # dufs's default listen port; nothing above overrides it.
+      caddy.reverse_proxy: "{{upstreams 5000}}"
+    logging: *container-log-tag
+
+networks:
+  edge:
+    external: true
+
+volumes:
+  # SHARE_PATH is the //server/share both volumes below point at, kept out of
+  # source as a repo variable. No `:?` here - this file is only included when
+  # the variable is set (see cd.yml), so an empty value would indicate a
+  # workflow bug rather than something to surface via a mount-time error.
+  #
+  # The server part must be an FQDN or an IP, never the bare hostname that works
+  # in Explorer on the host. The mount is performed by the Linux daemon VM, whose
+  # resolver does not apply the host's DNS suffix search list and speaks neither
+  # NetBIOS nor mDNS, so a bare name fails with "lookup <host> ...: no such host".
+  #
+  # Two volumes on one device rather than one shared volume: Docker bakes
+  # driver_opts into a named volume at creation, so a volume carries exactly one
+  # mount mode. The API's view stays read-only regardless of the GUI's, since
+  # nothing in Aerie itself writes to the share.
+
+  # Read-write, for the GUI - uploading is the point. Guest works because the
+  # share already allows anonymous writes; a share needing credentials wants
+  # username=/password= here, sourced from repo *secrets* rather than variables.
+  # uid/gid and the mode bits are pinned because a guest CIFS mount otherwise
+  # presents everything as owned by an unmapped id, which the client-side
+  # permission check can fail before the request ever reaches the server.
+  share:
+    driver: local
+    driver_opts:
+      type: cifs
+      o: "guest,rw,vers=3.0,uid=0,gid=0,file_mode=0664,dir_mode=0775"
+      device: "${SHARE_PATH}"
+
+  # Read-only, for the api container's media serving.
+  share_ro:
+    driver: local
+    driver_opts:
+      type: cifs
+      o: "guest,ro,vers=3.0"
+      device: "${SHARE_PATH}"

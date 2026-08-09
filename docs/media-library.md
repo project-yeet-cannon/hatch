@@ -1,6 +1,6 @@
 # Media Library
 
-How a music file on the house SMB share becomes something a Sonos speaker will play, via Aerie's `Speaker` devices and their `MediaPlayback` channels — and how files get onto that share in the first place, via the web GUI at `media.${DOMAIN}`.
+How a music file on the house SMB share becomes something a Sonos speaker will play, via Aerie's `Speaker` devices and their `MediaPlayback` channels.
 
 ## Why anything is needed at all
 
@@ -22,33 +22,34 @@ So Aerie serves the library over HTTP itself, and hands out URLs pointing back a
 
 Serving is off entirely when `RootPath` is empty. A configured-but-missing path logs a startup warning rather than failing silently — see Program.cs.
 
-### Deployment: the API runs in a Linux container
+### Deployment: a subdirectory of the house share
 
-`compose.prod.yml` runs `api` as a Linux container even though its host is Windows, so `MediaLibrary__RootPath` is the **in-container mount point** (`/media-library`), never a UNC path. The share is mounted there read-only by the `media` volume, which uses the CIFS driver with guest access to match the share's public read permissions. `:ro` on both the mount and the CIFS options is deliberate — nothing in Aerie writes to the library.
+The library isn't a share of its own — it's a folder inside the house SMB share, the same one the file browser at `share.${DOMAIN}` serves ([file-share.md](file-share.md)). Both live in [`compose.share.yml`](../compose.share.yml), which mounts `SHARE_PATH` twice: read-write for the GUI, and read-only as `share_ro` for `api`. Two volumes on one device is forced by Docker baking `driver_opts` into a named volume at creation — a volume carries exactly one mount mode — and it's what keeps the API's view read-only no matter what the GUI does. Nothing in Aerie writes to the library.
 
-**The mount is optional and lives in a separate compose file.** `MediaLibrary__RootPath`, the `media` volume, and its mount into `api` are all defined in `compose.media.yml`, not `compose.prod.yml`. `.github/workflows/cd.yml` layers that file in with `-f compose.media.yml` only when the `MEDIA_LIBRARY_SHARE` repo variable is set; otherwise it's omitted entirely and `api` starts with no media mount. This split exists because the CIFS mount is resolved and created by the Docker *daemon* before any container starts — an unresolvable or misconfigured share fails `docker compose up` for the **entire stack** (db, caddy, everything), not just media serving. With the variable unset, `MediaLibraryOptions.RootPath` stays `""` and the API just logs a warning and serves nothing (see Program.cs and "Serving is off entirely" above) — the rest of the stack deploys normally.
+`compose.prod.yml` runs `api` as a Linux container even though its host is Windows, so `MediaLibrary__RootPath` is an **in-container path** (`/share-ro/<subpath>`), never a UNC path.
 
-**Which share gets mounted is not in source.** `device:` interpolates `MEDIA_LIBRARY_SHARE`, a GitHub Actions **repo variable** (Settings → Secrets and variables → Actions → Variables), wired into the deploy job's `env:` block in `.github/workflows/cd.yml` alongside `DOMAIN`, `HA_HOST` and friends. Set it to the share in `//server/share` form, e.g. `//NAS/Music`. A subdirectory of a share works too — `//NAS/public/music` mounts just `music` out of the `public` share, which the kernel's CIFS client handles as a mount prefix.
+**Two variables, with very different failure modes.** Both are GitHub Actions **repo variables** (Settings → Secrets and variables → Actions → Variables), wired into the deploy job's `env:` block in [`cd.yml`](../.github/workflows/cd.yml):
 
-**Use an FQDN or an IP for the server, never the bare hostname.** The mount is performed by the Linux Docker VM, not by Windows: its resolver doesn't apply the host's DNS suffix search list and speaks neither NetBIOS nor mDNS, so a name that resolves fine in Explorer fails the deploy with `error resolving passed in network volume address: lookup <host> ...: no such host`. Note this makes the mount depend on whatever DNS the daemon reaches — if the record only exists on the LAN resolver, an IP in the variable (or `addr=` in the volume's `o:` options) is the way to sidestep resolution entirely. If the share is temporarily unreachable, unsetting `MEDIA_LIBRARY_SHARE` lets the rest of the stack keep deploying while media serving stays off.
+| Variable | What | If it's wrong |
+| --- | --- | --- |
+| `SHARE_PATH` | The `//server/share` the CIFS driver mounts, e.g. `//NAS/public` | Fails `docker compose up` for the **entire stack**, because the daemon resolves the mount before any container starts |
+| `MEDIA_LIBRARY_SUBPATH` | Folder within that share holding the music, e.g. `Music` or `Media/Music` | Startup warning only — Program.cs logs `RootPath ... does not exist` and serves nothing |
 
-**Changing the variable is not enough on its own.** Docker stores `driver_opts` on the named volume at creation and reuses the existing volume on later deploys, so `aerie_media` keeps the old device string until it's removed. After changing the variable, run `docker volume rm aerie_media` on the host (the api container must be down first) and redeploy. Nothing is lost — the volume holds no data, it's just a handle on the remote share.
+That asymmetry is the point of composing the path in the environment rather than mounting the subdirectory directly: a typo in the *music* folder name can't take the house down.
 
-It's a variable rather than a secret because it's a LAN path to an already-public-read share. A share needing credentials would want `username=`/`password=` in the volume's `o:` options, sourced from repo *secrets* instead.
+**`MEDIA_LIBRARY_SUBPATH` unset turns media serving off, and that's a security property, not just a default.** The compose file builds the path as `${MEDIA_LIBRARY_SUBPATH:+/share-ro/${MEDIA_LIBRARY_SUBPATH}}`, so an empty variable yields an empty `RootPath` (serving off per "Serving is off entirely" above). Written the obvious way instead — `/share-ro/${MEDIA_LIBRARY_SUBPATH}` — an unset variable would collapse to `/share-ro/`, silently publishing **the entire house share** on an endpoint that is unauthenticated by design.
 
-### Browsing and uploading: `media.${DOMAIN}`
+**The whole layer is optional.** `cd.yml` adds `-f compose.share.yml` only when `SHARE_PATH` is set; otherwise it's omitted entirely and `api` starts with no share mount, `RootPath` stays `""`, and the rest of the stack deploys normally.
 
-The share also gets a browser UI, served by [dufs](https://github.com/sigoden/dufs) as the `media-gui` service in `compose.media.yml` — directory browsing, drag-and-drop upload, delete, rename, folder download-as-archive, and search. It follows the standard pattern in [reverse-proxy-architecture.md](reverse-proxy-architecture.md): `edge` network, two `caddy` labels, no published port, so Caddy issues the cert and routes to it with no DNS or Caddy config change. Because it lives in `compose.media.yml`, it appears and disappears with `MEDIA_LIBRARY_SHARE` exactly like the API's mount does.
+**Use an FQDN or an IP for the server, never the bare hostname.** The mount is performed by the Linux Docker VM, not by Windows: its resolver doesn't apply the host's DNS suffix search list and speaks neither NetBIOS nor mDNS, so a name that resolves fine in Explorer fails the deploy with `error resolving passed in network volume address: lookup <host> ...: no such host`. If the record only exists on the LAN resolver, an IP in the variable (or `addr=` in the volume's `o:` options) sidesteps resolution entirely. If the share is temporarily unreachable, unsetting `SHARE_PATH` lets the rest of the stack keep deploying.
 
-**It mounts the share read-write, through a second volume.** `media_rw` mounts the same `MEDIA_LIBRARY_SHARE` device with `rw` where `media` uses `ro`. Two volumes are required rather than one loosened set of options: Docker bakes `driver_opts` into a named volume at creation, so a volume carries exactly one mount mode — and the API's view is meant to stay read-only regardless, since nothing in Aerie writes to the library. The rw options also pin `uid=0,gid=0,file_mode=0664,dir_mode=0775`; a guest CIFS mount otherwise presents files as owned by an unmapped id, and the client-side permission check can reject a write before it ever reaches the server. Guest works for writes here only because the share itself permits anonymous writes — if that changes, both volumes want `username=`/`password=` from repo *secrets*.
+**Changing `SHARE_PATH` is not enough on its own.** Docker stores `driver_opts` on the named volume at creation and reuses the existing volume on later deploys, so `aerie_share` and `aerie_share_ro` keep the old device string until removed. After changing it, run `docker volume rm aerie_share aerie_share_ro` on the host (both containers must be down first) and redeploy — remember there are two. Nothing is lost; the volumes hold no data, they're just handles on the remote share. `MEDIA_LIBRARY_SUBPATH` needs none of this: it's an env var, so a redeploy is enough.
 
-Note that everything about `aerie_media` needing `docker volume rm` after a variable change (above) applies to `aerie_media_rw` too — remove both.
+`SHARE_PATH` is a variable rather than a secret because it's a LAN path to an already-guest-accessible share. A share needing credentials would want `username=`/`password=` in the volumes' `o:` options, sourced from repo *secrets* instead.
 
-**The login is a placeholder.** `--auth admin:password@/:rw` is checked into `compose.media.yml`, the same way the Uptime Kuma admin credentials are in `compose.observability.yml`, so the app needs no secret wireup to stand up. Defining only that rule, with no anonymous rule, means *every* request authenticates — there is no unauthenticated read. But unlike Kuma's, this login gates write access to the actual music share: anyone on the LAN or Tailscale who reads this repo can upload, overwrite, and delete. Replace it with a GitHub Actions secret interpolated into that `--auth` value before this subdomain carries anything worth protecting.
+### Getting files into the library
 
-The `--allow-upload`/`--allow-delete`/`--allow-search`/`--allow-archive` flags and the `:rw` in the auth rule are both load-bearing: the flags decide which operations exist at all, the rule decides who may use them. They're listed individually rather than as `-A`, which would also turn on `--allow-symlink` and let listings follow symlinks out of the share.
-
-This is separate from the API's own `/media` endpoint, which stays read-only and unauthenticated — that one exists for the speakers, which can't log in.
+The file browser at `share.${DOMAIN}` can upload straight into the music folder, since it's mounting the same share read-write. That's the one path by which anything in this stack writes there — the API's own mount is read-only end to end.
 
 Finally, set `MediaLibraryBaseUrl` to a hostname the speakers can resolve — with Caddy fronting the API that's the published `home.${DOMAIN}` name (`https://home.${DOMAIN}/media`), not the container's own `:8080`, which isn't published. The speaker verifies TLS, so that URL only works while Caddy is serving a publicly-trusted cert for the name; otherwise publish the API port on the LAN and use a plain `http://` base URL.
 
@@ -80,6 +81,6 @@ Like every other action kind, the value isn't validated at save time — a bad p
 
 ## Not done yet
 
-- No directory browsing *in the API's `/media` endpoint* — you still have to know the relative path to type into the Play box. `media.${DOMAIN}` browses the same files, so paths can be read off there, but the two aren't linked; `UseDirectoryBrowser` on the same file provider would close the gap.
+- No directory browsing — you have to know the relative path to type into the Play box. `UseDirectoryBrowser` on the same file provider would fix that; in the meantime `share.${DOMAIN}` browses the same files, so paths can be read off there and typed in by hand.
 - No stop/pause/volume commands — `IHomeAssistantCommandService` only has `PlayMediaAsync` on the media side.
-- The library is served without authentication to anything that can reach the API. (The `media.${DOMAIN}` GUI does require a login, but a placeholder one that's checked into source — see above.)
+- The library is served without authentication to anything that can reach the API.
