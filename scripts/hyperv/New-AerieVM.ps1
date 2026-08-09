@@ -27,6 +27,10 @@
         Hyper-V "Time Synchronization" integration service disabled so it
         can't fight the in-guest chrony/pfSense NTP config
       - starts the VM
+      - if -LogIngestUrl/-LogIngestToken are supplied, registers a Scheduled
+        Task that ships this VM's serial console to Aerie.Api's
+        /api/vm-console-logs, from where it flows into OpenSearch alongside
+        every other Aerie log line (see lib/Send-VmConsoleLog.ps1)
 
 .EXAMPLE
     # Phase 0 scratch VM for the DR-restore gate
@@ -94,11 +98,18 @@ param(
     [int]$DataDiskSizeGB = 200,
 
     [string[]]$ExtraPackages = @(),
-    [string[]]$RunCmd = @()
+    [string[]]$RunCmd = @(),
+
+    # Both required together to ship this VM's serial console to OpenSearch
+    # (see the Set-VMComPort block below) - omit either to skip it, e.g. for
+    # the Phase 0 scratch VM.
+    [string]$LogIngestUrl,
+    [string]$LogIngestToken
 )
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib\New-NoCloudIso.ps1')
+. (Join-Path $PSScriptRoot 'lib\Register-VmConsoleLogShipper.ps1')
 
 if (Get-VM -Name $VMName -ErrorAction SilentlyContinue) {
     throw "A VM named '$VMName' already exists. Remove it first (Remove-VM -Name $VMName after stopping it) or pick a different name."
@@ -186,16 +197,17 @@ Disable-VMIntegrationService -VMName $VMName -Name 'Time Synchronization'
 # has no built-in way to redirect a COM port straight to a file, on Gen 1 or
 # Gen 2. A plain file path is accepted here without error but then fails
 # Start-VM with a generic "parameter is incorrect" once vmwp.exe tries to
-# bind it. TODO(TODO_SWARM.md): to get a persisted, after-the-fact boot log
-# (rather than only what vmconnect shows live), something independent of
-# this script's process needs to sit on this pipe and copy bytes to a file
-# for the VM's lifetime - a Scheduled Task registered on the host, since
-# anything spawned as a child of this GitHub Actions step gets killed by the
-# runner's job-object cleanup when the step ends.
+# bind it. Register-VmConsoleLogShipper (below) is what actually drains this
+# pipe, when -LogIngestUrl/-LogIngestToken are supplied.
 $comPipePath = "\\.\pipe\$VMName-com1"
 Set-VMComPort -VMName $VMName -Number 1 -Path $comPipePath
 
 Start-VM -Name $VMName
+
+if ($LogIngestUrl -and $LogIngestToken) {
+    Register-VmConsoleLogShipper -VMName $VMName -VmDir $vmDir -IngestUrl $LogIngestUrl -Token $LogIngestToken
+    Write-Host "Console log shipper registered - serial console now flows to $LogIngestUrl (Scheduled Task 'Aerie-VMConsoleLog-$VMName')."
+}
 
 Write-Host ""
 Write-Host "VM '$VMName' started. MAC $MacAddress - register the DHCP reservation on pfSense now if it isn't already."

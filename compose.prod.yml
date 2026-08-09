@@ -33,6 +33,8 @@ services:
     environment:
       - DOTNET_ENVIRONMENT=Docker
       - DOMAIN=${DOMAIN}
+      # Gates VmConsoleLogsController - see scripts/hyperv/lib/Send-VmConsoleLog.ps1.
+      - VM_LOG_SHIPPER_TOKEN=${VM_LOG_SHIPPER_TOKEN}
     # The music-library mount (MediaLibrary__RootPath env + the `media`
     # volume) lives in compose.media.yml, layered in only when
     # MEDIA_LIBRARY_SHARE is set - see that file and docs/media-library.md.

@@ -1,16 +1,26 @@
 # Optional layer on top of compose.prod.yml: mounts the music library SMB
-# share read-only into the api container so it can be served over HTTP
-# (Sonos speakers fetch tracks themselves - see docs/media-library.md).
+# share into the api container read-only so it can be served over HTTP
+# (Sonos speakers fetch tracks themselves - see docs/media-library.md), and
+# publishes a browse/upload web GUI for the same share at media.${DOMAIN}.
 #
 # Only included in the deploy when the MEDIA_LIBRARY_SHARE repo variable is
 # set (see .github/workflows/cd.yml). It's deliberately kept out of
-# compose.prod.yml: the CIFS mount is resolved and created by the Docker
+# compose.prod.yml: the CIFS mounts are resolved and created by the Docker
 # daemon *before* any container starts, so an unresolvable or misconfigured
 # share fails `docker compose up` for the entire stack, not just the api
 # container's media serving. Leaving MEDIA_LIBRARY_SHARE unset skips this
 # file entirely and the api container starts with no media mount -
 # MediaLibraryOptions.RootPath stays unset and the API just logs a warning
 # and serves nothing (Program.cs), rather than blocking the deploy.
+
+# Attaches each container's Compose service name to its own log lines (via
+# the json-file driver's `attrs`), so fluent-bit can derive a `service`
+# field per line for OpenSearch. Re-declared here because YAML anchors don't
+# cross file boundaries in Compose - see containers/fluent-bit/service_tag.lua.
+x-logging: &container-log-tag
+  options:
+    labels: "com.docker.compose.service"
+
 services:
   api:
     environment:
@@ -20,6 +30,52 @@ services:
       - MediaLibrary__RootPath=/media-library
     volumes:
       - media:/media-library:ro
+
+  # Browse/upload GUI for the same share at https://media.${DOMAIN}, served by
+  # dufs (a single-binary static file server with an upload UI). It gets the
+  # read-write `media_rw` mount rather than the api container's read-only
+  # `media` one - nothing in Aerie itself writes to the library, and keeping
+  # the API's view read-only preserves that.
+  #
+  # Only on the `edge` network: Caddy reaches it by container name and its port
+  # is never published to the host, per docs/reverse-proxy-architecture.md.
+  media-gui:
+    image: sigoden/dufs:v0.46.0
+    restart: always
+    networks:
+      - edge
+    # Dummy admin credentials, in source on purpose: this is a LAN-only stack
+    # with no real secrets behind it, and the same reasoning as the Uptime Kuma
+    # login in compose.observability.yml applies. Unlike those, though, this
+    # login gates *write* access to the actual music share - swap it for a real
+    # credential (a GitHub Actions secret interpolated here) as soon as this
+    # subdomain matters. Rule syntax is `user:pass@path:permission`; defining
+    # only this rule and no anonymous (`@`-prefixed) one means every request,
+    # read included, has to authenticate.
+    #
+    # The allow flags and the auth rule are both required: `:rw` says *who* may
+    # write, the flags say which operations exist at all. Listed individually
+    # rather than via `-A`, which would additionally enable --allow-symlink and
+    # let listings follow symlinks out of the share.
+    command:
+      - /media-library
+      - --auth
+      - "admin:password@/:rw"
+      - --allow-upload
+      - --allow-delete
+      - --allow-search
+      - --allow-archive
+    volumes:
+      - media_rw:/media-library
+    labels:
+      caddy: media.${DOMAIN}
+      # dufs's default listen port; nothing above overrides it.
+      caddy.reverse_proxy: "{{upstreams 5000}}"
+    logging: *container-log-tag
+
+networks:
+  edge:
+    external: true
 
 volumes:
   # MEDIA_LIBRARY_SHARE is the //server/share the CIFS driver mounts, kept
@@ -40,4 +96,20 @@ volumes:
       # that needs credentials wants username=/password= here, sourced from
       # repo *secrets* rather than variables.
       o: "guest,ro,vers=3.0"
+      device: "${MEDIA_LIBRARY_SHARE}"
+
+  # The same share again, read-write, for the media-gui container's uploads and
+  # deletes. It has to be a second volume rather than a looser `o:` on `media`
+  # above: Docker bakes driver_opts into a named volume when it's created, so
+  # one volume can only carry one set of mount options, and the api container's
+  # mount is meant to stay read-only regardless.
+  media_rw:
+    driver: local
+    driver_opts:
+      type: cifs
+      # Guest again - the share already allows anonymous writes. uid/gid and
+      # the mode bits are fixed here because a guest CIFS mount otherwise
+      # presents everything as owned by an unmapped id, which the client-side
+      # permission check can fail before the request ever reaches the server.
+      o: "guest,rw,vers=3.0,uid=0,gid=0,file_mode=0664,dir_mode=0775"
       device: "${MEDIA_LIBRARY_SHARE}"

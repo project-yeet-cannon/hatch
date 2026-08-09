@@ -164,6 +164,11 @@ jobs:
           NODE_SSH_PUBLIC_KEY: ${{ vars.NODE_SSH_PUBLIC_KEY }}
           NTP_SERVER: ${{ vars.NTP_SERVER }}
           DOMAIN: ${{ vars.DOMAIN }}
+          # Shared secret the VM's console-log Scheduled Task sends as
+          # X-Vm-Log-Token to Aerie.Api's /api/vm-console-logs (see
+          # VmConsoleLogsController and cd.yml). Console-log shipping is
+          # skipped for this VM if unset.
+          VM_LOG_SHIPPER_TOKEN: ${{ secrets.VM_LOG_SHIPPER_TOKEN }}
           # Optional: pins the qemu-img download when the golden image has to
           # be built. See Get-GoldenImage.ps1's .NOTES.
           QEMU_IMG_SHA256: ${{ vars.QEMU_IMG_SHA256 }}
@@ -194,6 +199,11 @@ jobs:
 
           if ($env:DOMAIN) { $params.Domain = $env:DOMAIN }
           if ($env:QEMU_IMG_SHA256) { $params.QemuImgSha256 = $env:QEMU_IMG_SHA256 }
+
+          if ($env:DOMAIN -and $env:VM_LOG_SHIPPER_TOKEN) {
+            $params.LogIngestUrl = "https://home.$($env:DOMAIN)/api/vm-console-logs"
+            $params.LogIngestToken = $env:VM_LOG_SHIPPER_TOKEN
+          }
 
           if ($env:EXTRA_PACKAGES -and $env:EXTRA_PACKAGES.Trim()) {
             $params.ExtraPackages = @($env:EXTRA_PACKAGES -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })

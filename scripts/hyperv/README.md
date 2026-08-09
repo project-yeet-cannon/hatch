@@ -86,6 +86,7 @@ them can knock the host off the network if scripted carelessly.
    | `NODE_SSH_PRIVATE_KEY` | secret | unless `skip_wait` | contents of `id_ed25519` |
    | `DOMAIN` | variable | no | already set for `cd.yml`; sets the guest's FQDN |
    | `QEMU_IMG_SHA256` | variable | no | pins the qemu-img download — see [Golden image](#golden-image) |
+   | `VM_LOG_SHIPPER_TOKEN` | secret | no | already set for `cd.yml`; without it, console-log shipping (below) is skipped |
 
 ## MAC addresses
 
@@ -108,6 +109,7 @@ D:\aerie\
       os-disk.vhdx                     full copy of the template, not a differencing disk
       data-disk.vhdx                   fixed-size, unformatted; Longhorn claims it in Phase 3
       seed.iso                         NoCloud cloud-init seed for this VM
+      console-log-shipper.ps1          only when console-log shipping is on - see below
 ```
 
 Both roots are defaults, not assumptions — pass `-VMStoragePath` /
@@ -167,6 +169,19 @@ post-boot report.
    Linux guest), MAC spoofing on, static memory, autostart, `ShutDown` as the
    stop action, and Hyper-V's Time Synchronization integration service
    disabled so it can't fight the in-guest chrony config.
+
+   If `-LogIngestUrl`/`-LogIngestToken` are supplied (flow B sets these
+   automatically whenever the `VM_LOG_SHIPPER_TOKEN` secret is present — see
+   above), the VM's serial console (COM1, wired to a named pipe — Hyper-V has
+   no way to redirect a COM port straight to a file) is also drained by a
+   per-VM Scheduled Task (`Aerie-VMConsoleLog-<VMName>`, runs as SYSTEM,
+   restarts on failure, survives host reboots) running
+   `console-log-shipper.ps1`, which POSTs each line to Aerie.Api's
+   `/api/vm-console-logs`. From there it flows through the same
+   `fluent-bit -> OpenSearch` pipeline as every other Aerie log line, visible
+   at `logs.<domain>` under service `vm-console.<VMName>`. `-RecreateVM`
+   replaces this task along with the VM; there's no separate cleanup step for
+   permanently decommissioning a node yet.
 
 4. **Verify.** Waits out cloud-init *and the reboot cloud-init triggers on
    itself* — see below — then prints the node's identity, addresses, disks,
@@ -256,6 +271,8 @@ Nothing k3s-specific goes in `-RunCmd` yet — that's Phase 2.
 | [`New-AerieVM.ps1`](New-AerieVM.ps1) | Creates one VM from the template. Bypasses preflight — use directly when you know better than a check. |
 | [`lib/New-NoCloudIso.ps1`](lib/New-NoCloudIso.ps1) | Builds the cloud-init seed ISO via Windows' built-in IMAPI2FS — no ADK or oscdimg needed. |
 | [`lib/AerieSsh.ps1`](lib/AerieSsh.ps1) | Post-boot verification over SSH. |
+| [`lib/Register-VmConsoleLogShipper.ps1`](lib/Register-VmConsoleLogShipper.ps1) | Registers the Scheduled Task that ships one VM's serial console to OpenSearch. |
+| [`lib/Send-VmConsoleLog.ps1`](lib/Send-VmConsoleLog.ps1) | Drains a VM's COM1 named pipe and POSTs lines to Aerie.Api. What that Scheduled Task actually runs. |
 | [`cloud-init/`](cloud-init/) | `user-data` / `meta-data` templates. |
 
 ## Troubleshooting

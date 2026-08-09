@@ -1,6 +1,6 @@
 # Media Library
 
-How a music file on the house SMB share becomes something a Sonos speaker will play, via Aerie's `Speaker` devices and their `MediaPlayback` channels.
+How a music file on the house SMB share becomes something a Sonos speaker will play, via Aerie's `Speaker` devices and their `MediaPlayback` channels — and how files get onto that share in the first place, via the web GUI at `media.${DOMAIN}`.
 
 ## Why anything is needed at all
 
@@ -36,6 +36,20 @@ Serving is off entirely when `RootPath` is empty. A configured-but-missing path 
 
 It's a variable rather than a secret because it's a LAN path to an already-public-read share. A share needing credentials would want `username=`/`password=` in the volume's `o:` options, sourced from repo *secrets* instead.
 
+### Browsing and uploading: `media.${DOMAIN}`
+
+The share also gets a browser UI, served by [dufs](https://github.com/sigoden/dufs) as the `media-gui` service in `compose.media.yml` — directory browsing, drag-and-drop upload, delete, rename, folder download-as-archive, and search. It follows the standard pattern in [reverse-proxy-architecture.md](reverse-proxy-architecture.md): `edge` network, two `caddy` labels, no published port, so Caddy issues the cert and routes to it with no DNS or Caddy config change. Because it lives in `compose.media.yml`, it appears and disappears with `MEDIA_LIBRARY_SHARE` exactly like the API's mount does.
+
+**It mounts the share read-write, through a second volume.** `media_rw` mounts the same `MEDIA_LIBRARY_SHARE` device with `rw` where `media` uses `ro`. Two volumes are required rather than one loosened set of options: Docker bakes `driver_opts` into a named volume at creation, so a volume carries exactly one mount mode — and the API's view is meant to stay read-only regardless, since nothing in Aerie writes to the library. The rw options also pin `uid=0,gid=0,file_mode=0664,dir_mode=0775`; a guest CIFS mount otherwise presents files as owned by an unmapped id, and the client-side permission check can reject a write before it ever reaches the server. Guest works for writes here only because the share itself permits anonymous writes — if that changes, both volumes want `username=`/`password=` from repo *secrets*.
+
+Note that everything about `aerie_media` needing `docker volume rm` after a variable change (above) applies to `aerie_media_rw` too — remove both.
+
+**The login is a placeholder.** `--auth admin:password@/:rw` is checked into `compose.media.yml`, the same way the Uptime Kuma admin credentials are in `compose.observability.yml`, so the app needs no secret wireup to stand up. Defining only that rule, with no anonymous rule, means *every* request authenticates — there is no unauthenticated read. But unlike Kuma's, this login gates write access to the actual music share: anyone on the LAN or Tailscale who reads this repo can upload, overwrite, and delete. Replace it with a GitHub Actions secret interpolated into that `--auth` value before this subdomain carries anything worth protecting.
+
+The `--allow-upload`/`--allow-delete`/`--allow-search`/`--allow-archive` flags and the `:rw` in the auth rule are both load-bearing: the flags decide which operations exist at all, the rule decides who may use them. They're listed individually rather than as `-A`, which would also turn on `--allow-symlink` and let listings follow symlinks out of the share.
+
+This is separate from the API's own `/media` endpoint, which stays read-only and unauthenticated — that one exists for the speakers, which can't log in.
+
 Finally, set `MediaLibraryBaseUrl` to a hostname the speakers can resolve — with Caddy fronting the API that's the published `home.${DOMAIN}` name (`https://home.${DOMAIN}/media`), not the container's own `:8080`, which isn't published. The speaker verifies TLS, so that URL only works while Caddy is serving a publicly-trusted cert for the name; otherwise publish the API port on the LAN and use a plain `http://` base URL.
 
 ## What you can type into the Play box
@@ -66,6 +80,6 @@ Like every other action kind, the value isn't validated at save time — a bad p
 
 ## Not done yet
 
-- No directory browsing — you have to know the relative path. `UseDirectoryBrowser` on the same file provider would fix that.
+- No directory browsing *in the API's `/media` endpoint* — you still have to know the relative path to type into the Play box. `media.${DOMAIN}` browses the same files, so paths can be read off there, but the two aren't linked; `UseDirectoryBrowser` on the same file provider would close the gap.
 - No stop/pause/volume commands — `IHomeAssistantCommandService` only has `PlayMediaAsync` on the media side.
-- The library is served without authentication to anything that can reach the API.
+- The library is served without authentication to anything that can reach the API. (The `media.${DOMAIN}` GUI does require a login, but a placeholder one that's checked into source — see above.)

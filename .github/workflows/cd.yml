@@ -38,10 +38,16 @@ jobs:
       HA_HOST: ${{ vars.HA_HOST }}
       HA_PORT: ${{ vars.HA_PORT }}
       HA_TOKEN: ${{ secrets.HA_TOKEN }}
-      # //server/share of the music library, mounted read-only into the api
-      # container (compose.prod.yml's `media` volume) so it can be served to
-      # Sonos speakers. A variable, not a secret: it's a LAN path to a share
-      # that already allows public read. See docs/media-library.md.
+      # Shared secret VmConsoleLogsController checks against X-Vm-Log-Token -
+      # see scripts/hyperv/lib/Send-VmConsoleLog.ps1, provisioned onto each
+      # Hyper-V host by provision-node.yml.
+      VM_LOG_SHIPPER_TOKEN: ${{ secrets.VM_LOG_SHIPPER_TOKEN }}
+      # //server/share of the music library. compose.media.yml mounts it twice:
+      # read-only into the api container (the `media` volume) so it can be
+      # served to Sonos speakers, and read-write into the media-gui container
+      # (`media_rw`) that serves the browse/upload UI at media.${DOMAIN}. A
+      # variable, not a secret: it's a LAN path to a share that already allows
+      # public read and guest write. See docs/media-library.md.
       MEDIA_LIBRARY_SHARE: ${{ vars.MEDIA_LIBRARY_SHARE }}
       # Reusable, tagged (not ephemeral) auth key — an ephemeral key would
       # de-register this node the moment the key's session ends, which is
@@ -187,8 +193,9 @@ jobs:
       # running - the failure only shows up later, in whichever step first tries
       # to use the new image.
       #
-      # compose.media.yml (the CIFS mount for the music library) is layered in
-      # only when MEDIA_LIBRARY_SHARE is set. That mount is resolved by the
+      # compose.media.yml (the CIFS mounts for the music library, plus the
+      # media-gui browse/upload UI that serves it) is layered in only when
+      # MEDIA_LIBRARY_SHARE is set. Those mounts are resolved by the
       # Docker daemon before any container starts, so an unresolvable share
       # (DNS failure, share offline, variable never configured) would otherwise
       # fail `up` for the whole stack, not just media serving - see

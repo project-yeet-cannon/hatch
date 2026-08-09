@@ -107,6 +107,11 @@ param(
     [string[]]$ExtraPackages = @(),
     [string[]]$RunCmd = @(),
 
+    # Forwarded to New-AerieVM.ps1 - both required together to ship this
+    # VM's serial console to OpenSearch. Omit either to skip it.
+    [string]$LogIngestUrl,
+    [string]$LogIngestToken,
+
     # Public half is injected by cloud-init; private half is used only to
     # verify the result and is never written to the VM.
     [string]$SshPublicKeyPath,
@@ -394,6 +399,10 @@ try {
         if ($Domain) { $vmArgs.Domain = $Domain }
         if ($ExtraPackages) { $vmArgs.ExtraPackages = $ExtraPackages }
         if ($RunCmd) { $vmArgs.RunCmd = $RunCmd }
+        if ($LogIngestUrl -and $LogIngestToken) {
+            $vmArgs.LogIngestUrl = $LogIngestUrl
+            $vmArgs.LogIngestToken = $LogIngestToken
+        }
 
         if ($DataDiskSizeGB -gt 0) {
             Write-Host "Note: the ${DataDiskSizeGB}GB data disk is fixed-size, so Hyper-V zeroes it up front. Expect this to take a while on spinning storage."
