@@ -49,7 +49,7 @@ on:
         default: '16'
         type: string
       data_disk_gb:
-        description: 'Fixed Longhorn data disk in GB. 0 skips it.'
+        description: 'Fixed Longhorn data disk in GB.'
         required: true
         default: '200'
         type: string
