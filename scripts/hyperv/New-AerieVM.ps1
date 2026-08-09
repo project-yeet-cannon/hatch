@@ -37,7 +37,7 @@
 
 .EXAMPLE
     # Phase 1 node VM
-    .\New-AerieVM.ps1 -VMName aerie-node-a -GoldenImagePath D:\aerie\vm-templates\debian-13-genericcloud.vhdx `
+    .\New-AerieVM.ps1 -VMName aerie-node-1 -GoldenImagePath D:\aerie\vm-templates\debian-13-genericcloud.vhdx `
         -SwitchName ExternalSwitch -MacAddress 00-15-5D-01-02-04 `
         -SshPublicKeyPath ~\.ssh\id_ed25519.pub -NtpServer 10.0.0.1 `
         -MemoryGB 16 -DataDiskSizeGB 200
@@ -113,6 +113,12 @@ if ($existingMacs -contains $macNormalized) {
 $vmDir = Join-Path $VMStoragePath $VMName
 New-Item -ItemType Directory -Path $vmDir -Force | Out-Null
 
+# Stale from a previous attempt at this VM name - Hyper-V opens this fresh on
+# Start-VM, but leaving an old one around invites confusion about which boot
+# a given line came from.
+$consoleLogPath = Join-Path $vmDir 'console.log'
+Remove-Item -Path $consoleLogPath -ErrorAction SilentlyContinue
+
 $osDiskPath = Join-Path $vmDir 'os-disk.vhdx'
 Write-Host "Copying golden image to $osDiskPath ..."
 Copy-Item -Path $GoldenImagePath -Destination $osDiskPath
@@ -182,10 +188,16 @@ Set-VMNetworkAdapter -VMNetworkAdapter $nic -StaticMacAddress $macNormalized -Ma
 Set-VM -Name $VMName -AutomaticStartAction Start -AutomaticStopAction ShutDown
 Disable-VMIntegrationService -VMName $VMName -Name 'Time Synchronization'
 
+# The golden image's kernel cmdline carries console=ttyS0 (standard on cloud
+# images, for exactly this reason), so this catches kernel boot output and
+# cloud-init's own console mirroring - the only way to see a first-boot
+# failure (e.g. a bad SSH key bake) without racing a live vmconnect session.
+Set-VMComPort -VMName $VMName -Number 1 -Path $consoleLogPath
+
 Start-VM -Name $VMName
 
 Write-Host ""
 Write-Host "VM '$VMName' started. MAC $MacAddress - register the DHCP reservation on pfSense now if it isn't already."
 Write-Host "Cloud-init runs on first boot and reboots itself once when done; check progress with:"
-Write-Host "  vmconnect localhost $VMName"
+Write-Host "  Get-Content $consoleLogPath -Wait"
 Write-Host "Once it's up, confirm the DHCP lease matches the reservation and SSH in as '$Username'."

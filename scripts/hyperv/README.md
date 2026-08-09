@@ -104,10 +104,11 @@ D:\aerie\
     debian-13-genericcloud.vhdx
     debian-13-genericcloud.vhdx.provenance.json
   VMs\                                 -VMStoragePath — Hyper-V config plus one directory per VM
-    aerie-node-a\
+    aerie-node-1\
       os-disk.vhdx                     full copy of the template, not a differencing disk
       data-disk.vhdx                   fixed-size, unformatted; Longhorn claims it in Phase 3
       seed.iso                         NoCloud cloud-init seed for this VM
+      console.log                      serial console capture - see Troubleshooting
 ```
 
 Both roots are defaults, not assumptions — pass `-VMStoragePath` /
@@ -121,7 +122,7 @@ Elevated PowerShell, in `scripts\hyperv\`:
 
 ```powershell
 .\Initialize-AerieNode.ps1 `
-    -VMName aerie-node-a `
+    -VMName aerie-node-1 `
     -MacAddress 00-15-5D-01-01-01 `
     -ExpectedIPAddress 10.0.0.21 `
     -NtpServer 10.0.0.1 `
@@ -165,8 +166,9 @@ post-boot report.
    creates a Generation 2 VM with Secure Boot on the
    `MicrosoftUEFICertificateAuthority` template (required for a shim-signed
    Linux guest), MAC spoofing on, static memory, autostart, `ShutDown` as the
-   stop action, and Hyper-V's Time Synchronization integration service
-   disabled so it can't fight the in-guest chrony config.
+   stop action, Hyper-V's Time Synchronization integration service disabled
+   so it can't fight the in-guest chrony config, and the serial console
+   redirected to `console.log` in the VM's directory.
 
 4. **Verify.** Waits out cloud-init *and the reboot cloud-init triggers on
    itself* — see below — then prints the node's identity, addresses, disks,
@@ -265,8 +267,15 @@ be unreachable from the LAN with no DHCP — a failure that looks like a DHCP
 problem for an hour. Recreate the switch bound to a physical NIC, per the
 prerequisites.
 
-**Timed out waiting for port 22.** The reservation probably doesn't match the
-MAC. Watch the console: `vmconnect localhost <VMName>`.
+**Timed out waiting for port 22, or SSH rejects the key.** Check
+`console.log` in the VM's directory (`D:\aerie\VMs\<VMName>\console.log`) —
+it's the serial console, redirected there by `New-AerieVM.ps1`, and captures
+kernel boot output plus cloud-init's own console mirroring from every boot
+since the VM was created. It survives after the fact, unlike `vmconnect
+localhost <VMName>`, which only shows what's on screen *now*. A port-22
+timeout is usually the DHCP reservation not matching the MAC; a rejected key
+usually shows up as a cloud-init failure to apply `ssh_authorized_keys` in
+the log.
 
 **"Something answered but didn't identify as ..."** Another host holds that
 address, or the reservation points somewhere else.

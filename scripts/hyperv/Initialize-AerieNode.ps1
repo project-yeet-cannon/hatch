@@ -51,14 +51,14 @@
 
 .EXAMPLE
     # Manual, on the host, in an elevated session
-    .\Initialize-AerieNode.ps1 -VMName aerie-node-a -MacAddress 00-15-5D-01-02-04 `
+    .\Initialize-AerieNode.ps1 -VMName aerie-node-1 -MacAddress 00-15-5D-01-02-04 `
         -ExpectedIPAddress 10.0.0.21 -NtpServer 10.0.0.1 -Domain landis.family `
         -MemoryGB 16 -DataDiskSizeGB 200 `
         -SshPublicKeyPath ~\.ssh\id_ed25519.pub -SshPrivateKeyPath ~\.ssh\id_ed25519
 
 .EXAMPLE
     # Check the host is ready without building anything
-    .\Initialize-AerieNode.ps1 -VMName aerie-node-a -MacAddress 00-15-5D-01-02-04 `
+    .\Initialize-AerieNode.ps1 -VMName aerie-node-1 -MacAddress 00-15-5D-01-02-04 `
         -ExpectedIPAddress 10.0.0.21 -NtpServer 10.0.0.1 `
         -SshPublicKeyPath ~\.ssh\id_ed25519.pub -PreflightOnly
 #>
