@@ -113,12 +113,6 @@ if ($existingMacs -contains $macNormalized) {
 $vmDir = Join-Path $VMStoragePath $VMName
 New-Item -ItemType Directory -Path $vmDir -Force | Out-Null
 
-# Stale from a previous attempt at this VM name - Hyper-V opens this fresh on
-# Start-VM, but leaving an old one around invites confusion about which boot
-# a given line came from.
-$consoleLogPath = Join-Path $vmDir 'console.log'
-Remove-Item -Path $consoleLogPath -ErrorAction SilentlyContinue
-
 $osDiskPath = Join-Path $vmDir 'os-disk.vhdx'
 Write-Host "Copying golden image to $osDiskPath ..."
 Copy-Item -Path $GoldenImagePath -Destination $osDiskPath
@@ -188,16 +182,23 @@ Set-VMNetworkAdapter -VMNetworkAdapter $nic -StaticMacAddress $macNormalized -Ma
 Set-VM -Name $VMName -AutomaticStartAction Start -AutomaticStopAction ShutDown
 Disable-VMIntegrationService -VMName $VMName -Name 'Time Synchronization'
 
-# The golden image's kernel cmdline carries console=ttyS0 (standard on cloud
-# images, for exactly this reason), so this catches kernel boot output and
-# cloud-init's own console mirroring - the only way to see a first-boot
-# failure (e.g. a bad SSH key bake) without racing a live vmconnect session.
-Set-VMComPort -VMName $VMName -Number 1 -Path $consoleLogPath
+# Set-VMComPort's -Path only accepts a named pipe ("\\.\pipe\Name") - Hyper-V
+# has no built-in way to redirect a COM port straight to a file, on Gen 1 or
+# Gen 2. A plain file path is accepted here without error but then fails
+# Start-VM with a generic "parameter is incorrect" once vmwp.exe tries to
+# bind it. TODO(TODO_SWARM.md): to get a persisted, after-the-fact boot log
+# (rather than only what vmconnect shows live), something independent of
+# this script's process needs to sit on this pipe and copy bytes to a file
+# for the VM's lifetime - a Scheduled Task registered on the host, since
+# anything spawned as a child of this GitHub Actions step gets killed by the
+# runner's job-object cleanup when the step ends.
+$comPipePath = "\\.\pipe\$VMName-com1"
+Set-VMComPort -VMName $VMName -Number 1 -Path $comPipePath
 
 Start-VM -Name $VMName
 
 Write-Host ""
 Write-Host "VM '$VMName' started. MAC $MacAddress - register the DHCP reservation on pfSense now if it isn't already."
 Write-Host "Cloud-init runs on first boot and reboots itself once when done; check progress with:"
-Write-Host "  Get-Content $consoleLogPath -Wait"
+Write-Host "  vmconnect localhost $VMName"
 Write-Host "Once it's up, confirm the DHCP lease matches the reservation and SSH in as '$Username'."
