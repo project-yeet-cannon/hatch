@@ -119,8 +119,12 @@ Copy-Item -Path $GoldenImagePath -Destination $osDiskPath
 
 if ($DataDiskSizeGB -gt 0) {
     $dataDiskPath = Join-Path $vmDir 'data-disk.vhdx'
-    Write-Host "Creating ${DataDiskSizeGB}GB fixed data disk at $dataDiskPath ..."
-    New-VHD -Path $dataDiskPath -SizeBytes ([int64]$DataDiskSizeGB * 1GB) -Fixed | Out-Null
+    # TEMP: -Dynamic instead of -Fixed to skip upfront zeroing during workflow
+    # iteration. Revert to -Fixed before provisioning a real node - see the
+    # tradeoffs (I/O consistency under Longhorn, overcommit risk across the
+    # three hosts) discussed in the provisioning chat.
+    Write-Host "Creating ${DataDiskSizeGB}GB dynamic data disk at $dataDiskPath ..."
+    New-VHD -Path $dataDiskPath -SizeBytes ([int64]$DataDiskSizeGB * 1GB) -Dynamic | Out-Null
 }
 
 # --- Render cloud-init seed ---

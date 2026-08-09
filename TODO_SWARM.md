@@ -289,6 +289,7 @@ after it.*
 - [ ] **Stagger Windows Update reboots across the three hosts** — quorum of 3
       tolerates one node down; two at once freezes the cluster
       — *not scripted: host-level policy, not a VM property*
+- [ ] undo temporary dynamic disk sizing in New-AerieVM.ps1
 
 ### Phase 2 — k3s + Flux + secrets
 
