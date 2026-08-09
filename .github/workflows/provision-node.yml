@@ -89,6 +89,11 @@ on:
         required: false
         default: false
         type: boolean
+      recreate_vm:
+        description: 'DESTRUCTIVE: if a VM with this name/MAC already exists (e.g. stuck with a stale SSH key from a rotated secret), stop it, remove it, delete its disks, and rebuild fresh instead of resuming it'
+        required: false
+        default: false
+        type: boolean
       skip_wait:
         description: 'Skip post-boot verification (does NOT prove the DHCP reservation works)'
         required: false
@@ -147,6 +152,7 @@ jobs:
           DATA_DISK_GB: ${{ inputs.data_disk_gb }}
           EXTRA_PACKAGES: ${{ inputs.extra_packages }}
           PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
+          RECREATE_VM: ${{ inputs.recreate_vm }}
           SKIP_WAIT: ${{ inputs.skip_wait }}
           SKIP_CHECKSUM_VERIFICATION: ${{ inputs.skip_checksum_verification }}
           # The private half is used only from the host, to verify the node
@@ -194,6 +200,8 @@ jobs:
           }
 
           if ([bool]::Parse($env:PREFLIGHT_ONLY)) { $params.PreflightOnly = $true }
+
+          if ([bool]::Parse($env:RECREATE_VM)) { $params.RecreateVM = $true }
 
           if ([bool]::Parse($env:SKIP_CHECKSUM_VERIFICATION)) { $params.SkipChecksumVerification = $true }
 

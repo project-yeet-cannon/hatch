@@ -34,6 +34,15 @@
     and that stays a hard error: `Remove-VM` it yourself or pick another
     name.
 
+    A resumed VM's cloud-init config - including its SSH authorized_keys -
+    was baked in at creation and is never re-applied, so a rotated
+    -SshPublicKey/-SshPrivateKey (or NODE_SSH_PUBLIC_KEY/NODE_SSH_PRIVATE_KEY)
+    silently has no effect on it: Verify will keep failing with the same
+    "key offered wasn't accepted" error every retry. Pass -RecreateVM to stop
+    and remove that stale VM and its disks and rebuild from scratch with
+    today's inputs - the golden image template is untouched, so this doesn't
+    repay the 10-20 min template build.
+
 .PARAMETER ExpectedIPAddress
     The address the pfSense reservation maps -MacAddress to. Required unless
     -SkipWaitForReady, because verification is what proves the reservation
@@ -109,6 +118,13 @@ param(
     [int]$ReadyTimeoutMinutes = 45,
 
     [switch]$PreflightOnly,
+
+    # An existing VM with a matching MAC is normally resumed as-is (see
+    # Idempotency above). This instead treats it as stale: stop it, remove
+    # it, delete its disk directory, and rebuild fresh with today's inputs.
+    # The one reason to reach for this is a rotated SSH key that a resumed
+    # VM can never pick up on its own.
+    [switch]$RecreateVM,
 
     # Forwarded to Get-GoldenImage.ps1, and only used when the template has
     # to be built on this host.
@@ -207,18 +223,23 @@ try {
         Write-Warning "MAC $MacAddress isn't in Hyper-V's 00-15-5D OUI. That's legal, but the convention keeps these distinguishable from physical NICs on the LAN."
     }
 
-    # A VM of this name is only ever resumed, never silently adopted or
-    # recreated: if its MAC matches, it's this same run's own VM continuing
-    # after an earlier failure (Template/Create already happened), so the
-    # rest of preflight and the stages below treat it as a resume rather than
-    # a conflict. If the MAC doesn't match, it's an unrelated VM that happens
-    # to share the name, and that's still a hard error.
+    # A VM of this name is only ever resumed or (with -RecreateVM) rebuilt,
+    # never silently adopted: if its MAC matches, it's this same run's own VM
+    # continuing after an earlier failure (Template/Create already happened),
+    # so the rest of preflight and the stages below either resume it as-is or
+    # tear it down and rebuild it, rather than treating it as a conflict. If
+    # the MAC doesn't match, it's an unrelated VM that happens to share the
+    # name, and that's still a hard error regardless of -RecreateVM.
     $existingVM = Get-VM -Name $VMName -ErrorAction SilentlyContinue
     $resuming = $false
+    $recreating = $false
     if ($existingVM) {
         $existingVmMacs = @($existingVM | Get-VMNetworkAdapter | Select-Object -ExpandProperty MacAddress)
         if ($existingVmMacs -notcontains $macNormalized) {
             $failures.Add("A VM named '$VMName' already exists on this host, but its MAC ($($existingVmMacs -join ', ')) doesn't match the requested $MacAddress - this looks like an unrelated VM, not a resumable run of this one. Stop and remove it first (Stop-VM -Name $VMName -TurnOff; Remove-VM -Name $VMName) or pick another name.")
+        }
+        elseif ($RecreateVM) {
+            $recreating = $true
         }
         else {
             $resuming = $true
@@ -233,9 +254,10 @@ try {
     # An answer here means something already holds the address the reservation
     # points at, so the VM would either not get it or collide with a live
     # host. Silence proves nothing (ICMP may be filtered), so this only ever
-    # fails on a positive response - except when resuming, where our own VM
-    # answering is exactly what should happen.
-    if (-not $resuming -and $ExpectedIPAddress -and (Test-Connection $ExpectedIPAddress -Count 2 -Quiet -ErrorAction SilentlyContinue)) {
+    # fails on a positive response - except when resuming or recreating,
+    # where our own (soon to be torn down, in the recreate case) VM answering
+    # is exactly what should happen.
+    if (-not $resuming -and -not $recreating -and $ExpectedIPAddress -and (Test-Connection $ExpectedIPAddress -Count 2 -Quiet -ErrorAction SilentlyContinue)) {
         $failures.Add("$ExpectedIPAddress already answers ping, so it isn't free. Either the reservation points at an in-use address, or a previous attempt at this VM is still running somewhere. (New-AerieVM.ps1 can be run directly to bypass this check if you know better.)")
     }
 
@@ -246,7 +268,10 @@ try {
 
     # Free space is only needed for a fresh OS disk copy + data disk; a
     # resumed VM already has both, and by now may well have consumed the
-    # margin this check would otherwise demand again.
+    # margin this check would otherwise demand again. A recreate also needs
+    # this - its old disks aren't deleted until after Preflight returns, so
+    # this conservatively counts a full new copy on top of the old one still
+    # on disk rather than assuming the teardown that hasn't happened yet.
     if (-not $resuming) {
         # Free space: the OS disk is a full copy of the template (not a
         # differencing disk), and the data disk is fixed, so both consume
@@ -283,6 +308,9 @@ try {
     if ($resuming) {
         Write-Host "Mode:      RESUMING - VM '$VMName' already exists with matching MAC $MacAddress; Template/Create will be skipped."
     }
+    elseif ($recreating) {
+        Write-Host "Mode:      RECREATING - VM '$VMName' already exists with matching MAC $MacAddress; -RecreateVM will stop and remove it (and delete its disks) before rebuilding fresh."
+    }
     Write-Host 'Preflight OK.'
 
     if ($PreflightOnly) {
@@ -291,13 +319,31 @@ try {
         return
     }
 
+    if ($recreating) {
+        # ---------------------------------------------------------------- #
+        Write-Stage 'Recreate: removing stale VM'
+        # ---------------------------------------------------------------- #
+
+        Write-Warning "-RecreateVM: treating VM '$VMName' as stale (e.g. its baked-in cloud-init config predates a rotated SSH key) rather than resuming it. Stopping it, removing it, and deleting its disk directory before rebuilding from scratch with today's inputs."
+        if ((Get-VM -Name $VMName).State -ne 'Off') {
+            Write-Host "Stopping VM '$VMName' ..."
+            Stop-VM -Name $VMName -TurnOff -Force
+        }
+        Remove-VM -Name $VMName -Force
+        $staleVmDir = Join-Path $VMStoragePath $VMName
+        if (Test-Path $staleVmDir) {
+            Write-Host "Deleting $staleVmDir ..."
+            Remove-Item -Path $staleVmDir -Recurse -Force
+        }
+    }
+
     if ($resuming) {
         # ---------------------------------------------------------------- #
         Write-Stage 'Resuming existing VM'
         # ---------------------------------------------------------------- #
 
         Write-Host "Found VM '$VMName' with matching MAC from a previous run of this script - skipping Golden image and Create, picking up at Verify."
-        Write-Warning "This VM's cloud-init config (SSH key, packages, hostname, etc.) was baked in by the run that created it and is NOT re-applied now. If -SshPublicKey or other inputs changed since then - including a rotated NODE_SSH_PUBLIC_KEY/NODE_SSH_PRIVATE_KEY - this run verifies against what's already on the VM, not against today's inputs. Remove-VM and recreate it if it needs to pick up new inputs."
+        Write-Warning "This VM's cloud-init config (SSH key, packages, hostname, etc.) was baked in by the run that created it and is NOT re-applied now. If -SshPublicKey or other inputs changed since then - including a rotated NODE_SSH_PUBLIC_KEY/NODE_SSH_PRIVATE_KEY - this run verifies against what's already on the VM, not against today's inputs. Re-run with -RecreateVM to stop, remove, and rebuild it with today's inputs."
         $currentState = (Get-VM -Name $VMName).State
         if ($currentState -eq 'Running') {
             Write-Host "VM is already running."
