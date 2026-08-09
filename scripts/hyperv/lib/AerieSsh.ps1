@@ -27,12 +27,72 @@ Or re-run with -SkipWaitForReady to provision the VM without post-boot verificat
     }
 }
 
+function ConvertTo-NormalizedSshPublicKey {
+    <#
+    .SYNOPSIS
+        Reduces an OpenSSH public key to the two fields that decide its
+        identity - algorithm and base64 blob - so that two spellings of the
+        same key compare equal.
+
+    .DESCRIPTION
+        The trailing comment is free text and routinely differs between
+        sources: the same key is 'ssh-ed25519 AAAA... nathan@laptop' in a
+        GitHub variable and bare 'ssh-ed25519 AAAA...' out of
+        `ssh-keygen -y`. Comparing the raw strings would report those as
+        different keys and send the reader hunting a mismatch that isn't one.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$PublicKey)
+
+    $fields = @($PublicKey.Trim() -split '\s+' | Where-Object { $_ })
+    if ($fields.Count -lt 2) { return $null }
+    "$($fields[0]) $($fields[1])"
+}
+
+function Get-SshPublicKeyFingerprint {
+    <#
+    .SYNOPSIS
+        Returns the SHA256 fingerprint of an OpenSSH public key, or $null if
+        ssh-keygen won't parse it.
+
+    .DESCRIPTION
+        Doubles as the only trustworthy syntax check on a public key. The
+        cheap regex elsewhere anchors the start of the string and so accepts
+        a key that was line-wrapped in transit (a common outcome of pasting
+        one into a GitHub Actions variable from a terminal that hard-wrapped
+        it) - which then renders into user-data as a broken YAML scalar and
+        produces a VM that rejects the key it was built with. ssh-keygen
+        either parses the whole thing or it doesn't.
+
+        Fingerprints are safe to print: they're derived from the public half
+        and are the join key between this run's logs, the seed ISO, and the
+        `cloud-init` authorized-keys banner on the VM's serial console.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$PublicKey)
+
+    $tempFile = Join-Path $env:TEMP "aerie-pub-$([Guid]::NewGuid().ToString('N')).pub"
+    try {
+        [IO.File]::WriteAllText($tempFile, ($PublicKey.Replace("`r`n", "`n").Trim() + "`n"))
+        $ErrorActionPreference = 'Continue'
+        $output = & ssh-keygen.exe -l -f $tempFile 2>&1
+        if ($LASTEXITCODE -ne 0) { return $null }
+        # "256 SHA256:xxxxx comment (ED25519)"
+        return ((([string]$output) -split '\s+') | Where-Object { $_ -like 'SHA256:*' } | Select-Object -First 1)
+    }
+    finally {
+        Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Resolve-SshPrivateKeyFile {
     <#
     .SYNOPSIS
         Materializes the private key to verify with (writing key *content* to
-        a locked-down temp file if that's what was given) and confirms
-        ssh.exe can actually parse it, before any VM work starts.
+        a locked-down temp file if that's what was given), confirms ssh.exe
+        can parse it, and - given -ExpectedPublicKey - confirms it is the
+        private half of the key about to be baked into the VM. All before any
+        VM work starts.
 
     .DESCRIPTION
         A malformed or truncated key (e.g. a mangled NODE_SSH_PRIVATE_KEY
@@ -43,11 +103,19 @@ function Resolve-SshPrivateKeyFile {
         Validating the key's format up front, before it's ever used, means a
         bad key fails in seconds with a message that actually points at the
         key instead of at the wrong theory.
+
+        The pairing check exists for the same reason and costs nothing: this
+        function already had to run `ssh-keygen -y` to prove the key parses,
+        and that command's whole output is the public half. Comparing it to
+        the key being injected turns "the two secrets don't correspond" from
+        a 45-minute round trip ending in an ambiguous auth failure into a
+        preflight error naming both fingerprints.
     #>
     [CmdletBinding()]
     param(
         [string]$SshPrivateKey,
         [string]$SshPrivateKeyPath,
+        [string]$ExpectedPublicKey,
         [Parameter(Mandatory)][string]$VMName
     )
 
@@ -70,13 +138,45 @@ function Resolve-SshPrivateKeyFile {
     # Stdin is fed an empty line rather than left attached to the console: an
     # encrypted key would otherwise make ssh-keygen block on a passphrase
     # prompt that nothing here will ever answer.
+    #
+    # Function-scoped drop to Continue, as in Invoke-NodeSsh: callers set
+    # $ErrorActionPreference to Stop, under which the 2>&1 redirect below
+    # turns anything ssh-keygen writes to stderr into a terminating
+    # NativeCommandError - so a rejected key would surface as that generic
+    # error rather than the message written for it a few lines down.
+    $ErrorActionPreference = 'Continue'
     $keygenOutput = '' | & ssh-keygen.exe -y -f $path 2>&1
     if ($LASTEXITCODE -ne 0) {
         if ($tempKeyFile) { Remove-Item $tempKeyFile -Force -ErrorAction SilentlyContinue }
         throw "The SSH private key at '$path' doesn't parse (ssh-keygen: $keygenOutput). Check -SshPrivateKey / -SshPrivateKeyPath (or the NODE_SSH_PRIVATE_KEY secret) holds a complete, unencrypted OpenSSH private key with its BEGIN/END markers intact - not truncated, not the public key, not passphrase-protected."
     }
 
-    [pscustomobject]@{ Path = $path; TempFile = $tempKeyFile }
+    # -y writes the public half to stdout; that's the thing worth comparing,
+    # not just the exit code.
+    $derivedPublicKey = (@($keygenOutput) -join "`n").Trim()
+    $derivedFingerprint = Get-SshPublicKeyFingerprint -PublicKey $derivedPublicKey
+
+    if ($ExpectedPublicKey) {
+        $expectedFingerprint = Get-SshPublicKeyFingerprint -PublicKey $ExpectedPublicKey
+        if (-not $expectedFingerprint) {
+            if ($tempKeyFile) { Remove-Item $tempKeyFile -Force -ErrorAction SilentlyContinue }
+            throw "The SSH public key (-SshPublicKey / NODE_SSH_PUBLIC_KEY) isn't something ssh-keygen can parse. The most common cause is a line break introduced when the key was pasted - it must be a single line, 'ssh-ed25519 AAAA... [comment]'. Left as-is it renders into the seed ISO's user-data as a broken YAML scalar, and the VM ends up rejecting the very key it was built with."
+        }
+
+        if ((ConvertTo-NormalizedSshPublicKey $derivedPublicKey) -ne (ConvertTo-NormalizedSshPublicKey $ExpectedPublicKey)) {
+            if ($tempKeyFile) { Remove-Item $tempKeyFile -Force -ErrorAction SilentlyContinue }
+            throw @"
+The SSH keypair doesn't match. The public key about to be baked into this VM is not the public half of the private key this run would verify with, so the VM could only ever refuse it.
+
+  public  (-SshPublicKey  / NODE_SSH_PUBLIC_KEY):  $expectedFingerprint
+  private (-SshPrivateKey / NODE_SSH_PRIVATE_KEY): $derivedFingerprint
+
+Fix whichever is wrong: 'ssh-keygen -y -f <private key>' prints the public half that belongs with the private key you're using.
+"@
+        }
+    }
+
+    [pscustomobject]@{ Path = $path; TempFile = $tempKeyFile; Fingerprint = $derivedFingerprint }
 }
 
 function Protect-PrivateKeyFile {
@@ -347,6 +447,25 @@ function Wait-AerieNodeReady {
     if ($final.StdOut -notmatch 'status:\s*done') {
         throw "cloud-init did not reach 'done' on $IPAddress (exit $($final.ExitCode)). Inspect /var/log/cloud-init-output.log on the node:`n$($final.StdOut)$($final.StdErr)"
     }
+
+    # 'done' is not the same as 'did anything'. With no readable datasource
+    # cloud-init completes cleanly against DataSourceNone, having applied no
+    # user-data at all: no account, no authorized_keys, no packages. The VM
+    # still boots, still takes the DHCP-reserved address, and still picks up
+    # the right hostname from DHCP option 12, so every signal short of this
+    # one says success - and the eventual symptom is an SSH failure that
+    # reads as a rejected key. Assert-NoCloudIso should stop a seed like that
+    # ever reaching a VM; this is the backstop for the ways it could still
+    # happen (DVD drive detached, media swapped, ISO unreadable in-guest).
+    if ($final.StdOut -match 'DataSourceNone') {
+        throw @"
+cloud-init finished on $IPAddress but found no datasource (DataSourceNone), so none of the seed ISO's user-data was applied - the '$User' account does not exist on this VM, and sshd will reject every key with a generic 'Permission denied (publickey)' that looks exactly like a wrong-key problem.
+
+The seed ISO wasn't readable in-guest. Check the VM still has the cidata DVD attached, and that its root holds files named exactly 'user-data' and 'meta-data'.
+
+$($final.StdOut)
+"@
+    }
     if ($final.ExitCode -ne 0) {
         Write-Warning "cloud-init finished but reports a degraded run (exit $($final.ExitCode)) - a module failed without aborting provisioning. Review /var/log/cloud-init-output.log before treating this node as ready:`n$($final.StdOut)"
     }
@@ -364,6 +483,12 @@ function Wait-AerieNodeReady {
         # $PRETTY_NAME would interpolate to empty here instead of reaching
         # the remote shell.
         "echo '--- identity'; hostnamectl --static; hostname -f; . /etc/os-release; echo `$PRETTY_NAME; uname -r"
+        # Which datasource cloud-init actually used, and the fingerprint of
+        # every key that reached authorized_keys. Both belong in the
+        # acceptance report: they're what makes 'this node is provisioned'
+        # checkable after the fact rather than inferred from the run passing.
+        "echo '--- cloud-init'; cloud-init status --long 2>/dev/null | grep -i -E 'status:|detail:' || echo 'cloud-init status unavailable'"
+        "echo '--- authorized keys'; ssh-keygen -l -f ~/.ssh/authorized_keys 2>/dev/null || echo 'no authorized_keys'"
         "echo '--- network'; ip -4 -brief addr show scope global; ip route | grep default"
         "echo '--- disks'; lsblk -o NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE"
         "echo '--- time'; timedatectl | sed -n 1,4p; chronyc -n sources 2>/dev/null || echo 'chrony not answering'"

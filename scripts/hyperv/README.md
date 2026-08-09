@@ -295,8 +295,37 @@ prerequisites.
 `vmconnect localhost <VMName>`, and log in there as `aerie` with the
 break-glass console password (see step 3) to read
 `/var/log/cloud-init-output.log` directly. A port-22 timeout is usually the
-DHCP reservation not matching the MAC; a rejected key usually shows up as a
-cloud-init failure to apply `ssh_authorized_keys` in the console output.
+DHCP reservation not matching the MAC.
+
+**`Permission denied (publickey)`.** Resist the urge to go rotate keys — the
+message does not mean what it appears to. sshd returns it identically for a
+rejected key and for an account that doesn't exist, and the second is far more
+likely here. Work down this list, cheapest first; each step needs nothing from
+the previous one:
+
+1. **Log in at the console as `aerie`.** `Login incorrect` means the account
+   was never created, so this was never a key problem. Go to step 3.
+2. **Compare fingerprints.** Preflight prints the keypair's `SHA256:…`, and
+   the acceptance report prints what actually landed in the VM's
+   `authorized_keys`. Different keys, or no `authorized_keys` at all, tells
+   you which half is wrong.
+3. **Check the datasource.** `cloud-init status --long` reporting
+   `DataSourceNone` means the seed ISO wasn't readable, so *none* of
+   `user-data` was applied: no account, no keys, no packages. Mount
+   `D:\aerie\VMs\<VMName>\seed.iso` and confirm its root holds files named
+   exactly `user-data` and `meta-data` — names like `USERDA~1` mean the image
+   lost Joliet and cloud-init skipped it. `Assert-NoCloudIso` is supposed to
+   catch this at ISO-creation time.
+4. **Confirm you're talking to the right machine.**
+   `Get-NetNeighbor -IPAddress <ExpectedIP>` returns the MAC that currently
+   holds the address; it should be the VM's.
+
+**The VM has the right hostname, so cloud-init must have run.** No — this is
+the single most misleading signal on the box. pfSense hands the reservation's
+hostname over DHCP (option 12) and the guest's network stack applies it as the
+transient hostname, with cloud-init uninvolved. A VM that applied *none* of its
+`user-data` still shows `Debian GNU/Linux 13 aerie-node-1 tty1` at the console.
+Check the datasource, not the hostname.
 
 **`Get-VMNetworkAdapter` shows `IPAddresses : {}`.** Not conclusive on its
 own. That list is populated by the guest KVP daemon from `hyperv-daemons`,

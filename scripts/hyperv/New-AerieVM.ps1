@@ -238,6 +238,7 @@ Start-VM -Name $VMName
 if ($LogIngestUrl -and $LogIngestToken) {
     Register-VmConsoleLogShipper -VMName $VMName -VmDir $vmDir -IngestUrl $LogIngestUrl -Token $LogIngestToken
     Write-Host "Console log shipper registered - serial console now flows to $LogIngestUrl (Scheduled Task 'Aerie-VMConsoleLog-$VMName')."
+    Write-Host "  A copy is kept on this host at $(Join-Path $vmDir 'console.log') - read that when the VM never reaches the network."
 }
 
 Write-Host ""

@@ -33,8 +33,12 @@ function Register-VmConsoleLogShipper {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 
     $pipeName = "$VMName-com1"
+    # Alongside the VM's disks, so the console log is found by anyone already
+    # looking at that VM's directory and is removed with it on -RecreateVM.
+    $consoleLogPath = Join-Path $VmDir 'console.log'
     $argumentList = "-NoProfile -ExecutionPolicy Bypass -File `"$shipperScript`" " +
-        "-VMName `"$VMName`" -PipeName `"$pipeName`" -IngestUrl `"$IngestUrl`" -Token `"$Token`""
+        "-VMName `"$VMName`" -PipeName `"$pipeName`" -IngestUrl `"$IngestUrl`" -Token `"$Token`" " +
+        "-LogFilePath `"$consoleLogPath`""
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $argumentList
 
     # AtStartup covers the host-reboot case; Register-VmConsoleLogShipper's

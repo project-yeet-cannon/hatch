@@ -160,6 +160,9 @@ function Write-Stage {
 $tempKeyFile = $null
 $privateKeyPath = $null
 $knownHostsFile = $null
+# Set-StrictMode is on, so anything referenced in the summary below has to
+# exist even on the paths that never assign it.
+$keyFingerprint = $null
 $startedUtc = (Get-Date).ToUniversalTime()
 
 try {
@@ -208,9 +211,14 @@ try {
         # matter which stage a later failure happens in.
         if ($privateKeyMaterialFound -and $opensshOk) {
             try {
-                $resolvedKey = Resolve-SshPrivateKeyFile -SshPrivateKey $SshPrivateKey -SshPrivateKeyPath $SshPrivateKeyPath -VMName $VMName
+                # -ExpectedPublicKey makes this the pairing check too: the
+                # public half is what gets baked into the VM, so a private
+                # key that doesn't correspond to it can only ever be refused.
+                $resolvedKey = Resolve-SshPrivateKeyFile -SshPrivateKey $SshPrivateKey -SshPrivateKeyPath $SshPrivateKeyPath `
+                    -ExpectedPublicKey $SshPublicKey -VMName $VMName
                 $privateKeyPath = $resolvedKey.Path
                 $tempKeyFile = $resolvedKey.TempFile
+                $keyFingerprint = $resolvedKey.Fingerprint
             }
             catch {
                 $failures.Add($_.Exception.Message)
@@ -316,6 +324,12 @@ try {
     Write-Host "MAC:       $MacAddress  ->  switch '$SwitchName' (External)"
     Write-Host "Expecting: $(if ($ExpectedIPAddress) { $ExpectedIPAddress } else { '(not verifying - -SkipWaitForReady)' })"
     Write-Host "Template:  $GoldenImagePath"
+    # Printed so a later auth failure can be checked against something rather
+    # than guessed at: this same fingerprint appears in the seed ISO's
+    # user-data and in cloud-init's authorized-keys banner on the VM console.
+    if ($keyFingerprint) {
+        Write-Host "SSH key:   $keyFingerprint (public key matches the private key verification will use)"
+    }
     if ($resuming) {
         Write-Host "Mode:      RESUMING - VM '$VMName' already exists with matching MAC $MacAddress; Template/Create will be skipped."
     }

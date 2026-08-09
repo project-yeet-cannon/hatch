@@ -13,15 +13,49 @@
     while the VM is running (see New-AerieVM.ps1's Set-VMComPort call), so
     this reconnects in a loop rather than treating a connect failure or a
     mid-stream disconnect (VM stopped/recreated) as fatal.
+
+    Lines are also written to -LogFilePath on the host. OpenSearch is the
+    better place to read them from, but it's reachable only once the rest of
+    Aerie is up and the VM has a working network - and the boots worth
+    reading are exactly the ones where neither is true. cloud-init prints its
+    datasource, the host key fingerprints, and the authorized-keys
+    fingerprints to this console, which makes a local copy the one diagnostic
+    that survives a node that never reaches the LAN at all.
 #>
 param(
     [Parameter(Mandatory)][string]$VMName,
     [Parameter(Mandatory)][string]$PipeName,
     [Parameter(Mandatory)][string]$IngestUrl,
-    [Parameter(Mandatory)][string]$Token
+    [Parameter(Mandatory)][string]$Token,
+    [string]$LogFilePath
 )
 
 $ErrorActionPreference = 'Stop'
+
+# This task runs for the VM's lifetime - months - so the on-disk copy needs a
+# ceiling. One rollover keeps the current boot plus the previous window,
+# which is as far back as any of this is useful.
+$MaxLogBytes = 32MB
+
+function Write-ConsoleLine {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Line)
+
+    if (-not $LogFilePath) { return }
+    try {
+        if ((Test-Path $LogFilePath) -and (Get-Item $LogFilePath).Length -ge $MaxLogBytes) {
+            Move-Item -Path $LogFilePath -Destination "$LogFilePath.1" -Force
+        }
+        # Round-trip ('o') rather than a hand-rolled format string: 'T' and
+        # 'Z' aren't custom format specifiers, so spelling ISO-8601 out by
+        # hand is a FormatException waiting to happen.
+        Add-Content -Path $LogFilePath -Value ('{0} {1}' -f (Get-Date).ToUniversalTime().ToString('o'), $Line)
+    }
+    catch {
+        # Never let the local copy take down the shipper - OpenSearch is
+        # still the primary sink.
+        Write-Warning "console log write to '$LogFilePath' failed: $($_.Exception.Message)"
+    }
+}
 
 # Batched rather than one HTTP call per line - a chatty boot (kernel +
 # cloud-init) can produce hundreds of lines a second.
@@ -76,6 +110,10 @@ while ($true) {
             $line = $reader.ReadLine()
             if ($null -eq $line) { break }
             $buffer.Add($line)
+            # Written through immediately rather than on the batch flush: a
+            # VM that panics mid-boot is precisely when the last few lines
+            # matter, and they'd be the ones still sitting in $buffer.
+            Write-ConsoleLine -Line $line
 
             if ($buffer.Count -ge $FlushEvery -or ((Get-Date) - $lastFlush).TotalSeconds -ge $FlushIntervalSeconds) {
                 Send-LineBatch -Lines $buffer
