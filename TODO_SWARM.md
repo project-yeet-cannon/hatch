@@ -293,15 +293,49 @@ after it.*
       the week, and `scripts/hyperv/Set-UpdateRebootSchedule.ps1` upserts
       each host's Windows Update AU registry policy. Rerun with an updated
       `hosts` input whenever the host topology changes.*
-- [ ] apply staggering actions to all cluster servers
+- [x] apply staggering actions to all cluster servers
 - [x] undo temporary dynamic disk sizing in New-AerieVM.ps1
 
 ### Phase 2 — k3s + Flux + secrets
 
-- [ ] k3s on all three as servers with embedded etcd, `--disable servicelb`
-- [ ] SOPS + age; back up the age private key offline **and** into the Phase 0
-      restic repo — without it, DR can't decrypt its own config
-- [ ] `flux bootstrap` against this repo, watching a new `deploy/` tree
+> Needs Phase 1's two available-host VMs actually built and reachable over
+> SSH first — the third host is still running prod and doesn't get a node
+> until Phase 7.
+
+- [ ] `scripts/k3s/Install-K3sNode.ps1` — new script, same shape as
+      `Initialize-AerieNode.ps1` (reuses `lib/AerieSsh.ps1` to connect, takes
+      `-VMName`/`-IPAddress` plus `-ClusterInit` or `-JoinServer <node1-ip>`),
+      so both nodes are one repeatable command each rather than hand-typed
+      SSH sessions:
+      - node 1: `curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=<pin> sh -s - server --cluster-init --disable servicelb --token <token>`
+      - node 2: same, with `--server https://<node1-ip>:6443` in place of `--cluster-init`
+      - **pin `INSTALL_K3S_VERSION`** — don't track the latest/stable channel,
+        for the same reproducibility reason as Goal 6.5's Renovate ask, which
+        should cover this pin too once it exists
+- [ ] Generate the shared cluster token before either install (`openssl rand
+      -hex 32`); store it exactly like the SSH keys — never in git
+- [ ] Confirm node-to-node ports are open before the second node joins: TCP
+      6443 (apiserver), 2379-2380 (etcd), 10250 (kubelet), UDP 8472 (flannel
+      VXLAN). Debian/Ubuntu cloud images ship with no firewall active, so
+      this is a no-op today — worth a one-line check, not a real risk, unless
+      that default changes
+- [ ] `age-keygen` for the SOPS key. Commit the **public** key and a
+      `.sops.yaml` creation rule (e.g. `deploy/**/secrets/*.yaml`) to git.
+      Get the **private** key into the Phase 0 restic repos (extend
+      `containers/backup/scripts/backup.sh` to pick it up) **and** print it
+      for offline storage — the same two-step pattern as the Phase 0 restic
+      password, and for the same reason: a key that only lives on the node it
+      protects isn't a secret store
+- [ ] `flux bootstrap github --owner=<owner> --repository=Aerie --branch=main
+      --path=deploy/cluster --personal`, run once from an operator machine
+      with `kubectl` pointed at node 1, using a scoped PAT (contents +
+      workflows) — the last imperative step; everything Flux manages after
+      this is a git commit to `deploy/`, no more manual `kubectl apply`
+- [ ] Note the gap, don't solve it here: `kubectl`/Flux target node 1's IP
+      directly — there's no VIP in front of the apiserver itself (kube-vip in
+      Phase 3 fronts *ingress* traffic only). Losing node 1 means manually
+      repointing the kubeconfig context at node 2 until Phase 7 restores a
+      third node. Acceptable for a home cluster; call it out if that changes
 
 > During the parallel build only the two new servers exist as nodes. Two-node
 > etcd has *worse* availability than one, so treat the build window as

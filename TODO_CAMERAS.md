@@ -17,6 +17,44 @@ we are going to do a lean build - getting the events and video flowing through t
 - Video feed: a **real live stream** proxied through Aerie.Api (HLS or go2rtc relay), not snapshot-polling. HADotNet only gives still images (`CameraProxyClient`) today, so the stream-fetching side is also new.
 - Workflow scope: **hardcode** motion → kiosk-modal as the only reaction for v1, but put it behind a single dispatch seam (`IMotionEventDispatcher`) so a real trigger/action registry can replace it later without a rewrite.
 
+## Hardware Selection
+
+No cameras owned yet as of 2026-08-09. This analysis drives the purchase, and several findings feed back into the plan below (see the flagged items in Phases 2, 7 and 8).
+
+### Chosen brand: Reolink PoE (wired only)
+
+Picked for event latency, not image quality. Reolink is a platinum-tier **Works with Home Assistant** integration (certified April 2025), fully local, and delivers motion binary sensors over **TCP push** — sub-second, rather than the integration's 5-second fast-polling fallback. Phases 4–6 are a latency chain; push at the front is what makes the kiosk modal feel live. It also produces exactly the entity shape `DiscoveryService`/`CameraChannelBuilder` already assume: one `camera.*` plus a sibling `binary_sensor.*_motion` under one HA device.
+
+Candidate models (all PoE, IP67, ~$80–200 street):
+
+| Model | Notes |
+| --- | --- |
+| RLC-811A | 4K bullet, 5x optical zoom, spotlight. Default pick — zoom means mounting doesn't have to be perfect. |
+| RLC-1224A | 12MP dome, 700lm spotlight, wide fixed lens. Broad-area coverage (driveway, back yard). |
+| RLC-823A | 4K PTZ, 5x zoom. Only if pan/tilt is wanted; not needed for v1. |
+| RLC-510A / 520A | 5MP budget bullet/dome. Fine for a low-value angle. |
+
+Buy PoE. **Not** WiFi, and **not** battery — battery models (Argus, Doorbell Battery) are documented as staying awake while the stream is viewed, which is fatal for a design that auto-opens a live feed on every motion event. LTE models (Go Plus, TrackMix LTE) are outright incompatible with the HA integration. Skip the NVR — it adds nothing here and complicates entity grouping.
+
+### Shortcomings and how they hit this plan
+
+1. **Five `camera.*` entities per device.** Reolink emits Fluent, Balanced, Clear, Snapshots Fluent, Snapshots Clear; only Fluent (low-res sub-stream) is enabled by default. `InferKind` takes `FirstOrDefault` over an **ordinal-sorted** entity list, so today it lands on `_fluent` by accident (the others have no state while disabled). Enabling "Clear" for 4K makes `_balanced`/`_clear` sort ahead and silently changes the anchor. → Phase 2 item.
+2. **H.265 main stream won't play in a browser.** On the 4K/12MP models the main ("Clear") stream is H.265; the sub-stream ("Fluent") is H.264. The kiosk modal wants the sub-stream anyway — lower latency, no transcode, and it removes any pressure to transcode 4K on the Windows prod box.
+3. **The `_motion` sensor is noisy** (trees, rain, headlights, shadows). v1 opens a modal on every transition, which gets annoying fast. Reolink also exposes `binary_sensor.*_person` / `_vehicle` / `_pet` from on-camera AI, with far fewer false positives. → Phase 2 item.
+4. **Avoid dual-lens models** (Duo 3, TrackMix): multiple lenses/channels under one HA device, and `CameraChannelBuilder` takes `FirstOrDefault` for both feed and motion, so half the camera would import silently. Single-lens keeps the one-device-one-feed assumption true.
+
+### Alternatives rejected
+
+- **UniFi Protect** — best-in-class when working, but has repeatedly broken HA motion events on firmware updates (core issues in Dec 2025 and Feb 2026). Wrong risk profile for a system whose whole value is event-driven, and needs a Protect console.
+- **Amcrest / Dahua** — good ONVIF hardware and the community Dahua integration passes motion events well, but it's HACS, not core. Don't want the event path depending on a third-party integration.
+- **Axis** — core integration, extremely reliable, ONVIF-native, but ~4–6x the price per camera.
+
+### Impact on Phase 7 (video)
+
+Phase 7 currently assumes the stream is fetched *through* HA. That's the hard path: HA bundles go2rtc (since 2024.11) but binds its API to port **11984** and doesn't expose it by default — the docs only describe opening it via `debug_ui`, explicitly flagged as debug-only.
+
+Cleaner with Reolink: **HA for events, camera-direct for video.** Reolink publishes stable RTSP URLs (`rtsp://user:pass@<ip>:554/h264Preview_01_sub` for the H.264 sub-stream), and a **standalone go2rtc** sidecar on the Windows box converts RTSP → HLS/MSE/WebRTC over plain HTTP that `CameraController` proxies. HA can be pointed at that same instance (`go2rtc: url: http://...:1984`), so both systems share one stream source instead of two. `CameraFeed`'s `HaEntityId` stays the identity/discovery key — no schema change — while the bytes come from a documented, stable URL rather than HA internals. This likely also removes the `hls.js` dependency flagged in Phase 8.
+
 ## Implementation Plan
 
 Follows the existing `Device`/`DeviceChannel` model (`src/Aerie.Api/Ef/DeviceMapping.cs`) and discovery pipeline (`src/Aerie.Api/Services/DeviceMapping/DiscoveryService.cs`) that Mysa/power-switches used — see `docs/device-architecture.md` for the phase-doc convention this mirrors.
@@ -33,6 +71,9 @@ Follows the existing `Device`/`DeviceChannel` model (`src/Aerie.Api/Ef/DeviceMap
 - [x] Add a `CameraChannels(cameraEntityId, entityIds)` helper mirroring `ThermostatChannels`/`SwitchChannels`: always emits the `CameraFeed` channel, plus a `MotionState` channel if a sibling `binary_sensor.*_motion` entity is present in the group — landed as `CameraChannelBuilder.cs`, matching `LightChannelBuilder`'s standalone-class shape
 - [x] Extract `BuildSuggestion`'s kind-inference chain into a pure function of `IReadOnlyList<string> entityIds` (it isn't today) so the new branch is unit-testable — `DiscoveryService` currently has zero test coverage because `TemplateClient` is sealed; this sidesteps that without adding a wrapper interface — landed as `DiscoveryService.InferKind` + `KindMatch`
 - [x] Unit test: camera+motion grouping produces the right `DeviceKind`/channels; camera-without-motion-sibling still imports with just `CameraFeed`
+- [ ] **Pin the camera-entity anchor deterministically** instead of relying on ordinal `FirstOrDefault` (`DiscoveryService.InferKind`). Reolink emits five `camera.*` entities per device (`_fluent`/`_balanced`/`_clear`/`_snapshots_*`); today the right one is picked only because the rest are disabled and stateless. Prefer the sub-stream (`_fluent`) explicitly — it's H.264, where `_clear` is H.265 and won't play in a browser — and fall back to ordinal-first for non-Reolink cameras. See Hardware Selection §1/§2.
+- [ ] **Prefer `binary_sensor.*_person` over `*_motion`** for the `MotionState` channel in `CameraChannelBuilder.Build`, falling back to `_motion` when no AI sensor exists. Reolink's plain motion sensor fires on trees/rain/headlights, and v1 opens a modal on every transition. See Hardware Selection §3.
+- [ ] Unit test both of the above: multi-`camera.*` group picks the sub-stream anchor; `_person`-present group picks it over `_motion`; `_motion`-only group still works
 
 ### Phase 3 — Admin UI
 
@@ -65,7 +106,10 @@ Follows the existing `Device`/`DeviceChannel` model (`src/Aerie.Api/Ef/DeviceMap
 ### Phase 7 — Video stream proxy
 
 - [ ] Confirm what the actual cameras/HA setup support (HA `stream` integration HLS vs. go2rtc WebRTC) by prototyping directly against one real camera entity — **flag back if the real capabilities push this toward a heavier lift than expected**, since this is genuinely new territory for the repo
-- [ ] Add a `CameraController` endpoint (e.g. `GET /api/devices/{id}/channels/{channelId}/camera/stream`) resolving the `CameraFeed` channel's `HaEntityId`, fetching the HA-side stream (playlist/segments or WebRTC negotiation) via `IHomeAssistantConnectionManager`'s host/port/token, and proxying it back
+- [ ] **Evaluate the camera-direct route recommended in Hardware Selection §"Impact on Phase 7" before building the HA-proxy version.** Verify the Reolink sub-stream RTSP URL plays directly (`ffplay rtsp://user:pass@<ip>:554/h264Preview_01_sub`), then stand up a **standalone go2rtc** on the Windows prod box and confirm it serves that stream over plain HTTP. HA's bundled go2rtc binds 11984 and isn't exposed by default, so proxying through HA is the harder path.
+- [ ] If the sidecar route holds up: point HA's own integration at the same instance (`go2rtc: url:`) so both systems share one stream source, and decide where the RTSP URL/credentials live (they are *not* the `CameraFeed` `HaEntityId` — that stays the identity key, so this needs a home: config, a new channel, or device metadata). **Flag the choice back before implementing.**
+- [ ] Add a `CameraController` endpoint (e.g. `GET /api/devices/{id}/channels/{channelId}/camera/stream`) resolving the `CameraFeed` channel's `HaEntityId`, fetching the stream (from the go2rtc sidecar if the above holds, otherwise HA-side playlist/segments or WebRTC negotiation via `IHomeAssistantConnectionManager`'s host/port/token), and proxying it back
+- [ ] Confirm go2rtc + any ffmpeg dependency actually runs as a service on Windows prod (see `project_windows_prod_servers`) — not just on the dev Mac
 - [ ] If proxying HLS, extract playlist-URL-rewriting (so segment URLs route back through this endpoint) into a pure, unit-testable function, same convention as `ChannelValueExtractor`
 - [ ] Unit test: the playlist-rewriting function
 - [ ] Manual test: confirm the proxied stream actually plays (e.g. `ffplay` or a bare `<video>` tag) against a real camera before wiring the kiosk modal to it
@@ -73,7 +117,7 @@ Follows the existing `Device`/`DeviceChannel` model (`src/Aerie.Api/Ef/DeviceMap
 ### Phase 8 — Kiosk dashboard modal (frontend)
 
 - [ ] Port the `Modal.tsx` pattern (`apps/admin/src/components/Modal.tsx`) into a new `apps/dashboard/src/components/CameraFeedModal.tsx`, plus matching `.modal-overlay`/`.modal-panel` CSS in dashboard's `theme.css` (doesn't exist there yet — dashboard has no modal today)
-- [ ] If the stream is HLS, add `hls.js` as a dashboard dependency (native `<video>` doesn't support HLS outside Safari) — **flag this new frontend dependency back given the lean-build ask**
+- [ ] If the stream is HLS, add `hls.js` as a dashboard dependency (native `<video>` doesn't support HLS outside Safari) — **flag this new frontend dependency back given the lean-build ask**. Likely avoidable: if Phase 7 lands on the go2rtc sidecar, its MSE/WebRTC output plays in a plain `<video>` with a small inline shim and no npm dependency. Re-check once Phase 7 is settled.
 - [ ] In `App.tsx`, subscribe to `/api/motion-events/stream` via `EventSource` on mount; track which camera device (if any) currently has active motion
 - [ ] Render `CameraFeedModal` when a camera's motion is active, sourcing video from the Phase 7 proxy endpoint; close on motion-inactive or the modal's X button
 - [ ] Build + lint the dashboard app; in-browser verification of the live feed/modal is on you as usual, not claimed here as tested
