@@ -1,0 +1,146 @@
+# Step 1 of the provisioning pipeline: install k3s server on one node
+# (TODO_SWARM.md Phase 2), either forming the cluster's embedded etcd or
+# joining an existing one. Dispatch-only, one node per run.
+#
+# This workflow is deliberately thin: it checks out the repo and hands every
+# decision to scripts/k3s/Install-K3sNode.ps1, which also supports being run
+# by hand from any Windows box with the OpenSSH client. That manual path is a
+# fallback only - this repo's goal is infrastructure-as-code, so the
+# dispatched run (auditable, with a job summary) is what "installing a node"
+# means here. Any logic added to this file instead of the script would exist
+# on only one of the two paths and let them drift.
+#
+# The runner doesn't need to be the node being installed - it only needs
+# outbound SSH to -ip_address (and, when joining, to node 1's :6443). Reusing
+# the same hyperv-host-* runners as provision-0-new-node.yml means no new
+# runner prerequisite: they already carry the OpenSSH client that script
+# needs.
+#
+# Billing: `runs-on` pins `self-hosted`, so runs never land on a
+# GitHub-hosted runner (which has no route to these LAN addresses anyway) and
+# never consume Actions minutes.
+#
+# Previous step: provision-0-new-node.yml, once the node answers SSH.
+# Next step: age-keygen for SOPS + `flux bootstrap` (not yet scripted).
+name: 'Provision 1: Install k3s'
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: 'Runner to dispatch from (any host works - it only needs to reach the node over SSH)'
+        required: true
+        type: choice
+        options:
+          - hyperv-host-0
+          - hyperv-host-1
+          - hyperv-host-2
+      vm_name:
+        description: 'The node VM name, as given to provision-0-new-node.yml (e.g. aerie-node-1)'
+        required: true
+        type: string
+      ip_address:
+        description: 'The node''s LAN address'
+        required: true
+        type: string
+      role:
+        description: 'cluster-init forms the etcd cluster (node 1 only); join adds a server to an existing one'
+        required: true
+        type: choice
+        options:
+          - cluster-init
+          - join
+      join_server:
+        description: 'Required when role=join: node 1''s LAN address'
+        required: false
+        type: string
+      reinstall:
+        description: 'DESTRUCTIVE: if k3s is already active on this node, uninstall it first and reinstall clean with today''s inputs (see the script''s -Reinstall notes on etcd membership before using this on a server that already joined)'
+        required: false
+        default: false
+        type: boolean
+      preflight_only:
+        description: 'Check SSH reachability and stop without installing anything'
+        required: false
+        default: false
+        type: boolean
+
+# Keyed on the node, not the runner host: two different nodes can install
+# concurrently from the same or different runners with no conflict, but
+# running the same node twice at once would race the same k3s.service.
+concurrency:
+  group: provision-1-install-k3s-${{ inputs.vm_name }}
+  cancel-in-progress: false
+
+jobs:
+  install:
+    name: ${{ inputs.vm_name }} (${{ inputs.role }})
+    runs-on: [self-hosted, '${{ inputs.host }}']
+
+    # Generous on purpose: the install script pulls the k3s binary and, on
+    # -reinstall, uninstalls first. Failing at 30m means something hung.
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out provisioning scripts
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install k3s
+        shell: powershell
+        env:
+          # Same quoting hazard as provision-0-new-node.yml: every input
+          # arrives as an env var rather than being interpolated into the
+          # script body, since `${{ }}` substitution happens before
+          # PowerShell parses anything.
+          VM_NAME: ${{ inputs.vm_name }}
+          IP_ADDRESS: ${{ inputs.ip_address }}
+          ROLE: ${{ inputs.role }}
+          JOIN_SERVER: ${{ inputs.join_server }}
+          REINSTALL: ${{ inputs.reinstall }}
+          PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
+          # Pinned once for the whole cluster, bumped deliberately - see
+          # TODO_SWARM.md Phase 2 on why this isn't the latest/stable channel.
+          K3S_VERSION: ${{ vars.K3S_VERSION }}
+          # Shared across every server in the cluster. Generated once with
+          # `openssl rand -hex 32` before node 1's install and never rotated
+          # without reinstalling every node.
+          K3S_CLUSTER_TOKEN: ${{ secrets.K3S_CLUSTER_TOKEN }}
+          # Same keypair provision-0-new-node.yml verified the node with -
+          # cloud-init baked the public half into this node's authorized_keys.
+          NODE_SSH_PRIVATE_KEY: ${{ secrets.NODE_SSH_PRIVATE_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+
+          foreach ($required in 'K3S_VERSION', 'K3S_CLUSTER_TOKEN', 'NODE_SSH_PRIVATE_KEY') {
+            if (-not (Get-Item "env:$required" -ErrorAction SilentlyContinue).Value) {
+              throw "$required is not set. Add it under Settings > Secrets and variables > Actions (K3S_VERSION is a repository variable; the other two are secrets)."
+            }
+          }
+
+          if ($env:ROLE -eq 'join' -and -not $env:JOIN_SERVER) {
+            throw "role=join needs join_server (node 1's LAN address)."
+          }
+
+          $params = @{
+            VMName              = $env:VM_NAME
+            IPAddress           = $env:IP_ADDRESS
+            K3sVersion          = $env:K3S_VERSION
+            Token               = $env:K3S_CLUSTER_TOKEN
+            SshPrivateKey       = $env:NODE_SSH_PRIVATE_KEY
+            ReadyTimeoutMinutes = 15
+          }
+
+          if ($env:ROLE -eq 'cluster-init') {
+            $params.ClusterInit = $true
+          }
+          else {
+            $params.JoinServer = $env:JOIN_SERVER
+          }
+
+          if ([bool]::Parse($env:REINSTALL)) { $params.Reinstall = $true }
+          if ([bool]::Parse($env:PREFLIGHT_ONLY)) { $params.PreflightOnly = $true }
+
+          & .\scripts\k3s\Install-K3sNode.ps1 @params

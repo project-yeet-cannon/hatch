@@ -5,30 +5,26 @@ places: the Phase 0 scratch VM for the DR-restore gate, and the Phase 1 node
 VMs (one per Windows host). Same VM shape both times — only the cloud-init
 payload (`-ExtraPackages` / `-RunCmd`) differs.
 
-## Two ways to run this, and they are the same thing
+## The GitHub Actions workflow is the way to run this
 
 [`Initialize-AerieNode.ps1`](Initialize-AerieNode.ps1) is the entry point, and
-it holds all the logic. There are two supported ways to invoke it, and neither
-is a degraded version of the other:
+it holds all the logic. **Actions → *Provision 0: New node VM* → Run
+workflow** is how a node gets built — dispatched, not hand-typed, so every
+run is an auditable record of who built which node when. This repo's goal is
+infrastructure-as-code; a script that only runs by someone remoting into a
+box isn't that.
 
-| | **A — on the host** | **B — GitHub Actions** |
-|---|---|---|
-| How | elevated PowerShell on the Hyper-V host | Actions → *Provision node VM* → Run workflow |
-| Needs | the `scripts\hyperv\` folder | a labelled self-hosted runner on that host |
-| Config | parameters you type | workflow inputs + repo variables |
-| Output | console | console + job summary |
-| Actions minutes | n/a | **zero** — `runs-on` pins `self-hosted` |
-
-The workflow checks out this repo on the target host and calls the same script
-with the same parameters. Nothing lives in the workflow that doesn't live in
-the script, which is what keeps the two from drifting.
+Running the script by hand — elevated PowerShell on the Hyper-V host, same
+parameters as the workflow inputs — still works and is documented below, but
+it's a fallback for when the runner isn't registered yet or is unreachable,
+not an equally-valid alternative. The workflow checks out this repo on the
+target host and calls the same script with the same parameters; nothing
+lives in the workflow that doesn't live in the script, which is what keeps
+the fallback path from drifting out of sync with the primary one.
 
 The scripts have **no dependencies outside this directory**. `robocopy` (or
-just copy) `scripts\hyperv\` onto a host and flow A works standalone — no repo
-clone, no runner, no network path back to GitHub.
-
-Use whichever fits: flow A when you're already on the box or the runner isn't
-up yet, flow B for an auditable record of who built which node when.
+just copy) `scripts\hyperv\` onto a host if you need the fallback path with
+no repo clone, no runner, no network path back to GitHub.
 
 ## One-time host prerequisites
 
@@ -70,7 +66,7 @@ them can knock the host off the network if scripted carelessly.
 
 1. **A self-hosted Actions runner on each host**, registered with a label
    matching the workflow's `host` choice (`hyperv-host-0` / `-1` / `-2` —
-   rename them in [`provision-node.yml`](../../.github/workflows/provision-node.yml)
+   rename them in [`provision-0-new-node.yml`](../../.github/workflows/provision-0-new-node.yml)
    to whatever you actually use). The runner service must run as a **local
    Administrator**: the Hyper-V cmdlets and the scripts'
    `#Requires -RunAsAdministrator` both demand it, and membership in
@@ -117,9 +113,22 @@ Both roots are defaults, not assumptions — pass `-VMStoragePath` /
 either somewhere else, including on different volumes. Missing directories are
 created on first run.
 
-## Flow A — on the host
+## Flow B — GitHub Actions (primary)
 
-Elevated PowerShell, in `scripts\hyperv\`:
+Actions → **Provision 0: New node VM** → Run workflow. Pick the `host`
+matching the runner label, fill in `vm_name`, `mac_address`, `expected_ip`,
+and the per-host `memory_gb` / `data_disk_gb`. `preflight_only` is available
+as a checkbox and checks the host is ready — missing switch, wrong switch
+type, a taken MAC, an occupied IP, a too-full volume — without building
+anything.
+
+The job writes a summary with the node's address, resources, and the full
+post-boot report.
+
+## Flow A — on the host (fallback)
+
+Only when the runner isn't registered yet or is unreachable. Elevated
+PowerShell, in `scripts\hyperv\`:
 
 ```powershell
 .\Initialize-AerieNode.ps1 `
@@ -134,20 +143,7 @@ Elevated PowerShell, in `scripts\hyperv\`:
     -SshPrivateKeyPath ~\.ssh\id_ed25519
 ```
 
-Check the host is ready without building anything by adding `-PreflightOnly` —
-worth doing first on a host you haven't provisioned before, since it catches a
-missing switch, a wrong switch type, a taken MAC, an occupied IP, or a too-full
-volume in about a second.
-
-## Flow B — GitHub Actions
-
-Actions → **Provision node VM** → Run workflow. Pick the `host` matching the
-runner label, fill in `vm_name`, `mac_address`, `expected_ip`, and the
-per-host `memory_gb` / `data_disk_gb`. `preflight_only` is available as a
-checkbox and does the same thing as above.
-
-The job writes a summary with the node's address, resources, and the full
-post-boot report.
+Same `-PreflightOnly` switch, same effect as the workflow's checkbox above.
 
 ## What a run actually does
 
@@ -258,15 +254,17 @@ need (e.g. `git`, if you'd rather clone the repo than copy compose files over).
 **Phase 1 — node VMs.** Use the real per-host memory split from
 `TODO_SWARM.md` (16 / 24 / 24 GB) via `-MemoryGB`, and set `-DataDiskSizeGB`
 to whatever you're carving out of the TB storage for Longhorn on that host.
-Nothing k3s-specific goes in `-RunCmd` yet — that's Phase 2.
+Nothing k3s-specific goes in `-RunCmd` — that's a separate step, once this
+node answers SSH: see [`../k3s/README.md`](../k3s/README.md) or dispatch
+**Provision 1: Install k3s**.
 
 ## Windows Update reboot staggering
 
 Once at least one node VM exists, run **Actions → Stagger Windows Update
 reboots → Run workflow** (or dispatch
 [`stagger-update-reboots.yml`](../../.github/workflows/stagger-update-reboots.yml)
-directly). It's the same manual, rerun-on-demand model as *Provision node
-VM*, but where that workflow builds one host per run, this one always
+directly). It's the same dispatch, rerun-on-demand model as *Provision 0: New
+node VM*, but where that workflow builds one host per run, this one always
 reconciles all of them at once:
 
 1. **Plan.** The `hosts` input (default `hyperv-host-0,hyperv-host-1,

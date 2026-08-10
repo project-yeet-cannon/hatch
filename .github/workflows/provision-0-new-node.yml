@@ -1,11 +1,15 @@
-# Provision a Hyper-V node VM (TODO_SWARM.md Phase 1)
+# Step 0 of the provisioning pipeline: build a Hyper-V node VM
+# (TODO_SWARM.md Phase 1). Dispatch-only, one host per run.
 #
-# Manual-only, one host per run. This workflow is deliberately thin: it checks
-# out the repo on the target Hyper-V host and hands every decision to
-# scripts/hyperv/Initialize-AerieNode.ps1, which is also the supported way to
-# do this by hand in an elevated PowerShell session on the host. Neither path
-# is a fallback for the other - they are the same code, and any logic added
-# here instead of in the script would exist on only one of them.
+# This is the primary way to run Initialize-AerieNode.ps1 - the workflow is
+# deliberately thin, checking out the repo on the target Hyper-V host and
+# handing every decision to the script, which also supports being run by hand
+# in an elevated PowerShell session on the host. That manual path is a
+# fallback (unreachable runner, box not registered yet), not an equally-valid
+# alternative: this repo's goal is infrastructure-as-code, so the dispatched
+# run - auditable, with a job summary - is what "provisioning a node" means
+# here. Any logic added to this file instead of the script would exist on
+# only one of the two paths and let them drift.
 #
 # Billing: `runs-on` pins `self-hosted`, so runs never land on a GitHub-hosted
 # runner and never consume Actions minutes, however long the 200GB fixed-disk
@@ -18,7 +22,9 @@
 #   - labelled to match the `host` choice below, plus `self-hosted`
 #   - OpenSSH client present:
 #       Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
-name: Provision node VM
+#
+# Next step: provision-1-install-k3s.yml, once this node answers SSH.
+name: 'Provision 0: New node VM'
 
 on:
   workflow_dispatch:
@@ -109,7 +115,7 @@ on:
 # the same storage volume. Queue instead of cancelling: a cancelled run leaves
 # a half-created VM behind that the next run then refuses to overwrite.
 concurrency:
-  group: provision-node-${{ inputs.host }}
+  group: provision-0-new-node-${{ inputs.host }}
   cancel-in-progress: false
 
 jobs:

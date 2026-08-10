@@ -46,7 +46,7 @@ on:
 
 # Two runs at once would compute the schedule twice and could interleave
 # writes on the same host. Queue instead of cancelling, same reasoning as
-# provision-node.yml: a cancelled run could leave a host mid-write.
+# provision-0-new-node.yml: a cancelled run could leave a host mid-write.
 concurrency:
   group: stagger-update-reboots
   cancel-in-progress: false

@@ -4,11 +4,12 @@
     from: preflight -> golden image -> VM -> wait for cloud-init -> report.
 
 .DESCRIPTION
-    This is the single entry point for TODO_SWARM.md Phase 1, and it is the
-    same code path whether you run it by hand in an elevated session on the
-    host or trigger .github/workflows/provision-node.yml. The workflow is a
-    thin wrapper that checks out the repo and invokes this script - it holds
-    no provisioning logic of its own, so the two paths can't drift.
+    This is the single entry point for TODO_SWARM.md Phase 1. The primary way
+    to run it is dispatching .github/workflows/provision-0-new-node.yml - a
+    thin wrapper that checks out the repo and invokes this script, holding no
+    provisioning logic of its own so the two paths can't drift. Running it by
+    hand in an elevated session on the host is the same code path, kept only
+    as a fallback for when the runner isn't reachable.
 
     Everything needed lives under scripts\hyperv\, with no references outside
     it. Copying just that directory to a host is a supported way to run this.

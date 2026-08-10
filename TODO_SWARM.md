@@ -253,10 +253,11 @@ after it.*
 
 ### Phase 1 — Node substrate
 
-> Provisioning is scripted in [`scripts/hyperv/`](scripts/hyperv/): run
-> `Initialize-AerieNode.ps1` in an elevated session on each host, or dispatch
-> the **Provision node VM** workflow at that host's runner. Both are the same
-> code path.
+> Provisioning is scripted in [`scripts/hyperv/`](scripts/hyperv/): dispatch
+> the **Provision 0: New node VM** workflow at that host's runner — the
+> primary path, and the auditable one. Running `Initialize-AerieNode.ps1` by
+> hand in an elevated session on the host is the same code path, kept only as
+> a fallback for when the runner isn't up yet.
 >
 > **`[x]` here means the script does it, not that a machine exists yet** —
 > unlike Phase 0, where every tick describes something already running. These
@@ -301,19 +302,25 @@ after it.*
 > Needs Phase 1's two available-host VMs actually built and reachable over
 > SSH first — the third host is still running prod and doesn't get a node
 > until Phase 7.
+>
+> **`[x]` here means the script/workflow does it, not that the cluster's
+> etcd has actually formed yet** — same convention as Phase 1.
 
-- [ ] `scripts/k3s/Install-K3sNode.ps1` — new script, same shape as
-      `Initialize-AerieNode.ps1` (reuses `lib/AerieSsh.ps1` to connect, takes
-      `-VMName`/`-IPAddress` plus `-ClusterInit` or `-JoinServer <node1-ip>`),
-      so both nodes are one repeatable command each rather than hand-typed
-      SSH sessions:
+- [x] `scripts/k3s/Install-K3sNode.ps1` — new script, same shape as
+      `Initialize-AerieNode.ps1` (reuses `hyperv/lib/AerieSsh.ps1` to connect,
+      takes `-VMName`/`-IPAddress` plus `-ClusterInit` or `-JoinServer
+      <node1-ip>`), wrapped by the **Provision 1: Install k3s** workflow
+      (`.github/workflows/provision-1-install-k3s.yml`) so both nodes are one
+      dispatched run each rather than hand-typed SSH sessions:
       - node 1: `curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=<pin> sh -s - server --cluster-init --disable servicelb --token <token>`
       - node 2: same, with `--server https://<node1-ip>:6443` in place of `--cluster-init`
       - **pin `INSTALL_K3S_VERSION`** — don't track the latest/stable channel,
         for the same reproducibility reason as Goal 6.5's Renovate ask, which
-        should cover this pin too once it exists
-- [ ] Generate the shared cluster token before either install (`openssl rand
-      -hex 32`); store it exactly like the SSH keys — never in git
+        should cover this pin too once it exists. The workflow reads it from
+        the `K3S_VERSION` repository variable, so it's bumped in one place
+- [x] Generate the shared cluster token before either install (`openssl rand
+      -hex 32`); store it as the `K3S_CLUSTER_TOKEN` repository secret —
+      exactly like the SSH keys, never in git
 - [ ] Confirm node-to-node ports are open before the second node joins: TCP
       6443 (apiserver), 2379-2380 (etcd), 10250 (kubelet), UDP 8472 (flannel
       VXLAN). Debian/Ubuntu cloud images ship with no firewall active, so
@@ -341,6 +348,11 @@ after it.*
 > etcd has *worse* availability than one, so treat the build window as
 > non-production and rebuild the old prod box as the third server immediately
 > after cutover (Phase 7).
+
+### Phase 2 and a half - Parallel domain
+
+- [ ] setup a different domain to use for the new cluster so we can verify the new work while keeping the old server in place
+
 
 ### Phase 3 — Platform services
 

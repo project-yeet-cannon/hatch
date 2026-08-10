@@ -16,7 +16,7 @@ jobs:
     # Runs on the self-hosted runner registered on the home server that hosts
     # the stack. `legacy-deployer` pins this to that one box for as long as the
     # stack lives there: bare `self-hosted` would match any runner in the repo,
-    # so registering the first hyperv-host-* runner (see provision-node.yml)
+    # so registering the first hyperv-host-* runner (see provision-0-new-node.yml)
     # would make production deploys start landing on a fresh, empty node with
     # no compose state and no Docker daemon on tcp://localhost:2375. Retarget
     # this when the stack itself moves off the old host, not before.
@@ -40,7 +40,7 @@ jobs:
       HA_TOKEN: ${{ secrets.HA_TOKEN }}
       # Shared secret VmConsoleLogsController checks against X-Vm-Log-Token -
       # see scripts/hyperv/lib/Send-VmConsoleLog.ps1, provisioned onto each
-      # Hyper-V host by provision-node.yml.
+      # Hyper-V host by provision-0-new-node.yml.
       VM_LOG_SHIPPER_TOKEN: ${{ secrets.VM_LOG_SHIPPER_TOKEN }}
       # //server/share of the house SMB share. compose.share.yml mounts it
       # twice: read-write for the browse/upload GUI at share.${DOMAIN}, and
