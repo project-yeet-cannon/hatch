@@ -2,6 +2,10 @@
 
 aviary home citadel
 
+Aerie is built to be redeployed, not just deployed — every operator-specific
+value is a parameter, and no secret material is committed. See
+[docs/ethos.md](docs/ethos.md) before adding configuration.
+
 ## Aerie.API
 
 `make run` to run it.

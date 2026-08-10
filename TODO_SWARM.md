@@ -30,7 +30,7 @@ Moving Aerie from one Windows Docker host to a resilient 3-node cluster.
 | Volumes | **Longhorn**, except Postgres (see [Storage split](#storage-split)) |
 | Ingress IP | **kube-vip** ARP-mode floating VIP |
 | Backup | **restic** → local repo + **AWS S3**; CNPG WAL archiving to S3 |
-| Secrets | **SOPS + age**, encrypted in git (Phase 0's restic secrets are a scoped exception — see Phase 0) |
+| Secrets | **External Secrets Operator**, git holds pointers only. Never secret bytes, encrypted or not — see [Secrets](#secrets--no-bytes-in-git) |
 | HA required | Postgres, API, kiosk `files`, ingress |
 | HA *not* required | Observability — reschedule-on-failure is acceptable |
 | Sequencing | **Backup + DR first**, on the current host, before any cluster work |
@@ -49,6 +49,48 @@ Two independent reasons:
 
 Since Linux VMs are on the table regardless, k3s costs a steeper learning curve
 once and buys mature off-the-shelf answers for every goal.
+
+### Secrets — no bytes in git
+
+This plan originally specified SOPS + age with encrypted secrets committed to the
+repo. **That is rejected**, per [`docs/ethos.md`](docs/ethos.md): Aerie is meant
+to be open-sourced and redeployed by other operators, and a committed encrypted
+secret is one operator's secret sitting in a shared artifact — meaningless to
+everyone downstream, and architecture (`.sops.yaml` creation rules) that only
+makes sense if the repo has exactly one owner. This is a product-vision
+constraint, not a security judgment; SOPS-in-git is sound crypto.
+
+The replacement is **External Secrets Operator (ESO)**. Git holds an
+`ExternalSecret` naming a path in a secret store; ESO reads the value at runtime
+and materializes a real k8s `Secret` in-cluster. Flux still reconciles
+everything, and the committed manifest is structural — identical for every
+installation.
+
+**The store is a deployment parameter, not a decision this table makes.** ESO
+speaks to many backends; the interface is committed, the provider is chosen per
+install. This installation uses **AWS SSM Parameter Store** — the AWS account
+already exists for Route53 DNS-01 and the restic S3 bucket, `SecureString`
+parameters are free at this scale (Secrets Manager would be $0.40/secret/month),
+and it puts the keys off-site, which is a better DR story than a key that only
+lives on the nodes it protects. **A self-hosted provider — in-cluster OpenBao —
+is required before open-sourcing**, since forcing every home user to open an AWS
+account to run a home server defeats the premise. Phase 3 keeps the
+`ClusterSecretStore` isolated so swapping it touches one manifest.
+
+Rotation becomes: change the parameter, ESO re-syncs on `refreshInterval`,
+reloader bounces the pods. **No commit, no deploy** — which is what Goal 6.1
+actually asked for and something SOPS never delivers, since SOPS rotation *is* a
+commit.
+
+Bootstrap chain — one imperative secret per installation, and only one:
+
+```text
+printed / offline copy
+  └→ GitHub Actions repository secrets
+       └→ bootstrap Secret in-cluster (created by workflow, never in git)
+            └→ ESO ClusterSecretStore
+                 └→ every other secret in the cluster
+```
 
 ---
 
@@ -224,14 +266,14 @@ after it.*
       on every deploy (`restic snapshots` fails → `restic init`)
 - [x] Generate the repo password, store as a **GitHub Actions secret**
       (`RESTIC_PASSWORD`), and **print it once for offline storage** — a
-      backup you can't decrypt isn't one. *(Scoped deviation from the SOPS +
-      age decision above: Phase 0 needed a secret store before Phase 2 exists
-      to provide one. GitHub Actions secrets match the pattern already used
-      for the Route53/HA credentials — `RESTIC_PASSWORD` /
+      backup you can't decrypt isn't one. *(No longer an exception — this **is**
+      the permanent root of trust. GitHub Actions secrets match the pattern
+      already used for the Route53/HA credentials — `RESTIC_PASSWORD` /
       `RESTIC_AWS_ACCESS_KEY_ID` / `RESTIC_AWS_SECRET_ACCESS_KEY`, kept
       separate from caddy's Route53 credentials via a dedicated `aerie-restic`
-      IAM user, scoped to only the backup bucket — and get replaced by SOPS +
-      age when Phase 2 lands.)*
+      IAM user, scoped to only the backup bucket. Phase 2 puts ESO downstream
+      of these rather than replacing them; the printed copy is what the whole
+      bootstrap chain hangs from.)*
 - [x] Back up correctly per service, not by copying volume directories:
       `pg_dumpall` for Postgres, `sqlite3 .backup` for Grafana and Kuma, the
       OpenSearch snapshot API, the Prometheus TSDB snapshot endpoint —
@@ -331,13 +373,26 @@ after it.*
       unchecked on purpose: a TCP connect can't probe a connectionless port,
       and the no-firewall default above is what makes that an acceptable gap
       rather than a real one*
-- [ ] `age-keygen` for the SOPS key. Commit the **public** key and a
-      `.sops.yaml` creation rule (e.g. `deploy/**/secrets/*.yaml`) to git.
-      Get the **private** key into the Phase 0 restic repos (extend
-      `containers/backup/scripts/backup.sh` to pick it up) **and** print it
-      for offline storage — the same two-step pattern as the Phase 0 restic
-      password, and for the same reason: a key that only lives on the node it
-      protects isn't a secret store
+- [ ] ~~`age-keygen` for the SOPS key~~ — **cut.** No secret bytes in git,
+      encrypted or otherwise; see [Secrets](#secrets--no-bytes-in-git) and
+      [`docs/ethos.md`](docs/ethos.md). Replaced by the three items below
+- [ ] Dedicated `aerie-eso` IAM user — `ssm:GetParameter*` /
+      `ssm:GetParametersByPath` scoped to `/aerie/*` only, plus `kms:Decrypt`
+      on the default `aws/ssm` key. Separate from `aerie-restic` and the
+      Route53 user, same isolation discipline as Phase 0
+- [ ] Define and commit the parameter naming convention
+      (`/aerie/<component>/<key>`, e.g. `/aerie/ha/token`,
+      `/aerie/cert-manager/route53-secret-access-key`). This is the *pointer*
+      half — structural, identical for every installation, and belongs in git
+- [ ] **Provision 2: Seed secrets** workflow
+      (`.github/workflows/provision-2-seed-secrets.yml`) — pushes the existing
+      GitHub Actions secrets into the `/aerie/*` tree
+      (`aws ssm put-parameter --type SecureString --overwrite`), then creates
+      the single ESO bootstrap Secret on the cluster over SSH via
+      `kubectl create secret generic --dry-run=client -o yaml | kubectl apply
+      -f -`. Idempotent and re-runnable, and the automation-first counterpart
+      to doing it by hand — same convention as Provision 0 and 1. This is the
+      **one** imperative secret injection the design allows
 - [ ] `flux bootstrap github --owner=<owner> --repository=Aerie --branch=main
       --path=deploy/cluster --personal`, run once from an operator machine
       with `kubectl` pointed at node 1, using a scoped PAT (contents +
@@ -361,8 +416,19 @@ after it.*
 
 ### Phase 3 — Platform services
 
+- [ ] **External Secrets Operator `HelmRelease` first**, with a Flux
+      `dependsOn` from cert-manager and CNPG — both need AWS credentials that
+      only ESO can supply, so ordering here is a hard requirement, not a
+      preference
+- [ ] `ClusterSecretStore` pointing at AWS SSM Parameter Store, authenticating
+      via the Phase 2 bootstrap Secret. **Keep this in its own manifest** — it
+      is the single file that changes when the provider is swapped for
+      in-cluster OpenBao before open-sourcing
+- [ ] `ExternalSecret`s for: Route53 (cert-manager), CNPG's S3 WAL credentials,
+      `HA_TOKEN`, `VM_LOG_SHIPPER_TOKEN`, kiosk Wi-Fi password
 - [ ] Flux `HelmRelease`s: Longhorn, cert-manager, kube-vip, CNPG operator
-- [ ] `ClusterIssuer` with Route53 DNS-01, reusing the existing AWS creds
+- [ ] `ClusterIssuer` with Route53 DNS-01, credentials from the `ExternalSecret`
+      above rather than a committed value
 - [ ] `HelmChartConfig` customizing k3s's bundled Traefik
 - [ ] One **wildcard** `*.${DOMAIN}` certificate — a single DNS-01 challenge
       covering all six hostnames instead of six
@@ -409,6 +475,10 @@ after it.*
       target → S3 for volumes, restic CronJob for the rest plus the local copy
 - [ ] **Alert on backup age and backup-job failure** — the single most valuable
       alert that doesn't exist today
+- [ ] Export the `/aerie/*` parameter tree into the restic repos on the same
+      schedule. The secret store is now off-site, but "AWS account is gone" is
+      the one failure mode ESO introduces, and `RESTIC_PASSWORD` is already
+      printed offline — that's what closes the loop
 - [ ] Schedule a quarterly DR rehearsal onto throwaway VMs
 
 ### Phase 9 — Productization + docs
@@ -426,10 +496,12 @@ Ranked by what actually bites:
 
 1. **Secrets can't stay in GitHub Actions env — for the platform long-term.**
    Today a rotation requires a deploy, and DR requires manually re-entering
-   everything. SOPS + age in git is what makes goal 5 and "release as a
-   product" achievable at all. (Phase 0's restic secrets are a deliberate,
-   scoped exception — see Phase 0 — this critique still fully applies from
-   Phase 2 onward.) Also replace
+   everything. ESO + an external store is what makes goal 5 and "release as a
+   product" achievable at all — and it beats the SOPS + age this plan
+   originally called for on exactly the rotation point, since a SOPS rotation
+   *is* a commit. GitHub Actions secrets remain correct for the bootstrap
+   credential and the Phase 0 restic root of trust; the critique applies to
+   everything downstream of those. Also replace
    `SecretObfuscator`'s XOR (`src/Aerie.Api/Common/SecretObfuscator.cs:10-32`) —
    it's obfuscation, not encryption, and it guards the HA token and kiosk Wi-Fi
    password.
@@ -445,6 +517,10 @@ Ranked by what actually bites:
    a dozen Helm charts; automate the bumps or they rot.
 6. **Rehearse DR or it's fiction.** Phase 9's scripts are only real once they've
    been run against empty VMs.
+7. **Make the ethos mechanical.** [ci.yml](.github/workflows/ci.yml) has no
+   secret scanning today. Add `gitleaks` plus a path-deny check that fails on
+   `*.agekey`, `*.pem`, `id_*`, `.sops.yaml`, `*.enc.yaml` — a rule enforced only
+   by memory is a rule that lapses. See [`docs/ethos.md`](docs/ethos.md).
 
 ---
 
@@ -462,15 +538,22 @@ Ranked by what actually bites:
   reconnect on their own after a node kill
 - **Frontend** — build + lint per the usual convention; in-browser verification
   stays with the user
+- **Portability** — no phase is done if a second operator couldn't run it on
+  their own hardware without asking questions. Grep the phase's new files for
+  hardcoded domains, IPs, and hostnames before ticking it
+  ([`docs/ethos.md`](docs/ethos.md))
 
 ## File impact
 
 **New:** `deploy/` (Flux tree), `charts/aerie/`, `scripts/`,
-`docs/cluster-architecture.md`, `docs/disaster-recovery.md`
+`docs/cluster-architecture.md`, `docs/disaster-recovery.md`,
+[`docs/ethos.md`](docs/ethos.md),
+`.github/workflows/provision-2-seed-secrets.yml`
 
 **Modified:** [Program.cs](src/Aerie.Api/Program.cs) (migrations → Job),
 [appsettings.Docker.json](src/Aerie.Api/appsettings.Docker.json) (connection
-strings → env), [containers/fluent-bit/](containers/fluent-bit/),
+strings → env), [ci.yml](.github/workflows/ci.yml) (secret scanning),
+[containers/fluent-bit/](containers/fluent-bit/),
 [containers/prometheus/prometheus.yml](containers/prometheus/prometheus.yml),
 [containers/aerie-db/pginit.sql](containers/aerie-db/pginit.sql)
 
