@@ -264,6 +264,14 @@ if (Directory.Exists(Path.Combine(appsPath, "docs")))
 {
     app.MapFallbackToFile("/apps/docs/{*path:nonfile}", "apps/docs/index.html");
 }
+// The family shell needs this for more than refresh survival: a printed QR
+// label encodes /apps/family/storage/c/{code} directly, so a cold scan from
+// the stock camera app is *always* a deep link into a route that only exists
+// client-side (see TODO_APPS Phase 4).
+if (Directory.Exists(Path.Combine(appsPath, "family")))
+{
+    app.MapFallbackToFile("/apps/family/{*path:nonfile}", "apps/family/index.html");
+}
 
 var opt = new RewriteOptions();
 opt.AddRedirect("^$", "apps/");
@@ -273,6 +281,7 @@ opt.AddRedirect("^apps/admin$", "apps/admin/");
 opt.AddRedirect("^apps/logo$", "apps/logo/");
 opt.AddRedirect("^apps/modeler$", "apps/modeler/");
 opt.AddRedirect("^apps/docs$", "apps/docs/");
+opt.AddRedirect("^apps/family$", "apps/family/");
 app.UseRewriter(opt);
 
 app.UseSwagger();

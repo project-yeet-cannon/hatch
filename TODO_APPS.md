@@ -231,18 +231,24 @@ section per app and module services drift out of the module folder.
 Plumbing a new SPA into the existing build. Follows the four established
 patterns exactly — this is a known path, just several files.
 
-- [ ] `src/Aerie.Web/apps/family/` — Vite + React + `react-router-dom`, `base:
+- [x] `src/Aerie.Web/apps/family/` — Vite + React + `react-router-dom`, `base:
       '/apps/family/'`, output to `wwwroot/apps/family` (copy
       [`dashboard/vite.config.ts`](src/Aerie.Web/apps/dashboard/vite.config.ts)).
-- [ ] Shell chrome: header, bottom tab nav sized for one thumb, theme lifted
+- [x] Shell chrome: header, bottom tab nav sized for one thumb, theme lifted
       from the existing `theme.css` tokens. Micro-apps mount as lazy routes
       under `/apps/family/<module>/`.
-- [ ] **PWA**: `manifest.webmanifest` (standalone display, icons, theme color),
+- [x] **PWA**: `manifest.webmanifest` (standalone display, icons, theme color),
       service worker caching the app shell. Cache-first for the shell,
       network-first for data — an offline *read* of a crate is useful; an
       offline write is not worth the sync complexity yet.
-- [ ] `vite-plugin-pwa`, or a hand-rolled SW if that pulls too much in.
-- [ ] Wire the build in four places, mirroring the existing apps exactly:
+- [x] `vite-plugin-pwa`, or a hand-rolled SW if that pulls too much in.
+      Hand-rolled ([`src/sw.js`](src/Aerie.Web/apps/family/src/sw.js), ~40
+      lines). The one thing a hand-written worker genuinely can't produce is
+      the list of *hashed* asset filenames, which only exists after the bundle
+      is built — so that single piece is a ~30-line `serviceWorker()` plugin in
+      [`vite.config.ts`](src/Aerie.Web/apps/family/vite.config.ts), and Workbox
+      stays out.
+- [x] Wire the build in four places, mirroring the existing apps exactly:
       a `BuildFamily` target in
       [`Aerie.Api.csproj`](src/Aerie.Api/Aerie.Api.csproj) with a
       `SkipFamilyBuild` guard; a `family-build` stage in
@@ -250,15 +256,37 @@ patterns exactly — this is a known path, just several files.
       `-p:SkipFamilyBuild=true`; `family` in the
       [`ci.yml`](.github/workflows/ci.yml#L32) matrix; the `test-web` loop in
       [`Makefile`](Makefile).
-- [ ] `MapFallbackToFile` + rewrite rule in
+- [x] `MapFallbackToFile` + rewrite rule in
       [`Program.cs:253`](src/Aerie.Api/Program.cs#L253) so deep links survive a
       hard refresh — this is what makes a scanned QR work.
-- [ ] Add a card to the apps landing page
+- [x] Add a card to the apps landing page
       ([`src/Aerie.Web/index.html`](src/Aerie.Web/index.html)).
 
 **Verify:** hard-refresh `/apps/family/storage/c/ABC-123` serves the shell;
 "Add to Home Screen" on iOS launches standalone with no browser chrome; airplane
 mode still opens the shell.
+
+*Verified* over HTTP against the running API: `/apps/family/storage/c/ABC-123`,
+`/apps/family/storage/locations` and an unknown deep link each return the shell
+document byte-identical to `/apps/family/`, while `sw.js`, the manifest, the
+icons and `assets/index-*.js` still resolve as real files with correct content
+types (the `:nonfile` constraint holds), and `/apps/family` redirects to
+`/apps/family/`. All 10 precache URLs return 200 — worth checking mechanically,
+because `cache.addAll` is all-or-nothing and one 404 silently costs you the
+whole offline story. `sw.js` correctly does not precache itself. The cache name
+changes for a source edit *and* for a `public/` edit (the case Vite's hashed
+filenames don't cover), and returns to its previous value when both are
+reverted. `dotnet build` runs `BuildFamily`; the 160 API tests still pass.
+
+The two device-side checks — iOS Add to Home Screen, and airplane mode — are
+still open, since they can't be exercised from here.
+
+Registry note: the module seam is
+[`src/modules/registry.ts`](src/Aerie.Web/apps/family/src/modules/registry.ts).
+A module is a folder plus one array entry; the home-screen card, the bottom
+tab, the lazy chunk and the route all derive from it, so "one nav entry" is
+literally one line. The shell never learns a module's internal screens — a
+module renders its own `<Routes>` under `/apps/family/<id>/`.
 
 ### Phase 3 — Storage Helper UI
 

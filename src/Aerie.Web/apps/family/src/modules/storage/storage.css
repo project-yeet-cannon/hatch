@@ -1,0 +1,45 @@
+/*
+  Storage Helper's own styles. Built entirely out of the shell's theme tokens
+  (src/theme.css) - no colours, fonts or radii of its own, which is what keeps
+  the suite looking like one product without anyone policing it.
+*/
+
+.storage-subnav {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  overflow-x: auto;
+  /* Fades the scroll edge instead of showing a cut-off pill, once there are
+     more tabs than fit a phone. */
+  scrollbar-width: none;
+}
+
+.storage-subnav::-webkit-scrollbar {
+  display: none;
+}
+
+.storage-subnav-link {
+  flex: none;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.storage-subnav-link.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+}
+
+.storage-pending {
+  text-align: center;
+}
+
+.storage-pending p {
+  margin: 4px 0 0;
+}

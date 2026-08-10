@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- viewport-fit=cover pairs with the env(safe-area-inset-*) padding in
+         App.css: standalone on a notched iPhone draws under the home indicator
+         unless the app opts in and then pads for it itself. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#2f6f9e" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#161d23" media="(prefers-color-scheme: dark)" />
+    <link rel="manifest" href="/apps/family/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/apps/family/icon.svg" />
+    <!-- iOS ignores the manifest's icons for Add to Home Screen and reads this
+         instead; it also wants a real raster, hence apple-touch-icon.png. -->
+    <link rel="apple-touch-icon" href="/apps/family/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Family" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <title>Aerie Family</title>
+    <!--
+      Fires before the module script below is even fetched, so a failure to
+      load/parse/execute main.tsx (bad deploy, MIME mismatch, syntax error)
+      still leaves a trace in the logs instead of just a blank screen. That
+      matters more here than elsewhere: this app is used from a phone home
+      screen where there's no devtools window to open.
+      Kept as plain inline JS (no build step touches this file's script tags).
+    -->
+    <script>
+      (function () {
+        try {
+          window.__uiLogSessionId = crypto.randomUUID();
+          var body = JSON.stringify([{
+            app: 'family',
+            level: 'info',
+            message: 'family index.html parse started',
+            timestamp: new Date().toISOString(),
+            sessionId: window.__uiLogSessionId,
+            url: location.href,
+            metadata: {
+              userAgent: navigator.userAgent,
+              standalone: window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true,
+            },
+          }]);
+          fetch('/api/ui-logs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: body,
+            keepalive: true,
+          }).catch(function () {});
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

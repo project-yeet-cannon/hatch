@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!--
+    Source of every raster icon in this folder - regenerate with ImageMagick
+    (see README), don't hand-edit the PNGs.
+
+    Full-bleed background with the glyph inside the central 80%, so the
+    maskable variant survives whatever shape Android crops it to. Flat fills
+    only, no gradients: ImageMagick's built-in MSVG renderer drops gradients,
+    and requiring a librsvg delegate to regenerate an icon is a trap for
+    whoever picks this up next.
+  -->
+  <rect width="512" height="512" fill="#2f6f9e"/>
+  <!-- Roof over a body: the house the suite is for. -->
+  <path fill="#ffffff" d="M256 120 407 246a16 16 0 0 1-10 28h-21v110a16 16 0 0 1-16 16H152a16 16 0 0 1-16-16V274h-21a16 16 0 0 1-10-28z"/>
+  <!-- Doorway - reads as a doorway at 512px and as a notch at 32px. -->
+  <path fill="#2f6f9e" d="M222 384v-70a34 34 0 0 1 68 0v70z"/>
+</svg>

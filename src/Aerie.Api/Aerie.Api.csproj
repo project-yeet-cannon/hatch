@@ -73,6 +73,21 @@
     <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/docs"/>
   </Target>
 
+  <!--
+    The family shell PWA. Unlike the apps above, its public/ folder is a build
+    input worth tracking: the manifest and icons are what make "Add to Home
+    Screen" work, and editing one without touching src/ must still rebuild.
+  -->
+  <ItemGroup>
+    <FamilySource Include="../Aerie.Web/apps/family/src/**/*.*;../Aerie.Web/apps/family/public/**/*.*;../Aerie.Web/apps/family/index.html;../Aerie.Web/apps/family/package.json;../Aerie.Web/apps/family/vite.config.ts"/>
+  </ItemGroup>
+
+  <Target Name="BuildFamily" BeforeTargets="Build" Condition="'$(SkipFamilyBuild)' != 'true'"
+          Inputs="@(FamilySource)" Outputs="wwwroot/apps/family/index.html">
+    <Exec Command="npm install" WorkingDirectory="../Aerie.Web/apps/family" Condition="!Exists('../Aerie.Web/apps/family/node_modules')"/>
+    <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/family"/>
+  </Target>
+
   <!-- Apps landing page (../Aerie.Web/index.html) - just a static file, no build step needed. -->
   <Target Name="CopyAppsIndex" BeforeTargets="Build"
           Inputs="../Aerie.Web/index.html" Outputs="wwwroot/apps/index.html">
