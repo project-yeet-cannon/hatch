@@ -440,26 +440,323 @@ after it.*
 
 ### Phase 3 — Platform services
 
-- [ ] **External Secrets Operator `HelmRelease` first**, with a Flux
-      `dependsOn` from cert-manager and CNPG — both need AWS credentials that
-      only ESO can supply, so ordering here is a hard requirement, not a
-      preference
-- [ ] `ClusterSecretStore` pointing at AWS SSM Parameter Store, authenticating
-      via the Phase 2 bootstrap Secret. **Keep this in its own manifest** — it
-      is the single file that changes when the provider is swapped for
-      in-cluster OpenBao before open-sourcing
-- [ ] `ExternalSecret`s for: Route53 (cert-manager), CNPG's S3 WAL credentials,
-      `HA_TOKEN`, `VM_LOG_SHIPPER_TOKEN`, kiosk Wi-Fi password
-- [ ] Flux `HelmRelease`s: Longhorn, cert-manager, kube-vip, CNPG operator
-- [ ] `ClusterIssuer` with Route53 DNS-01, credentials from the `ExternalSecret`
-      above rather than a committed value
-- [ ] `HelmChartConfig` customizing k3s's bundled Traefik
-- [ ] One **wildcard** `*.${DOMAIN}` certificate — a single DNS-01 challenge
-      covering all six hostnames instead of six
+> Re-scoped. The first pass listed seven bullets that were really one sentence
+> each; working them through against the repo turned up five things that would
+> have stopped a run dead, and one dependency claim that was simply wrong.
+>
+> - **Operator values have no path into a Flux-reconciled manifest.** Phases 0-2
+>   pass `${DOMAIN}` and friends as `vars.*` at deploy time, but Flux reconciles
+>   from git, where [ethos](docs/ethos.md) forbids them. Nothing in the plan
+>   bridged that. Flux's answer is `postBuild.substituteFrom` against an
+>   in-cluster ConfigMap — which has to exist *before* the first commit under
+>   `deploy/`, making it the true first step of the phase (3b.1).
+> - **The Longhorn disk is raw.** Phase 1 attaches a fixed VHDX and explicitly
+>   leaves it unformatted — "Longhorn claims it in Phase 3"
+>   ([Initialize-AerieNode.ps1:494](scripts/hyperv/Initialize-AerieNode.ps1#L494)).
+>   Longhorn's v1 engine wants a *filesystem path*, not a block device, and
+>   defaults to `/var/lib/longhorn` on the root disk. Install it before the disk
+>   is mounted there and it quietly fills the OS disk instead — 32 GB by
+>   default, against a 200 GB data disk it never touches (3b.2).
+> - **There is no LoadBalancer implementation in the cluster.** Phase 2 installs
+>   k3s with `--disable servicelb` and the plan called kube-vip one bullet in a
+>   list of four `HelmRelease`s. It is two components, not one, and until both
+>   land Traefik's Service sits at `<pending>` and ingress has no address (3b.8).
+> - **A wildcard cert that nothing serves.** Traefik falls back to its built-in
+>   self-signed certificate for any route that doesn't name a Secret. Without a
+>   `TLSStore`, the wildcard is issued, stored, and never presented (3b.10d).
+> - **Split-horizon DNS breaks the DNS-01 self-check.** pfSense Unbound answers
+>   for `${DOMAIN}` on the LAN, so cert-manager's propagation check — which
+>   resolves through CoreDNS → the node's resolver → pfSense — never sees the
+>   public `_acme-challenge` TXT it just wrote to Route53. The challenge hangs
+>   and reports what looks like an AWS failure (3b.7).
+> - **The `dependsOn` reasoning was wrong.** "cert-manager and CNPG both need
+>   AWS credentials that only ESO can supply" — neither *controller* needs a
+>   credential. The `ClusterIssuer` does, and the Phase 4 CNPG `Cluster` does.
+>   Serializing controller installs behind ESO buys nothing and hides the real
+>   constraint, which is that ESO's **CRDs** must exist before any
+>   `ExternalSecret` applies. A two-layer Kustomization split expresses that
+>   correctly; a chain of `dependsOn` between releases does not — and a Ready
+>   `HelmRelease` never did imply a synced Secret (3b.3).
+
+#### Phase 3a — Manual prerequisites
+
+*Six one-time steps. None of them are code, all of them block something below.
+Do these first, in order, and the whole of 3b runs unattended.*
+
+**1. Confirm Phase 2 actually landed.** Phase 2's `[x]`s mean the scripts exist,
+not that a cluster does. On any node, as `aerie`:
+
+```sh
+sudo k3s kubectl get nodes -o wide                    # 2 nodes, both Ready
+sudo k3s kubectl -n external-secrets get secret aerie-eso-bootstrap
+sudo env KUBECONFIG=/etc/rancher/k3s/k3s.yaml flux check
+```
+
+and confirm `deploy/cluster/flux-system/` exists on `main` — Flux commits it
+during bootstrap. Any of the four failing means re-running the matching
+Provision workflow; all of them are idempotent, so a re-run is the fix rather
+than a repair.
+
+**2. Pick and reserve the ingress VIP.** This is the floating address kube-vip
+answers ARP for, and the one pfSense will eventually point `*.${DOMAIN}` at in
+Phase 7.
+
+  1. pfSense → **Services → DHCP Server → LAN** — note the pool's start and end
+     address.
+  2. Choose an address on the node subnet that is **outside that pool** and is
+     not one of the nodes' DHCP reservations from Phase 1.
+  3. If the only convenient address is inside the pool, shrink the pool instead
+     of taking it. kube-vip answers for the VIP unconditionally; a DHCP client
+     later handed the same address is an intermittent outage that presents as a
+     networking bug and costs a day.
+  4. Do **not** create a reservation or static mapping for it. The VIP has no
+     MAC of its own — it moves between nodes, which is the point.
+  5. Verify it's genuinely free, from a LAN machine: `ping -c3 <vip>` gets no
+     reply, and `arp -n <vip>` shows no entry.
+  6. Record it. It becomes the `INGRESS_VIP` repository variable in step 5.
+
+  Do not point any DNS at it yet — that's Phase 7, after the cluster serves.
+
+**3. Read the node's network interface name.** kube-vip's ARP mode advertises on
+a named interface.
+
+```sh
+ssh aerie@<node-ip> "ip -o -4 addr show scope global | awk '{print \$2, \$4}'"
+```
+
+Expect one line, e.g. `eth0` or `ens18`. It will be identical on every node —
+they're built from one golden image — and if it isn't, stop and find out why
+before continuing. Record it as `NODE_INTERFACE`.
+
+**4. Collect the Route53 facts, and confirm the split-horizon problem is real.**
+
+  1. AWS console → **Route53 → Hosted zones →** the zone for `${DOMAIN}` → copy
+     the **Hosted zone ID** (`Z...`). Record it as `ROUTE53_HOSTED_ZONE_ID`.
+  2. Confirm the zone is publicly delegated:
+     `dig +short NS ${DOMAIN} @1.1.1.1` must return four `awsdns` nameservers.
+     If it doesn't, DNS-01 cannot work — and neither can Caddy's certificates
+     today, so this should already be true.
+  3. Confirm the internal override, from a LAN machine:
+     `dig +short A home.${DOMAIN}` returns an internal address while
+     `dig +short A home.${DOMAIN} @1.1.1.1` returns nothing. That difference is
+     expected and is exactly what 3b.7's resolver override exists to survive.
+
+**5. Set the new repository variables.** Settings → Secrets and variables →
+Actions → **Variables**. Provision 4 (3b.1) reads these and nothing else.
+
+| Variable | Value | New? |
+|---|---|---|
+| `DOMAIN` | base domain | existing |
+| `ACME_EMAIL` | Let's Encrypt account address | existing |
+| `AWS_REGION` | region holding the SSM tree | existing |
+| `INGRESS_VIP` | from step 2 | **new** |
+| `NODE_INTERFACE` | from step 3 | **new** |
+| `ROUTE53_HOSTED_ZONE_ID` | from step 4 | **new** |
+| `LONGHORN_REPLICA_COUNT` | **`2`** — see 3b.11 | **new** |
+
+**6. Look up and record the chart versions to pin.** Every `HelmRelease` below
+pins an exact chart version, for the same reproducibility reason as
+`K3S_VERSION`. Unlike everything else in 3a these are *structural* — identical
+for every installation — so they are committed in the manifests, not entered as
+variables. Collect them once so 3b is a straight line:
+
+| Component | Chart repository |
+|---|---|
+| external-secrets | `https://charts.external-secrets.io` |
+| cert-manager | `https://charts.jetstack.io` |
+| longhorn | `https://charts.longhorn.io` |
+| kube-vip / kube-vip-cloud-provider | `https://kube-vip.github.io/helm-charts` |
+| cloudnative-pg | `https://cloudnative-pg.github.io/charts` |
+
+> **Gate:** the seven variables in step 5 are all set, and step 2's address
+> answers nothing on the LAN. 3b assumes both.
+
+#### Phase 3b — Scriptable, in this order
+
+*Each step's inputs come from the repo or from the ConfigMap planted in step 1 —
+nothing below waits on a human except the one explicit stop in step 10.*
+
+- [ ] **1. Provision 4: cluster configuration.**
+      `.github/workflows/provision-4-cluster-config.yml` →
+      `scripts/k3s/Set-ClusterConfig.ps1`. Renders ConfigMap
+      `aerie-cluster-config` in `flux-system` from the 3a.5 variables and
+      applies it over SSH stdin — same shape as Provision 2's bootstrap Secret,
+      minus the secrecy, since every one of these is an operator *value*.
+      Every Kustomization in `deploy/` then reaches them via
+      `postBuild.substituteFrom`.
+      **Runs before the first commit under `deploy/`**: a Kustomization whose
+      substitution source is missing fails to reconcile rather than degrading
+      gracefully. Re-runnable — changing a value and re-running is how the VIP
+      or domain gets changed later, with no commit.
+      *Exit:* `kubectl -n flux-system get cm aerie-cluster-config -o yaml` lists
+      all seven keys.
+- [ ] **2. Provision 5: node storage prep.**
+      `.github/workflows/provision-5-node-storage.yml` →
+      `scripts/k3s/Initialize-NodeStorage.ps1`, run once per node. Over SSH:
+      - install `open-iscsi`, `nfs-common`, `cryptsetup`; `systemctl enable
+        --now iscsid`. Longhorn attaches volumes over iSCSI to the *host*, so
+        these are node packages, not container ones
+      - confirm `multipath-tools` is absent (it is, on a Debian cloud image) or
+        blacklist Longhorn's devices — multipathd claiming them is the classic
+        "volume stuck in Attaching" failure
+      - identify the data disk **by being the unpartitioned one of the expected
+        size**, never by hardcoding `/dev/sdb`; refuse ambiguity and refuse a
+        disk that already holds a filesystem unless `-Force`
+      - `mkfs.ext4`, label it, and mount at `/var/lib/longhorn` from `/etc/fstab`
+        **by UUID** — Hyper-V device ordering isn't stable across reboots, and a
+        `/dev/sdb` fstab entry is a node that boots with Longhorn's data path
+        pointing at the wrong disk
+      **Before step 11**, unavoidably: Longhorn's default data path is on the
+      root filesystem, so installing it first means silently filling the OS disk.
+      *Exit:* `findmnt /var/lib/longhorn` on every node, with capacity matching
+      `-DataDiskSizeGB`.
+- [ ] **3. The Flux tree skeleton** — commit only, no cluster access:
+      - `deploy/cluster/flux-system/` — Flux's own, committed by the bootstrap
+      - `deploy/cluster/infrastructure.yaml` — two Kustomizations,
+        `infra-config` `dependsOn` `infra-controllers`
+      - `deploy/cluster/infrastructure/controllers/` — one `HelmRepository` +
+        `HelmRelease` per component (steps 4, 7, 8, 11, 12)
+      - `deploy/cluster/infrastructure/config/` — the objects those controllers'
+        CRDs define (steps 5, 6, 9, 10, and Longhorn's StorageClasses)
+
+      Both Kustomizations carry `postBuild.substituteFrom` the step-1 ConfigMap.
+      The layer boundary is what enforces ordering: CRDs and controllers
+      converge first, then everything that needs them. This replaces the
+      original plan's release-to-release `dependsOn` chain, for the reason in
+      the preamble.
+- [ ] **4. External Secrets Operator** — `controllers/external-secrets.yaml`,
+      pinned, `installCRDs: true`. Commit the `external-secrets` Namespace too
+      even though Provision 2 already created it: applying an existing namespace
+      is a no-op, and a rebuilt cluster shouldn't depend on which of the two ran
+      first.
+      *Exit:* `kubectl get crd externalsecrets.external-secrets.io`.
+- [ ] **5. `ClusterSecretStore`** — `config/cluster-secret-store.yaml`, **alone
+      in its own file, nothing else beside it**. AWS provider, service
+      `ParameterStore`, region `${AWS_REGION}`, authenticating by `secretRef` to
+      `aerie-eso-bootstrap`. This is the single file that changes when the
+      provider is swapped for in-cluster OpenBao before open-sourcing, which is
+      the only reason it's isolated.
+      *Exit:* the store reports `Ready=True`.
+- [ ] **6. `ExternalSecret`s** — `config/external-secrets/`, one per entry in
+      [`parameters.json`](scripts/secrets/parameters.json) that is
+      **`required: true`**. That rule is the correction to the original list,
+      which named the kiosk Wi-Fi password and CNPG's S3 WAL credentials: both
+      are `required: false`, neither is seeded, and an `ExternalSecret` pointing
+      at an absent parameter sits in `SecretSyncError` indefinitely and poisons
+      the phase gate. They move to the phases that create their IAM users and
+      consume them — 5 and 4.
+      Phase 3 therefore creates: `cert-manager/route53-*` (consumed here),
+      plus `ha/token` and `logging/vm-log-shipper-token` — not consumed until
+      Phase 5, but created now as the end-to-end proof that the store works
+      while there's still nothing depending on it.
+      Worth a small generator (`scripts/secrets/New-ExternalSecrets.ps1`) plus a
+      CI check that the tree matches `parameters.json`: the docs already promise
+      both halves read one file, and hand-maintained duplication is how that
+      stops being true.
+- [ ] **7. cert-manager** — controller only; the issuer comes in step 10.
+      Pinned, `crds.enabled: true`, and the two `extraArgs` that 3a.4 exists to
+      justify: `--dns01-recursive-nameservers-only` and
+      `--dns01-recursive-nameservers=1.1.1.1:53,8.8.8.8:53`.
+      Without them the propagation self-check resolves through CoreDNS → the
+      node's resolver → pfSense Unbound, which answers authoritatively for the
+      *internal* view of `${DOMAIN}` and will never return the public TXT
+      record cert-manager just wrote. The order then hangs until timeout and
+      reports what reads like a Route53 permissions failure.
+- [ ] **8. kube-vip** — two components, which the original single bullet hid:
+      - **`kube-vip-cloud-provider`**, which assigns addresses to
+        `Service type=LoadBalancer`. Phase 2's `--disable servicelb` means the
+        cluster has no such implementation at all right now
+      - **`kube-vip`** DaemonSet in **ARP** mode — `vip_interface:
+        ${NODE_INTERFACE}`, `svc_enable: true`, hostNetwork, plus its RBAC
+      - the pool: ConfigMap `kubevip` in `kube-system` with
+        `range-global: ${INGRESS_VIP}-${INGRESS_VIP}`, a deliberate
+        one-address pool
+      Still **not** an apiserver VIP — the Phase 2 gap
+      ([docs](docs/secrets-architecture.md#known-gap-no-vip-in-front-of-the-apiserver))
+      is unchanged by this and stays open until Phase 7.
+      *Exit:* `ping ${INGRESS_VIP}` answers from the LAN, and
+      `ip addr show ${NODE_INTERFACE}` on the elected leader shows it.
+- [ ] **9. Traefik `HelmChartConfig`** — `config/traefik-helmchartconfig.yaml`,
+      `helm.cattle.io/v1`, named `traefik` in `kube-system`. k3s's bundled
+      Traefik is a `HelmChart` CR owned by k3s's own helm-controller;
+      `HelmChartConfig` merges values into it, which is what keeps Flux and k3s
+      from fighting over one release. Sets the Service's requested
+      `${INGRESS_VIP}`, `websecure` TLS, and `publishedService`.
+      *Exit:* `kubectl -n kube-system get svc traefik` shows
+      `EXTERNAL-IP = ${INGRESS_VIP}`, and `curl -k https://${INGRESS_VIP}` from
+      the LAN returns Traefik's 404 — the correct answer with no routes defined.
+- [ ] **10. The wildcard certificate — staging, then prod.** The one step in 3b
+      with a human in the middle, deliberately:
+      1. Both `ClusterIssuer`s (`letsencrypt-staging`, `letsencrypt-prod`),
+         identical but for the ACME server URL. Route53 DNS-01 solver,
+         `hostedZoneID: ${ROUTE53_HOSTED_ZONE_ID}`, `email: ${ACME_EMAIL}`,
+         both halves of the credential by `secretRef` to step 6's Secret —
+         the access key ID isn't sensitive, but splitting one credential across
+         two delivery mechanisms is how drift starts.
+      2. `Certificate` `aerie-wildcard` in `kube-system`, `secretName:
+         aerie-wildcard-tls`, `dnsNames: ["*.${DOMAIN}", "${DOMAIN}"]` —
+         **the apex is listed explicitly because a wildcard does not match it**.
+      3. **Stop here and read `kubectl describe certificate aerie-wildcard`.**
+         A stuck `DNS01` challenge is either 3a.4's split-horizon problem or a
+         hosted-zone-ID / IAM mismatch. Diagnose it against staging, which has
+         no meaningful rate limit. Then flip `issuerRef` to `letsencrypt-prod`
+         and delete the staging Secret so a fresh order runs. Let's Encrypt
+         allows five duplicate certificates per week; debugging DNS-01 against
+         prod burns that in an afternoon and then you wait for it.
+      4. Traefik `TLSStore` named `default` in `kube-system`, with
+         `defaultCertificate.secretName: aerie-wildcard-tls`. **Missing from the
+         original plan, and without it the certificate is issued and never
+         served** — Traefik presents its built-in self-signed cert to any route
+         that doesn't name a Secret, so every Phase 5 Ingress would need its own
+         `tls:` block. One `TLSStore` covers all seven hostnames and everything
+         added later, which is the entire argument for a wildcard.
+      *Exit:* `openssl s_client -connect ${INGRESS_VIP}:443 -servername
+      home.${DOMAIN} </dev/null | openssl x509 -noout -issuer -ext
+      subjectAltName` shows a Let's Encrypt production issuer and `*.${DOMAIN}`.
+- [ ] **11. Longhorn** — `defaultDataPath: /var/lib/longhorn` matching step 2,
+      and two settings that are easy to get wrong:
+      - `defaultReplicaCount: ${LONGHORN_REPLICA_COUNT}` — **2 during the build
+        window.** Only two nodes exist until Phase 7; a three-replica volume on
+        a two-node cluster is permanently Degraded, and its alarms are noise
+        that trains you to ignore the real ones. Phase 7 raises it
+      - `persistence.defaultClass: false` — k3s already ships `local-path` as
+        the default StorageClass, and the storage split deliberately puts
+        Postgres on it. Two default StorageClasses make any PVC that omits a
+        class undefined
+      Then explicit `longhorn-r3` / `longhorn-r2` StorageClasses in `config/`,
+      the per-volume counts the [storage split](#storage-split) calls for, so
+      Phase 6 chooses per volume rather than inheriting a global default.
+      Defining `longhorn-r3` now is not a contradiction of the paragraph above:
+      nothing binds to it until Phase 6, and anything that does will read
+      Degraded until Phase 7 joins the third node. Expected, and the reason
+      Phase 6's critical volumes are the ones worth deferring if that noise
+      matters more than the ordering.
+      *Exit:* `kubectl -n longhorn-system get nodes.longhorn.io -o wide` shows
+      each disk schedulable at the data disk's capacity — which is what actually
+      proves step 2 worked, more than `df` does.
+- [ ] **12. CloudNativePG operator** — pinned `HelmRelease`, no credentials, no
+      configuration. Last because nothing else waits on it and Phase 4 is what
+      makes it do anything.
+      *Exit:* `kubectl get crd clusters.postgresql.cnpg.io`.
+- [ ] **13. Phase gate as a command** — `scripts/k3s/Test-ClusterPlatform.ps1`,
+      asserting every *Exit* above in one run, in the same verification-stage
+      shape as the other scripts. "Phase 3 is done" should be something that
+      exits 0, not something remembered — and it doubles as the smoke test after
+      a node rebuild.
+      Run the [portability check](#verification) over `deploy/` before ticking:
+      grep the new tree for the base domain, any LAN address, and the VIP. Every
+      one of them should appear as a `${...}` substitution and nowhere else.
 
 ### Phase 4 — Data tier
 
 - [ ] CNPG `Cluster`: 3 instances, `minSyncReplicas: 1`, anti-affinity, `local-path`
+      — note the same two-node caveat as Longhorn (Phase 3b.11): three instances
+      with anti-affinity across two nodes leaves one permanently Pending until
+      Phase 7 joins the third. Start at 2 and scale, or accept the Pending pod
+- [ ] The CNPG WAL `ExternalSecret`, deferred here from Phase 3 — its IAM user
+      doesn't exist yet, which is why `postgres/wal-s3-*` is `required: false`
+      in [`parameters.json`](scripts/secrets/parameters.json). Create the user,
+      seed via Provision 2, flip the entries to required, then add the manifest
 - [ ] `quartz` database via the `Database` CRD
 - [ ] Quartz DDL via a one-shot Job — mind the missing `IF NOT EXISTS` (Finding 3)
 - [ ] WAL archiving + base backups to S3 → continuous PITR, a strictly better
@@ -470,8 +767,12 @@ after it.*
 
 - [ ] First-party Helm chart: `api` (3 replicas) + `files` (2 replicas)
 - [ ] Migration Job as a Helm hook (Finding 1)
-- [ ] Ingress resources replacing the Caddy labels
+- [ ] Ingress resources replacing the Caddy labels — no per-Ingress `tls:`
+      block needed, the Phase 3b.10d `TLSStore` serves the wildcard to all of them
 - [ ] The `kiosk` host's `/` → `/apps/dashboard/` rewrite as a Traefik `Middleware`
+- [ ] The kiosk Wi-Fi `ExternalSecret`, deferred here from Phase 3 — it stays
+      `required: false` until the value moves out of `SiteSettings`, and an
+      `ExternalSecret` for an unseeded parameter never reaches `SecretSynced`
 - [ ] **Resource requests and limits on every workload**
 - [ ] Flux image-update-automation watching GHCR and committing tag bumps —
       which removes `cd.yml` entirely rather than rewriting it
@@ -487,11 +788,19 @@ after it.*
 
 ### Phase 7 — Cutover
 
-- [ ] Point pfSense Unbound's `local-data` at the kube-vip VIP — a one-line
-      change to the existing zone redirect
-- [ ] Verify all six hostnames
+- [ ] Point pfSense Unbound's `local-data` at the kube-vip VIP (`INGRESS_VIP`,
+      set in Phase 3a.2) — a one-line change to the existing zone redirect
+- [ ] Verify all seven hostnames — `home`, `kiosk`, `files`, `share`, `status`,
+      `logs`, `metrics`. The plan said six before `share` existed; the wildcard
+      makes the count irrelevant to the certificate but not to this check
 - [ ] Rebuild the old prod box as the third k3s server and join it, restoring
       proper 3-node quorum
+- [ ] **Raise the replica counts the two-node build window forced down**: the
+      `LONGHORN_REPLICA_COUNT` variable to `3` and re-run Provision 4 (no commit
+      — that's the point of the ConfigMap), the per-volume Phase 6 classes to
+      the [storage split](#storage-split)'s 3-and-2, and CNPG to 3 instances.
+      Confirm Longhorn actually rebuilds onto the new node rather than reporting
+      Degraded, which is the first real proof the third node is carrying load
 
 ### Phase 8 — Backup v2 + rehearsal
 
@@ -553,12 +862,13 @@ Ranked by what actually bites:
 - **Phase 0 gate** — a real restore completed onto a scratch VM before any
   cluster work begins
 - **Per phase** — `flux get all` clean; `kubectl get nodes` all Ready
+- **Phase 3 gate** — `scripts/k3s/Test-ClusterPlatform.ps1` exits 0 (Phase 3b.13)
 - **HA proof (the real test)** — hard-power-off one node and confirm the VIP
   moves and the site stays up, CNPG promotes a replica, API pods reschedule, and
   Longhorn volumes rebuild. Do this for **each** of the three nodes, not just one
 - **Data** — `cnpg status` shows 3 instances streaming, sync replica healthy
 - **Backups** — restore the newest snapshot into a scratch Postgres and query it
-- **App** — all six hostnames serve with a valid wildcard cert; kiosk tablets
+- **App** — all seven hostnames serve with a valid wildcard cert; kiosk tablets
   reconnect on their own after a node kill
 - **Frontend** — build + lint per the usual convention; in-browser verification
   stays with the user
@@ -576,6 +886,14 @@ Ranked by what actually bites:
 [`scripts/secrets/`](scripts/secrets/), [`scripts/flux/`](scripts/flux/),
 [`.github/workflows/provision-2-seed-secrets.yml`](.github/workflows/provision-2-seed-secrets.yml),
 [`.github/workflows/provision-3-bootstrap-flux.yml`](.github/workflows/provision-3-bootstrap-flux.yml)
+
+*Phase 3 adds:* `scripts/k3s/Set-ClusterConfig.ps1`,
+`scripts/k3s/Initialize-NodeStorage.ps1`,
+`scripts/k3s/Test-ClusterPlatform.ps1`,
+`scripts/secrets/New-ExternalSecrets.ps1`,
+`.github/workflows/provision-4-cluster-config.yml`,
+`.github/workflows/provision-5-node-storage.yml`, and the
+`deploy/cluster/infrastructure/` tree.
 
 **Modified:** [Program.cs](src/Aerie.Api/Program.cs) (migrations → Job),
 [appsettings.Docker.json](src/Aerie.Api/appsettings.Docker.json) (connection
