@@ -150,22 +150,38 @@ point of the whole exercise.
 
 The one-time platform work. Nothing user-visible; everything after this is cheap.
 
-- [ ] `Modules/IModuleContext.cs` — marker interface for module `DbContext`s.
-- [ ] Replace the hardcoded migration block in
+- [x] `Modules/IModuleContext.cs` — marker interface for module `DbContext`s.
+      Declares `Database`, which `DbContext` already satisfies, so the migration
+      loop needs no cast and a module needs no method bodies.
+- [x] Replace the hardcoded migration block in
       [`Program.cs:157`](src/Aerie.Api/Program.cs#L157) with a loop over every
       registered `IModuleContext`, so module #2 never edits `Program.cs`.
-- [ ] `Modules/ModuleRegistration.cs` — one extension method registering a
+- [x] `Modules/ModuleRegistration.cs` — one extension method registering a
       module context with the shared connection string, its schema, and its own
-      `MigrationsHistoryTable`.
-- [ ] Generic design-time factory for module contexts.
+      `MigrationsHistoryTable`. Plus `AddAerieModules`, the one-line-per-module
+      registry, so the list of apps lives in `Modules/` and `Program.cs` holds a
+      single call that never changes.
+- [x] Generic design-time factory for module contexts
+      ([`ModuleDesignTimeFactory.cs`](src/Aerie.Api/Modules/ModuleDesignTimeFactory.cs)).
       [`DesignTimeDbContextFactory.cs`](src/Aerie.Api/Ef/DesignTimeDbContextFactory.cs)
-      is typed to `AerieContext`; `dotnet ef` needs one per context type.
-- [ ] `Modules/README.md` — how to add a module, in ten lines. This is the
+      is typed to `AerieContext`; `dotnet ef` needs one per context type. The EF
+      CLI only finds concrete non-generic factories, so a module still writes a
+      three-line subclass — that's the whole per-module cost.
+- [x] `Modules/README.md` — how to add a module, in ten lines. This is the
       artifact that makes app #2 an afternoon.
 
 **Verify:** `dotnet ef migrations add Init --context StorageContext` scaffolds
 into the module folder; app starts; `\dn` in `make db-shell` shows the new
 schema; `public.__EFMigrationsHistory` is untouched.
+
+*Verified* against a throwaway `Scratch` module (since Storage doesn't exist
+yet), then removed: migration scaffolded to `Modules/Scratch/Migrations/` with
+`Migrations/` untouched, startup logged `Migrating module context
+ScratchContext`, `\dn` showed `scratch` holding both `Things` and its own
+`__EFMigrationsHistory`, and `public.__EFMigrationsHistory` stayed at 11 rows.
+Note for Phase 1: `dotnet ef migrations add` builds *before* writing the
+migration, so a `--no-build` run right after it won't have the new migration in
+the assembly.
 
 ### Phase 1 — Storage Helper backend
 
@@ -300,7 +316,8 @@ Named so they're decisions rather than oversights.
 
 **New**
 ```
-src/Aerie.Api/Modules/IModuleContext.cs, ModuleRegistration.cs, README.md
+src/Aerie.Api/Modules/IModuleContext.cs, ModuleRegistration.cs,
+                       ModuleDesignTimeFactory.cs, README.md
 src/Aerie.Api/Modules/Storage/**
 src/Aerie.Api.Tests/Storage/**
 src/Aerie.Web/apps/family/**

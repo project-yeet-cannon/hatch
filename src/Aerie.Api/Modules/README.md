@@ -1,0 +1,76 @@
+# Modules
+
+A module is one family app: its own folder, its own Postgres schema, its own
+migration history. It rides the existing pod, deploy, backup, and log pipeline —
+adding one touches no container, manifest, CI job, or `Program.cs`.
+
+## Adding a module
+
+1. `mkdir Modules/<Name>/` and write the entities and context there.
+2. Context: pin the schema and implement the marker interface.
+
+   ```csharp
+   public class WidgetContext(DbContextOptions<WidgetContext> options)
+       : DbContext(options), IModuleContext
+   {
+       public const string Schema = "widget";
+       public DbSet<Widget> Widgets => Set<Widget>();
+
+       protected override void OnModelCreating(ModelBuilder b) => b.HasDefaultSchema(Schema);
+   }
+   ```
+
+3. Design-time factory, so `dotnet ef` can build the context without running the app:
+
+   ```csharp
+   public class WidgetDesignTimeFactory : ModuleDesignTimeFactory<WidgetContext>
+   {
+       protected override string Schema => WidgetContext.Schema;
+   }
+   ```
+
+4. Register it — one line in `AddAerieModules` in
+   [`ModuleRegistration.cs`](ModuleRegistration.cs):
+
+   ```csharp
+   services.AddModuleContext<WidgetContext>(configuration, WidgetContext.Schema);
+   ```
+
+5. Scaffold the first migration into the module folder:
+
+   ```sh
+   dotnet ef migrations add Init --context WidgetContext \
+     --project ./src/Aerie.Api/Aerie.Api.csproj -o Modules/Widget/Migrations
+   ```
+
+6. Controller at `/api/<name>/*` — `AddControllers` already finds it anywhere in
+   the assembly.
+
+Startup migrates every registered module context automatically. Nothing else to
+wire.
+
+## Rules
+
+- **One schema per module, one database.** Cross-app reads are plain SQL and one
+  CNPG backup still covers everything. Splitting a module into its own service
+  later is a connection string change, not a rewrite.
+- **Never reference another module's entities.** Read its tables through SQL or
+  its service if you must; a compile-time dependency turns two modules into one.
+- **`Schema` is declared once**, as the `const` on the context, and referenced by
+  the registration and the design-time factory. Three copies of the string is how
+  a module ends up with its history table in the wrong schema.
+- **No module invents a user.** Auth is deliberately absent (tailnet-only, two
+  trusted adults); it stays a middleware-plus-`Person`-table change later only as
+  long as that holds. See the tripwire in [`TODO_APPS.md`](../../../TODO_APPS.md).
+- **Nothing operator-specific in module code** — domains, hostnames, and paths
+  come from config, per [`docs/ethos.md`](../../../docs/ethos.md).
+
+## What's shared, and what isn't
+
+Home-automation code (`Controllers/`, `Services/`, `Ef/`) is layer-first because
+it's one domain sliced by layer. Modules are module-first because the app *is*
+the boundary. Both layouts are intentional; don't migrate one to the other.
+
+`Ef/AerieContext.cs` and its `public` schema belong to home automation. A module
+migration must never appear in `Migrations/` or in
+`public.__EFMigrationsHistory`.

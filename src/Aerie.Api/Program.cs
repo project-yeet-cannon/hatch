@@ -2,6 +2,7 @@ using Aerie.Api.Common;
 using Aerie.Api.Ef;
 using Aerie.Api.Jobs;
 using Aerie.Api.Models.Environment;
+using Aerie.Api.Modules;
 using Aerie.Api.Services;
 using Aerie.Api.Services.ClimateControl;
 using Aerie.Api.Services.Dashboard;
@@ -64,6 +65,11 @@ builder.Services.AddPooledDbContextFactory<AerieContext>(o =>
 });
 builder.Services.AddScoped<AerieContext>(sp =>
     sp.GetRequiredService<IDbContextFactory<AerieContext>>().CreateDbContext());
+
+// Family app modules - separate schemas in the same database, each with its own
+// DbContext and migration history. The registry lives in Modules/ so adding an
+// app doesn't touch this file at all (see Modules/README.md).
+builder.Services.AddAerieModules(builder.Configuration);
 
 // Quartz
 builder.Services.AddQuartz(q =>
@@ -158,6 +164,15 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AerieContext>();
     await db.Database.MigrateAsync();
+
+    // Every registered module context, in whatever order the registry lists them -
+    // module schemas are independent by construction, so there is nothing to order.
+    // A loop rather than a block per module is the point: module #2 never edits this.
+    foreach (var moduleDb in scope.ServiceProvider.GetServices<IModuleContext>())
+    {
+        app.Logger.LogInformation("Migrating module context {Context}", moduleDb.GetType().Name);
+        await moduleDb.Database.MigrateAsync();
+    }
 
     var seeder = scope.ServiceProvider.GetRequiredService<IDeviceMappingSeeder>();
     await seeder.SeedAsync();
