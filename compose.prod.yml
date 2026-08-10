@@ -33,6 +33,10 @@ services:
     environment:
       - DOTNET_ENVIRONMENT=Docker
       - DOMAIN=${DOMAIN}
+      # What the family shell prints into a QR label (AppsOptions). It has to be
+      # the canonical host rather than the origin the sheet was printed from,
+      # because the label outlives the laptop - see docs/storage-helper.md.
+      - Apps__PublicBaseUrl=https://home.${DOMAIN}
       # Gates VmConsoleLogsController - see scripts/hyperv/lib/Send-VmConsoleLog.ps1.
       - VM_LOG_SHIPPER_TOKEN=${VM_LOG_SHIPPER_TOKEN}
     # The music-library mount (MediaLibrary__RootPath env + the `share_ro`

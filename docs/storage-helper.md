@@ -97,12 +97,60 @@ suite looking like one product.
 | Crate | `/crates/{id}` and `/c/{code}` | Label, location, notes, item list, and an always-open add-item row. One component, two routes: `c/{code}` is what a label carries, `crates/{id}` is what in-app lists link to. |
 | Crate list | `/crates` | Grouped by location, for "what's in the attic". Unplaced crates are their own group at the end rather than hidden. |
 | Locations | `/locations` | Flat CRUD. |
+| Labels | `/labels` | The print sheet — see below. Not a tab: it's a thing you do once, at a desk, and it's reached from the crate list or a crate. |
 
 Design constraints worth stating, because they explain choices that otherwise
 look arbitrary: this is used **standing in a garage, one-handed, holding a box**.
 So every tappable thing clears 44px, the add-item field is sticky and keeps
 focus after each save (unpacking a box is a run of items, not one), and Delete
 sits at the opposite edge of the form from Save.
+
+### Labels
+
+The sheet is the workflow the app is built around: mint N blank crates, print,
+tape them onto empty boxes, *then* scan each one as it gets filled. Everything
+about it is shaped by the label outliving the software.
+
+- **The QR encodes a full URL** — `{PublicBaseUrl}/apps/family/storage/c/{code}`
+  — so the stock iOS camera opens the crate page with nothing installed and no
+  account. That is the single most valuable property of the whole app, and it's
+  free.
+- **The printed code is the recovery path.** It sits beside the QR in mono at a
+  size you can read at arm's length, because a scuffed QR is a dead end and
+  `CrateCode.Normalize` will take whatever someone types off a worn label.
+- **Paper is a setting, not an assumption.** Page size (Letter default, A4) and
+  the column × row grid are UI settings kept in `localStorage`, which is where a
+  fact about someone's printer belongs. No label product is assumed: it's plain
+  paper, dashed cut lines and tape.
+- **The sheet previews at true physical size** — it's laid out in `mm`, so the
+  preview and the paper are the same thing, and an under-sized QR costs a glance
+  rather than a sheet.
+- **Which crates a sheet is for lives in the URL** (`?code=…`). A minted batch
+  survives a refresh: by then the crates exist, and losing the list of codes
+  would mean boxes with no way back to them. Reprinting one faded label is the
+  same screen with one code in it, from the crate's edit form.
+
+Codes are generated at 25% error correction (`Q`) rather than the default,
+because the expected conditions are dust, scuffs and a photocopier. The encoder
+is a dynamic `import()`, so the ~30 kB of it never loads on the path that
+matters — pointing a camera at a box.
+
+### Configuration
+
+| Key | Default | What it does |
+|---|---|---|
+| `Apps:PublicBaseUrl` | *(empty)* | Absolute base URL printed into QR labels, e.g. `https://home.example.com`. Set at deploy — `compose.prod.yml` passes `Apps__PublicBaseUrl` built from the `DOMAIN` variable. |
+
+It exists because a QR label is not a link in a page: it is taped to a box for a
+decade and must carry the install's canonical host, not whichever hostname or IP
+the laptop that printed the sheet happened to be using. Unset, the app falls
+back to the printing browser's origin and says so on screen — labels still
+print on a fresh install, but the fallback is never a silent choice.
+Set-but-unusable (no scheme, not http(s)) is treated as unset and logged.
+
+Served to the shell by `GET /api/apps/config`, which lives beside the module
+seam in `Modules/AppsController.cs` rather than inside Storage: the value
+describes the install, not this app.
 
 ### Searching
 
@@ -131,8 +179,6 @@ with no network fails and says so.
 Named so they're decisions rather than oversights. Full reasoning in
 [`TODO_APPS.md`](../TODO_APPS.md).
 
-- **QR labels and the print sheet** (Phase 4) — the label encodes a full URL, so
-  the stock iOS camera opens the crate page with nothing installed.
 - **Postgres full-text search** (Phase 5).
 - **Photos of crate contents** — the most valuable v2 feature for an app of this
   kind, deferred on timing: blob storage should land on Longhorn after the k3s

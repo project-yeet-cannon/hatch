@@ -329,23 +329,52 @@ where it means three different things.
 
 ### Phase 4 — QR labels
 
-- [ ] Client-side QR via `qrcode` — already a dependency in
+- [x] Client-side QR via `qrcode` — already a dependency in
       [`admin/package.json`](src/Aerie.Web/apps/admin/package.json) for kiosk
-      provisioning, same pattern.
-- [ ] **Encode a full URL**, `{PublicBaseUrl}/apps/family/storage/c/{code}` — so
+      provisioning, same pattern. Loaded through a dynamic `import()`
+      ([`qr.ts`](src/Aerie.Web/apps/family/src/modules/storage/qr.ts)) so its
+      ~30 kB is its own chunk: printing happens at a desk, and the path this
+      app is judged by is a camera pointed at a box.
+- [x] **Encode a full URL**, `{PublicBaseUrl}/apps/family/storage/c/{code}` — so
       the stock camera app opens the crate with nothing installed.
-- [ ] `Apps:PublicBaseUrl` config, supplied at deploy from `vars.DOMAIN` like
+- [x] `Apps:PublicBaseUrl` config, supplied at deploy from `vars.DOMAIN` like
       every other operator value. **Not hardcoded** — per
       [`docs/ethos.md`](docs/ethos.md) this is exactly the "structural file
       quietly carrying an operator value" failure mode.
-- [ ] **Print sheet** — `@page` CSS, grid of QR + human-readable code + blank
+      [`Modules/AppsOptions.cs`](src/Aerie.Api/Modules/AppsOptions.cs) +
+      `GET /api/apps/config`, registered from `AddAerieModules` so `Program.cs`
+      still doesn't change. Unset falls back to the printing browser's origin
+      and says so on screen — a fresh operator gets working labels, but never
+      silently.
+- [x] **Print sheet** — `@page` CSS, grid of QR + human-readable code + blank
       write-on line. Rows/columns and page size as UI settings defaulting to
       Letter; don't hardcode a label product or assume Letter paper.
-- [ ] "Print N new labels" flow: batch-create → print → tape → scan to name.
+      Laid out in `mm`, so the on-screen preview is at true physical size.
+- [x] "Print N new labels" flow: batch-create → print → tape → scan to name.
 
 **Verify:** print a sheet on real paper, scan with the stock iOS camera from
 across a room, land on the right crate. Scan a label photocopied once to
 approximate wear.
+
+*Verified* at the seams that can be exercised without paper: `/api/apps/config`
+returned the configured base with its trailing slash trimmed over HTTP, a batch
+of 3 minted distinct codes, and the URL the sheet prints
+(`/apps/family/storage/c/93TQT3`) both resolved through `by-code` and served the
+shell byte-identical to `/apps/family/` on a hard refresh — the printed string is
+therefore a working link end to end. The new QR chunk is in the service worker's
+precache and all 12 precache URLs still return 200, so printing works offline
+too. `NormalizeBaseUrl` has its own tests for the cases that would only surface
+on paper (no scheme, wrong scheme, unset); API tests are at 174, `npm run build`
+and `oxlint` are clean, and the storage chunk went 16 kB → 24 kB with the
+encoder split out.
+
+The acceptance test — paper, a stock camera, and a photocopied label — is the
+user's, along with choosing a grid that suits their boxes.
+
+Config note: `compose.prod.yml` gains one line (`Apps__PublicBaseUrl` built from
+`DOMAIN`). That is the one edit to the "untouched" list below, and it's platform
+cost rather than per-app cost: it's the install's own URL, and app #2 inherits it
+without touching a compose file.
 
 ### Phase 5 — Search
 
@@ -386,9 +415,10 @@ Named so they're decisions rather than oversights.
 **New**
 ```
 src/Aerie.Api/Modules/IModuleContext.cs, ModuleRegistration.cs,
-                       ModuleDesignTimeFactory.cs, README.md
+                       ModuleDesignTimeFactory.cs, README.md,
+                       AppsOptions.cs, AppsController.cs
 src/Aerie.Api/Modules/Storage/**
-src/Aerie.Api.Tests/Storage/**
+src/Aerie.Api.Tests/Storage/**, src/Aerie.Api.Tests/Modules/**
 src/Aerie.Web/apps/family/**
 docs/storage-helper.md          (after Phase 3, matching docs/ conventions)
 ```
@@ -398,11 +428,15 @@ docs/storage-helper.md          (after Phase 3, matching docs/ conventions)
 src/Aerie.Api/Program.cs         module migration loop; family fallback + rewrite
 src/Aerie.Api/Aerie.Api.csproj   BuildFamily target
 src/Aerie.Api/Dockerfile.api     family-build stage, COPY, SkipFamilyBuild
+src/Aerie.Api/appsettings.json   empty Apps:PublicBaseUrl default
 .github/workflows/ci.yml         family in the web matrix
 Makefile                         family in test-web
 src/Aerie.Web/index.html         landing page card
+compose.prod.yml                 Apps__PublicBaseUrl from DOMAIN (Phase 4)
 ```
 
 **Untouched** — `apps/dashboard`, `apps/admin`, `apps/docs`, `apps/modeler`,
-`Ef/AerieContext.cs`, every compose file, every k3s manifest. That list is the
-proof that goal 1 holds.
+`Ef/AerieContext.cs`, every k3s manifest, and every compose file except the one
+line of `compose.prod.yml` that hands the install its own public URL. That list
+is the proof that goal 1 holds: all of it is one-time platform cost, and app #2
+adds nothing to any of these files.

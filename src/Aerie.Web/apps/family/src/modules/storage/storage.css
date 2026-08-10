@@ -290,3 +290,10 @@
 .storage-form-delete {
   margin-left: auto;
 }
+
+/* The module's own tab strip is chrome too - see the print block in App.css. */
+@media print {
+  .storage-subnav {
+    display: none;
+  }
+}

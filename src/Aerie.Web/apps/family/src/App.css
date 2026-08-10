@@ -181,3 +181,23 @@
   flex: none;
   color: var(--muted);
 }
+
+/* ---- Print ---- */
+
+/*
+  Printing a screen prints its content, not the app around it. This lives in the
+  shell rather than in the module that first needed it (Storage Helper's label
+  sheets) because the chrome being hidden is the shell's own - a module reaching
+  in to hide .shell-header would be the wrong file knowing the wrong thing.
+*/
+@media print {
+  .shell-header,
+  .shell-tabs,
+  .shell-offline {
+    display: none;
+  }
+
+  .shell-main {
+    padding: 0;
+  }
+}

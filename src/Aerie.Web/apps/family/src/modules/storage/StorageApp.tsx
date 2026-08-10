@@ -2,6 +2,7 @@ import { Navigate, NavLink, Route, Routes } from 'react-router-dom';
 import { CrateListPage } from './CrateListPage';
 import { CratePage } from './CratePage';
 import { ItemIndexPage } from './ItemIndexPage';
+import { LabelsPage } from './LabelsPage';
 import { LocationsPage } from './LocationsPage';
 import { cratesPath, itemsPath, locationsPath } from './routes';
 import './storage.css';
@@ -40,6 +41,9 @@ export default function StorageApp() {
         <Route path="crates" element={<CrateListPage />} />
         <Route path="crates/:id" element={<CratePage />} />
         <Route path="locations" element={<LocationsPage />} />
+        {/* Not a subnav tab: printing is a thing you do at a desk once, and it's
+            reached from the crate list (a batch) or a crate (a faded label). */}
+        <Route path="labels" element={<LabelsPage />} />
         {/* The scan destination: what a QR label resolves to. */}
         <Route path="c/:code" element={<CratePage />} />
         <Route path="*" element={<Navigate to={itemsPath} replace />} />

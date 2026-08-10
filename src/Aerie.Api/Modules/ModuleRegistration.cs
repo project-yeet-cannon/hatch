@@ -17,6 +17,9 @@ public static class ModuleRegistration
     /// </summary>
     public static IServiceCollection AddAerieModules(this IServiceCollection services, IConfiguration configuration)
     {
+        // Platform config every app in the family shell can read - see AppsController.
+        services.Configure<AppsOptions>(configuration.GetSection(AppsOptions.SectionName));
+
         // One line per module - each module's own extension registers its context
         // and its services, so this list stays a table of contents.
         services.AddStorageModule(configuration);

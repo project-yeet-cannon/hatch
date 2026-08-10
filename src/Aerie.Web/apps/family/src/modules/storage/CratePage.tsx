@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { createItem, deleteCrate, deleteItem, getCrate, getCrateByCode, getLocations, updateCrate, updateItem } from './api';
 import { CodeChip, EmptyNote, ErrorNote, InlineError, Loading } from './components';
-import { cratesPath } from './routes';
+import { cratesPath, reprintPath } from './routes';
 import type { CrateDetail, Item, Location } from './types';
 import { useMutation, useResource } from './useResource';
 
@@ -159,6 +159,12 @@ function CrateForm({ crate: detail, onSaved, onClose }: { crate: CrateDetail; on
         <button type="button" onClick={onClose}>
           Cancel
         </button>
+        {/* Reprinting one label: a code that's been through a decade of garage,
+            or a box that got re-taped. The sheet is the same one the batch
+            flow prints, with a single cell on it. */}
+        <Link to={reprintPath([crate.code])} className="storage-link-btn">
+          Print label
+        </Link>
         <button type="button" className="btn-danger storage-form-delete" onClick={destroy} disabled={remove.busy}>
           Delete
         </button>

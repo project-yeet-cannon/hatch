@@ -101,6 +101,17 @@ export const getCrateByCode = (code: string, signal?: AbortSignal) =>
 export const createCrate = (request: CrateWriteRequest) =>
   fetchJson<CrateDetail>('/crates', { method: 'POST', ...asJson(request) });
 
+/**
+ * Mints `count` blank crates for a label sheet. Capped server-side at
+ * MAX_BATCH_COUNT - kept in step here so the count box can't offer a number the
+ * API will refuse.
+ */
+export const createCrateBatch = (count: number) =>
+  fetchJson<Crate[]>('/crates/batch', { method: 'POST', ...asJson({ count }) });
+
+/** StorageService.MaxBatchCount. */
+export const MAX_BATCH_COUNT = 200;
+
 export const updateCrate = (id: string, request: CrateWriteRequest) =>
   fetchJson<Crate>(`/crates/${id}`, { method: 'PUT', ...asJson(request) });
 

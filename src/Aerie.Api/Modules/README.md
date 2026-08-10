@@ -80,7 +80,10 @@ wire.
   trusted adults); it stays a middleware-plus-`Person`-table change later only as
   long as that holds. See the tripwire in [`TODO_APPS.md`](../../../TODO_APPS.md).
 - **Nothing operator-specific in module code** — domains, hostnames, and paths
-  come from config, per [`docs/ethos.md`](../../../docs/ethos.md).
+  come from config, per [`docs/ethos.md`](../../../docs/ethos.md). The install's
+  own public URL is already solved: [`AppsOptions`](AppsOptions.cs)
+  (`Apps:PublicBaseUrl`, served to the shell by `GET /api/apps/config`). Read it
+  from there rather than adding a second setting for the same fact.
 
 ## What's shared, and what isn't
 
