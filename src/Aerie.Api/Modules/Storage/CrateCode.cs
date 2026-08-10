@@ -27,7 +27,7 @@ public static class CrateCode
     public const string Alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
     /// <summary>Where the display dash goes, splitting the code into two even halves.</summary>
-    private const int GroupSize = Length / 2;
+    public const int GroupSize = Length / 2;
 
     /// <summary>A new random code, bare and uppercase. Cryptographic RNG so batches don't correlate.</summary>
     public static string Next() => RandomNumberGenerator.GetString(Alphabet, Length);

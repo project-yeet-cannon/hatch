@@ -148,7 +148,7 @@ public class StorageController(StorageContext db, IStorageService storage, TimeP
     {
         if (await MissingLocation(request.LocationId, ct)) return BadRequest("locationId does not exist");
 
-        var crate = await db.Crates.Include(c => c.Items).FirstOrDefaultAsync(c => c.Id == id, ct);
+        var crate = await db.Crates.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (crate is null) return NotFound();
 
         // Code is deliberately not writable: it's taped to a box.
@@ -158,7 +158,9 @@ public class StorageController(StorageContext db, IStorageService storage, TimeP
         crate.UpdatedAt = time.GetUtcNow();
         await db.SaveChangesAsync(ct);
 
-        return ToDto(crate, await LocationNameAsync(crate.LocationId, ct), crate.Items.Count);
+        // Counted rather than Include'd: the count is all this needs, and loading
+        // the items would drag a search document along for each one.
+        return ToDto(crate, await LocationNameAsync(crate.LocationId, ct), await db.Items.CountAsync(i => i.CrateId == id, ct));
     }
 
     /// <summary>Deleting a crate takes its items with it (FK is CASCADE) and leaves its location alone.</summary>
@@ -181,13 +183,18 @@ public class StorageController(StorageContext db, IStorageService storage, TimeP
             {
                 Crate = c,
                 LocationName = c.Location == null ? null : c.Location.Name,
-                Items = c.Items.OrderBy(i => i.Name).ToList(),
+                // Projected to the DTO rather than loaded as entities: an Item
+                // carries a tsvector, and this is the scan path - the one response
+                // in the app that has to be small.
+                Items = c.Items.OrderBy(i => i.Name)
+                    .Select(i => new ItemDto(i.Id, i.CrateId, i.Name, i.Quantity, i.Notes, i.CreatedAt, i.UpdatedAt))
+                    .ToList(),
             })
             .FirstOrDefaultAsync(ct);
 
         return row is null
             ? null
-            : new CrateDetailDto(ToDto(row.Crate, row.LocationName, row.Items.Count), [.. row.Items.Select(ToDto)]);
+            : new CrateDetailDto(ToDto(row.Crate, row.LocationName, row.Items.Count), row.Items);
     }
 
     private async Task<bool> MissingLocation(Guid? locationId, CancellationToken ct) =>
@@ -213,23 +220,85 @@ public class StorageController(StorageContext db, IStorageService storage, TimeP
         var query = db.Items.AsNoTracking();
         if (crateId is { } id) query = query.Where(i => i.CrateId == id);
 
-        var rows = await query
-            .OrderBy(i => i.Name)
-            .Select(i => new
-            {
-                Item = i,
-                CrateCode = i.Crate!.Code,
-                CrateLabel = i.Crate!.Label,
-                LocationId = i.Crate!.LocationId,
-                LocationName = i.Crate!.Location == null ? null : i.Crate!.Location.Name,
-            })
-            .ToListAsync(ct);
+        return await IndexRowsAsync(query.OrderBy(i => i.Name), ct);
+    }
+
+    /// <summary>
+    /// Full-text search across the same index, returning the same rows - so the
+    /// screen that shows the whole list and the screen that shows matches are one
+    /// screen. Empty or punctuation-only queries return nothing rather than
+    /// everything: the caller already has the full list from <c>GET items</c>.
+    /// </summary>
+    /// <remarks>
+    /// Two things about the query are deliberate, and both come from how people
+    /// actually look for a box:
+    /// <list type="bullet">
+    /// <item>The document is the item's stored vector <b>concatenated with its
+    /// crate and location text</b>, because "drill garage" has to match a drill
+    /// in the garage - and a generated column can only ever see its own row.</item>
+    /// <item>Results are ordered by name, not <c>ts_rank</c>. With prefix terms
+    /// that all have to match, relevance is close to binary; a stable alphabetical
+    /// list is easier to scan than a ranking nobody can perceive.</item>
+    /// </list>
+    /// </remarks>
+    [HttpGet("search")]
+    public async Task<IReadOnlyList<ItemIndexRow>> Search([FromQuery] string? q, CancellationToken ct)
+    {
+        var tsquery = SearchQuery.ToTsQuery(q);
+        if (tsquery is null) return [];
+
+        var matches = db.Items.AsNoTracking().Where(i =>
+            i.SearchVector
+                .Concat(EF.Functions.ToTsVector(SearchQuery.Config,
+                    (i.Crate!.Label ?? "") + " " +
+                    // The code three ways - bare, and each half on its own - so a
+                    // code read off a label finds its contents whether it's typed
+                    // "D2QDYM", "D2Q-DYM" or just the half that's still legible.
+                    i.Crate!.Code + " " +
+                    i.Crate!.Code.Substring(0, CrateCode.GroupSize) + " " +
+                    i.Crate!.Code.Substring(CrateCode.GroupSize) + " " +
+                    (i.Crate!.Location == null ? "" : i.Crate!.Location.Name)))
+                .Matches(EF.Functions.ToTsQuery(SearchQuery.Config, tsquery)));
+
+        return await IndexRowsAsync(matches.OrderBy(i => i.Name), ct, SearchQuery.MaxResults);
+    }
+
+    /// <summary>
+    /// Materialises index rows, carrying each item's crate and location with it so
+    /// a list screen needs no follow-up lookups.
+    /// </summary>
+    /// <remarks>
+    /// Columns rather than whole entities: an Item now carries a tsvector, and
+    /// nobody wants a search document per row shipped to a phone. <paramref
+    /// name="limit"/> is applied after the projection so the SQL stays one
+    /// statement with a LIMIT, rather than a projection over a subquery whose
+    /// ordering is then anyone's guess.
+    /// </remarks>
+    private static async Task<IReadOnlyList<ItemIndexRow>> IndexRowsAsync(
+        IQueryable<Item> items, CancellationToken ct, int? limit = null)
+    {
+        var query = items.Select(i => new
+        {
+            i.Id,
+            i.Name,
+            i.Quantity,
+            i.Notes,
+            i.CrateId,
+            CrateCode = i.Crate!.Code,
+            CrateLabel = i.Crate!.Label,
+            LocationId = i.Crate!.LocationId,
+            LocationName = i.Crate!.Location == null ? null : i.Crate!.Location.Name,
+        });
+
+        if (limit is { } max) query = query.Take(max);
+
+        var rows = await query.ToListAsync(ct);
 
         return
         [
             .. rows.Select(r => new ItemIndexRow(
-                r.Item.Id, r.Item.Name, r.Item.Quantity, r.Item.Notes,
-                r.Item.CrateId, r.CrateCode, CrateCode.Format(r.CrateCode), r.CrateLabel,
+                r.Id, r.Name, r.Quantity, r.Notes,
+                r.CrateId, r.CrateCode, CrateCode.Format(r.CrateCode), r.CrateLabel,
                 r.LocationId, r.LocationName))
         ];
     }

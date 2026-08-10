@@ -86,6 +86,11 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
+  // A caller that asked for no-store gets no store. That's how a module says
+  // "this answer isn't worth keeping" - search, whose URL is a different one per
+  // keystroke - without the shell having to know any module's routes.
+  if (request.cache === 'no-store') return;
+
   // Every client-side route resolves to the one shell document, which is what
   // makes a scanned QR (/apps/family/storage/c/ABC-123) open offline too.
   if (request.mode === 'navigate') {

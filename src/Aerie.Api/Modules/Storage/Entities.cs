@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
+using NpgsqlTypes;
 
 namespace Aerie.Api.Modules.Storage;
 
@@ -82,6 +83,14 @@ public class Item
     public int Quantity { get; set; } = 1;
 
     public string? Notes { get; set; }
+
+    /// <summary>
+    /// The item's own text as a search document, maintained by Postgres as a
+    /// generated column - never assigned in code, and null until the row comes
+    /// back from the database. Configured in StorageContext.OnModelCreating;
+    /// searched through <see cref="SearchQuery"/>.
+    /// </summary>
+    public NpgsqlTsVector SearchVector { get; private set; } = null!;
 
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

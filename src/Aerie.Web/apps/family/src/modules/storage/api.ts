@@ -121,6 +121,20 @@ export const deleteCrate = (id: string) => fetchJson<void>(`/crates/${id}`, { me
 
 export const getItems = (signal?: AbortSignal) => fetchJson<ItemIndexRow[]>('/items', { signal });
 
+/**
+ * Postgres full-text search across item, crate and location text - the same rows
+ * as getItems, chosen by the server, so a match screen and the whole list are the
+ * same screen.
+ *
+ * `no-store` keeps the service worker out of it: a search runs once per settled
+ * keystroke, and caching every prefix somebody ever typed would fill the data
+ * cache with answers to questions nobody will ask twice. Offline searching falls
+ * back to filtering the cached index instead, which is fresher than a stale
+ * result would be anyway.
+ */
+export const searchItems = (q: string, signal?: AbortSignal) =>
+  fetchJson<ItemIndexRow[]>(`/search?q=${encodeURIComponent(q)}`, { signal, cache: 'no-store' });
+
 export const createItem = (request: ItemWriteRequest) =>
   fetchJson<Item>('/items', { method: 'POST', ...asJson(request) });
 

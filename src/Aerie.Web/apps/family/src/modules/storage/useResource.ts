@@ -87,6 +87,23 @@ export function useResource<T>(key: string, load: (signal: AbortSignal) => Promi
   };
 }
 
+/**
+ * `value`, but only once it has stopped changing for `delayMs`. Typing is what
+ * this exists for: search runs on the server now, and one request per character
+ * thumbed into the box would be a dozen queries to answer one question. The
+ * input itself never waits - only the query does.
+ */
+export function useDebounced<T>(value: T, delayMs: number): T {
+  const [settled, setSettled] = useState(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+
+  return settled;
+}
+
 export interface Mutation {
   busy: boolean;
   error: string | null;

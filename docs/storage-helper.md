@@ -31,7 +31,7 @@ storage.locations  id, name, description, created_at
 storage.crates     id, code (unique), label, location_id → locations (SET NULL),
                    notes, created_at, updated_at
 storage.items      id, crate_id → crates (CASCADE), name, quantity, notes,
-                   created_at, updated_at
+                   search_vector (generated, GIN), created_at, updated_at
 ```
 
 The two delete behaviours are the interesting part, and they point opposite ways
@@ -79,6 +79,7 @@ physical workflows:
 |---|---|
 | `GET /crates/by-code/{code}` | The scan path. Takes whatever a QR carries or a person types; returns the crate **and its items** in one response, so the scan destination never needs a second round trip. |
 | `POST /crates/batch { count }` | Mints N blank crates for a label sheet. The workflow that matters is print → tape onto empty boxes → scan each one as it gets filled. Creating a crate in the app before the box physically exists is backwards. Capped at 200 per call so a typo can't mint ten thousand. |
+| `GET /search?q=` | Full-text search — see [Searching](#searching). Returns the same rows as `GET /items`, so the list screen and the match screen are one screen. |
 
 `GET /items` is the flat index: each row carries its crate code, crate label and
 location name, so the "where is the drill" screen draws from one request and
@@ -93,7 +94,7 @@ suite looking like one product.
 
 | Screen | Route | Notes |
 |---|---|---|
-| Item index | `/items` | The front door. Flat list across every crate, each row showing crate + location. Filtering is client-side over the whole index (see below). |
+| Item index | `/items` | The front door. Flat list across every crate, each row showing crate + location. Typing searches the server; with no network it filters the loaded list instead (see below). |
 | Crate | `/crates/{id}` and `/c/{code}` | Label, location, notes, item list, and an always-open add-item row. One component, two routes: `c/{code}` is what a label carries, `crates/{id}` is what in-app lists link to. |
 | Crate list | `/crates` | Grouped by location, for "what's in the attic". Unplaced crates are their own group at the end rather than hidden. |
 | Locations | `/locations` | Flat CRUD. |
@@ -154,17 +155,43 @@ describes the install, not this app.
 
 ### Searching
 
-Client-side substring matching over the loaded index, where every
-whitespace-separated term must match somewhere on the row — item name, notes,
-crate label, crate code or location name. That's what makes `drill garage` work,
-which is how people actually recall where something is: by the thing and the
-place, not either alone.
+Postgres full-text — `GET /api/storage/search?q=`, built in
+`SearchQuery.cs` and `StorageController.Search`. Deliberately not OpenSearch: the
+cluster is already there for logs, but a few hundred household items is three
+orders of magnitude below where that earns its complexity, and `tsvector` won't
+need replacing at this scale.
 
-This is deliberate at household scale. A few hundred items is a small payload,
-it filters faster than anyone types, and it keeps working with no network once
-the service worker has the list. `TODO_APPS.md` Phase 5 replaces it with
-Postgres full-text (`GET /api/storage/search`), which buys stemming and
-misspelling tolerance at the cost of the offline half.
+Three properties, each of them about someone thumb-typing while holding a box:
+
+- **Every term is a prefix.** `dri` finds the drill; results narrow while typing
+  rather than only once a word is finished.
+- **Every term must match, and the document spans all three tables.** `drill
+  garage` means the drill *in the garage* — the crate label, the crate code
+  (bare, dashed, or either half) and the location name are part of what's
+  searched, because that's how people recall where a thing is: by the thing and
+  the place, not either alone.
+- **The `english` configuration**, so `lights` finds `light`, `batter` finds the
+  battery in a note, and `the` doesn't narrow anything.
+
+Only letters and digits survive the trip from the search box to the query, so no
+`tsquery` operator can reach the parser from typed text and a stray quote is a
+word break rather than a syntax error thrown at someone mid-search.
+
+The item's own text (`name` + `notes`) is a **generated `tsvector` column** with
+a GIN index, so it's tokenised on write and no code path can forget to reindex
+after an edit. Worth being straight about the index: the crate and location text
+is concatenated onto that vector per row, because a generated column can only see
+its own row, and a concatenated vector can't use the index — so this query scans.
+At a few hundred items that's the right trade against the alternatives (splitting
+the query per matched crate, or trigger-maintained denormalisation). The index is
+what stops "make it index-backed" from being a schema change later.
+
+**Offline**, the screen falls back to the substring filter over the loaded index
+that Phase 3 shipped, and says so under the search box. It can't stem, but a
+garage is exactly where the signal goes, and "no results" would be a lie there.
+Search responses themselves are fetched `no-store`: one URL per settled keystroke
+would fill the service worker's data cache with answers to questions nobody asks
+twice.
 
 ### Offline
 
@@ -179,7 +206,6 @@ with no network fails and says so.
 Named so they're decisions rather than oversights. Full reasoning in
 [`TODO_APPS.md`](../TODO_APPS.md).
 
-- **Postgres full-text search** (Phase 5).
 - **Photos of crate contents** — the most valuable v2 feature for an app of this
   kind, deferred on timing: blob storage should land on Longhorn after the k3s
   cutover rather than on the current host's disk and then get migrated.

@@ -373,10 +373,10 @@ after it.*
       unchecked on purpose: a TCP connect can't probe a connectionless port,
       and the no-firewall default above is what makes that an acceptable gap
       rather than a real one*
-- [ ] ~~`age-keygen` for the SOPS key~~ — **cut.** No secret bytes in git,
+- [x] ~~`age-keygen` for the SOPS key~~ — **cut.** No secret bytes in git,
       encrypted or otherwise; see [Secrets](#secrets--no-bytes-in-git) and
       [`docs/ethos.md`](docs/ethos.md). Replaced by the three items below
-- [ ] Dedicated `aerie-eso` IAM user — `ssm:GetParameter*` /
+- [x] Dedicated `aerie-eso` IAM user — `ssm:GetParameter*` /
       `ssm:GetParametersByPath` scoped to `/aerie/*` only, plus `kms:Decrypt`
       on the default `aws/ssm` key. Separate from `aerie-restic` and the
       Route53 user, same isolation discipline as Phase 0

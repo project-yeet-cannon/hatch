@@ -378,10 +378,12 @@ without touching a compose file.
 
 ### Phase 5 — Search
 
-- [ ] Generated `tsvector` column on `items` (name + notes), GIN index.
-- [ ] `GET /api/storage/search?q=` spanning item name/notes, crate label, and
-      location name; returns item → crate → location in one row.
-- [ ] Prefix matching so search is useful while typing.
+- [x] Generated `tsvector` column on `items` (name + notes), GIN index.
+- [x] `GET /api/storage/search?q=` spanning item name/notes, crate label, and
+      location name; returns item → crate → location in one row — the same
+      `ItemIndexRow` as `GET /items`, so the list screen and the match screen
+      stay one screen.
+- [x] Prefix matching so search is useful while typing.
 
 Postgres full-text, deliberately — **not** OpenSearch. The cluster is already
 there for logs, but a few hundred household items is three orders of magnitude
@@ -390,6 +392,50 @@ this scale.
 
 **Verify:** partial words and misspelling-adjacent prefixes find the right item;
 searching a location name returns everything stored there.
+
+*Verified* over HTTP against the real Postgres, with the `Search` migration
+applied into `storage` (`public.__EFMigrationsHistory` still at 11 rows) and
+`\d storage."Items"` showing `SearchVector` as `GENERATED ALWAYS AS … STORED`
+under a GIN index. `dri` found both drill rows, `lights` and `light` each found
+`String lights` (stemming), `batter` found the item whose *notes* mention a
+battery, `drill garage` found the drill in the garage while `attic` alone
+returned everything stored there, and the crate code matched typed as `HZ4-YHB`,
+`hz4` or `yhb`. Empty, punctuation-only and stop-word-only queries return `[]`
+rather than the whole index; `a drill in the garage` still finds the drill. 188
+API tests pass, `npm run build` and `oxlint` are clean, and all 12 service-worker
+precache URLs still return 200.
+
+One knock-on worth naming: adding a column to `Item` meant every read that
+projected the whole entity — the item index *and* the scan path — would have
+shipped a search document per row to a phone. Both now project columns, verified
+by the crate detail and index responses carrying no `searchVector` field, and
+`UpdateCrate` counts its items instead of loading them.
+
+Two things worth writing down, because both are trades rather than oversights:
+
+**The GIN index does not accelerate this query.** A generated column can only see
+its own row, so crate and location text is concatenated onto the item's vector
+per row — and a concatenated vector can't use the index. Making it index-backed
+means either splitting the query per matched crate or maintaining a denormalised
+document by trigger, and neither is worth it three orders of magnitude below where
+it would matter. The column and index still earn their place: the item's own text
+is tokenised on write rather than per query, and the day this needs to be a lookup
+it's a query change, not a schema change.
+
+**Offline search survives.** Phase 3 predicted the switch to `GET /search` would
+cost the offline half; it doesn't. The screen still loads the full index (it's the
+list with an empty box), so any search failure falls back to the substring filter
+over that list and says so under the box, rather than showing a red error in the
+one place in the house where the signal drops. Search responses are fetched
+`no-store` — one URL per settled keystroke would otherwise fill the worker's data
+cache with answers to questions nobody asks twice — and `sw.js` honours that
+generically, so it still knows nothing about any module's routes.
+
+Provider note: `StorageContext` configures the tsvector column only when the
+provider is Npgsql, because EF's InMemory provider — which the module's unit
+tests run on — cannot map a `tsvector` at all and fails model validation. The
+query-building half (`SearchQuery`) is a pure function with its own tests; what
+the query *finds* is Postgres's own behaviour and is verified against a real one.
 
 ## Deferred
 
