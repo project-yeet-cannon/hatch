@@ -50,6 +50,13 @@ Running node 2 before node 1 exists fails preflight: the workflow checks
    runner, confirms the node answers port 22, and — for `role: join` — that
    `join_server` answers 6443. Cheap failures before an install that
    downloads a binary and starts etcd.
+1a. **Join preflight.** For `role: join`, also checks that `join_server`
+   answers 6443 (apiserver), 2379-2380 (etcd client/peer), and 10250
+   (kubelet) from the runner. Only proves those ports answer from the
+   runner, not from the joining node itself — but a miss here is almost
+   always a typo'd `join_server` or a firewalled node 1, worth catching
+   before the remote install starts. UDP 8472 (flannel VXLAN) isn't checked;
+   see "Still manual" below.
 2. **Inspect.** Checks whether k3s is already active on the node. If so, the
    install is skipped (safe to rerun this workflow) unless `reinstall` is
    checked, which runs the node's own `k3s-uninstall.sh` first.
@@ -65,10 +72,12 @@ Running node 2 before node 1 exists fails preflight: the workflow checks
 
 ## Still manual
 
-- **Confirming node-to-node ports are open** (6443, 2379-2380, 10250, UDP
-  8472) before the second node joins. Debian/Ubuntu cloud images ship with no
-  firewall active, so this is a no-op today — TODO_SWARM.md calls it out as
-  worth a one-line check if that default ever changes, not a real risk now.
+- **UDP 8472 (flannel VXLAN)** isn't checked by the join preflight — a TCP
+  connect can't meaningfully probe a connectionless port. The TCP ports
+  (6443, 2379-2380, 10250) are checked; see "Order of operations" above.
+  Debian/Ubuntu cloud images ship with no firewall active, so this has stayed
+  a non-issue in practice — TODO_SWARM.md flags it as worth revisiting only
+  if that default ever changes.
 - **Generating `K3S_CLUSTER_TOKEN`** — a one-time secret-bootstrap action,
   same tier as `NODE_SSH_PRIVATE_KEY` and Phase 0's `RESTIC_PASSWORD`.
 - Everything after this: `age-keygen` for SOPS and `flux bootstrap` are the

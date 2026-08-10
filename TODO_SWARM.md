@@ -321,11 +321,16 @@ after it.*
 - [x] Generate the shared cluster token before either install (`openssl rand
       -hex 32`); store it as the `K3S_CLUSTER_TOKEN` repository secret —
       exactly like the SSH keys, never in git
-- [ ] Confirm node-to-node ports are open before the second node joins: TCP
+- [x] Confirm node-to-node ports are open before the second node joins: TCP
       6443 (apiserver), 2379-2380 (etcd), 10250 (kubelet), UDP 8472 (flannel
       VXLAN). Debian/Ubuntu cloud images ship with no firewall active, so
       this is a no-op today — worth a one-line check, not a real risk, unless
       that default changes
+      — *`Install-K3sNode.ps1`'s join preflight now checks the four TCP
+      ports against `-JoinServer` before installing. UDP 8472 is left
+      unchecked on purpose: a TCP connect can't probe a connectionless port,
+      and the no-firewall default above is what makes that an acceptable gap
+      rather than a real one*
 - [ ] `age-keygen` for the SOPS key. Commit the **public** key and a
       `.sops.yaml` creation rule (e.g. `deploy/**/secrets/*.yaml`) to git.
       Get the **private** key into the Phase 0 restic repos (extend

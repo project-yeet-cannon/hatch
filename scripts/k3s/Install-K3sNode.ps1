@@ -26,9 +26,9 @@
     Stages:
       1. Preflight - SSH key resolves, the OpenSSH client is present, the
                      node answers port 22, and (for -JoinServer) the target
-                     server's apiserver port answers too. Cheap failures
-                     before an install that downloads a binary and starts
-                     etcd.
+                     server's apiserver (6443), etcd (2379-2380), and kubelet
+                     (10250) ports answer too. Cheap failures before an
+                     install that downloads a binary and starts etcd.
       2. Inspect   - checks whether k3s is already active on the node. If so,
                      the install is skipped (idempotent re-run) unless
                      -Reinstall forces a clean uninstall/reinstall.
@@ -165,13 +165,25 @@ try {
     }
 
     if ($JoinServer) {
-        # Only proves the apiserver port answers from this machine, not from
-        # the joining node itself - but a miss here is almost always a typo'd
-        # -JoinServer, so it's worth catching before the remote install even
-        # starts. TODO_SWARM.md Phase 2 separately calls out confirming
-        # 6443/2379-2380/10250/8472 node-to-node, which this does not attempt.
-        if (-not (Test-TcpPort -IPAddress $JoinServer -Port 6443)) {
-            $failures.Add("-JoinServer $JoinServer isn't answering on 6443 (k3s apiserver) from this machine. Confirm node 1 finished -ClusterInit and the address is right.")
+        # Only proves these ports answer from this machine, not from the
+        # joining node itself - but a miss here is almost always a typo'd
+        # -JoinServer or a firewalled node, so it's worth catching before the
+        # remote install even starts. TODO_SWARM.md Phase 2 calls out
+        # 6443/2379-2380/10250/8472 as the ports node-to-node traffic needs;
+        # UDP 8472 (flannel VXLAN) is deliberately not probed here - a TCP
+        # connect can't meaningfully test a connectionless port, and
+        # Debian/Ubuntu cloud images ship with no firewall active by default,
+        # which is why this has stayed a non-issue in practice.
+        $joinPorts = [ordered]@{
+            6443  = 'k3s apiserver'
+            2379  = 'etcd client'
+            2380  = 'etcd peer'
+            10250 = 'kubelet'
+        }
+        foreach ($port in $joinPorts.Keys) {
+            if (-not (Test-TcpPort -IPAddress $JoinServer -Port $port)) {
+                $failures.Add("-JoinServer $JoinServer isn't answering on $port ($($joinPorts[$port])) from this machine. Confirm node 1 finished -ClusterInit, the address is right, and nothing is firewalling node-to-node traffic.")
+            }
         }
     }
 
@@ -304,7 +316,7 @@ try {
     Write-Host 'Phase 2 checklist - confirm and tick off in TODO_SWARM.md:'
     Write-Host "  - this node installed and Ready                 (verified above)"
     Write-Host '  - cluster token generated once, stored like the SSH keys, never in git'
-    Write-Host '  - node-to-node ports open (6443/2379-2380/10250/8472 UDP) - not checked by this script'
+    Write-Host '  - node-to-node TCP ports open (6443/2379-2380/10250)   (verified above for -JoinServer runs; UDP 8472/flannel is not checked)'
     Write-Host '  - age-keygen for SOPS, public key + .sops.yaml committed, private key backed up'
     Write-Host '  - flux bootstrap, run once from an operator machine against this node'
 
