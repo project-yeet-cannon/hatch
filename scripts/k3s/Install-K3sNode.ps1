@@ -317,8 +317,8 @@ try {
     Write-Host "  - this node installed and Ready                 (verified above)"
     Write-Host '  - cluster token generated once, stored like the SSH keys, never in git'
     Write-Host '  - node-to-node TCP ports open (6443/2379-2380/10250)   (verified above for -JoinServer runs; UDP 8472/flannel is not checked)'
-    Write-Host '  - age-keygen for SOPS, public key + .sops.yaml committed, private key backed up'
-    Write-Host '  - flux bootstrap, run once from an operator machine against this node'
+    Write-Host '  - Provision 2: seed secrets  (scripts/secrets/, once both nodes are up)'
+    Write-Host '  - Provision 3: bootstrap Flux (scripts/flux/)'
 
     # A no-op outside Actions, which is the point: manual invocation is a
     # last resort here (see scripts/hyperv/README.md) and provision-1-install

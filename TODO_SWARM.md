@@ -380,38 +380,62 @@ after it.*
       `ssm:GetParametersByPath` scoped to `/aerie/*` only, plus `kms:Decrypt`
       on the default `aws/ssm` key. Separate from `aerie-restic` and the
       Route53 user, same isolation discipline as Phase 0
-- [ ] Define and commit the parameter naming convention
+- [x] Define and commit the parameter naming convention
       (`/aerie/<component>/<key>`, e.g. `/aerie/ha/token`,
       `/aerie/cert-manager/route53-secret-access-key`). This is the *pointer*
       half — structural, identical for every installation, and belongs in git
-- [ ] **Provision 2: Seed secrets** workflow
+      — *[`scripts/secrets/parameters.json`](scripts/secrets/parameters.json)
+      is the single source of truth (paths, which env var supplies each, which
+      phase consumes it — no values, ever), read by the seeding script today
+      and by the Phase 3 `ExternalSecret`s next. Convention, IAM split,
+      rotation story and what deliberately stays **out** of the store are in
+      [`docs/secrets-architecture.md`](docs/secrets-architecture.md). The
+      prefix is a parameter (`-ParameterPrefix`), so two installations can
+      share one AWS account*
+- [x] **Provision 2: Seed secrets** workflow
       (`.github/workflows/provision-2-seed-secrets.yml`) — pushes the existing
       GitHub Actions secrets into the `/aerie/*` tree
       (`aws ssm put-parameter --type SecureString --overwrite`), then creates
-      the single ESO bootstrap Secret on the cluster over SSH via
-      `kubectl create secret generic --dry-run=client -o yaml | kubectl apply
-      -f -`. Idempotent and re-runnable, and the automation-first counterpart
-      to doing it by hand — same convention as Provision 0 and 1. This is the
-      **one** imperative secret injection the design allows
-- [ ] `flux bootstrap github --owner=<owner> --repository=Aerie --branch=main
-      --path=deploy/cluster --personal`, run once from an operator machine
-      with `kubectl` pointed at node 1, using a scoped PAT (contents +
-      workflows) — the last imperative step; everything Flux manages after
-      this is a git commit to `deploy/`, no more manual `kubectl apply`
-- [ ] Note the gap, don't solve it here: `kubectl`/Flux target node 1's IP
+      the single ESO bootstrap Secret on the cluster over SSH. Idempotent and
+      re-runnable, and the automation-first counterpart to doing it by hand —
+      same convention as Provision 0 and 1. This is the **one** imperative
+      secret injection the design allows
+      — *[`scripts/secrets/Sync-AerieSecrets.ps1`](scripts/secrets/Sync-AerieSecrets.ps1).
+      Three refinements on the line above: it **reads before writing**, so an
+      unchanged secret doesn't burn one of SSM's 100 versions per run;
+      it **verifies as the `aerie-eso` identity**, listing *and* decrypting
+      one value, since `GetParametersByPath` never touches KMS and would hide
+      a missing `kms:Decrypt` until ESO failed on it in production; and no
+      secret ever reaches a command line — values go to AWS via
+      `--cli-input-json file://` and to the cluster over SSH **stdin**, which
+      is why `Invoke-NodeSsh` grew `-StdIn` rather than using a heredoc*
+- [x] ~~`flux bootstrap ...`, run once from an operator machine~~ — **scripted
+      instead.** `Provision 3: Bootstrap Flux`
+      ([`.github/workflows/provision-3-bootstrap-flux.yml`](.github/workflows/provision-3-bootstrap-flux.yml)
+      → [`scripts/flux/Bootstrap-Flux.ps1`](scripts/flux/Bootstrap-Flux.ps1))
+      runs `flux bootstrap github` *on the node* over SSH, so no cluster
+      credential is copied onto a runner, and the PAT arrives on stdin rather
+      than in argv. Leaving this one imperative would have made it the only
+      provisioning step with no repeatable path — and it's the one a rebuilt
+      control plane most needs to re-run. Owner/repo come from the run's
+      context, so it can only ever be pointed at the repo it was dispatched
+      from. Everything Flux manages after this is a git commit to `deploy/`
+- [x] Note the gap, don't solve it here: `kubectl`/Flux target node 1's IP
       directly — there's no VIP in front of the apiserver itself (kube-vip in
       Phase 3 fronts *ingress* traffic only). Losing node 1 means manually
       repointing the kubeconfig context at node 2 until Phase 7 restores a
       third node. Acceptable for a home cluster; call it out if that changes
+      — *written up in
+      [`docs/secrets-architecture.md`](docs/secrets-architecture.md#known-gap-no-vip-in-front-of-the-apiserver),
+      with the recovery (both workflows are idempotent — re-run against a
+      survivor) and the two ways out if it ever costs more than that. Both
+      provisioning scripts print the warning at the end of a successful run,
+      so it can't quietly become a surprise*
 
 > During the parallel build only the two new servers exist as nodes. Two-node
 > etcd has *worse* availability than one, so treat the build window as
 > non-production and rebuild the old prod box as the third server immediately
 > after cutover (Phase 7).
-
-### Phase 2 and a half - Parallel domain
-
-- [ ] setup a different domain to use for the new cluster so we can verify the new work while keeping the old server in place
 
 
 ### Phase 3 — Platform services
@@ -548,7 +572,10 @@ Ranked by what actually bites:
 **New:** `deploy/` (Flux tree), `charts/aerie/`, `scripts/`,
 `docs/cluster-architecture.md`, `docs/disaster-recovery.md`,
 [`docs/ethos.md`](docs/ethos.md),
-`.github/workflows/provision-2-seed-secrets.yml`
+[`docs/secrets-architecture.md`](docs/secrets-architecture.md),
+[`scripts/secrets/`](scripts/secrets/), [`scripts/flux/`](scripts/flux/),
+[`.github/workflows/provision-2-seed-secrets.yml`](.github/workflows/provision-2-seed-secrets.yml),
+[`.github/workflows/provision-3-bootstrap-flux.yml`](.github/workflows/provision-3-bootstrap-flux.yml)
 
 **Modified:** [Program.cs](src/Aerie.Api/Program.cs) (migrations → Job),
 [appsettings.Docker.json](src/Aerie.Api/appsettings.Docker.json) (connection

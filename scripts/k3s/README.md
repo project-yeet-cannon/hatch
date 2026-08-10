@@ -80,5 +80,16 @@ Running node 2 before node 1 exists fails preflight: the workflow checks
   if that default ever changes.
 - **Generating `K3S_CLUSTER_TOKEN`** — a one-time secret-bootstrap action,
   same tier as `NODE_SSH_PRIVATE_KEY` and Phase 0's `RESTIC_PASSWORD`.
-- Everything after this: `age-keygen` for SOPS and `flux bootstrap` are the
-  remaining Phase 2 items and aren't scripted yet.
+
+## What comes after
+
+Both remaining Phase 2 steps are scripted, in the same dispatch-a-workflow
+shape as this one:
+
+- [`scripts/secrets/`](../secrets/) — **Provision 2: Seed secrets**. Pushes this
+  installation's secrets into the parameter store and plants the ESO bootstrap
+  Secret. (Replaces the `age-keygen` / SOPS step the plan originally called for
+  — no secret bytes in git, encrypted or otherwise. See
+  [`docs/ethos.md`](../../docs/ethos.md).)
+- [`scripts/flux/`](../flux/) — **Provision 3: Bootstrap Flux**. After it, the
+  cluster changes by commit rather than by command.

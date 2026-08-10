@@ -250,6 +250,14 @@ function Invoke-NodeSsh {
         NativeCommandError; and ssh is invoked with the call operator rather
         than Start-Process, whose -ArgumentList flattens an array by joining
         on spaces without re-quoting, which would shred a multi-line -Command.
+
+    .PARAMETER StdIn
+        Piped to the remote command's standard input. This is how anything
+        sensitive should reach a node: sshd runs the command through a login
+        shell, so -Command lands in that shell's argv, where any other local
+        user's `ps` can read it for as long as the command runs. Standard
+        input never appears there. Callers pass the shape of the work in
+        -Command and the secret bytes in -StdIn.
     #>
     [CmdletBinding()]
     param(
@@ -258,6 +266,7 @@ function Invoke-NodeSsh {
         [Parameter(Mandatory)][string]$KeyPath,
         [Parameter(Mandatory)][string]$KnownHostsFile,
         [Parameter(Mandatory)][string]$Command,
+        [string]$StdIn,
         [int]$ConnectTimeoutSec = 10
     )
 
@@ -277,7 +286,12 @@ function Invoke-NodeSsh {
 
         # Function-scoped, so it doesn't leak back to the caller.
         $ErrorActionPreference = 'Continue'
-        & ssh.exe @sshArgs 1> $stdout 2> $stderr
+        if ($PSBoundParameters.ContainsKey('StdIn')) {
+            $StdIn | & ssh.exe @sshArgs 1> $stdout 2> $stderr
+        }
+        else {
+            & ssh.exe @sshArgs 1> $stdout 2> $stderr
+        }
         $exitCode = $LASTEXITCODE
 
         [pscustomobject]@{

@@ -1,0 +1,139 @@
+# Step 3 of the provisioning pipeline: install Flux on the cluster and point
+# it at this repository (TODO_SWARM.md Phase 2's last item). After this runs,
+# changing the cluster means committing to deploy/ - there is no further
+# kubectl apply in the design.
+#
+# TODO_SWARM.md originally wrote this step as "run once from an operator
+# machine", which would have made it the only provisioning step with no
+# repeatable, auditable path. It is scripted instead, same thin-wrapper shape
+# as Provision 0-2: this file checks out the repo and hands every decision to
+# scripts/flux/Bootstrap-Flux.ps1.
+#
+# The bootstrap itself runs *on the node*, over SSH, using k3s's own
+# kubeconfig - so no cluster credential is ever copied onto a runner.
+#
+# The PAT cannot be the automatic `secrets.GITHUB_TOKEN`: registering the
+# deploy key Flux authenticates with afterwards needs administration:write,
+# which the run-scoped token cannot be granted. Use a dedicated PAT with
+# contents:write + administration:write on this repository (plus
+# workflows:write if `path` ever contains workflow files), stored as the
+# FLUX_GITHUB_TOKEN repository secret.
+#
+# Billing: `runs-on` pins `self-hosted`, so runs never land on a
+# GitHub-hosted runner (which has no route to the node's LAN address anyway)
+# and never consume Actions minutes.
+#
+# Previous step: provision-2-seed-secrets.yml.
+# Next: Phase 3 - platform services, entirely as commits under deploy/.
+name: 'Provision 3: Bootstrap Flux'
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: 'Runner to dispatch from (any host works - it only needs SSH to the node)'
+        required: true
+        type: choice
+        options:
+          - hyperv-host-0
+          - hyperv-host-1
+          - hyperv-host-2
+      ip_address:
+        description: 'The k3s server to bootstrap from (node 1 today - see the apiserver-VIP gap in docs/secrets-architecture.md)'
+        required: true
+        type: string
+      path:
+        description: 'Repository path Flux reconciles from, and where it commits its own manifests'
+        required: true
+        default: deploy/cluster
+        type: string
+      branch:
+        description: 'Branch Flux commits to and reconciles'
+        required: true
+        default: main
+        type: string
+      repository_kind:
+        description: 'personal = a user-owned repository (flux --personal); organization = org-owned'
+        required: true
+        default: personal
+        type: choice
+        options:
+          - personal
+          - organization
+      preflight_only:
+        description: 'Check reachability, the PAT and the version pin, then stop without touching the cluster'
+        required: false
+        default: false
+        type: boolean
+
+# One bootstrap at a time: two concurrent runs would race both the cluster's
+# flux-system namespace and the commits to `path`.
+concurrency:
+  group: provision-3-bootstrap-flux
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    name: Bootstrap Flux on ${{ inputs.ip_address }}
+    runs-on: [self-hosted, '${{ inputs.host }}']
+
+    # The flux CLI install, the controller rollout and the first
+    # reconciliation all happen inside one run. Failing at 30m means a
+    # controller never went Ready.
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out provisioning scripts
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Bootstrap Flux
+        shell: powershell
+        env:
+          IP_ADDRESS: ${{ inputs.ip_address }}
+          FLUX_PATH: ${{ inputs.path }}
+          FLUX_BRANCH: ${{ inputs.branch }}
+          REPOSITORY_KIND: ${{ inputs.repository_kind }}
+          PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
+
+          # Taken from the run's own context rather than typed in, so the
+          # cluster can only ever be pointed at the repository it was
+          # dispatched from.
+          GITHUB_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPOSITORY_NAME: ${{ github.event.repository.name }}
+
+          # Pinned once for the whole cluster, bumped deliberately - same
+          # reproducibility reasoning as K3S_VERSION.
+          FLUX_VERSION: ${{ vars.FLUX_VERSION }}
+
+          # PAT with contents:write, workflows:write and administration:write.
+          # Read by the script from the environment, never as an argument.
+          FLUX_GITHUB_TOKEN: ${{ secrets.FLUX_GITHUB_TOKEN }}
+
+          # Same keypair provision-0/1/2 used.
+          NODE_SSH_PRIVATE_KEY: ${{ secrets.NODE_SSH_PRIVATE_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+
+          foreach ($required in 'FLUX_VERSION', 'FLUX_GITHUB_TOKEN', 'NODE_SSH_PRIVATE_KEY') {
+            if (-not (Get-Item "env:$required" -ErrorAction SilentlyContinue).Value) {
+              throw "$required is not set. Add it under Settings > Secrets and variables > Actions (FLUX_VERSION is a repository variable; the other two are secrets). See scripts/flux/README.md."
+            }
+          }
+
+          $params = @{
+            IPAddress     = $env:IP_ADDRESS
+            GitHubOwner   = $env:GITHUB_OWNER
+            Repository    = $env:GITHUB_REPOSITORY_NAME
+            Branch        = $env:FLUX_BRANCH
+            Path          = $env:FLUX_PATH
+            FluxVersion   = $env:FLUX_VERSION
+            SshPrivateKey = $env:NODE_SSH_PRIVATE_KEY
+          }
+
+          if ($env:REPOSITORY_KIND -eq 'personal') { $params.Personal = $true }
+          if ([bool]::Parse($env:PREFLIGHT_ONLY)) { $params.PreflightOnly = $true }
+
+          & .\scripts\flux\Bootstrap-Flux.ps1 @params

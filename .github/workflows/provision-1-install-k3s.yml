@@ -21,7 +21,7 @@
 # never consume Actions minutes.
 #
 # Previous step: provision-0-new-node.yml, once the node answers SSH.
-# Next step: age-keygen for SOPS + `flux bootstrap` (not yet scripted).
+# Next step: provision-2-seed-secrets.yml, then provision-3-bootstrap-flux.yml.
 name: 'Provision 1: Install k3s'
 
 on:
