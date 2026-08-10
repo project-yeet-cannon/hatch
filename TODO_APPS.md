@@ -193,22 +193,38 @@ storage.items      id, crate_id → crates (CASCADE), name, quantity, notes,
                    search_vector (generated), created_at, updated_at
 ```
 
-- [ ] Entities + `StorageContext` with `HasDefaultSchema("storage")`.
-- [ ] **Crate codes** — 6 chars, Crockford base32 (no `I`/`L`/`O`/`U`), displayed
+- [x] Entities + `StorageContext` with `HasDefaultSchema("storage")`.
+      `search_vector` lands with the rest of search in Phase 5, as its own
+      migration.
+- [x] **Crate codes** — 6 chars, Crockford base32 (no `I`/`L`/`O`/`U`), displayed
       `XXX-XXX`. Generated server-side, retry on unique violation. Printed as
       text on the label beside the QR so a scuffed or faded code is still
       recoverable by typing — these labels live in a garage for a decade.
-- [ ] `StorageController` — CRUD for locations, crates, items; `GET
+      `CrateCode.Normalize` also accepts what someone reads *off* a worn label:
+      lowercase, dashed, and `I`/`L`/`O` in place of the digits they resemble.
+- [x] `StorageController` — CRUD for locations, crates, items; `GET
       /api/storage/crates/by-code/{code}` for the scan path.
-- [ ] **Batch crate creation** — `POST /api/storage/crates/batch { count }`
+- [x] **Batch crate creation** — `POST /api/storage/crates/batch { count }`
       returning N unlabeled crates. This is the workflow that matters: print a
       sheet, tape labels on empty boxes, *then* scan each one as you fill it.
       Creating a crate in the UI before it physically exists is backwards.
-- [ ] Tests in `Aerie.Api.Tests/Storage/` — code generation and collision retry,
+- [x] Tests in `Aerie.Api.Tests/Storage/` — code generation and collision retry,
       batch creation, cascade behavior.
 
 **Verify:** full lifecycle through Swagger; deleting a crate takes its items and
 leaves its location; deleting a location orphans crates rather than deleting them.
+
+*Verified* end-to-end over HTTP against the real Postgres (not just InMemory):
+`Init` applied into `storage` with `public.__EFMigrationsHistory` still at 11
+rows, startup logged `Migrating module context StorageContext`, a batch of 3
+minted distinct codes, a crate typed back as `D2Q-dym` resolved through the scan
+path, deleting the location left its crate unplaced with items intact, and
+deleting the crate took its items and returned 404.
+
+Registration note: a module's services are wired by its own
+`Add<Name>Module(configuration)` extension (`Modules/Storage/StorageModule.cs`),
+which `AddAerieModules` calls in one line — otherwise the registry grows a
+section per app and module services drift out of the module folder.
 
 ### Phase 2 — Shell PWA
 

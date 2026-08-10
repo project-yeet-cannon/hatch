@@ -1,3 +1,4 @@
+using Aerie.Api.Modules.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Migrations;
 
@@ -16,8 +17,10 @@ public static class ModuleRegistration
     /// </summary>
     public static IServiceCollection AddAerieModules(this IServiceCollection services, IConfiguration configuration)
     {
-        // One line per module, e.g.:
-        //   services.AddModuleContext<StorageContext>(configuration, StorageContext.Schema);
+        // One line per module - each module's own extension registers its context
+        // and its services, so this list stays a table of contents.
+        services.AddStorageModule(configuration);
+
         return services;
     }
 

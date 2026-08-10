@@ -29,11 +29,26 @@ adding one touches no container, manifest, CI job, or `Program.cs`.
    }
    ```
 
-4. Register it — one line in `AddAerieModules` in
+4. Give the module one DI entry point, so its services live in its own folder
+   and the registry stays a table of contents:
+
+   ```csharp
+   public static class WidgetModule
+   {
+       public static IServiceCollection AddWidgetModule(this IServiceCollection services, IConfiguration configuration)
+       {
+           services.AddModuleContext<WidgetContext>(configuration, WidgetContext.Schema);
+           services.AddScoped<IWidgetService, WidgetService>();
+           return services;
+       }
+   }
+   ```
+
+   Then one line in `AddAerieModules` in
    [`ModuleRegistration.cs`](ModuleRegistration.cs):
 
    ```csharp
-   services.AddModuleContext<WidgetContext>(configuration, WidgetContext.Schema);
+   services.AddWidgetModule(configuration);
    ```
 
 5. Scaffold the first migration into the module folder:
@@ -59,6 +74,8 @@ wire.
 - **`Schema` is declared once**, as the `const` on the context, and referenced by
   the registration and the design-time factory. Three copies of the string is how
   a module ends up with its history table in the wrong schema.
+- **A module registers its own services**, via one `Add<Name>Module` extension.
+  `AddAerieModules` gains exactly one line per app and never grows a section.
 - **No module invents a user.** Auth is deliberately absent (tailnet-only, two
   trusted adults); it stays a middleware-plus-`Person`-table change later only as
   long as that holds. See the tripwire in [`TODO_APPS.md`](../../../TODO_APPS.md).
