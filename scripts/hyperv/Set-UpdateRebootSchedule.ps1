@@ -53,4 +53,4 @@ foreach ($name in $values.Keys) {
 Restart-Service -Name wuauserv -Force
 
 Write-Host "Windows Update on $env:COMPUTERNAME: install + reboot every $($dayNames[$ScheduledInstallDay]) at ${ScheduledInstallHour}:00 (+${RebootGraceMinutes}m grace)." -ForegroundColor Green
-Get-ItemProperty -Path $auPath | Select-Object $values.Keys | Format-List | Out-Host
+Get-ItemProperty -Path $auPath | Select-Object -Property ([string[]]$values.Keys) | Format-List | Out-Host
