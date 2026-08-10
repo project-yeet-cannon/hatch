@@ -3,14 +3,18 @@
 # The 3-node cluster runs embedded etcd with quorum 3 - it tolerates exactly
 # one node down. Left to its own defaults, Windows Update reboots each host
 # on its own schedule with no coordination between them; two hosts rebooting
-# close together freezes the cluster. This workflow discovers the current
-# hyperv-host-* runners, spreads them evenly across the week, and upserts
-# each host's Windows Update install/reboot schedule via
-# scripts/hyperv/Set-UpdateRebootSchedule.ps1.
+# close together freezes the cluster. This workflow spreads the given hosts
+# evenly across the week and upserts each one's Windows Update install/reboot
+# schedule via scripts/hyperv/Set-UpdateRebootSchedule.ps1.
 #
-# Host discovery is dynamic (the GitHub self-hosted runners API), not a
-# hardcoded list, so a topology change - a host added, removed, or renamed -
-# never requires editing this file. Just rerun it.
+# The host list is a plain workflow input (the `hosts` runner-label list
+# below), not auto-discovered. Discovering it via the GitHub API would need
+# the self-hosted-runners endpoints, which are excluded from the automatic
+# GITHUB_TOKEN entirely - the only way in is a fine-grained PAT with
+# Administration: Read on this repo. For a job that runs a couple of times a
+# year, retyping the host list on a topology change is a smaller ongoing cost
+# than minting and rotating that credential. Rerun with an updated `hosts`
+# value whenever a host is added, removed, or renamed.
 #
 # Billing: both jobs pin `self-hosted`, so this never lands on a
 # GitHub-hosted runner or consumes Actions minutes.
@@ -19,10 +23,10 @@ name: Stagger Windows Update reboots
 on:
   workflow_dispatch:
     inputs:
-      host_label_pattern:
-        description: 'Regex a runner label must match to count as a cluster host'
+      hosts:
+        description: 'Comma-separated runner labels, one per host (edit this when the topology changes)'
         required: true
-        default: '^hyperv-host-\d+$'
+        default: 'hyperv-host-0,hyperv-host-1,hyperv-host-2'
         type: string
       reboot_hour:
         description: 'Local hour (0-23) every host installs + reboots at, on its assigned day'
@@ -50,59 +54,32 @@ concurrency:
 jobs:
   plan:
     name: Compute schedule
-    # Any always-on host works here - this job only calls the GitHub API and
-    # does arithmetic, it never touches a hyperv-host-* box. legacy-deployer
-    # is the one runner guaranteed to exist regardless of Phase 1 progress.
+    # Any always-on host works here - this job only does string parsing and
+    # arithmetic, it never touches a hyperv-host-* box. legacy-deployer is
+    # the one runner guaranteed to exist regardless of Phase 1 progress.
     runs-on: [self-hosted, legacy-deployer]
-    permissions:
-      # List-runners is a read-only Actions endpoint. If this turns out to be
-      # insufficient (some GitHub Enterprise configs gate it behind
-      # `administration: read` instead), that's a one-line change here, not a
-      # redesign.
-      actions: read
     outputs:
       matrix: ${{ steps.compute.outputs.matrix }}
       host_count: ${{ steps.compute.outputs.host_count }}
     steps:
-      - name: Discover hosts and compute schedule
+      - name: Compute schedule
         id: compute
         shell: powershell
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          HOST_LABEL_PATTERN: ${{ inputs.host_label_pattern }}
+          HOSTS: ${{ inputs.hosts }}
           REBOOT_HOUR: ${{ inputs.reboot_hour }}
           REBOOT_GRACE_MINUTES: ${{ inputs.reboot_grace_minutes }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           $ErrorActionPreference = 'Stop'
-          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-          $headers = @{
-            Authorization          = "Bearer $env:GH_TOKEN"
-            Accept                 = 'application/vnd.github+json'
-            'X-GitHub-Api-Version' = '2022-11-28'
-          }
-
-          $runners = @()
-          $page = 1
-          do {
-            $resp = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:REPO/actions/runners?per_page=100&page=$page"
-            $runners += $resp.runners
-            $page++
-          } while ($resp.runners.Count -eq 100)
-
-          $matchedHosts = @()
-          foreach ($runner in $runners) {
-            $match = $runner.labels | Where-Object { $_.name -match $env:HOST_LABEL_PATTERN } | Select-Object -First 1
-            if ($match) { $matchedHosts += $match.name }
-          }
+          $matchedHosts = $env:HOSTS -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
           # Sorted so the assignment below is stable across reruns regardless
-          # of the order the API happens to return runners in.
+          # of the order hosts were typed in.
           $matchedHosts = $matchedHosts | Sort-Object -Unique
 
           if ($matchedHosts.Count -eq 0) {
-            throw "No self-hosted runners found with a label matching '$env:HOST_LABEL_PATTERN'. Check runner labels or the host_label_pattern input."
+            throw "The 'hosts' input is empty. Pass a comma-separated list of runner labels, e.g. hyperv-host-0,hyperv-host-1,hyperv-host-2."
           }
 
           # Windows AU ScheduledInstallDay encoding: 1=Sunday .. 7=Saturday.

@@ -288,11 +288,11 @@ after it.*
       it. `chronyc sources` is in the post-boot report*
 - [x] **Stagger Windows Update reboots across the three hosts** — quorum of 3
       tolerates one node down; two at once freezes the cluster
-      — *scripted: `.github/workflows/stagger-update-reboots.yml` discovers
-      the current `hyperv-host-*` runners, spreads them evenly across the
-      week, and `scripts/hyperv/Set-UpdateRebootSchedule.ps1` upserts each
-      host's Windows Update AU registry policy. Rerun the workflow whenever
-      the host topology changes.*
+      — *scripted: `.github/workflows/stagger-update-reboots.yml` takes a
+      typed-in list of `hyperv-host-*` runners, spreads them evenly across
+      the week, and `scripts/hyperv/Set-UpdateRebootSchedule.ps1` upserts
+      each host's Windows Update AU registry policy. Rerun with an updated
+      `hosts` input whenever the host topology changes.*
 - [ ] apply staggering actions to all cluster servers
 - [x] undo temporary dynamic disk sizing in New-AerieVM.ps1
 

@@ -269,18 +269,20 @@ directly). It's the same manual, rerun-on-demand model as *Provision node
 VM*, but where that workflow builds one host per run, this one always
 reconciles all of them at once:
 
-1. **Discover.** Calls the GitHub self-hosted runners API and keeps every
-   runner with a label matching `host_label_pattern` (default
-   `^hyperv-host-\d+$`, matching the `hyperv-host-0/1/2` labels *Provision
-   node VM* already depends on). Nothing here is hardcoded to three hosts —
-   add or remove a host's runner and the next dispatch picks it up.
-2. **Plan.** Sorts the matched labels and spreads them evenly across the
-   week (3 hosts today → Monday/Wednesday/Friday), all at the same
-   `reboot_hour`. The mapping only depends on sorted label order, so
-   rerunning after a topology change reassigns everyone consistently with no
-   manual bookkeeping. Check the job summary, or dispatch with `dry_run: true`
-   to see the computed schedule without touching anything.
-3. **Apply.** On each host's own runner,
+1. **Plan.** The `hosts` input (default `hyperv-host-0,hyperv-host-1,
+   hyperv-host-2`) is a comma-separated list of runner labels, typed in by
+   hand rather than discovered — the GitHub API for listing self-hosted
+   runners is excluded from the automatic `GITHUB_TOKEN` entirely and would
+   need a fine-grained PAT with `Administration: Read` on the repo. For a job
+   that runs a couple of times a year, editing this input on a topology
+   change is a smaller cost than minting and rotating that credential. The
+   list is sorted and spread evenly across the week (3 hosts today →
+   Monday/Wednesday/Friday), all at the same `reboot_hour`. The mapping only
+   depends on sorted order, so rerunning with the same `hosts` value
+   reassigns everyone consistently with no other bookkeeping. Check the job
+   summary, or dispatch with `dry_run: true` to see the computed schedule
+   without touching anything.
+2. **Apply.** On each host's own runner,
    [`Set-UpdateRebootSchedule.ps1`](Set-UpdateRebootSchedule.ps1) upserts the
    "Configure Automatic Updates" policy under
    `HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU` — Windows
@@ -288,9 +290,8 @@ reconciles all of them at once:
    day/hour, no WSUS and no custom Scheduled Task required. One host failing
    doesn't block the others (`fail-fast: false`).
 
-Rerun the workflow any time a host is added, removed, or renamed — that's the
-whole point of computing the schedule from live runner labels instead of a
-list checked into the repo.
+Rerun the workflow with an updated `hosts` value any time a host is added,
+removed, or renamed.
 
 ## Still manual
 
