@@ -267,7 +267,7 @@ if (Directory.Exists(Path.Combine(appsPath, "docs")))
 // The family shell needs this for more than refresh survival: a printed QR
 // label encodes /apps/family/storage/c/{code} directly, so a cold scan from
 // the stock camera app is *always* a deep link into a route that only exists
-// client-side (see TODO_APPS Phase 4).
+// client-side (see docs/family-apps-architecture.md).
 if (Directory.Exists(Path.Combine(appsPath, "family")))
 {
     app.MapFallbackToFile("/apps/family/{*path:nonfile}", "apps/family/index.html");

@@ -7,7 +7,8 @@ them; the code resolves to a page listing what's inside; a flat search across
 every box answers the only question the app exists for — *where is the drill?*
 
 It is the first app on the family-apps platform described in
-[`TODO_APPS.md`](../TODO_APPS.md), and it is deliberately the whole of that
+[`family-apps-architecture.md`](family-apps-architecture.md), and it is
+deliberately the whole of that
 platform's proof: a module folder in `Aerie.Api`, a module folder in the family
 shell, one line in a registry. It adds no container, no database, no ingress, no
 backup entry, and no uptime monitor — it inherits all of them.
@@ -20,7 +21,8 @@ Two things follow from that and shape everything below:
 - **Tailnet only, no auth.** Two trusted adults, no public ingress. Worth being
   plain about: a full index of what's in your house and where is a burglary aid,
   so the tailnet boundary is doing real security work here, not just saving a
-  login screen. The tripwire for building real auth is in `TODO_APPS.md`.
+  login screen. The tripwire for building real auth is in
+  [`family-apps-architecture.md`](family-apps-architecture.md#auth-none-now-and-the-tripwire).
 
 ## Data model
 
@@ -204,9 +206,10 @@ with no network fails and says so.
 ## Deferred
 
 Named so they're decisions rather than oversights. Full reasoning in
-[`TODO_APPS.md`](../TODO_APPS.md).
+[`family-apps-architecture.md`](family-apps-architecture.md#deferred).
 
 - **Photos of crate contents** — the most valuable v2 feature for an app of this
   kind, deferred on timing: blob storage should land on Longhorn after the k3s
   cutover rather than on the current host's disk and then get migrated.
-- **Auth** — see the tripwire in `TODO_APPS.md`.
+- **Auth** — see the tripwire in
+  [`family-apps-architecture.md`](family-apps-architecture.md#auth-none-now-and-the-tripwire).

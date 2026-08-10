@@ -6,10 +6,10 @@
 // result as sw.js at the bundle root, so its scope is the whole family shell
 // and nothing above it.
 //
-// Policy, per TODO_APPS Phase 2: cache-first for the shell, network-first for
-// data. An offline *read* of a crate you've already opened is useful in a
-// garage with no signal; an offline write isn't worth the sync complexity yet,
-// so writes simply fail as they would without a worker at all.
+// Policy, per docs/family-apps-architecture.md: cache-first for the shell,
+// network-first for data. An offline *read* of a crate you've already opened is
+// useful in a garage with no signal; an offline write isn't worth the sync
+// complexity yet, so writes simply fail as they would without a worker at all.
 
 const CACHE = 'aerie-family-__BUILD_ID__';
 const DATA_CACHE = 'aerie-family-data';

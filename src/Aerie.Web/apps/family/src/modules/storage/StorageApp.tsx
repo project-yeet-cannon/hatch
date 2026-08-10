@@ -12,9 +12,9 @@ import './storage.css';
  * is routed here and nowhere else - the shell mounts this one component and
  * knows nothing about the screens below.
  *
- * The URLs were settled in TODO_APPS Phase 2, before there were screens behind
- * them, because `c/:code` is what gets printed onto a label and taped to a box
- * for a decade - it can't be renamed afterwards.
+ * The URLs were settled before there were screens behind them, because
+ * `c/:code` is what gets printed onto a label and taped to a box for a decade -
+ * it can't be renamed afterwards.
  */
 export default function StorageApp() {
   return (

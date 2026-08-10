@@ -78,7 +78,8 @@ wire.
   `AddAerieModules` gains exactly one line per app and never grows a section.
 - **No module invents a user.** Auth is deliberately absent (tailnet-only, two
   trusted adults); it stays a middleware-plus-`Person`-table change later only as
-  long as that holds. See the tripwire in [`TODO_APPS.md`](../../../TODO_APPS.md).
+  long as that holds. See the tripwire in
+  [`docs/family-apps-architecture.md`](../../../docs/family-apps-architecture.md#auth-none-now-and-the-tripwire).
 - **Nothing operator-specific in module code** — domains, hostnames, and paths
   come from config, per [`docs/ethos.md`](../../../docs/ethos.md). The install's
   own public URL is already solved: [`AppsOptions`](AppsOptions.cs)

@@ -1,6 +1,7 @@
 # Aerie Family
 
-The shell PWA for household micro-apps (`TODO_APPS.md`). One Vite build, one
+The shell PWA for household micro-apps
+(`docs/family-apps-architecture.md`). One Vite build, one
 installed icon on the home screen, N apps inside it as lazily-loaded route
 modules. Served by `Aerie.Api` at `/apps/family/`.
 
@@ -63,7 +64,7 @@ Precaching at install time is what makes airplane mode work after one visit
 rather than two. (`vite-plugin-pwa` would supply the same list and bring
 Workbox along for a policy that is ~40 lines here.)
 
-The caching policy, per `TODO_APPS.md` Phase 2:
+The caching policy, per `docs/family-apps-architecture.md`:
 
 | Request | Strategy |
 |---|---|
