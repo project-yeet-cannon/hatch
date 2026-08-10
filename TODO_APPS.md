@@ -290,17 +290,42 @@ module renders its own `<Routes>` under `/apps/family/<id>/`.
 
 ### Phase 3 — Storage Helper UI
 
-- [ ] **Crate view** — the scan destination, and the screen that has to be
+- [x] **Crate view** — the scan destination, and the screen that has to be
       instant: label, location, item list, add-item inline.
-- [ ] **Item index** — flat searchable list across all crates, each row showing
+- [x] **Item index** — flat searchable list across all crates, each row showing
       crate + location. This is the "where is the drill" screen and the reason
       the app exists.
-- [ ] **Locations** — simple CRUD list. Flat, no hierarchy; add nesting only if
+- [x] **Locations** — simple CRUD list. Flat, no hierarchy; add nesting only if
       it's genuinely missed.
-- [ ] **Crate list** grouped by location, for the "what's in the attic" question.
+- [x] **Crate list** grouped by location, for the "what's in the attic" question.
+- [x] [`docs/storage-helper.md`](docs/storage-helper.md), per the file-impact
+      list below.
 
 **Verify:** add a crate, put items in it, find each item from the index, land on
 the right crate. On a phone, one-handed.
+
+*Verified* at the seam this phase could break: every DTO's JSON was exercised
+against the running API and the real Postgres — location, crate, item, the
+`by-code` scan path (typed back lowercase and dashed, as someone reads it off a
+label), the `items` index row, a `400` body, a `404`, and both cascades — and
+matched `types.ts` field for field. `npm run build` and `oxlint` are clean; the
+module is its own 16 kB lazy chunk, so the shell's launch cost is unchanged.
+
+Screen behaviour on a phone is the user's to check — that half of "one-handed"
+can't be exercised from here.
+
+Two notes for Phase 4. Search is client-side over the loaded index (every term
+must match somewhere on the row, so `drill garage` works); it's a placeholder
+for Phase 5's `GET /search`, but it's the placeholder that keeps working offline,
+which the real one won't. And crate creation in the UI is a single "New crate"
+button — the batch endpoint stays unused until the print sheet exists, because
+minting twenty blank crates is only useful when you can print twenty labels.
+
+Routing note: links inside a module are built from
+[`routes.ts`](src/Aerie.Web/apps/family/src/modules/storage/routes.ts), not
+`../`-relative. `..` resolves against the *route* hierarchy, and this module
+renders links from an index route, a splat route and ordinary routes alike,
+where it means three different things.
 
 ### Phase 4 — QR labels
 
