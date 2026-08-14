@@ -100,9 +100,11 @@ jobs:
           JOIN_SERVER: ${{ inputs.join_server }}
           REINSTALL: ${{ inputs.reinstall }}
           PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
-          # Pinned once for the whole cluster, bumped deliberately - see
-          # TODO_SWARM.md Phase 2 on why this isn't the latest/stable channel.
-          K3S_VERSION: ${{ vars.K3S_VERSION }}
+          # No K3S_VERSION here on purpose: the pin is structural, so it is
+          # committed in scripts/versions.json and read by the script from the
+          # checkout above. That ties the version to the commit this run was
+          # dispatched from - to try a bump, dispatch from its branch.
+          #
           # Shared across every server in the cluster. Generated once with
           # `openssl rand -hex 32` before node 1's install and never rotated
           # without reinstalling every node.
@@ -114,9 +116,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
-          foreach ($required in 'K3S_VERSION', 'K3S_CLUSTER_TOKEN', 'NODE_SSH_PRIVATE_KEY') {
+          foreach ($required in 'K3S_CLUSTER_TOKEN', 'NODE_SSH_PRIVATE_KEY') {
             if (-not (Get-Item "env:$required" -ErrorAction SilentlyContinue).Value) {
-              throw "$required is not set. Add it under Settings > Secrets and variables > Actions (K3S_VERSION is a repository variable; the other two are secrets)."
+              throw "$required is not set. Add it as a repository secret under Settings > Secrets and variables > Actions."
             }
           }
 
@@ -127,7 +129,6 @@ jobs:
           $params = @{
             VMName              = $env:VM_NAME
             IPAddress           = $env:IP_ADDRESS
-            K3sVersion          = $env:K3S_VERSION
             Token               = $env:K3S_CLUSTER_TOKEN
             SshPrivateKey       = $env:NODE_SSH_PRIVATE_KEY
             ReadyTimeoutMinutes = 15

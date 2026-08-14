@@ -30,7 +30,7 @@ which one you're holding tells you where it goes.
 
 | | Example | Where it lives |
 |---|---|---|
-| **Structural** — true for every installation | "the API talks to Postgres on 5432", the Quartz DDL, a Helm chart's shape | Committed to git |
+| **Structural** — true for every installation | "the API talks to Postgres on 5432", the Quartz DDL, a Helm chart's shape, a pinned tool version | Committed to git |
 | **Operator values** — differs per installation, not sensitive | base domain, LAN subnet, node IPs, host names, timezone, tablet count | GitHub Actions **variables** (`vars.*`), Helm `values.yaml`, script parameters — supplied per install |
 | **Operator secrets** — differs per installation, sensitive | HA token, Route53 credentials, restic password, cluster token, Wi-Fi password | An external secret store, referenced by name from git |
 
@@ -78,6 +78,18 @@ the server's filesystem by the repo, never committed.
 parameter (`-VMName`, `-IPAddress`, `-NtpServer`, `-JoinServer`, disk sizes).
 Nothing about the author's three hosts is embedded in them. Preserve this — it is
 the single largest piece of already-portable work in the repo.
+
+**Version pins are not parameters.** The k3s, Flux and qemu-img versions the
+provisioning scripts install are committed in
+[`scripts/versions.json`](../scripts/versions.json) and read by
+[`scripts/lib/AerieVersions.ps1`](../scripts/lib/AerieVersions.ps1) — not
+supplied as `vars.*`. They pass both tests below: a second operator's install
+isn't *wrong* at these versions, and they aren't *meaningless* to them either —
+they're the versions this repo was tested against, and asking a stranger to
+invent their own is asking a question the repo should answer. Committing them
+also binds the version to the commit, so a node rebuilt from an old tag gets
+that tag's k3s rather than whatever the repository settings say today. The same
+reasoning puts Helm chart versions in the manifests rather than in variables.
 
 **Choice of platform is itself a parameter.** Where Aerie depends on an external
 service, the *interface* is committed and the *provider* is chosen per install.

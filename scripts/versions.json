@@ -1,0 +1,55 @@
+{
+  "_comment": [
+    "Pinned versions of the third-party tooling Aerie provisions with.",
+    "",
+    "These are structural in the sense docs/ethos.md means it: identical for",
+    "every installation, so they belong in git rather than in per-repository",
+    "Actions variables. A second operator running this repo gets the same k3s",
+    "and the same Flux the author tested with, without being told what to type.",
+    "Site-specific values - domains, addresses, key material - stay as vars/",
+    "secrets, because those genuinely differ per install.",
+    "",
+    "Bump these in a commit, deliberately, one line at a time. To try a bump",
+    "before merging it, dispatch the provisioning workflow from the branch",
+    "that carries it; every script also takes an explicit override parameter",
+    "for a by-hand run. Never point any of them at a 'latest' or 'stable'",
+    "channel - a moving pin makes a rebuilt node a different node.",
+    "",
+    "Read by scripts/lib/AerieVersions.ps1."
+  ],
+
+  "k3s": {
+    "_comment": [
+      "Full k3s release tag, including the +k3sN build suffix, as passed to",
+      "INSTALL_K3S_VERSION. Deliberately one minor behind the stable channel:",
+      "k3s maintains four minor lines at once, and the ecosystem installed on",
+      "top of it (Longhorn, CloudNativePG, kube-vip) soaks against the older",
+      "ones first. Channel list: https://update.k3s.io/v1-release/channels"
+    ],
+    "version": "v1.35.7+k3s1"
+  },
+
+  "flux": {
+    "_comment": [
+      "flux2 release tag. The CLI installed on the node and the controllers it",
+      "bootstraps are the same version, so this one pin covers both.",
+      "Releases: https://github.com/fluxcd/flux2/releases"
+    ],
+    "version": "v2.9.4"
+  },
+
+  "qemuImg": {
+    "_comment": [
+      "qemu-img for Windows, used once per host to convert the vendor cloud",
+      "image from qcow2 to VHDX. Cloudbase publishes no checksum file, so the",
+      "hash below is pinned here instead - computed once from this exact URL,",
+      "and re-derivable by anyone:",
+      "  Get-FileHash -Algorithm SHA256 <the downloaded zip>",
+      "If the URL 404s, check https://cloudbase.it/qemu-img-windows/, bump both",
+      "fields together, and say in the commit message how the new hash was",
+      "obtained. Bumping the URL without the hash is worse than no pin at all."
+    ],
+    "url": "https://cloudbase.it/downloads/qemu-img-win-x64-2_3_0.zip",
+    "sha256": "8dc1c69d9880919cdad8c09126a016262d4a9edf48b87a1ef587914fe4177909"
+  }
+}

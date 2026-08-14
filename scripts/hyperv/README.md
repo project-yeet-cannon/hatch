@@ -81,8 +81,11 @@ them can knock the host off the network if scripted carelessly.
    | `NTP_SERVER` | variable | yes | pfSense's LAN address |
    | `NODE_SSH_PRIVATE_KEY` | secret | unless `skip_wait` | contents of `id_ed25519` |
    | `DOMAIN` | variable | no | already set for `cd.yml`; sets the guest's FQDN |
-   | `QEMU_IMG_SHA256` | variable | no | pins the qemu-img download — see [Golden image](#golden-image) |
    | `VM_LOG_SHIPPER_TOKEN` | secret | no | already set for `cd.yml`; without it, console-log shipping (below) is skipped |
+
+   The qemu-img download is pinned in
+   [`scripts/versions.json`](../versions.json), not by a variable — see
+   [Golden image](#golden-image).
 
 ## MAC addresses
 
@@ -233,15 +236,19 @@ Integrity checking is asymmetric because the two upstreams differ:
   `SHA256SUMS`, fetched from the same directory. Automatic, and a mismatch
   fails the run.
 - **qemu-img** (needed because Hyper-V's `Convert-VHD` only handles VHD/VHDX,
-  not qcow2) comes from Cloudbase, which publishes no checksum file. So it
-  gets trust-on-first-use pinning: the first run prints the hash and warns
-  that the download was unverified; set that value as the `QEMU_IMG_SHA256`
-  repository variable (or pass `-QemuImgSha256`) and every later run verifies
-  it. Pass `-QemuImgZipPath` instead to use a zip you downloaded yourself.
+  not qcow2) comes from Cloudbase, which publishes no checksum file. So its
+  URL and SHA256 are committed together in
+  [`scripts/versions.json`](../versions.json), and every download is verified
+  against that hash. Pass `-QemuImgZipPath` to use a zip you downloaded
+  yourself, or `-QemuImgUrl` to fetch a different build — in both cases the
+  committed hash no longer applies (it describes the committed URL), so the
+  run warns unless you also pass `-QemuImgSha256`.
 
 The pinned Cloudbase URL is versioned. If it 404s, check
-[the qemu-img-windows page](https://cloudbase.it/qemu-img-windows/) and bump
-`-QemuImgUrl`'s default.
+[the qemu-img-windows page](https://cloudbase.it/qemu-img-windows/), then bump
+the `url` and `sha256` in `versions.json` **together** — a bumped URL with a
+stale hash fails the build, and a bumped URL with no hash is worse than no pin
+at all. Get the new hash with `Get-FileHash -Algorithm SHA256 <the zip>`.
 
 ## Phase-specific usage
 

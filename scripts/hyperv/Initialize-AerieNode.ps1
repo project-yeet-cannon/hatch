@@ -139,7 +139,8 @@ param(
     [switch]$RecreateVM,
 
     # Forwarded to Get-GoldenImage.ps1, and only used when the template has
-    # to be built on this host.
+    # to be built on this host. Both are overrides: left unset, that script
+    # takes the committed qemu-img pin from scripts/versions.json.
     [string]$QemuImgZipPath,
     [string]$QemuImgSha256,
     [switch]$SkipChecksumVerification

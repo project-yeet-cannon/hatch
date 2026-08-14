@@ -43,6 +43,12 @@
     Where Flux's own manifests are committed and what it reconciles from.
     Everything under it becomes cluster state; that is the whole point.
 
+.PARAMETER FluxVersion
+    Optional override. The pin normally comes from scripts/versions.json
+    ('flux.version'), committed alongside the manifests Flux reconciles so a
+    re-bootstrap from an old tag installs that tag's Flux. Pass this only for
+    a one-off by-hand run; a real bump is a commit to that file.
+
 .PARAMETER Personal
     Set for a user-owned repository, omit for an organization-owned one -
     this is `flux bootstrap github --personal`.
@@ -50,7 +56,7 @@
 .EXAMPLE
     $env:FLUX_GITHUB_TOKEN = '<pat>'
     .\Bootstrap-Flux.ps1 -IPAddress 10.0.0.21 -GitHubOwner someone `
-        -FluxVersion v2.4.0 -Personal -SshPrivateKeyPath ~\.ssh\id_ed25519
+        -Personal -SshPrivateKeyPath ~\.ssh\id_ed25519
 #>
 [CmdletBinding()]
 param(
@@ -71,7 +77,8 @@ param(
     [ValidatePattern('^[A-Za-z0-9._/-]{1,255}$')]
     [string]$Path = 'deploy/cluster',
 
-    [Parameter(Mandatory)]
+    # Defaults to the committed pin in scripts/versions.json - see the
+    # .PARAMETER note above before passing this explicitly.
     [ValidatePattern('^v\d+\.\d+\.\d+$')]
     [string]$FluxVersion,
 
@@ -91,6 +98,17 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot '..\hyperv\lib\AerieSsh.ps1')
+. (Join-Path $PSScriptRoot '..\lib\AerieVersions.ps1')
+
+# Resolved here rather than as a param default: param() has to be the first
+# statement in the file, so the manifest reader isn't loaded yet at that point.
+if (-not $FluxVersion) {
+    $FluxVersion = Get-AerieVersion -Name 'flux.version' -Pattern '^v\d+\.\d+\.\d+$'
+    $script:FluxVersionSource = 'scripts/versions.json'
+}
+else {
+    $script:FluxVersionSource = '-FluxVersion override'
+}
 
 $script:StageNumber = 0
 function Write-Stage {
@@ -161,7 +179,7 @@ try {
 
     Write-Host "Cluster:   $IPAddress (kubeconfig $kubeconfig)"
     Write-Host "Repo:      $GitHubOwner/$Repository ($Branch) at $Path$(if ($Personal) { ' [personal]' } else { ' [organization]' })"
-    Write-Host "Flux:      $FluxVersion (pinned)"
+    Write-Host "Flux:      $FluxVersion (pinned, from $script:FluxVersionSource)"
     if ($keyFingerprint) { Write-Host "SSH key:   $keyFingerprint" }
     Write-Host 'Preflight OK.'
 
@@ -301,7 +319,7 @@ try {
             '|---|---|'
             "| Repository | $tick$GitHubOwner/$Repository$tick ($tick$Branch$tick) |"
             "| Path | $tick$Path$tick |"
-            "| Flux version | $tick$FluxVersion$tick |"
+            "| Flux version | $tick$FluxVersion$tick ($script:FluxVersionSource) |"
             "| Elapsed | ${elapsed} min |"
             ''
             '<details><summary>flux get all --all-namespaces</summary>'

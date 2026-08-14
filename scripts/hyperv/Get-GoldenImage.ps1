@@ -25,11 +25,13 @@
     - The distro image is verified against the vendor's own SHA512SUMS /
       SHA256SUMS file, fetched from the same directory. Fully automatic, and
       it fails the run on mismatch.
-    - Cloudbase publishes no checksum file, so qemu-img gets trust-on-first-
-      use pinning instead: the first run prints the hash, and passing it back
-      as -QemuImgSha256 (the workflow reads vars.QEMU_IMG_SHA256) verifies it
-      from then on. Without that variable the download is unverified — which
-      is why the script says so loudly rather than quietly proceeding.
+    - Cloudbase publishes no checksum file, so qemu-img gets pinned by hash
+      instead. Both the URL and its SHA256 are committed in
+      scripts/versions.json, so every host and every operator converts with
+      the same binary. -QemuImgUrl / -QemuImgSha256 override them for a
+      one-off run; a real bump is a commit that moves both fields together.
+      A run with no hash to check against says so loudly rather than quietly
+      proceeding.
 
 .EXAMPLE
     # Fully automatic — downloads a pinned qemu-img build
@@ -61,13 +63,13 @@ param(
     [ValidateScript({ Test-Path $_ -PathType Leaf })]
     [string]$QemuImgZipPath,
 
-    # Cloudbase's release assets are versioned, so this is pinned rather than
-    # resolved to "latest" — a silently-newer converter is exactly the kind
-    # of thing that turns a reproducible template into an irreproducible one.
-    # If it 404s, check https://cloudbase.it/qemu-img-windows/ and bump it.
-    [string]$QemuImgUrl = 'https://cloudbase.it/downloads/qemu-img-win-x64-2_3_0.zip',
+    # Both default to the committed pin in scripts/versions.json. Cloudbase's
+    # release assets are versioned, so this is a fixed URL rather than
+    # "latest" — a silently-newer converter is exactly the kind of thing that
+    # turns a reproducible template into an irreproducible one.
+    [string]$QemuImgUrl,
 
-    # See .NOTES — trust-on-first-use pin for the qemu-img zip.
+    # See .NOTES — the hash the downloaded zip must match.
     [string]$QemuImgSha256,
 
     # Skips verifying the downloaded distro image against the vendor's
@@ -87,6 +89,25 @@ $ErrorActionPreference = 'Stop'
 # by default on some Server SKUs, which these hosts reject outright.
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+. (Join-Path $PSScriptRoot '..\lib\AerieVersions.ps1')
+
+# The qemu-img pin lives in scripts/versions.json rather than in a repository
+# variable: the same converter build on every host, for every operator, is
+# structural. Resolved here rather than as a param default because param() has
+# to be the first statement in the file, before the manifest reader is loaded.
+$pinnedQemuImgUrl = Get-AerieVersion -Name 'qemuImg.url' -Pattern '^https://'
+$usingPinnedQemuImg = (-not $QemuImgZipPath) -and ((-not $QemuImgUrl) -or ($QemuImgUrl -eq $pinnedQemuImgUrl))
+if (-not $QemuImgUrl) { $QemuImgUrl = $pinnedQemuImgUrl }
+
+# The committed hash describes the committed URL, so it is only applied to
+# that download. A zip handed in with -QemuImgZipPath, or fetched from an
+# overridden -QemuImgUrl, is a different artifact: checking it against this
+# hash would fail for a reason that has nothing to do with integrity. Verify
+# one of those by passing -QemuImgSha256 explicitly.
+if ((-not $QemuImgSha256) -and $usingPinnedQemuImg) {
+    $QemuImgSha256 = Get-AerieVersion -Name 'qemuImg.sha256' -Pattern '^[0-9a-fA-F]{64}$'
+}
 
 if (-not $ImageUrl) {
     $ImageUrl = switch ($Distro) {
@@ -174,7 +195,7 @@ try {
         Write-Host "  OK - qemu-img zip matches the pinned SHA256."
     }
     else {
-        Write-Warning "qemu-img zip is UNVERIFIED (no -QemuImgSha256 given). Its SHA256 is:`n  $zipHash`nPin it - set repository variable QEMU_IMG_SHA256 to that value - so later runs are verified."
+        Write-Warning "qemu-img zip is UNVERIFIED - it came from outside the pin in scripts/versions.json and no -QemuImgSha256 was given. Its SHA256 is:`n  $zipHash`nRe-run with -QemuImgSha256 to verify it, or commit this build (URL and hash together) to scripts/versions.json to make it the pin."
     }
 
     $qemuImgDir = Join-Path $work 'qemu-img'

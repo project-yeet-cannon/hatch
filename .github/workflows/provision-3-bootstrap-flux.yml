@@ -103,10 +103,11 @@ jobs:
           GITHUB_OWNER: ${{ github.repository_owner }}
           GITHUB_REPOSITORY_NAME: ${{ github.event.repository.name }}
 
-          # Pinned once for the whole cluster, bumped deliberately - same
-          # reproducibility reasoning as K3S_VERSION.
-          FLUX_VERSION: ${{ vars.FLUX_VERSION }}
-
+          # No FLUX_VERSION here on purpose: like the k3s pin it is
+          # structural, so it lives in scripts/versions.json and is read by
+          # the script from the checkout above - which means the Flux version
+          # and the manifests it reconciles move in the same commit.
+          #
           # PAT with contents:write, workflows:write and administration:write.
           # Read by the script from the environment, never as an argument.
           FLUX_GITHUB_TOKEN: ${{ secrets.FLUX_GITHUB_TOKEN }}
@@ -117,9 +118,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
-          foreach ($required in 'FLUX_VERSION', 'FLUX_GITHUB_TOKEN', 'NODE_SSH_PRIVATE_KEY') {
+          foreach ($required in 'FLUX_GITHUB_TOKEN', 'NODE_SSH_PRIVATE_KEY') {
             if (-not (Get-Item "env:$required" -ErrorAction SilentlyContinue).Value) {
-              throw "$required is not set. Add it under Settings > Secrets and variables > Actions (FLUX_VERSION is a repository variable; the other two are secrets). See scripts/flux/README.md."
+              throw "$required is not set. Add it as a repository secret under Settings > Secrets and variables > Actions. See scripts/flux/README.md."
             }
           }
 
@@ -129,7 +130,6 @@ jobs:
             Repository    = $env:GITHUB_REPOSITORY_NAME
             Branch        = $env:FLUX_BRANCH
             Path          = $env:FLUX_PATH
-            FluxVersion   = $env:FLUX_VERSION
             SshPrivateKey = $env:NODE_SSH_PRIVATE_KEY
           }
 

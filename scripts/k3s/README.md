@@ -40,9 +40,16 @@ Running node 2 before node 1 exists fails preflight: the workflow checks
 
 | Name | Kind | What |
 |---|---|---|
-| `K3S_VERSION` | repository variable | Pinned k3s version, e.g. `v1.31.4+k3s1`. **Never** the latest/stable channel — see TODO_SWARM.md Phase 2 for why. Bump deliberately; every future node install reads this one value. |
 | `K3S_CLUSTER_TOKEN` | repository secret | Generate once with `openssl rand -hex 32` *before* installing node 1. Identical across every server in the cluster — store it like the SSH keys, never in git. Rotating it means reinstalling every node. |
 | `NODE_SSH_PRIVATE_KEY` | repository secret | Already set for [`provision-0-new-node.yml`](../../.github/workflows/provision-0-new-node.yml) — the same keypair Phase 1 baked into the node's `authorized_keys`. |
+
+Nothing else to set: the k3s version is **not** a variable. It's pinned in
+[`scripts/versions.json`](../versions.json) and read from the checkout the run
+was dispatched from, so the version is a property of the commit rather than of
+the repository's settings — a node rebuilt from an old tag gets that tag's k3s.
+Bump it in a commit; **never** point it at the latest/stable channel, for the
+reason TODO_SWARM.md Phase 2 gives. To try a bump before merging, dispatch the
+workflow from its branch.
 
 ## What a run actually does
 

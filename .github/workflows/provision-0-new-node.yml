@@ -175,9 +175,11 @@ jobs:
           # VmConsoleLogsController and cd.yml). Console-log shipping is
           # skipped for this VM if unset.
           VM_LOG_SHIPPER_TOKEN: ${{ secrets.VM_LOG_SHIPPER_TOKEN }}
-          # Optional: pins the qemu-img download when the golden image has to
-          # be built. See Get-GoldenImage.ps1's .NOTES.
-          QEMU_IMG_SHA256: ${{ vars.QEMU_IMG_SHA256 }}
+          # No QEMU_IMG_SHA256 here on purpose: the qemu-img URL and its hash
+          # are committed together in scripts/versions.json, so the golden
+          # image is built with the same converter on every host without an
+          # operator having to carry a hash around. See Get-GoldenImage.ps1's
+          # .NOTES.
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
@@ -204,7 +206,6 @@ jobs:
           }
 
           if ($env:DOMAIN) { $params.Domain = $env:DOMAIN }
-          if ($env:QEMU_IMG_SHA256) { $params.QemuImgSha256 = $env:QEMU_IMG_SHA256 }
 
           if ($env:DOMAIN -and $env:VM_LOG_SHIPPER_TOKEN) {
             $params.LogIngestUrl = "https://home.$($env:DOMAIN)/api/vm-console-logs"

@@ -40,8 +40,11 @@
                      prints the full node list.
 
 .PARAMETER K3sVersion
-    Pin, e.g. 'v1.31.4+k3s1' - never the latest/stable channel. See
-    TODO_SWARM.md Phase 2 for why (same reproducibility reasoning as the
+    Optional override. The pin normally comes from scripts/versions.json
+    ('k3s.version'), which is committed so every node - and every rebuild of
+    an old node - installs the same k3s. Pass this only for a one-off by-hand
+    run; a real bump is a commit to that file. Never a latest/stable channel.
+    See TODO_SWARM.md Phase 2 for why (same reproducibility reasoning as the
     Renovate ask under Goal 6.5).
 
 .PARAMETER Token
@@ -51,15 +54,20 @@
     keys - never in git.
 
 .EXAMPLE
-    # Node 1 - forms the cluster
+    # Node 1 - forms the cluster, at the committed pin
     .\Install-K3sNode.ps1 -VMName aerie-node-1 -IPAddress 10.0.0.21 `
-        -K3sVersion v1.31.4+k3s1 -Token $token -ClusterInit `
-        -SshPrivateKeyPath ~\.ssh\id_ed25519
+        -Token $token -ClusterInit -SshPrivateKeyPath ~\.ssh\id_ed25519
 
 .EXAMPLE
     # Node 2 - joins node 1
     .\Install-K3sNode.ps1 -VMName aerie-node-2 -IPAddress 10.0.0.22 `
-        -K3sVersion v1.31.4+k3s1 -Token $token -JoinServer 10.0.0.21 `
+        -Token $token -JoinServer 10.0.0.21 `
+        -SshPrivateKeyPath ~\.ssh\id_ed25519
+
+.EXAMPLE
+    # Trying a bump by hand before committing it
+    .\Install-K3sNode.ps1 -VMName aerie-node-3 -IPAddress 10.0.0.23 `
+        -K3sVersion v1.36.3+k3s1 -Token $token -JoinServer 10.0.0.21 `
         -SshPrivateKeyPath ~\.ssh\id_ed25519
 #>
 [CmdletBinding()]
@@ -72,7 +80,8 @@ param(
     [ValidatePattern('^(\d{1,3}\.){3}\d{1,3}$')]
     [string]$IPAddress,
 
-    [Parameter(Mandatory)]
+    # Defaults to the committed pin in scripts/versions.json - see the
+    # .PARAMETER note above before passing this explicitly.
     [ValidatePattern('^v\d+\.\d+\.\d+(\+k3s\d+)?$')]
     [string]$K3sVersion,
 
@@ -111,6 +120,17 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot '..\hyperv\lib\AerieSsh.ps1')
+. (Join-Path $PSScriptRoot '..\lib\AerieVersions.ps1')
+
+# Resolved here rather than as a param default: param() has to be the first
+# statement in the file, so the manifest reader isn't loaded yet at that point.
+if (-not $K3sVersion) {
+    $K3sVersion = Get-AerieVersion -Name 'k3s.version' -Pattern '^v\d+\.\d+\.\d+\+k3s\d+$'
+    $script:K3sVersionSource = 'scripts/versions.json'
+}
+else {
+    $script:K3sVersionSource = '-K3sVersion override'
+}
 
 $script:StageNumber = 0
 function Write-Stage {
@@ -194,7 +214,7 @@ try {
 
     Write-Host "Node:      $VMName ($IPAddress)"
     Write-Host "Role:      $(if ($ClusterInit) { 'cluster-init (first server, forms etcd)' } else { "join existing cluster at $JoinServer" })"
-    Write-Host "k3s:       $K3sVersion (pinned)"
+    Write-Host "k3s:       $K3sVersion (pinned, from $script:K3sVersionSource)"
     if ($keyFingerprint) {
         Write-Host "SSH key:   $keyFingerprint"
     }
@@ -335,7 +355,7 @@ try {
             '|---|---|'
             "| Role | $(if ($ClusterInit) { 'cluster-init (forms etcd)' } else { "join $tick$JoinServer$tick" }) |"
             "| Address | $tick$IPAddress$tick |"
-            "| k3s version | $tick$K3sVersion$tick |"
+            "| k3s version | $tick$K3sVersion$tick ($script:K3sVersionSource) |"
             "| Reinstalled | $Reinstall |"
             "| Elapsed | ${elapsed} min |"
             ''

@@ -33,9 +33,13 @@ is ever copied onto a runner.
 
 | Name | Kind | What |
 |---|---|---|
-| `FLUX_VERSION` | repository variable | Pinned Flux version, e.g. `v2.4.0`. Bumped deliberately, same reproducibility reasoning as `K3S_VERSION`. |
 | `FLUX_GITHUB_TOKEN` | repository secret | PAT with **contents:write** (commit the manifests) and **administration:write** (register the deploy key Flux authenticates with from then on). Add workflows:write only if the reconciled path ever holds workflow files. Classic equivalent: `repo`. |
 | `NODE_SSH_PRIVATE_KEY` | repository secret | Already set for Provision 0/1/2. |
+
+The Flux version isn't a variable — it's pinned in
+[`scripts/versions.json`](../versions.json) and read from the checkout, which
+puts the controllers' version in the same commit as the manifests they
+reconcile. Bump it in a commit.
 
 The automatic `secrets.GITHUB_TOKEN` **cannot** be used: it can't be granted
 administration:write, so it can't register the deploy key.
@@ -46,7 +50,7 @@ the cluster can only ever be pointed at the repository it was dispatched from.
 ## What a run actually does
 
 1. **Preflight.** SSH key resolves, the node answers 22 and 6443, the PAT is
-   present, and `FLUX_VERSION` is a real pin rather than a channel.
+   present, and the pinned version is an exact release rather than a channel.
 2. **Install the flux CLI** on the node, at that exact version — skipped if
    it's already there. Downloaded to `/tmp/flux-install.sh` and run from disk
    rather than piped from a URL into a shell, same as the k3s install.

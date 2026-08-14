@@ -358,8 +358,16 @@ after it.*
       - node 2: same, with `--server https://<node1-ip>:6443` in place of `--cluster-init`
       - **pin `INSTALL_K3S_VERSION`** — don't track the latest/stable channel,
         for the same reproducibility reason as Goal 6.5's Renovate ask, which
-        should cover this pin too once it exists. The workflow reads it from
-        the `K3S_VERSION` repository variable, so it's bumped in one place
+        should cover this pin too once it exists
+        — *pinned in [`scripts/versions.json`](scripts/versions.json), read by
+        `scripts/lib/AerieVersions.ps1`. It started life as a `K3S_VERSION`
+        repository variable; that was the wrong bucket by
+        [`docs/ethos.md`](docs/ethos.md)'s own table — a version pin is
+        structural, identical for every installation, so it belongs in git.
+        Committing it also ties the version to the commit: a node rebuilt from
+        an old tag gets that tag's k3s, which a repo-settings value can't do.
+        The same file now holds the Flux and qemu-img pins, and is the one
+        target Goal 6.5's Renovate ask needs for the scripted tooling*
 - [x] Generate the shared cluster token before either install (`openssl rand
       -hex 32`); store it as the `K3S_CLUSTER_TOKEN` repository secret —
       exactly like the SSH keys, never in git
@@ -555,10 +563,11 @@ Actions → **Variables**. Provision 4 (3b.1) reads these and nothing else.
 | `LONGHORN_REPLICA_COUNT` | **`2`** — see 3b.11 | **new** |
 
 **6. Look up and record the chart versions to pin.** Every `HelmRelease` below
-pins an exact chart version, for the same reproducibility reason as
-`K3S_VERSION`. Unlike everything else in 3a these are *structural* — identical
-for every installation — so they are committed in the manifests, not entered as
-variables. Collect them once so 3b is a straight line:
+pins an exact chart version, for the same reproducibility reason as the k3s
+pin. Unlike everything else in 3a these are *structural* — identical for every
+installation — so they are committed in the manifests, exactly like the k3s,
+Flux and qemu-img pins in [`scripts/versions.json`](scripts/versions.json), and
+not entered as variables. Collect them once so 3b is a straight line:
 
 | Component | Chart repository |
 |---|---|
