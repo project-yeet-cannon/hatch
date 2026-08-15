@@ -247,7 +247,7 @@ try {
     $alreadyActive = $serviceState -eq 'active'
     if ($alreadyActive -and $Reinstall) {
         Write-Warning "-Reinstall: k3s is active on '$VMName' - running its uninstall script before reinstalling with today's inputs. If this is a server node and other servers are still up, it will not have removed itself from the etcd member list first."
-        $uninstall = Invoke-NodeSsh @ssh -Command 'test -x /usr/local/bin/k3s-uninstall.sh && sudo /usr/local/bin/k3s-uninstall.sh || echo "no k3s-uninstall.sh found"' -ConnectTimeoutSec 60
+        $uninstall = Invoke-NodeSsh @ssh -Command "test -x /usr/local/bin/k3s-uninstall.sh && sudo /usr/local/bin/k3s-uninstall.sh || echo 'no k3s-uninstall.sh found'" -ConnectTimeoutSec 60
         if ($uninstall.ExitCode -ne 0) {
             throw "k3s-uninstall.sh failed on $IPAddress (exit $($uninstall.ExitCode)):`n$($uninstall.StdOut)$($uninstall.StdErr)"
         }

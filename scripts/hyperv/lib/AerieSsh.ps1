@@ -270,6 +270,30 @@ function Invoke-NodeSsh {
         [int]$ConnectTimeoutSec = 10
     )
 
+    # Windows PowerShell 5.1's native-command argument binder wraps an argument
+    # containing whitespace in double quotes but does not escape the double
+    # quotes already inside it, so ssh.exe's own CommandLineToArgvW parsing
+    # removes every one of them. The remote shell then runs a script that is
+    # subtly not the one that was written, with no error anywhere: `tr -d
+    # "\r\n"` arrives as `tr -d rn`, which silently deletes every r and n from
+    # whatever it was filtering. Nothing downstream can tell that happened, so
+    # it is refused here rather than diagnosed later from its consequences.
+    #
+    # Quote with ' in remote scripts. Where a value genuinely needs " (or must
+    # not be word-split), send it on -StdIn instead - which is where anything
+    # sensitive belongs anyway.
+    if ($Command.Contains('"')) {
+        throw @"
+Invoke-NodeSsh was given a -Command containing a double quote, which cannot survive the trip to the node.
+
+Windows PowerShell 5.1 does not escape embedded double quotes when it builds ssh.exe's command line, and ssh.exe's argument parsing then strips them - so the remote shell would run the script with every " deleted, silently and without error.
+
+Rewrite the command using single quotes, or pass the value that needs quoting on -StdIn. The offending command was:
+
+$Command
+"@
+    }
+
     $stdout = [IO.Path]::GetTempFileName()
     $stderr = [IO.Path]::GetTempFileName()
     try {

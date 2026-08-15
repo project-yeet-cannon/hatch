@@ -95,11 +95,16 @@ the cluster can only ever be pointed at the repository it was dispatched from.
 ## What a run actually does
 
 1. **Preflight.** SSH key resolves, the node answers 22 and 6443, and the
-   pinned version is an exact release rather than a channel. With no token, it
-   also asks GitHub whether the repository is anonymously readable — a definite
-   404 fails the run here rather than as an opaque source-controller error four
-   stages later. Any other answer (timeout, DNS, rate limit) says nothing about
-   visibility and only warns.
+   pinned version is an exact release rather than a channel. It also proves the
+   repository is clonable with whatever credential was supplied, by asking
+   GitHub directly: with no token, whether it is anonymously readable (a
+   definite 404 means private); with one, a `git-upload-pack` request carrying
+   that exact credential (401 means the PAT was rejected, 403/404 that it
+   carries no **contents:read** here). Either way the failure lands in preflight
+   rather than as an opaque source-controller error four stages and fifteen
+   minutes later. Any other answer — timeout, DNS, rate limit — says nothing
+   about the repository and only warns; this runs on a home runner whose egress
+   isn't the script's business.
 2. **Install the flux CLI** on the node, at that exact version — skipped if
    it's already there. Downloaded to `/tmp/flux-install.sh` and run from disk
    rather than piped from a URL into a shell, same as the k3s install.
@@ -119,12 +124,22 @@ repair.
 
 ## The token never reaches a command line
 
-When there is one, it arrives on the remote shell's **standard input**, goes to
-a `mktemp` file created `0600`, and reaches `kubectl` through `--from-file`. A
+When there is one, it arrives on the remote shell's **standard input** and is
+redirected straight into a `mktemp` file created `0600`, reaching `kubectl`
+through `--from-file`. It never lands in a shell variable on the way. A
 `--from-literal=password=…` — and equally a `$(cat tokenfile)` substitution,
 which the shell expands *before* exec — would put it in the argv of a process
 any local `ps` can read. A `trap` removes the file on every exit path. Same
 discipline as Provision 2.
+
+Everything in that remote script is quoted with `'`, never `"`, and
+`Invoke-NodeSsh` now *rejects* a command containing a double quote. Windows
+PowerShell 5.1 doesn't escape embedded double quotes when it builds `ssh.exe`'s
+command line, and `ssh.exe`'s own argument parsing then strips them — so the
+node would run a script that is subtly not the one that was written, with no
+error anywhere. That is not theoretical: it is what broke this stage. `tr -d
+"\r\n"` arrived as `tr -d rn`, silently deleting every `r` and `n` from the
+token, and GitHub answered 401 on a PAT that was perfectly good.
 
 ## After it succeeds
 

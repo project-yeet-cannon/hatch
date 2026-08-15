@@ -180,7 +180,7 @@ try {
     # clone, which only works if the repository is public; that is checked
     # below rather than left to fail four stages later.
     $token = $env:FLUX_GITHUB_TOKEN
-    if ([string]::IsNullOrWhiteSpace($token)) { $token = $null }
+    if ([string]::IsNullOrWhiteSpace($token)) { $token = $null } else { $token = $token.Trim() }
 
     if (-not $SshPrivateKey -and -not $SshPrivateKeyPath) {
         $failures.Add('No SSH private key: pass -SshPrivateKeyPath or -SshPrivateKey. This is the same key Phase 1 baked into the node.')
@@ -240,6 +240,39 @@ try {
             }
         }
     }
+    else {
+        # The token is checked against the exact endpoint Flux clones from,
+        # with the exact credential shape it will use (basic auth, username
+        # `git`), because that is the only check that proves what matters. The
+        # repository API would answer 200 for a fine-grained PAT that has
+        # metadata but not contents:read - which clones fine right up until it
+        # doesn't.
+        #
+        # Worth the request: without it a wrong token is not diagnosed until
+        # `flux create source git` gives up waiting for the source to go Ready,
+        # which is -SyncTimeoutMinutes later and reads as a Flux problem.
+        $basicAuth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("git:$token"))
+        try {
+            Invoke-WebRequest -Uri "https://github.com/$GitHubOwner/$Repository.git/info/refs?service=git-upload-pack" `
+                -Headers @{ Authorization = "Basic $basicAuth" } `
+                -UseBasicParsing -TimeoutSec 15 | Out-Null
+        }
+        catch {
+            $status = $null
+            if ($_.Exception.PSObject.Properties['Response'] -and $_.Exception.Response) {
+                $status = [int]$_.Exception.Response.StatusCode
+            }
+            # Same discipline as the anonymous check: only a definite answer
+            # from GitHub fails a run. A timeout or a DNS failure says nothing
+            # about the token and must not block a home runner.
+            if ($status -in 401, 403, 404) {
+                $failures.Add("FLUX_GITHUB_TOKEN cannot clone $GitHubOwner/$Repository - GitHub answered HTTP $status to a git-upload-pack request. 401 means the credential was rejected outright, usually an expired, revoked or truncated PAT. 403/404 means the token is valid but carries no contents:read on this repository (for a fine-grained PAT, check it grants Contents: Read and lists this repository). Flux would be handed the same credential and fail the same way, several minutes later and less legibly.")
+            }
+            else {
+                Write-Warning "Couldn't verify FLUX_GITHUB_TOKEN against $GitHubOwner/$Repository ($($_.Exception.Message)). Continuing - if the token is wrong, stage 5 fails on the source not becoming Ready."
+            }
+        }
+    }
 
     if ($failures.Count -gt 0) {
         $detail = ($failures | ForEach-Object { "  - $_" }) -join "`n"
@@ -266,7 +299,7 @@ try {
     Write-Stage 'Install the flux CLI'
     # ---------------------------------------------------------------- #
 
-    $installed = Invoke-NodeSsh @ssh -Command 'command -v flux >/dev/null 2>&1 && flux --version 2>/dev/null || echo "flux not installed"' -ConnectTimeoutSec 20
+    $installed = Invoke-NodeSsh @ssh -Command "command -v flux >/dev/null 2>&1 && flux --version 2>/dev/null || echo 'flux not installed'" -ConnectTimeoutSec 20
     if ($installed.ExitCode -ne 0) {
         $permanentReason = Get-SshPermanentFailureReason -StdErr $installed.StdErr
         throw "SSH to $IPAddress as '$Username' failed$(if ($permanentReason) { ": $permanentReason" }):`n$($installed.StdErr)"
@@ -333,23 +366,34 @@ try {
     $syncLines.Add('set -eu')
 
     if ($token) {
-        # Same argv discipline as Provision 2: the token arrives on standard
-        # input, goes to a 0600 mktemp file, and reaches kubectl through
-        # --from-file. `--from-literal=password=...` would put it in the argv
-        # of a process any local `ps` can read.
-        $syncLines.Add('IFS= read -r AERIE_GITHUB_TOKEN')
+        # Single quotes only, here and below. Invoke-NodeSsh refuses a command
+        # containing a double quote, because Windows PowerShell 5.1 does not
+        # escape one when it builds ssh.exe's command line and the node would
+        # receive this script with every " silently deleted. That is not
+        # hypothetical: it is what broke this stage. `tr -d "\r\n"` arrived as
+        # `tr -d rn`, which strips every r and n from the token, and GitHub
+        # answered 401 on a credential that was demonstrably correct.
+        #
+        # Same argv discipline as Provision 2, one step further: the token goes
+        # straight from standard input into a 0600 mktemp file and reaches
+        # kubectl through --from-file, never passing through a shell variable
+        # or an argv any local `ps` could read.
+        #
+        # tr is what strips the CRLF Windows PowerShell appends when it pipes a
+        # string to a native command. Left in, the carriage return reaches
+        # GitHub as part of the credential - the same baffling 401.
+        #
+        # $AERIE_TOKEN_FILE is left unquoted deliberately: mktemp's template is
+        # fixed here, so the path can't contain whitespace, and a " would not
+        # survive the trip anyway.
         $syncLines.Add('AERIE_TOKEN_FILE=$(mktemp /tmp/aerie-flux-token.XXXXXX)')
-        $syncLines.Add('trap ''rm -f "$AERIE_TOKEN_FILE"'' EXIT INT TERM')
-        # Windows PowerShell terminates a piped string with CRLF, so the token
-        # arrives with a trailing carriage return. Left in, it reaches GitHub
-        # as part of the credential and comes back as a baffling 401 on a
-        # token that is demonstrably correct.
-        $syncLines.Add('printf %s "$AERIE_GITHUB_TOKEN" | tr -d "\r\n" > "$AERIE_TOKEN_FILE"')
-        $syncLines.Add('unset AERIE_GITHUB_TOKEN')
+        $syncLines.Add('trap ''rm -f $AERIE_TOKEN_FILE'' EXIT INT TERM')
+        $syncLines.Add('tr -d ''\r\n'' > $AERIE_TOKEN_FILE')
+        $syncLines.Add('test -s $AERIE_TOKEN_FILE || { echo ''the token never arrived on standard input'' >&2; exit 1; }')
         # create|apply rather than create: this run may be a re-run, and
         # `kubectl create secret` on an existing Secret is a hard failure.
         $syncLines.Add('sudo k3s kubectl create secret generic flux-system -n flux-system' +
-            ' --from-literal=username=git --from-file=password="$AERIE_TOKEN_FILE"' +
+            ' --from-literal=username=git --from-file=password=$AERIE_TOKEN_FILE' +
             ' --dry-run=client -o yaml | sudo k3s kubectl apply -f -')
     }
 
@@ -388,7 +432,7 @@ try {
     Write-Host $syncOutput
     if ($sync.ExitCode -ne 0) {
         $hint = if ($token) {
-            'A 401 here is a token without contents:read on this repository.'
+            'Preflight already proved this token can clone this repository, so a 401 here means the credential was damaged between here and the cluster rather than that it is wrong - check the flux-system Secret in the cluster before re-issuing the PAT.'
         }
         else {
             "Cloning anonymously - a 403/404 here means $GitHubOwner/$Repository isn't publicly readable, so set FLUX_GITHUB_TOKEN."
