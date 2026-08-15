@@ -1,0 +1,34 @@
+version: 2
+
+# Actions only, deliberately. The application dependencies (nuget under src/,
+# npm under src/Aerie.Web/apps/*, gradle under apps/kiosk) are covered by CI
+# builds and tests, so a bad bump there fails loudly and cheaply. Action
+# versions have no such backstop: nothing in this repo builds or tests them,
+# so they drift silently until GitHub deprecates the runtime underneath them
+# and every job starts printing a warning. That is exactly how checkout, the
+# docker actions, and the setup-* actions ended up three majors behind on
+# node20. Add the other ecosystems here if the PR volume is ever wanted, but
+# they solve a different problem than this file does.
+updates:
+  - package-ecosystem: github-actions
+    # "/" is the whole repo for this ecosystem, not just the root: dependabot
+    # scans .github/workflows/*.yml and the composite actions under
+    # .github/actions/*/action.yml from this one entry. It does not need (and
+    # will reject) a separate directory entry per action.
+    directory: /
+    schedule:
+      interval: weekly
+    # One PR for the whole batch rather than one per action. These upgrades
+    # are near-always correlated - a node runtime deprecation moves every
+    # action at once - and reviewing them together is what makes the breaking
+    # -change check tractable. Majors stay out of the group so each one
+    # arrives as its own PR: those are the ones that change behavior (the
+    # setup-node v5 auto-caching switch, checkout v7 refusing fork refs on
+    # workflow_run) and deserve to be read on their own.
+    groups:
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: ci

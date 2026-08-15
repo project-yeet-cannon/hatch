@@ -130,7 +130,7 @@ jobs:
 
     steps:
       - name: Check out provisioning scripts
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # Nothing here talks to git afterwards, and this is a long-lived
           # self-hosted workspace - don't leave a credential in it.
