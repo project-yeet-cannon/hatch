@@ -47,12 +47,18 @@
 }
 
 .labels-layout {
+  margin-top: 12px;
+}
+
+/* Paper and grid sit together on one row; the stock picker above them is a
+   sentence long and gets the full width. */
+.labels-layout-row {
   display: flex;
   gap: 12px;
   margin-top: 12px;
 }
 
-.labels-layout .storage-field {
+.labels-layout-row .storage-field {
   flex: 1 1 0;
   min-width: 0;
 }
@@ -80,16 +86,29 @@
   box-shadow: var(--shadow);
 }
 
+/* Padding, gap and corner radius are inline, from the stock's geometry. */
 .label-cell {
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 3mm;
-  padding: 3mm;
   overflow: hidden;
-  /* The cut line. Dashed and grey so it guides scissors without competing with
-     the code for attention on a taped-up box. */
-  border: 0.2mm dashed #b4b4b4;
+  border: 0.2mm solid transparent;
+}
+
+/* The cut line on plain paper. Dashed and grey so it guides scissors without
+   competing with the code for attention on a taped-up box. */
+.label-cell.cut {
+  border-color: #b4b4b4;
+}
+
+/*
+  A die-cut sticker has no line to draw - the paper is already cut. The outline
+  is a preview affordance only, so the label's edges are visible on screen while
+  judging the layout, and it goes transparent (not away) at print time: it keeps
+  its 0.2mm of the box either way, so what's previewed is what's printed.
+*/
+.label-cell.die-cut {
+  border-color: #dcdcdc;
 }
 
 .label-cell.stacked {
@@ -103,6 +122,7 @@
   display: block;
 }
 
+/* The 1.5mm gap is TEXT_LINE_GAP_MM in labelLayout.ts, which budgets for it. */
 .label-text {
   flex: 1;
   min-width: 0;
@@ -155,6 +175,11 @@
   .label-page {
     box-shadow: none;
     break-after: page;
+  }
+
+  /* Nothing is printed on the die: the sticker's own edge is the edge. */
+  .label-cell.die-cut {
+    border-color: transparent;
   }
 
   /* Without this the last page drags a blank sheet out behind it. */

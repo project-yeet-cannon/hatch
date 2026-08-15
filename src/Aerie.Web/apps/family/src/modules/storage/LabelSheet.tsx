@@ -1,4 +1,4 @@
-import { chunk, geometryFor, MARGIN_MM } from './labelLayout';
+import { chunk, geometryFor } from './labelLayout';
 import type { LabelLayout } from './labelLayout';
 import { crateLabelUrl } from './routes';
 import type { Crate } from './types';
@@ -12,7 +12,13 @@ import type { Crate } from './types';
  *
  * On screen it is a preview at true physical size, because it's built out of
  * `mm`: what you see is what comes out, which is the only way to judge whether
- * a QR is big enough before spending a sheet of paper on it.
+ * a QR is big enough before spending a sheet of paper - or a sheet of stickers -
+ * on it.
+ *
+ * Every measurement comes from the geometry, including the ones that used to be
+ * constants here: on plain paper they're a preference, but on a die-cut stock
+ * they're where the die is, and the two have to be described by the same code
+ * for the preview to stay honest about both.
  */
 export function LabelSheet({
   crates,
@@ -26,14 +32,18 @@ export function LabelSheet({
   images: Record<string, string>;
 }) {
   const geometry = geometryFor(layout);
+  const { stock } = geometry;
   const pages = chunk(crates, geometry.perPage);
 
   return (
     <div className="label-sheet">
       {/* The one thing that has to reach the print engine rather than an
           element: page size and margins are properties of the paper, and
-          @page is the only way to say so. */}
-      <style>{`@page { size: ${geometry.page.id}; margin: ${MARGIN_MM}mm; }`}</style>
+          @page is the only way to say so. On a die-cut stock this is what
+          lands the grid on the die, so it is not decoration. */}
+      <style>
+        {`@page { size: ${geometry.page.id}; margin: ${stock.marginYMm}mm ${stock.marginXMm}mm; }`}
+      </style>
 
       {pages.map((page) => (
         <div
@@ -42,12 +52,30 @@ export function LabelSheet({
           style={{
             width: `${geometry.contentWidthMm}mm`,
             height: `${geometry.contentHeightMm}mm`,
-            gridTemplateColumns: `repeat(${layout.columns}, 1fr)`,
-            gridTemplateRows: `repeat(${layout.rows}, 1fr)`,
+            // 1fr rather than the computed cell width: the two agree to the
+            // millimetre, and fr can't round its way into an overflow that
+            // costs a blank page.
+            gridTemplateColumns: `repeat(${geometry.columns}, 1fr)`,
+            gridTemplateRows: `repeat(${geometry.rows}, 1fr)`,
+            gap: `${stock.gapYMm}mm ${stock.gapXMm}mm`,
           }}
         >
           {page.map((crate) => (
-            <div key={crate.id} className={`label-cell${geometry.stacked ? ' stacked' : ''}`}>
+            <div
+              key={crate.id}
+              className={[
+                'label-cell',
+                geometry.stacked ? 'stacked' : '',
+                stock.cutLines ? 'cut' : 'die-cut',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              style={{
+                padding: `${stock.padMm}mm`,
+                gap: `${stock.padMm}mm`,
+                borderRadius: stock.cornerRadiusMm ? `${stock.cornerRadiusMm}mm` : undefined,
+              }}
+            >
               <img
                 className="label-qr"
                 src={images[crateLabelUrl(baseUrl, crate.code)]}

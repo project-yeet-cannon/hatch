@@ -8,8 +8,10 @@ import { LabelSheet } from './LabelSheet';
 import {
   COLUMN_RANGE,
   geometryFor,
+  LABEL_STOCKS,
   PAGE_SIZES,
   ROW_RANGE,
+  stockFor,
   useLabelLayout,
 } from './labelLayout';
 import type { LabelLayout } from './labelLayout';
@@ -45,7 +47,11 @@ function normalizeCode(raw: string): string {
 function NewLabelsForm() {
   const [layout, updateLayout] = useLabelLayout();
   const geometry = geometryFor(layout);
-  const [count, setCount] = useState(String(geometry.perPage));
+  // Null means "however many fill a sheet", so changing the stock or the grid
+  // moves it. On plain paper a leftover is a scrap of paper; on a sheet of
+  // stickers it's four stickers thrown away, so the default has to keep up.
+  const [typedCount, setTypedCount] = useState<string | null>(null);
+  const count = typedCount ?? String(geometry.perPage);
   const create = useMutation();
   const navigate = useNavigate();
 
@@ -68,7 +74,7 @@ function NewLabelsForm() {
   return (
     <form className="card storage-form" onSubmit={submit}>
       <p className="labels-lede">
-        Print a sheet of blank labels, tape them onto empty boxes, then scan each one as you fill it.
+        Print a sheet of blank labels, stick them onto empty boxes, then scan each one as you fill it.
       </p>
 
       <label className="storage-field">
@@ -77,7 +83,7 @@ function NewLabelsForm() {
           type="text"
           inputMode="numeric"
           value={count}
-          onChange={(e) => setCount(e.target.value)}
+          onChange={(e) => setTypedCount(e.target.value)}
           aria-label="How many labels"
         />
       </label>
@@ -159,12 +165,24 @@ function PrintView({ codes }: { codes: string[] }) {
 
         <p className="labels-hint">
           {found.length} {found.length === 1 ? 'label' : 'labels'} ·{' '}
-          {sheetCount(found.length, geometry.perPage)} sheet(s) · cut on the dashed lines
+          {sheetCount(found.length, geometry.perPage)} sheet(s) ·{' '}
+          {geometry.stock.cutLines ? 'cut on the dashed lines' : 'peel and stick'}
         </p>
 
         {missing > 0 && (
           <p className="labels-hint">
             {missing} of these crates no longer {missing === 1 ? 'exists' : 'exist'}.
+          </p>
+        )}
+
+        {/* On plain paper a print dialog that shrinks the page costs nothing -
+            the cut lines shrink with it. On a die-cut sheet the die doesn't,
+            so "Fit to page" is the one setting that quietly ruins a sheet of
+            stickers, and it's on by default in more than one browser. */}
+        {!geometry.stock.cutLines && (
+          <p className="labels-warning" role="status">
+            Print at <strong>100% scale</strong> with default margins — “Fit to page” shrinks the sheet
+            but not the stickers. Run one sheet on plain paper and hold it against the labels first.
           </p>
         )}
 
@@ -189,42 +207,73 @@ function PrintView({ codes }: { codes: string[] }) {
   );
 }
 
-/** Paper and grid. Deliberately not a label-product picker: this is plain paper and scissors. */
+/**
+ * What's in the printer.
+ *
+ * Paper and grid are a preference on plain paper and a specification on a
+ * die-cut sheet, so a stock that fixes either one hides the control for it
+ * rather than showing a number the sheet is going to ignore.
+ */
 function LayoutControls({ layout, onChange }: { layout: LabelLayout; onChange: (patch: Partial<LabelLayout>) => void }) {
+  const stock = stockFor(layout.stock);
+
   return (
     <div className="labels-layout">
       <label className="storage-field">
-        <span>Paper</span>
-        <select value={layout.pageSize} onChange={(e) => onChange({ pageSize: e.target.value })}>
-          {PAGE_SIZES.map((size) => (
-            <option key={size.id} value={size.id}>
-              {size.label}
+        <span>Label stock</span>
+        <select value={stock.id} onChange={(e) => onChange({ stock: e.target.value })}>
+          {LABEL_STOCKS.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
             </option>
           ))}
         </select>
       </label>
 
-      <label className="storage-field">
-        <span>Columns</span>
-        <input
-          type="number"
-          min={COLUMN_RANGE.min}
-          max={COLUMN_RANGE.max}
-          value={layout.columns}
-          onChange={(e) => onChange({ columns: Number(e.target.value) })}
-        />
-      </label>
+      <p className="labels-hint">{stock.note}</p>
 
-      <label className="storage-field">
-        <span>Rows</span>
-        <input
-          type="number"
-          min={ROW_RANGE.min}
-          max={ROW_RANGE.max}
-          value={layout.rows}
-          onChange={(e) => onChange({ rows: Number(e.target.value) })}
-        />
-      </label>
+      {(stock.pageSizeId === null || stock.grid === null) && (
+        <div className="labels-layout-row">
+          {stock.pageSizeId === null && (
+            <label className="storage-field">
+              <span>Paper</span>
+              <select value={layout.pageSize} onChange={(e) => onChange({ pageSize: e.target.value })}>
+                {PAGE_SIZES.map((size) => (
+                  <option key={size.id} value={size.id}>
+                    {size.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {stock.grid === null && (
+            <>
+              <label className="storage-field">
+                <span>Columns</span>
+                <input
+                  type="number"
+                  min={COLUMN_RANGE.min}
+                  max={COLUMN_RANGE.max}
+                  value={layout.columns}
+                  onChange={(e) => onChange({ columns: Number(e.target.value) })}
+                />
+              </label>
+
+              <label className="storage-field">
+                <span>Rows</span>
+                <input
+                  type="number"
+                  min={ROW_RANGE.min}
+                  max={ROW_RANGE.max}
+                  value={layout.rows}
+                  onChange={(e) => onChange({ rows: Number(e.target.value) })}
+                />
+              </label>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
