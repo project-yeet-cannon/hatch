@@ -48,10 +48,15 @@ them can knock the host off the network if scripted carelessly.
    exactly why this isn't scripted: on a remote session it would sever the
    session that was running it.
 
-3. **The OpenSSH client**, for post-boot verification:
+3. **The OpenSSH client**, for post-boot verification — **installed for you**
+   by the workflow's *Ensure runner dependencies* step
+   ([`scripts/runner/`](../runner/README.md)), so this is only a by-hand step
+   when running the script outside Actions on a machine that lacks it:
 
    ```powershell
    Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
+   # or, from a checkout, in an elevated shell:
+   .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency OpenSshClient
    ```
 
 4. **An SSH keypair** (`ssh-keygen -t ed25519`). The public half is injected
@@ -81,7 +86,7 @@ them can knock the host off the network if scripted carelessly.
    | `NTP_SERVER` | variable | yes | pfSense's LAN address |
    | `NODE_SSH_PRIVATE_KEY` | secret | unless `skip_wait` | contents of `id_ed25519` |
    | `DOMAIN` | variable | no | already set for `cd.yml`; sets the guest's FQDN |
-   | `VM_LOG_SHIPPER_TOKEN` | secret | no | already set for `cd.yml`; without it, console-log shipping (below) is skipped |
+   | `VM_LOG_SHIPPER_TOKEN` | secret | yes | shared secret for console-log shipping (below). Nothing issues it — mint one with [`scripts/secrets/new-shared-secret.sh`](../secrets/new-shared-secret.sh). This step degrades without it by skipping shipping for the VM, but that is degradation, not a supported configuration: [`parameters.json`](../secrets/parameters.json) marks it required and Provision 2 refuses to seed without it. |
 
    The qemu-img download is pinned in
    [`scripts/versions.json`](../versions.json), not by a variable — see
@@ -179,8 +184,9 @@ Same `-PreflightOnly` switch, same effect as the workflow's checkbox above.
    `-ConsolePassword ''` to opt out and accept that.
 
    If `-LogIngestUrl`/`-LogIngestToken` are supplied (flow B sets these
-   automatically whenever the `VM_LOG_SHIPPER_TOKEN` secret is present — see
-   above), the VM's serial console (COM1, wired to a named pipe — Hyper-V has
+   automatically from the `VM_LOG_SHIPPER_TOKEN` secret, which the table above
+   requires; a VM built before it was set ships nothing until it's rebuilt or
+   `-RecreateVM`'d), the VM's serial console (COM1, wired to a named pipe — Hyper-V has
    no way to redirect a COM port straight to a file) is also drained by a
    per-VM Scheduled Task (`Aerie-VMConsoleLog-<VMName>`, runs as SYSTEM,
    restarts on failure, survives host reboots) running

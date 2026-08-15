@@ -39,10 +39,41 @@ that consumes it reads the same path.
 | `ESO_AWS_ACCESS_KEY_ID` | repository **variable** | The **`aerie-eso`** user's id. |
 | `ESO_AWS_SECRET_ACCESS_KEY` | repository **secret** | Its secret half. `aerie-eso` holds `ssm:GetParameter*` + `ssm:GetParametersByPath` on `/aerie/*` and `kms:Decrypt` on the default `aws/ssm` key. This pair becomes the in-cluster bootstrap Secret. |
 | `NODE_SSH_PRIVATE_KEY` | repository secret | Already set for Provision 0/1 — the key cloud-init baked into the node. |
+| `VM_LOG_SHIPPER_TOKEN` | repository secret | Required, and the one value here with **no issuer to fetch it from** — see below. |
 
 Everything else the workflow passes (`AWS_ACCESS_KEY_ID`, `HA_TOKEN`,
 `RESTIC_*`, …) already exists for `cd.yml`. Optional entries with no matching
-value are skipped with a note, not an error.
+value are skipped with a note, not an error — but `required: true` entries in
+[`parameters.json`](parameters.json) fail preflight, before anything is
+written.
+
+### Secrets with no issuer
+
+Almost everything in the tree comes from somewhere: `HA_TOKEN` from Home
+Assistant, the AWS pairs from IAM, `NODE_SSH_PRIVATE_KEY` from `ssh-keygen`.
+`VM_LOG_SHIPPER_TOKEN` has no issuer at all — it's a shared secret two sides
+compare, so you mint it:
+
+```bash
+./scripts/secrets/new-shared-secret.sh          # print a 256-bit hex token
+./scripts/secrets/new-shared-secret.sh --set    # or write it straight to the repo (needs gh)
+```
+
+Hex, not base64, because the value ends up as an HTTP header, a Windows
+Scheduled Task argument, and a compose environment variable, and hex is the
+one encoding none of the three quote or wrap.
+
+**Three consumers must hold the same value**, so rotating it is three re-runs,
+not one:
+
+| Consumer | Gets it from | After a change |
+|---|---|---|
+| `Aerie.Api` (`VmConsoleLogsController`) | `cd.yml` → `compose.prod.yml` | re-run the deploy |
+| The per-VM console-log Scheduled Task on each Hyper-V host | `provision-0-new-node.yml` | applied on that VM's next build / `recreate_vm` |
+| `/aerie/logging/vm-log-shipper-token` in SSM, for Phase 3 | this workflow | re-run Provision 2 |
+
+Until the API and the shippers agree, every shipper POST is a `401` and the
+console lines are dropped — the shipper's local copy on the host keeps them.
 
 ### Which tab: ids are variables, everything else is a secret
 
@@ -61,10 +92,14 @@ Getting it wrong is silent — `${{ secrets.X }}` for a value stored as a
 variable resolves to an empty string, not an error — so both workflows fail
 fast on an empty credential and name the tab the value belongs on.
 
-**Runner prerequisite:** the AWS CLI v2 must be on the runner's PATH
-(`winget install --exact --id Amazon.AWSCLI`). Preflight fails with that exact
-command if it's missing. Restart the runner service afterwards — a Windows
-service only re-reads PATH when it starts.
+**Runner prerequisite: none to install by hand.** This workflow's *Ensure
+runner dependencies* step installs the AWS CLI v2 (pinned in
+[`scripts/versions.json`](../versions.json), SHA256-verified) and the OpenSSH
+client before the seed runs — see [`scripts/runner/`](../runner/README.md).
+That step is also what makes a same-run install usable: the MSI writes the
+machine PATH, which the runner service can't see until it restarts, so the
+step publishes the directory to `$GITHUB_PATH` and preflight resolves
+`aws.exe` from its install directory as well as from PATH.
 
 ### Two users, on purpose
 

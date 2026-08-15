@@ -87,6 +87,16 @@ jobs:
         with:
           persist-credentials: false
 
+      # Everything this job does reaches the node over SSH. Installed here
+      # rather than assumed, so a newly-registered runner works on its first
+      # dispatch - see scripts/runner/README.md.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency OpenSshClient
+
       - name: Install k3s
         shell: powershell
         env:

@@ -90,7 +90,21 @@ the `ExternalSecret` manifests read. Change a path there and nowhere else.
 | `/aerie/tailscale/auth-key` | subnet router, if it follows the stack in | 5 |
 
 Entries ahead of their phase are listed so the convention is settled before the
-manifest that needs it exists. Seeding skips any whose value isn't supplied.
+manifest that needs it exists. Seeding skips an *optional* entry whose value
+isn't supplied, with a note; a `required: true` one fails preflight instead,
+before anything is written — the alternative is a cluster that comes up with a
+silently missing credential and fails at the point of use, weeks later.
+
+Most of these values have an issuer you fetch them from: Home Assistant mints
+`ha/token`, IAM mints every key pair, `ssh-keygen` mints the node key.
+`logging/vm-log-shipper-token` has none — it is a shared secret the shipper and
+the API compare, so the operator mints it, with
+[`scripts/secrets/new-shared-secret.sh`](../scripts/secrets/new-shared-secret.sh).
+It is required rather than optional because the alternative — an installation
+where the console-log path silently does nothing — hides exactly the failure it
+exists to diagnose: a node that never reaches the network. See
+[`scripts/secrets/README.md`](../scripts/secrets/README.md#secrets-with-no-issuer)
+for the three consumers that have to agree on the value.
 
 ### What deliberately stays out
 

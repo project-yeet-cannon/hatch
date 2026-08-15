@@ -46,7 +46,10 @@ jobs:
       HA_TOKEN: ${{ secrets.HA_TOKEN }}
       # Shared secret VmConsoleLogsController checks against X-Vm-Log-Token -
       # see scripts/hyperv/lib/Send-VmConsoleLog.ps1, provisioned onto each
-      # Hyper-V host by provision-0-new-node.yml.
+      # Hyper-V host by provision-0-new-node.yml. Nothing issues it; mint one
+      # with scripts/secrets/new-shared-secret.sh. All three consumers of this
+      # secret (here, Provision 0, Provision 2) must hold the same value, so
+      # rotating it means re-running this deploy as well.
       VM_LOG_SHIPPER_TOKEN: ${{ secrets.VM_LOG_SHIPPER_TOKEN }}
       # //server/share of the house SMB share. compose.share.yml mounts it
       # twice: read-write for the browse/upload GUI at share.${DOMAIN}, and

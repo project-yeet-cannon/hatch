@@ -20,8 +20,10 @@
 #     cmdlets and `#Requires -RunAsAdministrator` both demand it; membership
 #     in Hyper-V Administrators alone is not enough)
 #   - labelled to match the `host` choice below, plus `self-hosted`
-#   - OpenSSH client present:
-#       Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
+#
+# Nothing else has to be prepared by hand: the OpenSSH client (and, in
+# Provision 2, the AWS CLI) is installed by the "Ensure runner dependencies"
+# step below - scripts/runner/README.md.
 #
 # Next step: provision-1-install-k3s.yml, once this node answers SSH.
 name: 'Provision 0: New node VM'
@@ -136,6 +138,16 @@ jobs:
           # self-hosted workspace - don't leave a credential in it.
           persist-credentials: false
 
+      # Post-boot verification SSHes into the new VM, so the host needs an SSH
+      # client. Installed here rather than listed as a prerequisite somebody
+      # has to have read - see scripts/runner/README.md.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency OpenSshClient
+
       - name: Provision node
         shell: powershell
         env:
@@ -172,8 +184,14 @@ jobs:
           DOMAIN: ${{ vars.DOMAIN }}
           # Shared secret the VM's console-log Scheduled Task sends as
           # X-Vm-Log-Token to Aerie.Api's /api/vm-console-logs (see
-          # VmConsoleLogsController and cd.yml). Console-log shipping is
-          # skipped for this VM if unset.
+          # VmConsoleLogsController and cd.yml). Nothing issues it - mint one
+          # with scripts/secrets/new-shared-secret.sh.
+          #
+          # This workflow degrades rather than fails if it's unset (the VM
+          # builds, it just ships no console lines) because a node that won't
+          # boot is a worse outcome than a node with no console log. That is
+          # not a licence to leave it unset: parameters.json marks the same
+          # value required, so Provision 2 refuses to seed without it.
           VM_LOG_SHIPPER_TOKEN: ${{ secrets.VM_LOG_SHIPPER_TOKEN }}
           # No QEMU_IMG_SHA256 here on purpose: the qemu-img URL and its hash
           # are committed together in scripts/versions.json, so the golden

@@ -88,6 +88,16 @@ jobs:
         with:
           persist-credentials: false
 
+      # The bootstrap runs on the node, over SSH - so the runner needs an SSH
+      # client and nothing else. Installed here rather than assumed; see
+      # scripts/runner/README.md.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency OpenSshClient
+
       - name: Bootstrap Flux
         shell: powershell
         env:

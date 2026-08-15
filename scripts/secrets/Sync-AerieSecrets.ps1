@@ -84,6 +84,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot '..\hyperv\lib\AerieSsh.ps1')
+. (Join-Path $PSScriptRoot '..\runner\lib\AerieRunnerDependencies.ps1')
 
 $script:StageNumber = 0
 # Replaced in preflight with the resolved absolute path, so every later call
@@ -273,12 +274,19 @@ try {
         $failures.Add("No AWS region: pass -AwsRegion or set AWS_REGION. The parameter tree lives in exactly one region and both this script and the Phase 3 ClusterSecretStore have to name the same one.")
     }
 
-    $awsCommand = Get-Command aws -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($awsCommand) {
-        $script:AwsCommand = $awsCommand.Source
+    # Resolved through the runner-dependency library rather than Get-Command
+    # alone: that also looks in the MSI's install directory, which is how a
+    # CLI installed earlier in this same job is found. The machine PATH entry
+    # the installer writes is invisible to the runner service - and every
+    # process it spawns - until the service restarts. Deliberately resolve
+    # only, never install: preflight runs under whatever account launched this
+    # script, and a check that mutates the machine it's checking isn't a check.
+    $awsPath = Get-AerieAwsCliPath
+    if ($awsPath) {
+        $script:AwsCommand = $awsPath
     }
     else {
-        $failures.Add("The AWS CLI isn't on PATH. Install v2 on this machine (winget install --exact --id Amazon.AWSCLI, or the MSI at https://awscli.amazonaws.com/AWSCLIV2.msi) and restart the shell - or the runner service, which only re-reads PATH when it starts.")
+        $failures.Add("The AWS CLI isn't installed. The 'Ensure runner dependencies' step in provision-2-seed-secrets.yml installs it - if this ran from that workflow, read that step's log. By hand: scripts\runner\Install-RunnerDependencies.ps1 -Dependency AwsCli from an elevated PowerShell.")
     }
 
     # The seed writer and the ESO reader are deliberately different IAM users:

@@ -38,6 +38,33 @@
     "version": "v2.9.4"
   },
 
+  "awsCli": {
+    "_comment": [
+      "AWS CLI v2 for Windows, installed on any runner that seeds the SSM",
+      "parameter tree (Provision 2). Note the URL is the *version-specific*",
+      "MSI, not https://awscli.amazonaws.com/AWSCLIV2.msi - that one is a",
+      "moving 'latest' pointer, so a hash pinned against it would break on",
+      "every upstream release. The versioned artifact is immutable, which is",
+      "what makes the hash below meaningful. AWS publishes no checksum file",
+      "for it, so - same as qemuImg - the hash is computed once from this",
+      "exact URL and re-derivable by anyone:",
+      "  Get-FileHash -Algorithm SHA256 <the downloaded msi>",
+      "Bump all three fields together, and say in the commit message how the",
+      "new hash was obtained.",
+      "",
+      "Treated as a floor, not an exact match: a runner already carrying a",
+      "*newer* aws.exe keeps it, with a warning. The pin exists so a bare",
+      "machine converges somewhere known, and AWS CLI v2 is backwards",
+      "compatible across minors - downgrading a shared runner (which other",
+      "workflows also use) would be a worse failure than running one release",
+      "ahead. Older or absent installs are brought up to this exact version.",
+      "Releases: https://github.com/aws/aws-cli/blob/v2/CHANGELOG.rst"
+    ],
+    "version": "2.36.24",
+    "url": "https://awscli.amazonaws.com/AWSCLIV2-2.36.24.msi",
+    "sha256": "73ab681fb344f35ec8c0f4ce87744ffc015856f692dad30b43fca7569a52f9de"
+  },
+
   "qemuImg": {
     "_comment": [
       "qemu-img for Windows, used once per host to convert the vendor cloud",
