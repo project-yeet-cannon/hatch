@@ -486,7 +486,12 @@ try {
 
     $listed = Invoke-Aws @('ssm', 'get-parameters-by-path', '--path', $prefix, '--recursive', '--query', 'Parameters[].Name', '--output', 'json')
     if ($listed.ExitCode -ne 0) {
-        throw "The ESO credential couldn't list $prefix/* (exit $($listed.ExitCode)). Check the aerie-eso IAM user has ssm:GetParametersByPath on $prefix/* :`n$($listed.StdErr)"
+        # Named explicitly because the near-miss is the likely cause and reads
+        # as correct: GetParametersByPath authorizes against the *path*, so a
+        # policy scoped only to '...:parameter$prefix/*' denies a call on
+        # '...:parameter$prefix'. Both ARNs are needed; scripts\secrets\iam\
+        # carries both, and Set-AerieSecretsIam.ps1 applies them.
+        throw "The ESO credential couldn't list $prefix/* (exit $($listed.ExitCode)). The aerie-eso IAM user needs ssm:GetParametersByPath on BOTH 'arn:aws:ssm:*:*:parameter$prefix' and 'arn:aws:ssm:*:*:parameter$prefix/*' - the bare path ARN is the one usually missing. Fix: .\scripts\secrets\Set-AerieSecretsIam.ps1`n$($listed.StdErr)"
     }
     $listedNames = @($listed.StdOut | ConvertFrom-Json)
     Write-Host "ESO credential can list $($listedNames.Count) parameter(s) under $prefix."

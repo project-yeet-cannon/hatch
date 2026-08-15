@@ -126,9 +126,42 @@ scoped to exactly what it needs.
 
 | User | Rights | Held by |
 |---|---|---|
-| seed writer | `ssm:PutParameter`, `ssm:GetParameter` on `/aerie/*`, `kms:Decrypt` on `aws/ssm` | the `SSM_AWS_*` pair — id as a repository variable, secret half as a repository secret — used only by Provision 2 |
-| `aerie-eso` | `ssm:GetParameter*`, `ssm:GetParametersByPath` on `/aerie/*`, `kms:Decrypt` on `aws/ssm` | the in-cluster bootstrap Secret |
+| seed writer | `ssm:PutParameter`, `ssm:GetParameter*` on `/aerie/*`, `kms:Decrypt` via SSM | the `SSM_AWS_*` pair — id as a repository variable, secret half as a repository secret — used only by Provision 2 |
+| `aerie-eso` | `ssm:GetParameter*`, `ssm:GetParametersByPath` on `/aerie` **and** `/aerie/*`, `kms:Decrypt` via SSM | the in-cluster bootstrap Secret |
 | Route53 / `aerie-restic` | unchanged from Phase 0 | seeded *as values* into the tree above |
+
+Don't hand-write these. They are committed as
+[`scripts/secrets/iam/`](../scripts/secrets/iam/) with the account, region and
+prefix left as placeholders, and
+[`Set-AerieSecretsIam.ps1`](../scripts/secrets/Set-AerieSecretsIam.ps1) renders
+and applies them (`-Render` prints the JSON to paste instead, for when the
+identity that can write IAM isn't the one at hand).
+
+### The bare path ARN is not optional
+
+The ESO row above names two resources where the obvious policy names one, and
+the difference is the whole reason these are committed rather than described.
+`GetParametersByPath` authorizes against the **path**, not against the
+parameters under it — a call on `/aerie` is checked against
+`arn:aws:ssm:<region>:<account>:parameter/aerie`, with no trailing slash.
+`parameter/aerie/*` does not match that string, so a policy scoped to
+`/aerie/*` alone — which reads as correct, and is what an earlier draft of this
+table said — denies the listing outright:
+
+```text
+User: arn:aws:iam::…:user/aerie-eso is not authorized to perform:
+ssm:GetParametersByPath on resource: arn:aws:ssm:…:parameter/aerie
+```
+
+Both ARNs, in one statement. The failure is caught at Provision 2's verify
+stage rather than in production, which is the stage's entire purpose — but it
+is cheaper still not to write the narrow policy in the first place.
+
+`kms:Decrypt` is scoped by a `kms:ViaService` condition on
+`ssm.<region>.amazonaws.com` rather than by key ARN. The default `aws/ssm` key
+has no stable ARN across installations and an alias isn't valid in a `Resource`
+element, so the condition is what keeps the grant from being "decrypt anything
+in the account".
 
 The split is one-directional, not disjoint: the writer reads *and* writes, the
 ESO user only reads. The writer needs the read half for read-before-write below

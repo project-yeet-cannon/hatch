@@ -35,9 +35,9 @@ that consumes it reads the same path.
 |---|---|---|
 | `AWS_REGION` | repository variable | Already set for `cd.yml`. The parameter tree lives in exactly one region, and the Phase 3 `ClusterSecretStore` must name the same one. |
 | `SSM_AWS_ACCESS_KEY_ID` | repository **variable** | The **seed writer**'s id. |
-| `SSM_AWS_SECRET_ACCESS_KEY` | repository **secret** | Its secret half. The seed writer holds `ssm:PutParameter` + `ssm:GetParameter` on `/aerie/*` and `kms:Decrypt` on the default `aws/ssm` key. The read half is what read-before-write needs; `PutParameter` alone fails on the first parameter that already exists. |
+| `SSM_AWS_SECRET_ACCESS_KEY` | repository **secret** | Its secret half. The seed writer holds `ssm:PutParameter` + `ssm:GetParameter*` on `/aerie/*` and `kms:Decrypt` through SSM. The read half is what read-before-write needs; `PutParameter` alone fails on the first parameter that already exists. |
 | `ESO_AWS_ACCESS_KEY_ID` | repository **variable** | The **`aerie-eso`** user's id. |
-| `ESO_AWS_SECRET_ACCESS_KEY` | repository **secret** | Its secret half. `aerie-eso` holds `ssm:GetParameter*` + `ssm:GetParametersByPath` on `/aerie/*` and `kms:Decrypt` on the default `aws/ssm` key. This pair becomes the in-cluster bootstrap Secret. |
+| `ESO_AWS_SECRET_ACCESS_KEY` | repository **secret** | Its secret half. `aerie-eso` holds `ssm:GetParameter*` + `ssm:GetParametersByPath` on `/aerie` **and** `/aerie/*`, and `kms:Decrypt` through SSM. Both ARNs — see [the policies](#the-iam-policies-are-committed-not-retyped). This pair becomes the in-cluster bootstrap Secret. |
 | `NODE_SSH_PRIVATE_KEY` | repository secret | Already set for Provision 0/1 — the key cloud-init baked into the node. |
 | `VM_LOG_SHIPPER_TOKEN` | repository secret | Required, and the one value here with **no issuer to fetch it from** — see below. |
 
@@ -112,6 +112,36 @@ holds a session for the length of a run. Splitting them costs one extra IAM
 user and removes a whole class of "the cluster overwrote its own secrets"
 failure.
 
+### The IAM policies are committed, not retyped
+
+[`iam/aerie-eso.policy.json`](iam/aerie-eso.policy.json) and
+[`iam/seed-writer.policy.json`](iam/seed-writer.policy.json) hold the two
+policies with `<AWS_REGION>`, `<AWS_ACCOUNT_ID>` and `<PARAMETER_PREFIX>` left
+as placeholders, so nothing installation-specific is committed.
+[`Set-AerieSecretsIam.ps1`](Set-AerieSecretsIam.ps1) fills them in from
+`sts get-caller-identity` and `parameters.json`, then attaches them:
+
+```powershell
+# As an operator identity that can write IAM — not the seed writer's
+.\Set-AerieSecretsIam.ps1 -SeedWriterUserName aerie-ssm-seed
+
+# Or print the rendered JSON to paste into the console, changing nothing.
+# With both values given it needs no AWS CLI and no credentials, so this
+# works from a laptop that has nothing but PowerShell.
+.\Set-AerieSecretsIam.ps1 -Render -AwsAccountId 123456789012 -AwsRegion us-east-1
+```
+
+It attaches policies to users that already exist; it does not create users or
+access keys, because minting a key means printing one.
+
+The reason this is a file and not a paragraph is one easy near-miss. The ESO
+user needs `GetParametersByPath` on **both** `arn:…:parameter/aerie` and
+`arn:…:parameter/aerie/*`. Listing authorizes against the *path* — the bare ARN
+with no trailing slash — which `/aerie/*` does not match, so the natural
+"scope it to `/aerie/*`" policy denies the verify stage with
+`is not authorized to perform: ssm:GetParametersByPath`. Full reasoning in
+[`docs/secrets-architecture.md`](../../docs/secrets-architecture.md#the-bare-path-arn-is-not-optional).
+
 ## What a run actually does
 
 1. **Preflight.** Parses the map, resolves the AWS CLI, checks every *required*
@@ -154,8 +184,10 @@ and statuses only.
 
 ## Still manual
 
-- **Creating the IAM users and their policies.** One-time AWS console/CLI work,
-  same tier as generating `K3S_CLUSTER_TOKEN`. The policies are spelled out in
-  [`docs/secrets-architecture.md`](../../docs/secrets-architecture.md#the-three-iam-users).
+- **Creating the IAM users themselves, and their access keys.** One-time AWS
+  console work, same tier as generating `K3S_CLUSTER_TOKEN`. Their *policies*
+  are no longer manual — [`Set-AerieSecretsIam.ps1`](Set-AerieSecretsIam.ps1)
+  applies the committed documents, for the reason
+  [above](#the-iam-policies-are-committed-not-retyped).
 - **Rotating the underlying credentials.** Rotation is "change the value, re-run
   this" — the re-run is scripted; deciding to rotate isn't.

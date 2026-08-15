@@ -385,9 +385,15 @@ after it.*
       encrypted or otherwise; see [Secrets](#secrets--no-bytes-in-git) and
       [`docs/ethos.md`](docs/ethos.md). Replaced by the three items below
 - [x] Dedicated `aerie-eso` IAM user — `ssm:GetParameter*` /
-      `ssm:GetParametersByPath` scoped to `/aerie/*` only, plus `kms:Decrypt`
-      on the default `aws/ssm` key. Separate from `aerie-restic` and the
-      Route53 user, same isolation discipline as Phase 0
+      `ssm:GetParametersByPath` scoped to `/aerie` **and** `/aerie/*`, plus
+      `kms:Decrypt` restricted to SSM by a `kms:ViaService` condition.
+      Separate from `aerie-restic` and the Route53 user, same isolation
+      discipline as Phase 0. *Both* ARNs because listing authorizes against
+      the bare path — `/aerie/*` alone denies `GetParametersByPath`, which is
+      how the first Provision 2 run failed. The policies are committed as
+      [`scripts/secrets/iam/`](scripts/secrets/iam/) and applied by
+      [`Set-AerieSecretsIam.ps1`](scripts/secrets/Set-AerieSecretsIam.ps1)
+      rather than retyped into the console
 - [x] Define and commit the parameter naming convention
       (`/aerie/<component>/<key>`, e.g. `/aerie/ha/token`,
       `/aerie/cert-manager/route53-secret-access-key`). This is the *pointer*
