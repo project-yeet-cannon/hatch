@@ -427,13 +427,29 @@ after it.*
       instead.** `Provision 3: Bootstrap Flux`
       ([`.github/workflows/provision-3-bootstrap-flux.yml`](.github/workflows/provision-3-bootstrap-flux.yml)
       → [`scripts/flux/Bootstrap-Flux.ps1`](scripts/flux/Bootstrap-Flux.ps1))
-      runs `flux bootstrap github` *on the node* over SSH, so no cluster
-      credential is copied onto a runner, and the PAT arrives on stdin rather
-      than in argv. Leaving this one imperative would have made it the only
+      installs Flux *on the node* over SSH, so no cluster credential is copied
+      onto a runner. Leaving this one imperative would have made it the only
       provisioning step with no repeatable path — and it's the one a rebuilt
       control plane most needs to re-run. Owner/repo come from the run's
       context, so it can only ever be pointed at the repo it was dispatched
       from. Everything Flux manages after this is a git commit to `deploy/`
+
+      *Deliberately **not** `flux bootstrap github`.* Bootstrap's convenience is
+      that it commits Flux's own manifests back here, and that is precisely
+      what [ethos](docs/ethos.md) forbids: `gotk-sync.yaml` carries one
+      installation's owner/repo/branch, and `gotk-components.yaml` becomes a
+      second pin for the Flux version [`scripts/versions.json`](scripts/versions.json)
+      already owns — 10k lines every downstream fork would re-conflict on at
+      every re-run. The script does bootstrap's halves explicitly instead:
+      `flux install` for the controllers, then `flux create source git` +
+      `flux create kustomization` for what bootstrap would have serialized into
+      `gotk-sync.yaml`. Those live in the cluster, and **the run writes nothing
+      to git**. Two consequences worth noting: the PAT drops from
+      contents:write + administration:write to *optional*, contents:read (a
+      public repo is cloned anonymously, so `FLUX_GITHUB_TOKEN` can be unset
+      entirely); and `versions.json` becomes the only place the Flux version
+      exists, so an upgrade is a bump plus a re-dispatch rather than a
+      committed manifest to keep in step
 - [x] Note the gap, don't solve it here: `kubectl`/Flux target node 1's IP
       directly — there's no VIP in front of the apiserver itself (kube-vip in
       Phase 3 fronts *ingress* traffic only). Losing node 1 means manually
@@ -506,10 +522,19 @@ sudo k3s kubectl -n external-secrets get secret aerie-eso-bootstrap
 sudo env KUBECONFIG=/etc/rancher/k3s/k3s.yaml flux check
 ```
 
-and confirm `deploy/cluster/flux-system/` exists on `main` — Flux commits it
-during bootstrap. Any of the four failing means re-running the matching
-Provision workflow; all of them are idempotent, so a re-run is the fix rather
-than a repair.
+and confirm the cluster is actually pointed somewhere:
+
+```sh
+sudo env KUBECONFIG=/etc/rancher/k3s/k3s.yaml flux get sources git
+sudo env KUBECONFIG=/etc/rancher/k3s/k3s.yaml flux get kustomizations
+```
+
+Both `flux-system`, both Ready. Note there is nothing to check *in the repo*:
+Provision 3 runs `flux install` rather than `flux bootstrap`, so no
+`deploy/cluster/flux-system/` is ever committed and the sync configuration
+lives only in the cluster. Any of the five failing means re-running the
+matching Provision workflow; all of them are idempotent, so a re-run is the fix
+rather than a repair.
 
 **2. Pick and reserve the ingress VIP.** This is the floating address kube-vip
 answers ARP for, and the one pfSense will eventually point `*.${DOMAIN}` at in
@@ -626,7 +651,11 @@ nothing below waits on a human except the one explicit stop in step 10.*
       *Exit:* `findmnt /var/lib/longhorn` on every node, with capacity matching
       `-DataDiskSizeGB`.
 - [ ] **3. The Flux tree skeleton** — commit only, no cluster access:
-      - `deploy/cluster/flux-system/` — Flux's own, committed by the bootstrap
+      - `deploy/cluster/kustomization.yaml` — the root Flux reconciles.
+        Already committed as an empty-`resources` skeleton, since Provision 3
+        neither creates nor writes to this path. There is deliberately no
+        `flux-system/` directory: the controllers come from the pin in
+        `scripts/versions.json` and the sync config lives in the cluster
       - `deploy/cluster/infrastructure.yaml` — two Kustomizations,
         `infra-config` `dependsOn` `infra-controllers`
       - `deploy/cluster/infrastructure/controllers/` — one `HelmRepository` +

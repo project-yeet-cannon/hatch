@@ -12,51 +12,82 @@
     wrapped by provision-3-bootstrap-flux.yml. Running it by hand is the
     fallback, not the norm.
 
-    The bootstrap runs *on the node* rather than from this machine: k3s
-    already has a root-owned kubeconfig at /etc/rancher/k3s/k3s.yaml, so
-    nothing has to copy cluster credentials onto a runner to make this work.
+    This deliberately does *not* run `flux bootstrap github`. Bootstrap's
+    convenience is that it commits Flux's own manifests back to the repo, and
+    that is the one thing docs/ethos.md forbids: gotk-sync.yaml carries one
+    installation's owner/repo/branch, and gotk-components.yaml becomes a second
+    pin for the Flux version scripts/versions.json already owns - a 10k-line
+    file that every downstream fork would re-conflict on at every re-run. The
+    two halves of bootstrap are done explicitly instead:
+
+      flux install                 -> the controllers, at the pinned version
+      flux create source git       -> where to sync from
+      flux create kustomization    -> what to reconcile
+
+    Nothing is written to the repository. The sync configuration lives in the
+    cluster, declared from this script's parameters, which is where a value
+    that is true of exactly one installation belongs.
+
+    The install runs *on the node* rather than from this machine: k3s already
+    has a root-owned kubeconfig at /etc/rancher/k3s/k3s.yaml, so nothing has to
+    copy cluster credentials onto a runner to make this work.
 
     Stages:
-      1. Preflight - SSH key resolves, node answers 22 and 6443, the PAT is
-                     present, and the Flux version is a real pin.
-      2. Install   - installs the pinned flux CLI on the node if it isn't
-                     already at that exact version.
-      3. Precheck  - `flux check --pre` against the live apiserver.
-      4. Bootstrap - `flux bootstrap github`, which installs the controllers,
-                     commits the flux-system manifests to -Path on -Branch,
-                     and registers a deploy key on the repository.
-      5. Verify    - `flux check` plus the reconciliation state of everything
-                     it now manages.
+      1. Preflight  - SSH key resolves, node answers 22 and 6443, the Flux
+                      version is a real pin, and the repository is reachable
+                      with whatever credential (or none) was supplied.
+      2. Install    - installs the pinned flux CLI on the node if it isn't
+                      already at that exact version.
+      3. Precheck   - `flux check --pre` against the live apiserver.
+      4. Controllers- `flux install`, at the pinned version.
+      5. Sync       - the GitRepository and Kustomization that point the
+                      cluster at -Path on -Branch.
+      6. Verify     - `flux check` plus the reconciliation state of everything
+                      it now manages.
 
-    Idempotent: `flux bootstrap` converges an existing installation, so a
-    re-run after a version bump or a lost node is a normal thing to do.
+    Idempotent: `flux install` upgrades an existing installation in place and
+    the two `flux create` calls upsert, so a re-run after a version bump or a
+    lost node is a normal thing to do. Bumping flux.version in
+    scripts/versions.json and re-dispatching is the upgrade path - there is no
+    committed copy of the controllers to keep in step with it.
 
 .PARAMETER GitHubToken
-    Not a parameter, deliberately - the PAT is read from the FLUX_GITHUB_TOKEN
-    environment variable so it stays out of the command line and shell
-    history. It needs contents:write (to commit the manifests) and
-    administration:write (to register the deploy key Flux authenticates with
-    from then on), plus workflows:write if -Path ever holds workflow files.
-    Classic equivalent: `repo`.
+    Not a parameter, deliberately - and now usually not needed at all. A public
+    repository is cloned anonymously over HTTPS, which is the expected shape
+    once this repo is open source: no credential, nothing to rotate, nothing to
+    register.
+
+    For a private repository, set FLUX_GITHUB_TOKEN in the environment. It
+    needs **contents:read** and nothing else (classic equivalent: `repo`, whose
+    read half is what gets used). It is stored as the `flux-system` Secret in
+    the cluster and reaches the node on stdin, never in argv.
+
+    Note what is no longer required: `flux bootstrap` needed contents:*write*
+    to commit its manifests and administration:write to register a deploy key,
+    which together are why secrets.GITHUB_TOKEN could not be used. Neither
+    applies here.
 
 .PARAMETER Path
-    Where Flux's own manifests are committed and what it reconciles from.
-    Everything under it becomes cluster state; that is the whole point.
+    What Flux reconciles, relative to the repository root. Everything under it
+    becomes cluster state; that is the whole point. Unlike under `flux
+    bootstrap`, Flux never writes to this path - the directory has to already
+    exist on -Branch, which is why deploy/cluster/kustomization.yaml is
+    committed as a skeleton.
 
 .PARAMETER FluxVersion
     Optional override. The pin normally comes from scripts/versions.json
     ('flux.version'), committed alongside the manifests Flux reconciles so a
-    re-bootstrap from an old tag installs that tag's Flux. Pass this only for
-    a one-off by-hand run; a real bump is a commit to that file.
-
-.PARAMETER Personal
-    Set for a user-owned repository, omit for an organization-owned one -
-    this is `flux bootstrap github --personal`.
+    re-run from an old tag installs that tag's Flux. Pass this only for a
+    one-off by-hand run; a real bump is a commit to that file.
 
 .EXAMPLE
-    $env:FLUX_GITHUB_TOKEN = '<pat>'
     .\Bootstrap-Flux.ps1 -IPAddress 10.0.0.21 -GitHubOwner someone `
-        -Personal -SshPrivateKeyPath ~\.ssh\id_ed25519
+        -SshPrivateKeyPath ~\.ssh\id_ed25519
+
+.EXAMPLE
+    $env:FLUX_GITHUB_TOKEN = '<pat with contents:read>'
+    .\Bootstrap-Flux.ps1 -IPAddress 10.0.0.21 -GitHubOwner someone `
+        -SshPrivateKeyPath ~\.ssh\id_ed25519
 #>
 [CmdletBinding()]
 param(
@@ -82,14 +113,12 @@ param(
     [ValidatePattern('^v\d+\.\d+\.\d+$')]
     [string]$FluxVersion,
 
-    [switch]$Personal,
-
     [string]$Username = 'aerie',
 
     [string]$SshPrivateKeyPath,
     [string]$SshPrivateKey,
 
-    [int]$BootstrapTimeoutMinutes = 15,
+    [int]$SyncTimeoutMinutes = 15,
 
     [switch]$PreflightOnly
 )
@@ -125,6 +154,17 @@ function Write-Stage {
 $kubeconfig = '/etc/rancher/k3s/k3s.yaml'
 $fluxEnv = "sudo env KUBECONFIG=$kubeconfig"
 
+# HTTPS rather than SSH: an anonymous clone of a public repository needs no
+# credential at all, and the authenticated case is a username/password Secret
+# rather than a deploy key that would have to be registered on the repository.
+$repoUrl = "https://github.com/$GitHubOwner/$Repository.git"
+
+# Structural, so not parameters: these are Flux's own bootstrap defaults, and
+# they are the same for every installation. Poll the repo every minute, re-apply
+# the whole tree every ten.
+$sourceInterval = '1m'
+$kustomizationInterval = '10m'
+
 $tempKeyFile = $null
 $knownHostsFile = $null
 $startedUtc = (Get-Date).ToUniversalTime()
@@ -136,10 +176,11 @@ try {
 
     $failures = New-Object Collections.Generic.List[string]
 
+    # Optional by design - see the .PARAMETER note. Absent means an anonymous
+    # clone, which only works if the repository is public; that is checked
+    # below rather than left to fail four stages later.
     $token = $env:FLUX_GITHUB_TOKEN
-    if ([string]::IsNullOrWhiteSpace($token)) {
-        $failures.Add('FLUX_GITHUB_TOKEN is not set. Flux needs a PAT with contents:write and administration:write on the repository (classic: repo) to commit its manifests and register its deploy key.')
-    }
+    if ([string]::IsNullOrWhiteSpace($token)) { $token = $null }
 
     if (-not $SshPrivateKey -and -not $SshPrivateKeyPath) {
         $failures.Add('No SSH private key: pass -SshPrivateKeyPath or -SshPrivateKey. This is the same key Phase 1 baked into the node.')
@@ -172,13 +213,42 @@ try {
         $failures.Add("$IPAddress isn't answering on port 6443. Run Provision 1 against this node first - there's no apiserver here to bootstrap.")
     }
 
+    # With no token the clone is anonymous, so the repository has to be public.
+    # GitHub answers 404 (not 403) for a private repo read without credentials,
+    # so a definite 404 is a definite misconfiguration and worth failing on
+    # here rather than as an opaque source-controller error later. Anything
+    # else - a timeout, DNS, rate limiting - says nothing about visibility and
+    # must not fail a run: this executes on a home runner whose egress is not
+    # this script's business.
+    $authDescription = 'token (contents:read), stored as the flux-system Secret'
+    if (-not $token) {
+        $authDescription = 'anonymous (public repository)'
+        try {
+            Invoke-WebRequest -Uri "https://api.github.com/repos/$GitHubOwner/$Repository" `
+                -Method Head -UseBasicParsing -TimeoutSec 15 | Out-Null
+        }
+        catch {
+            $status = $null
+            if ($_.Exception.PSObject.Properties['Response'] -and $_.Exception.Response) {
+                $status = [int]$_.Exception.Response.StatusCode
+            }
+            if ($status -eq 404) {
+                $failures.Add("GitHub reports $GitHubOwner/$Repository as non-existent to an anonymous caller, which for a repository that does exist means it is private. Either make it public or set FLUX_GITHUB_TOKEN to a PAT with contents:read - Flux has to be able to clone it without the credentials this script is holding.")
+            }
+            else {
+                Write-Warning "Couldn't confirm $GitHubOwner/$Repository is publicly readable ($($_.Exception.Message)). Continuing - if it turns out to be private, stage 5 fails on the source not becoming Ready."
+            }
+        }
+    }
+
     if ($failures.Count -gt 0) {
         $detail = ($failures | ForEach-Object { "  - $_" }) -join "`n"
         throw "Preflight failed with $($failures.Count) problem(s):`n$detail"
     }
 
     Write-Host "Cluster:   $IPAddress (kubeconfig $kubeconfig)"
-    Write-Host "Repo:      $GitHubOwner/$Repository ($Branch) at $Path$(if ($Personal) { ' [personal]' } else { ' [organization]' })"
+    Write-Host "Repo:      $repoUrl ($Branch) at $Path"
+    Write-Host "Auth:      $authDescription"
     Write-Host "Flux:      $FluxVersion (pinned, from $script:FluxVersionSource)"
     if ($keyFingerprint) { Write-Host "SSH key:   $keyFingerprint" }
     Write-Host 'Preflight OK.'
@@ -228,57 +298,102 @@ try {
     $precheck = Invoke-NodeSsh @ssh -Command "$fluxEnv flux check --pre" -ConnectTimeoutSec 30
     Write-Host ($precheck.StdOut + $precheck.StdErr).TrimEnd()
     if ($precheck.ExitCode -ne 0) {
-        throw "flux check --pre failed on $IPAddress (exit $($precheck.ExitCode)). The cluster doesn't meet Flux's prerequisites - fix that before bootstrapping."
+        throw "flux check --pre failed on $IPAddress (exit $($precheck.ExitCode)). The cluster doesn't meet Flux's prerequisites - fix that before installing."
     }
 
     # ---------------------------------------------------------------- #
-    Write-Stage 'flux bootstrap github'
+    Write-Stage 'flux install'
     # ---------------------------------------------------------------- #
 
-    $bootstrapArgs = @(
-        'bootstrap', 'github'
-        "--owner=$GitHubOwner"
-        "--repository=$Repository"
-        "--branch=$Branch"
-        "--path=$Path"
-        "--timeout=${BootstrapTimeoutMinutes}m"
+    # No --components: the default set is exactly what `flux bootstrap` would
+    # have installed (source, kustomize, helm and notification controllers).
+    # Nothing here touches git, so this needs no credential of any kind.
+    $installArgs = @(
+        'install'
+        "--version=$FluxVersion"
+        "--timeout=${SyncTimeoutMinutes}m"
     )
-    if ($Personal) { $bootstrapArgs += '--personal' }
 
-    # The PAT arrives on standard input and is read into a shell variable,
-    # never into argv. `sudo env GITHUB_TOKEN=...` - and equally a
-    # `$(cat tokenfile)` substitution, which the shell expands before exec -
-    # would put the token in the argv of a process that lives for the whole
-    # multi-minute bootstrap, readable by every local `ps`. `export` is a
-    # builtin, so the value only ever reaches flux's environment.
-    #
-    # That in turn means not running flux under sudo: sudo scrubs the
-    # environment. Instead the root-owned kubeconfig is copied to a
-    # user-owned temp file (mktemp creates it 0600) that the trap removes on
-    # any exit path.
-    $bootstrapCmd = @(
-        'set -eu'
-        'IFS= read -r AERIE_GITHUB_TOKEN'
+    Write-Host "Installing the Flux controllers at $FluxVersion ..."
+    $controllers = Invoke-NodeSsh @ssh -Command "$fluxEnv flux $($installArgs -join ' ')" -ConnectTimeoutSec 30
+    $controllersOutput = ($controllers.StdOut + $controllers.StdErr).TrimEnd()
+    Write-Host $controllersOutput
+    if ($controllers.ExitCode -ne 0) {
+        throw "flux install failed on $IPAddress (exit $($controllers.ExitCode)). The controllers never came up; nothing has been pointed at the repository yet."
+    }
+
+    # ---------------------------------------------------------------- #
+    Write-Stage 'Point it at the repository'
+    # ---------------------------------------------------------------- #
+
+    # What `flux bootstrap` would have written into gotk-sync.yaml and
+    # committed. Declared against the cluster instead: these three values are
+    # true of one installation, and docs/ethos.md keeps those out of git.
+    $syncLines = New-Object Collections.Generic.List[string]
+    $syncLines.Add('set -eu')
+
+    if ($token) {
+        # Same argv discipline as Provision 2: the token arrives on standard
+        # input, goes to a 0600 mktemp file, and reaches kubectl through
+        # --from-file. `--from-literal=password=...` would put it in the argv
+        # of a process any local `ps` can read.
+        $syncLines.Add('IFS= read -r AERIE_GITHUB_TOKEN')
+        $syncLines.Add('AERIE_TOKEN_FILE=$(mktemp /tmp/aerie-flux-token.XXXXXX)')
+        $syncLines.Add('trap ''rm -f "$AERIE_TOKEN_FILE"'' EXIT INT TERM')
         # Windows PowerShell terminates a piped string with CRLF, so the token
-        # arrives with a trailing carriage return that `read` keeps. Left in,
-        # it reaches GitHub as part of the credential and comes back as a
-        # baffling 401 on a token that is demonstrably correct.
-        'AERIE_GITHUB_TOKEN=$(printf %s "$AERIE_GITHUB_TOKEN" | tr -d "\r\n")'
-        'export GITHUB_TOKEN="$AERIE_GITHUB_TOKEN"'
-        'unset AERIE_GITHUB_TOKEN'
-        'AERIE_KUBECONFIG=$(mktemp /tmp/aerie-flux-kubeconfig.XXXXXX)'
-        'trap ''rm -f "$AERIE_KUBECONFIG"'' EXIT INT TERM'
-        "sudo cat $kubeconfig > `"`$AERIE_KUBECONFIG`""
-        'export KUBECONFIG="$AERIE_KUBECONFIG"'
-        "flux $($bootstrapArgs -join ' ')"
-    ) -join "`n"
+        # arrives with a trailing carriage return. Left in, it reaches GitHub
+        # as part of the credential and comes back as a baffling 401 on a
+        # token that is demonstrably correct.
+        $syncLines.Add('printf %s "$AERIE_GITHUB_TOKEN" | tr -d "\r\n" > "$AERIE_TOKEN_FILE"')
+        $syncLines.Add('unset AERIE_GITHUB_TOKEN')
+        # create|apply rather than create: this run may be a re-run, and
+        # `kubectl create secret` on an existing Secret is a hard failure.
+        $syncLines.Add('sudo k3s kubectl create secret generic flux-system -n flux-system' +
+            ' --from-literal=username=git --from-file=password="$AERIE_TOKEN_FILE"' +
+            ' --dry-run=client -o yaml | sudo k3s kubectl apply -f -')
+    }
 
-    Write-Host "Bootstrapping against $GitHubOwner/$Repository at $Path ..."
-    $bootstrap = Invoke-NodeSsh @ssh -Command $bootstrapCmd -StdIn $token -ConnectTimeoutSec 30
-    $bootstrapOutput = ($bootstrap.StdOut + $bootstrap.StdErr).TrimEnd()
-    Write-Host $bootstrapOutput
-    if ($bootstrap.ExitCode -ne 0) {
-        throw "flux bootstrap failed on $IPAddress (exit $($bootstrap.ExitCode)). A 403 here is almost always a PAT missing administration:write, which is what registering the deploy key needs."
+    $sourceArgs = @(
+        'create', 'source', 'git', 'flux-system'
+        "--url=$repoUrl"
+        "--branch=$Branch"
+        "--interval=$sourceInterval"
+        "--timeout=${SyncTimeoutMinutes}m"
+    )
+    if ($token) { $sourceArgs += '--secret-ref=flux-system' }
+    $syncLines.Add("$fluxEnv flux $($sourceArgs -join ' ')")
+
+    # --prune: an object deleted from the tree is deleted from the cluster,
+    # which is what makes the repository the whole truth rather than an
+    # append-only log of things that were once applied.
+    $kustomizationArgs = @(
+        'create', 'kustomization', 'flux-system'
+        '--source=GitRepository/flux-system'
+        "--path=./$($Path.Trim('/'))"
+        '--prune=true'
+        "--interval=$kustomizationInterval"
+        "--timeout=${SyncTimeoutMinutes}m"
+    )
+    $syncLines.Add("$fluxEnv flux $($kustomizationArgs -join ' ')")
+
+    # -StdIn only when there is something to send: Invoke-NodeSsh keys off
+    # PSBoundParameters, so passing $null would still pipe an empty line into a
+    # remote script that isn't reading one.
+    $syncStdIn = @{}
+    if ($token) { $syncStdIn['StdIn'] = $token }
+
+    Write-Host "Pointing the cluster at $repoUrl ($Branch) at $Path ..."
+    $sync = Invoke-NodeSsh @ssh @syncStdIn -Command ($syncLines -join "`n") -ConnectTimeoutSec 30
+    $syncOutput = ($sync.StdOut + $sync.StdErr).TrimEnd()
+    Write-Host $syncOutput
+    if ($sync.ExitCode -ne 0) {
+        $hint = if ($token) {
+            'A 401 here is a token without contents:read on this repository.'
+        }
+        else {
+            "Cloning anonymously - a 403/404 here means $GitHubOwner/$Repository isn't publicly readable, so set FLUX_GITHUB_TOKEN."
+        }
+        throw "Configuring the Flux sync failed on $IPAddress (exit $($sync.ExitCode)). $hint A 'path not found' means $Path doesn't exist on $Branch - unlike ``flux bootstrap``, nothing here creates it."
     }
 
     # ---------------------------------------------------------------- #
@@ -288,7 +403,7 @@ try {
     $check = Invoke-NodeSsh @ssh -Command "$fluxEnv flux check" -ConnectTimeoutSec 30
     Write-Host ($check.StdOut + $check.StdErr).TrimEnd()
     if ($check.ExitCode -ne 0) {
-        throw "flux check failed after bootstrap (exit $($check.ExitCode)) - the controllers are installed but not healthy."
+        throw "flux check failed after install (exit $($check.ExitCode)) - the controllers are installed but not healthy."
     }
 
     $getAll = Invoke-NodeSsh @ssh -Command "$fluxEnv flux get all --all-namespaces" -ConnectTimeoutSec 30
@@ -304,6 +419,7 @@ try {
     Write-Host "Flux $FluxVersion is reconciling ${GitHubOwner}/${Repository}:$Path in ${elapsed} min." -ForegroundColor Green
     Write-Host ''
     Write-Host "From here on, changes under $Path are applied by committing them - no more kubectl apply."
+    Write-Host 'Nothing was committed by this run: the sync configuration lives in the cluster, not in git.'
     Write-Host 'Phase 3 starts with the External Secrets Operator HelmRelease, which consumes the'
     Write-Host 'bootstrap Secret Provision 2 planted.'
     Write-Host ''
@@ -313,14 +429,18 @@ try {
         $tick = [char]0x60
         $fence = "$tick$tick$tick"
         $lines = @(
-            "## Flux bootstrapped on $tick$IPAddress$tick"
+            "## Flux installed on $tick$IPAddress$tick"
             ''
             '| | |'
             '|---|---|'
             "| Repository | $tick$GitHubOwner/$Repository$tick ($tick$Branch$tick) |"
             "| Path | $tick$Path$tick |"
+            "| Auth | $authDescription |"
             "| Flux version | $tick$FluxVersion$tick ($script:FluxVersionSource) |"
             "| Elapsed | ${elapsed} min |"
+            ''
+            'Nothing was committed to the repository - the `GitRepository` and'
+            '`Kustomization` live in the cluster.'
             ''
             '<details><summary>flux get all --all-namespaces</summary>'
             ''

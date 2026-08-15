@@ -586,7 +586,7 @@ try {
     $elapsed = [math]::Round(((Get-Date).ToUniversalTime() - $startedUtc).TotalMinutes, 1)
     Write-Host "Secrets synced in ${elapsed} min." -ForegroundColor Green
     Write-Host ''
-    Write-Host 'Next in Phase 2: flux bootstrap (Provision 3), which is what starts reconciling'
+    Write-Host 'Next in Phase 2: installing Flux (Provision 3), which is what starts reconciling'
     Write-Host 'deploy/ - including the Phase 3 ClusterSecretStore that consumes the Secret above.'
     if (-not $SkipBootstrap) {
         Write-Host ''

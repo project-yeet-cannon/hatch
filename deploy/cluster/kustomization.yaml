@@ -1,0 +1,18 @@
+# The root of the tree Flux reconciles. Provision 3 creates a Kustomization
+# pointing here; everything the cluster runs is reached from this file.
+#
+# It exists as a committed skeleton because Provision 3 runs `flux install`
+# rather than `flux bootstrap`, and so - unlike bootstrap - never writes to
+# this repository. Nothing creates this path at run time: an empty or missing
+# directory is a Kustomization that never goes Ready.
+#
+# Note what is *not* here and never will be: Flux's own gotk-components.yaml
+# and gotk-sync.yaml. The controllers are installed from the pin in
+# scripts/versions.json, and the sync configuration is a per-installation fact
+# that lives in the cluster. See docs/ethos.md.
+#
+# Phase 3 fills this in (TODO_SWARM.md): infrastructure.yaml first, carrying
+# the two layered Kustomizations and their postBuild.substituteFrom.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []

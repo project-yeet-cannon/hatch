@@ -9,15 +9,20 @@
 # as Provision 0-2: this file checks out the repo and hands every decision to
 # scripts/flux/Bootstrap-Flux.ps1.
 #
-# The bootstrap itself runs *on the node*, over SSH, using k3s's own
-# kubeconfig - so no cluster credential is ever copied onto a runner.
+# The install itself runs *on the node*, over SSH, using k3s's own kubeconfig
+# - so no cluster credential is ever copied onto a runner.
 #
-# The PAT cannot be the automatic `secrets.GITHUB_TOKEN`: registering the
-# deploy key Flux authenticates with afterwards needs administration:write,
-# which the run-scoped token cannot be granted. Use a dedicated PAT with
-# contents:write + administration:write on this repository (plus
-# workflows:write if `path` ever contains workflow files), stored as the
-# FLUX_GITHUB_TOKEN repository secret.
+# Deliberately not `flux bootstrap github`: bootstrap's convenience is that it
+# commits Flux's own manifests back here, and gotk-sync.yaml is one
+# installation's owner/repo/branch - exactly what docs/ethos.md keeps out of
+# the repo. The script does bootstrap's two halves explicitly instead (`flux
+# install`, then a GitRepository + Kustomization), so this run writes nothing
+# to git and the sync configuration lives in the cluster.
+#
+# That also removes the credential problem bootstrap created. No commit means
+# no contents:write; no deploy key means no administration:write. A public
+# repository needs no token at all, and a private one needs FLUX_GITHUB_TOKEN
+# with contents:read and nothing more.
 #
 # Billing: `runs-on` pins `self-hosted`, so runs never land on a
 # GitHub-hosted runner (which has no route to the node's LAN address anyway)
@@ -43,38 +48,30 @@ on:
         required: true
         type: string
       path:
-        description: 'Repository path Flux reconciles from, and where it commits its own manifests'
+        description: 'Repository path Flux reconciles from. Must already exist on the branch - nothing here creates it'
         required: true
         default: deploy/cluster
         type: string
       branch:
-        description: 'Branch Flux commits to and reconciles'
+        description: 'Branch Flux reconciles'
         required: true
         default: main
         type: string
-      repository_kind:
-        description: 'personal = a user-owned repository (flux --personal); organization = org-owned'
-        required: true
-        default: personal
-        type: choice
-        options:
-          - personal
-          - organization
       preflight_only:
-        description: 'Check reachability, the PAT and the version pin, then stop without touching the cluster'
+        description: 'Check reachability, the repository, the token if any and the version pin, then stop without touching the cluster'
         required: false
         default: false
         type: boolean
 
-# One bootstrap at a time: two concurrent runs would race both the cluster's
-# flux-system namespace and the commits to `path`.
+# One install at a time: two concurrent runs would race the cluster's
+# flux-system namespace.
 concurrency:
   group: provision-3-bootstrap-flux
   cancel-in-progress: false
 
 jobs:
   bootstrap:
-    name: Bootstrap Flux on ${{ inputs.ip_address }}
+    name: Install Flux on ${{ inputs.ip_address }}
     runs-on: [self-hosted, '${{ inputs.host }}']
 
     # The flux CLI install, the controller rollout and the first
@@ -98,13 +95,12 @@ jobs:
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
           & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency OpenSshClient
 
-      - name: Bootstrap Flux
+      - name: Install Flux
         shell: powershell
         env:
           IP_ADDRESS: ${{ inputs.ip_address }}
           FLUX_PATH: ${{ inputs.path }}
           FLUX_BRANCH: ${{ inputs.branch }}
-          REPOSITORY_KIND: ${{ inputs.repository_kind }}
           PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
 
           # Taken from the run's own context rather than typed in, so the
@@ -116,10 +112,14 @@ jobs:
           # No FLUX_VERSION here on purpose: like the k3s pin it is
           # structural, so it lives in scripts/versions.json and is read by
           # the script from the checkout above - which means the Flux version
-          # and the manifests it reconciles move in the same commit.
+          # and the manifests it reconciles move in the same commit. Since
+          # nothing commits a copy of the controllers, that file is the only
+          # place the version exists: bump it and re-dispatch to upgrade.
           #
-          # PAT with contents:write, workflows:write and administration:write.
-          # Read by the script from the environment, never as an argument.
+          # Optional. A public repository is cloned anonymously and needs no
+          # credential at all; leave the secret unset. For a private one, a PAT
+          # with contents:read - stored in-cluster as the flux-system Secret,
+          # read by the script from the environment, never as an argument.
           FLUX_GITHUB_TOKEN: ${{ secrets.FLUX_GITHUB_TOKEN }}
 
           # Same keypair provision-0/1/2 used.
@@ -128,10 +128,11 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
-          foreach ($required in 'FLUX_GITHUB_TOKEN', 'NODE_SSH_PRIVATE_KEY') {
-            if (-not (Get-Item "env:$required" -ErrorAction SilentlyContinue).Value) {
-              throw "$required is not set. Add it as a repository secret under Settings > Secrets and variables > Actions. See scripts/flux/README.md."
-            }
+          # FLUX_GITHUB_TOKEN is deliberately not in this list - see the env
+          # comment above. The script's preflight decides whether its absence
+          # is a problem, by checking whether the repository is public.
+          if (-not $env:NODE_SSH_PRIVATE_KEY) {
+            throw "NODE_SSH_PRIVATE_KEY is not set. Add it as a repository secret under Settings > Secrets and variables > Actions. See scripts/flux/README.md."
           }
 
           $params = @{
@@ -143,7 +144,6 @@ jobs:
             SshPrivateKey = $env:NODE_SSH_PRIVATE_KEY
           }
 
-          if ($env:REPOSITORY_KIND -eq 'personal') { $params.Personal = $true }
           if ([bool]::Parse($env:PREFLIGHT_ONLY)) { $params.PreflightOnly = $true }
 
           & .\scripts\flux\Bootstrap-Flux.ps1 @params
