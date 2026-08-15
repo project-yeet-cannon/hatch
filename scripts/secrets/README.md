@@ -26,7 +26,7 @@ script with the same parameters, so the two can't drift.
 | [`Sync-AerieSecrets.ps1`](Sync-AerieSecrets.ps1) | Reads the map, writes the values, verifies them as the ESO identity, applies the bootstrap Secret. |
 
 Adding a secret is: add an entry to `parameters.json`, map the repository
-secret onto its `env` name in the workflow, re-run. The Phase 3 `ExternalSecret`
+secret or variable onto its `env` name in the workflow, re-run. The Phase 3 `ExternalSecret`
 that consumes it reads the same path.
 
 ## One-time setup
@@ -34,13 +34,32 @@ that consumes it reads the same path.
 | Name | Kind | What |
 |---|---|---|
 | `AWS_REGION` | repository variable | Already set for `cd.yml`. The parameter tree lives in exactly one region, and the Phase 3 `ClusterSecretStore` must name the same one. |
-| `SSM_AWS_ACCESS_KEY_ID` / `SSM_AWS_SECRET_ACCESS_KEY` | repository secrets | The **seed writer**: `ssm:PutParameter` + `ssm:GetParameter` on `/aerie/*`, `kms:Decrypt` on the default `aws/ssm` key. The read half is what read-before-write needs; `PutParameter` alone fails on the first parameter that already exists. |
-| `ESO_AWS_ACCESS_KEY_ID` / `ESO_AWS_SECRET_ACCESS_KEY` | repository secrets | The **`aerie-eso`** user: `ssm:GetParameter*` + `ssm:GetParametersByPath` on `/aerie/*`, `kms:Decrypt` on the default `aws/ssm` key. Becomes the in-cluster bootstrap Secret. |
+| `SSM_AWS_ACCESS_KEY_ID` | repository **variable** | The **seed writer**'s id. |
+| `SSM_AWS_SECRET_ACCESS_KEY` | repository **secret** | Its secret half. The seed writer holds `ssm:PutParameter` + `ssm:GetParameter` on `/aerie/*` and `kms:Decrypt` on the default `aws/ssm` key. The read half is what read-before-write needs; `PutParameter` alone fails on the first parameter that already exists. |
+| `ESO_AWS_ACCESS_KEY_ID` | repository **variable** | The **`aerie-eso`** user's id. |
+| `ESO_AWS_SECRET_ACCESS_KEY` | repository **secret** | Its secret half. `aerie-eso` holds `ssm:GetParameter*` + `ssm:GetParametersByPath` on `/aerie/*` and `kms:Decrypt` on the default `aws/ssm` key. This pair becomes the in-cluster bootstrap Secret. |
 | `NODE_SSH_PRIVATE_KEY` | repository secret | Already set for Provision 0/1 — the key cloud-init baked into the node. |
 
 Everything else the workflow passes (`AWS_ACCESS_KEY_ID`, `HA_TOKEN`,
 `RESTIC_*`, …) already exists for `cd.yml`. Optional entries with no matching
-secret are skipped with a note, not an error.
+value are skipped with a note, not an error.
+
+### Which tab: ids are variables, everything else is a secret
+
+An AWS access key **id** names an identity; it does not authenticate one. So
+every `*_ACCESS_KEY_ID` here is a repository **variable** and every
+`*_SECRET_ACCESS_KEY`, token and password is a repository **secret**. Each
+credential pair therefore straddles both tabs of *Settings → Secrets and
+variables → Actions*.
+
+The payoff is diagnostic: an id kept out of the secret store stays unmasked in
+run logs, so an `AccessDenied` shows *which* IAM user hit it instead of `***`.
+[`parameters.json`](parameters.json) records the split per value as
+`githubKind`, and the two workflows read the matching side.
+
+Getting it wrong is silent — `${{ secrets.X }}` for a value stored as a
+variable resolves to an empty string, not an error — so both workflows fail
+fast on an empty credential and name the tab the value belongs on.
 
 **Runner prerequisite:** the AWS CLI v2 must be on the runner's PATH
 (`winget install --exact --id Amazon.AWSCLI`). Preflight fails with that exact

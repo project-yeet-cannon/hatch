@@ -30,7 +30,13 @@ jobs:
     env:
       DOCKER_HOST: tcp://localhost:2375
       IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      # Access key *ids* are repository variables, not secrets: an id names an
+      # identity, it doesn't authenticate one, and leaving it unmasked means a
+      # failed deploy's log shows which IAM user was actually used - the first
+      # thing worth knowing about an AccessDenied. Their secret halves stay
+      # secrets. scripts/secrets/parameters.json records the same split as
+      # `githubKind`, and provision-2-seed-secrets.yml reads the same names.
+      AWS_ACCESS_KEY_ID: ${{ vars.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       ACME_EMAIL: ${{ vars.ACME_EMAIL }}
@@ -67,13 +73,39 @@ jobs:
       # the other. See compose.backup.yml, which maps these into the
       # container's own AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY.
       RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
-      RESTIC_AWS_ACCESS_KEY_ID: ${{ secrets.RESTIC_AWS_ACCESS_KEY_ID }}
+      RESTIC_AWS_ACCESS_KEY_ID: ${{ vars.RESTIC_AWS_ACCESS_KEY_ID }}
       RESTIC_AWS_SECRET_ACCESS_KEY: ${{ secrets.RESTIC_AWS_SECRET_ACCESS_KEY }}
       RESTIC_S3_REPOSITORY: ${{ vars.RESTIC_S3_REPOSITORY }}
       RESTIC_AWS_REGION: ${{ vars.RESTIC_AWS_REGION }}
       TZ: ${{ vars.TZ }}
 
     steps:
+      # The job-level env block above cannot fail loudly on its own: a name
+      # read from the wrong tab of Settings > Secrets and variables (a
+      # `vars.X` that is stored as a secret, or the reverse) resolves to an
+      # empty string, and compose interpolates that as a warning rather than
+      # an error. The four AWS credential halves are where that matters most -
+      # the ids are variables and the secret halves are secrets, so each pair
+      # straddles both tabs - and an empty one means an expired wildcard
+      # certificate or a backup run writing nowhere, both of which surface
+      # days later rather than here. Deliberately narrow: the genuinely
+      # optional values (SHARE_PATH, MEDIA_LIBRARY_SUBPATH) stay unchecked.
+      - name: Verify AWS credentials resolved
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tab = @{
+            AWS_ACCESS_KEY_ID            = 'Variables'
+            AWS_SECRET_ACCESS_KEY        = 'Secrets'
+            RESTIC_AWS_ACCESS_KEY_ID     = 'Variables'
+            RESTIC_AWS_SECRET_ACCESS_KEY = 'Secrets'
+          }
+          foreach ($name in $tab.Keys) {
+            if (-not (Get-Item "env:$name" -ErrorAction SilentlyContinue).Value) {
+              throw "$name resolved to an empty string. It belongs on the $($tab[$name]) tab of Settings > Secrets and variables > Actions; if it is already set, it is on the other tab. See scripts/secrets/README.md."
+            }
+          }
+
       - name: Checkout compose files
         uses: actions/checkout@v4
         with:

@@ -12,7 +12,7 @@ them live in an external secret store, chosen per install.
 
 ```text
 operator (printed / offline copy)
-  └→ GitHub Actions repository secrets
+  └→ GitHub Actions repository secrets (+ variables, for access key ids)
        └→ Provision 2 ──put──→ AWS SSM Parameter Store  /aerie/*   (SecureString)
        └→ Provision 2 ──ssh──→ bootstrap Secret in-cluster (never in git)
                                     └→ ESO ClusterSecretStore
@@ -112,7 +112,7 @@ scoped to exactly what it needs.
 
 | User | Rights | Held by |
 |---|---|---|
-| seed writer | `ssm:PutParameter`, `ssm:GetParameter` on `/aerie/*`, `kms:Decrypt` on `aws/ssm` | `SSM_AWS_*` repository secrets, used only by Provision 2 |
+| seed writer | `ssm:PutParameter`, `ssm:GetParameter` on `/aerie/*`, `kms:Decrypt` on `aws/ssm` | the `SSM_AWS_*` pair — id as a repository variable, secret half as a repository secret — used only by Provision 2 |
 | `aerie-eso` | `ssm:GetParameter*`, `ssm:GetParametersByPath` on `/aerie/*`, `kms:Decrypt` on `aws/ssm` | the in-cluster bootstrap Secret |
 | Route53 / `aerie-restic` | unchanged from Phase 0 | seeded *as values* into the tree above |
 
@@ -157,8 +157,9 @@ parts worth knowing here:
 
 ## Rotation
 
-1. Update the GitHub Actions repository secret (or whatever future source
-   replaces it).
+1. Update the GitHub Actions repository secret — or variable, for an access
+   key id (see [`scripts/secrets/README.md`](../scripts/secrets/README.md#which-tab-ids-are-variables-everything-else-is-a-secret)) — or whatever future
+   source replaces it.
 2. Re-run **Provision 2**. Only the changed parameter gets a new version.
 3. ESO re-syncs on its `refreshInterval`; reloader restarts the affected pods.
 

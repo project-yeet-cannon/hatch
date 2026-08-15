@@ -290,7 +290,7 @@ try {
     $writerKeyId = Get-EnvValue 'SSM_AWS_ACCESS_KEY_ID'
     $writerSecret = Get-EnvValue 'SSM_AWS_SECRET_ACCESS_KEY'
     if (-not $SkipSeed -and (-not $writerKeyId -or -not $writerSecret)) {
-        $failures.Add("SSM_AWS_ACCESS_KEY_ID / SSM_AWS_SECRET_ACCESS_KEY aren't both set. These are the seed writer's credentials (ssm:PutParameter + ssm:GetParameter on $prefix/*), separate from the read-only ESO user - see docs/secrets-architecture.md.")
+        $failures.Add("SSM_AWS_ACCESS_KEY_ID (repository variable) / SSM_AWS_SECRET_ACCESS_KEY (repository secret) aren't both set. These are the seed writer's credentials (ssm:PutParameter + ssm:GetParameter on $prefix/*), separate from the read-only ESO user - see docs/secrets-architecture.md.")
     }
 
     $bootstrap = Get-Field $map 'bootstrap'
@@ -301,7 +301,9 @@ try {
         $envName = Get-Field $bootstrapKeys.$keyName 'env'
         $value = Get-EnvValue $envName
         if (-not $value) {
-            $failures.Add("$envName isn't set. It supplies the '$keyName' key of the ESO bootstrap Secret - the aerie-eso IAM user's credential.")
+            $kind = [string](Get-Field $bootstrapKeys.$keyName 'githubKind')
+            if (-not $kind) { $kind = 'secret' }
+            $failures.Add("$envName isn't set. It supplies the '$keyName' key of the ESO bootstrap Secret - the aerie-eso IAM user's credential. It's the '$(Get-Field $bootstrapKeys.$keyName 'githubSource')' repository $kind.")
         }
         $bootstrapValues[$keyName] = $value
     }
@@ -316,7 +318,9 @@ try {
         $value = Get-EnvValue $envName
 
         if (-not $value -and $required) {
-            $failures.Add("$envName isn't set, and $prefix/$key is required. Add it as the '$(Get-Field $parameter 'githubSecret')' repository secret, or mark the parameter optional in parameters.json if this installation genuinely doesn't have one.")
+            $kind = [string](Get-Field $parameter 'githubKind')
+            if (-not $kind) { $kind = 'secret' }
+            $failures.Add("$envName isn't set, and $prefix/$key is required. Add it as the '$(Get-Field $parameter 'githubSource')' repository $kind - Settings > Secrets and variables > Actions, $(if ($kind -eq 'variable') { 'Variables' } else { 'Secrets' }) tab - or mark the parameter optional in parameters.json if this installation genuinely doesn't have one.")
         }
 
         $planned.Add([pscustomobject]@{
