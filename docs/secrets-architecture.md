@@ -112,12 +112,27 @@ scoped to exactly what it needs.
 
 | User | Rights | Held by |
 |---|---|---|
-| seed writer | `ssm:PutParameter` on `/aerie/*` | `SSM_AWS_*` repository secrets, used only by Provision 2 |
+| seed writer | `ssm:PutParameter`, `ssm:GetParameter` on `/aerie/*`, `kms:Decrypt` on `aws/ssm` | `SSM_AWS_*` repository secrets, used only by Provision 2 |
 | `aerie-eso` | `ssm:GetParameter*`, `ssm:GetParametersByPath` on `/aerie/*`, `kms:Decrypt` on `aws/ssm` | the in-cluster bootstrap Secret |
 | Route53 / `aerie-restic` | unchanged from Phase 0 | seeded *as values* into the tree above |
 
-The credential the cluster holds forever must not be able to write the tree it
-reads — that is why the first two are separate users rather than one.
+The split is one-directional, not disjoint: the writer reads *and* writes, the
+ESO user only reads. The writer needs the read half for read-before-write below
+— a `PutParameter`-only policy fails on the first parameter that already
+exists.
+
+What the split buys is the other direction. The credential the cluster holds
+forever must not be able to write the tree it reads: it sits in etcd for the
+life of the install, so anything that can read that Secret — the ESO pod, a
+`kubectl get secret -n external-secrets`, an etcd snapshot in a backup — would
+otherwise be able to overwrite every credential above it. Including the restic
+password and S3 keys, which makes the worst case a silently rewritten recovery
+path rather than a leak. That is why the first two are separate users, and it
+costs one IAM user to close.
+
+The writer's extra rights are bounded by its lifetime instead: it exists only
+in GitHub Actions and only holds an AWS session for the length of a Provision 2
+run.
 
 ## Seeding: Provision 2
 

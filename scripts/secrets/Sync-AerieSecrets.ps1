@@ -283,12 +283,14 @@ try {
 
     # The seed writer and the ESO reader are deliberately different IAM users:
     # the credential the cluster holds forever must not be able to write the
-    # tree it reads. Both are needed even for a -SkipSeed run, since Verify
-    # exercises the ESO half and Bootstrap plants it.
+    # tree it reads. The writer reads as well as writes - read-before-write in
+    # Seed needs it - so the split is one-directional, not disjoint. Both are
+    # needed even for a -SkipSeed run, since Verify exercises the ESO half and
+    # Bootstrap plants it.
     $writerKeyId = Get-EnvValue 'SSM_AWS_ACCESS_KEY_ID'
     $writerSecret = Get-EnvValue 'SSM_AWS_SECRET_ACCESS_KEY'
     if (-not $SkipSeed -and (-not $writerKeyId -or -not $writerSecret)) {
-        $failures.Add("SSM_AWS_ACCESS_KEY_ID / SSM_AWS_SECRET_ACCESS_KEY aren't both set. These are the seed writer's credentials (ssm:PutParameter on $prefix/*), separate from the read-only ESO user - see docs/secrets-architecture.md.")
+        $failures.Add("SSM_AWS_ACCESS_KEY_ID / SSM_AWS_SECRET_ACCESS_KEY aren't both set. These are the seed writer's credentials (ssm:PutParameter + ssm:GetParameter on $prefix/*), separate from the read-only ESO user - see docs/secrets-architecture.md.")
     }
 
     $bootstrap = Get-Field $map 'bootstrap'

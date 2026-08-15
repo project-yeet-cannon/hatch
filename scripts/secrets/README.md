@@ -34,7 +34,7 @@ that consumes it reads the same path.
 | Name | Kind | What |
 |---|---|---|
 | `AWS_REGION` | repository variable | Already set for `cd.yml`. The parameter tree lives in exactly one region, and the Phase 3 `ClusterSecretStore` must name the same one. |
-| `SSM_AWS_ACCESS_KEY_ID` / `SSM_AWS_SECRET_ACCESS_KEY` | repository secrets | The **seed writer**: `ssm:PutParameter` on `/aerie/*` and nothing else. |
+| `SSM_AWS_ACCESS_KEY_ID` / `SSM_AWS_SECRET_ACCESS_KEY` | repository secrets | The **seed writer**: `ssm:PutParameter` + `ssm:GetParameter` on `/aerie/*`, `kms:Decrypt` on the default `aws/ssm` key. The read half is what read-before-write needs; `PutParameter` alone fails on the first parameter that already exists. |
 | `ESO_AWS_ACCESS_KEY_ID` / `ESO_AWS_SECRET_ACCESS_KEY` | repository secrets | The **`aerie-eso`** user: `ssm:GetParameter*` + `ssm:GetParametersByPath` on `/aerie/*`, `kms:Decrypt` on the default `aws/ssm` key. Becomes the in-cluster bootstrap Secret. |
 | `NODE_SSH_PRIVATE_KEY` | repository secret | Already set for Provision 0/1 — the key cloud-init baked into the node. |
 
@@ -49,10 +49,14 @@ service only re-reads PATH when it starts.
 
 ### Two users, on purpose
 
-The seed writer can write but not read; `aerie-eso` can read but not write. The
-credential that sits in the cluster forever must not be able to rewrite the tree
-it reads. Splitting them costs one extra IAM user and removes a whole class of
-"the cluster overwrote its own secrets" failure.
+Both can read; only the seed writer can write. The asymmetry runs one way on
+purpose — the credential that sits in the cluster forever must not be able to
+rewrite the tree it reads, because that tree holds the restic password and S3
+keys and a rewritten recovery path fails silently. The writer's extra rights
+are bounded by its lifetime instead: it never leaves GitHub Actions, and only
+holds a session for the length of a run. Splitting them costs one extra IAM
+user and removes a whole class of "the cluster overwrote its own secrets"
+failure.
 
 ## What a run actually does
 
