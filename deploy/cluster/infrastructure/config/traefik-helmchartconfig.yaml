@@ -1,0 +1,153 @@
+# TODO_SWARM.md Phase 3b.9 - Traefik's HelmChartConfig.
+#
+# k3s ships Traefik itself: a HelmChart CR named `traefik` in `kube-system`,
+# reconciled by k3s's own bundled helm-controller (a different controller from
+# Flux's helm-controller, sharing nothing but the concept). That object is
+# regenerated from k3s's packaged manifest on every k3s upgrade, so committing
+# a competing `HelmChart` named `traefik` would fight k3s for ownership of one
+# object on every node reboot. `HelmChartConfig` is k3s's own answer to that -
+# a second, additive CR that k3s's controller layers on *top* of the HelmChart
+# it owns, which is what lets this be a Flux-reconciled file without Flux and
+# k3s ever touching the same object. It must carry the identical name and
+# namespace as the HelmChart it patches - that pairing is how k3s's controller
+# finds it, not a convention.
+#
+# Verified against the exact pin in scripts/versions.json (k3s v1.35.7+k3s1)
+# rather than assumed from generic Traefik docs, because both the values below
+# and their correctness depend on the chart version underneath, and the
+# k3s-bundled Traefik chart is repackaged (Rancher rebuilds the upstream
+# artifact under its own registry) and lags upstream:
+#   https://raw.githubusercontent.com/k3s-io/k3s/v1.35.7+k3s1/manifests/traefik.yaml
+# resolves chart `traefik-40.1.4+up40.1.0` - upstream traefik-helm-chart
+# v40.1.0 - and already sets, in the HelmChart's own valuesContent:
+#   providers.kubernetesIngress.publishedService.enabled: true
+#   service.spec.ipFamilyPolicy: PreferDualStack
+#   image.tag / priorityClassName / tolerations / deployment.podAnnotations
+# None of that is repeated here except publishedService (see below); this file
+# adds only what k3s's own manifest does not set.
+#
+# ---------------------------------------------------------------------------
+# How the merge actually works, read from k3s-io/helm-controller v0.17.7
+# (pkg/controllers/chart/chart.go), not assumed:
+#
+# The install/upgrade Job mounts the HelmChart's own valuesContent and this
+# object's valuesContent as two ordered files -
+# values-0-000-HelmChart-ValuesContent.yaml then
+# values-1-000-HelmChartConfig-ValuesContent.yaml - passed to
+# `helm upgrade --install -f <file> -f <file>`. That is plain Helm multi-values
+# merge: maps merge key-by-key with the later file winning on overlap, lists
+# are replaced wholesale, not appended. This file is always file 1, so it wins
+# any conflict with k3s's own values without needing to duplicate them.
+#
+# HelmChartConfig itself carries no status at all - confirmed against the Go
+# type, which (unlike HelmChart, which has `+kubebuilder:subresource:status`
+# and a real Status struct with Conditions) declares neither. There is nothing
+# for kstatus to poll: the moment kustomize-controller applies this object
+# successfully, infra-config's `wait: true` considers it Ready, whether or not
+# k3s's helm-controller has even started the Job that consumes it. This step's
+# real proof is therefore its own *Exit* line - `kubectl -n kube-system get svc
+# traefik` and a curl against the VIP - never the Kustomization's status, the
+# same gap 3b.5's footnote calls out for ClusterSecretStore.
+#
+# One more correction, to infrastructure.yaml's framing rather than to this
+# object: that file says nothing under config/ "can even be applied until
+# layer 1 has registered the types they use" - true for every other object in
+# this directory, not this one. `helmchartconfigs.helm.cattle.io` is a CRD k3s
+# installs at cluster bring-up as part of its own bundled helm-controller, not
+# something infra-controllers' HelmReleases register. This file has no real
+# dependency on layer 1 at all; it sits in infra-config only because that is
+# where every other per-installation, ${...}-bearing object in this phase
+# lives, and splitting one file out for a technicality would cost more clarity
+# than it buys.
+# ---------------------------------------------------------------------------
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    service:
+      spec:
+        # The one setting this whole step exists for: without it,
+        # kube-vip-cloud-provider still assigns *an* address to this Service
+        # (3b.8's pool holds exactly one), but nothing pins it to the specific
+        # VIP 3a.2 chose and verified free - a real risk the day the pool ever
+        # grows past one entry for a second LoadBalancer Service.
+        #
+        # loadBalancerIP is deprecated in the core Kubernetes API (since 1.24,
+        # superseded everywhere else by provider-specific annotations) but not
+        # removed, and kube-vip-cloud-provider treats it as a first-class,
+        # explicitly-supported "legacy" input: verified against
+        # pkg/provider/loadBalancer.go at the pinned v0.0.12,
+        # checkLegacyLoadBalancerIPAnnotation reads this field once and copies
+        # it into its own kube-vip.io/loadbalancerIPs annotation, which is what
+        # actually drives allocation from then on. Nothing to migrate later -
+        # this is the field the chart exposes, and the chart has no values.
+        # path for setting an annotation directly.
+        #
+        # Unvalidated: unlike the tls block below, `service.spec` has no
+        # values.schema.json shape beyond `type` (checked directly against the
+        # pinned chart's schema), so a typo'd key here - loadBalancerIp, wrong
+        # case - installs cleanly and is silently never read, the same trap
+        # 3b.7's cert-manager footnote and 3b.8's kube-vip footnote both flag
+        # for their own unvalidated values blocks.
+        loadBalancerIP: "${INGRESS_VIP}"
+    ports:
+      websecure:
+        http:
+          tls:
+            # Already the chart's own default in the pinned version (checked
+            # in traefik/values.yaml: `enabled: true` under
+            # ports.websecure.http.tls, annotated `@default -- true`) - set
+            # explicitly anyway, for the same reason 3b.4 sets
+            # `installCRDs: true` and 3b.7 sets `crds.keep: true` over their
+            # own chart defaults: a default that flips upstream, silently,
+            # in a routine chart bump would otherwise serve plaintext HTTP on
+            # 443 and nothing here would report it.
+            #
+            # The path itself is worth getting right and not guessing at: the
+            # older, still-widely-documented `ports.websecure.tls.enabled`
+            # (no `http`) is not this chart's shape at the pinned version -
+            # v3's chart nests TLS under the entrypoint's `http` block, next
+            # to `redirections` and `middlewares`, because `http` and `http3`
+            # now carry independent settings. Unlike `service.spec` above,
+            # this one *is* schema-validated: `ports.<entrypoint>` sets
+            # `additionalProperties: false` (confirmed in the chart's
+            # generated values.schema.json), so the flatter legacy path is not
+            # silently ignored here - `helm template`/`install` rejects it
+            # outright as an unknown property. A install-time failure either
+            # way, which is the better failure mode of the two footnotes above
+            # and below it.
+            enabled: true
+    providers:
+      kubernetesIngress:
+        publishedService:
+          # Redundant against k3s's own baseline valuesContent, which already
+          # sets this - kept anyway, and for once not primarily as insurance
+          # against an upstream default (k3s's manifest is not upstream's
+          # default, it is a value k3s chose deliberately). It is kept because
+          # this file's own values.yaml comment - "usually with the Service
+          # provided by this Chart" - is exactly true here, and because
+          # leaving 3b.9's own bullet ("sets ... publishedService") represented
+          # by nothing in the manifest would make this file harder to audit
+          # against the plan than the one line of duplication costs.
+          enabled: true
+# ---------------------------------------------------------------------------
+# What is deliberately absent.
+#
+# No Namespace object for kube-system. Every other controller/config file in
+# this tree that targets a non-default namespace either creates it
+# (namespaces.yaml, for `aerie`) or arrives alongside the controller that
+# creates it (cert-manager, external-secrets). kube-system is neither - it is
+# a builtin namespace that exists before k3s's own manifests run, let alone
+# Flux's. Committing a Namespace object for it here would put it under
+# infra-config's `prune: true`, and deleting this file would then attempt to
+# delete kube-system itself. Nothing in this tree should ever own it.
+#
+# No `service.type`. Already `LoadBalancer` in the chart's own default
+# (traefik/values.yaml: `service.spec.type: LoadBalancer`), which is also the
+# only type kube-vip-cloud-provider watches - repeating it here would be
+# 3b.4-style insurance for a value with no chart-level alternative for k3s to
+# drift toward, so it is left at the default instead of restated.
+# ---------------------------------------------------------------------------

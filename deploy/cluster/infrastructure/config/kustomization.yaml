@@ -34,3 +34,4 @@ resources:
   - namespaces.yaml
   - cluster-secret-store.yaml
   - external-secrets
+  - traefik-helmchartconfig.yaml

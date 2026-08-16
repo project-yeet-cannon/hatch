@@ -992,7 +992,7 @@ nothing below waits on a human except the one explicit stop in step 10.*
       deliberate address this pool hands out). That Lease is what the exit
       criterion's "elected leader" is actually reading, and it's the same
       mechanism Phase 7's HA proof exercises with a hard power-off.*
-- [ ] **9. Traefik `HelmChartConfig`** — `config/traefik-helmchartconfig.yaml`,
+- [x] **9. Traefik `HelmChartConfig`** — `config/traefik-helmchartconfig.yaml`,
       `helm.cattle.io/v1`, named `traefik` in `kube-system`. k3s's bundled
       Traefik is a `HelmChart` CR owned by k3s's own helm-controller;
       `HelmChartConfig` merges values into it, which is what keeps Flux and k3s
@@ -1001,6 +1001,26 @@ nothing below waits on a human except the one explicit stop in step 10.*
       *Exit:* `kubectl -n kube-system get svc traefik` shows
       `EXTERNAL-IP = ${INGRESS_VIP}`, and `curl -k https://${INGRESS_VIP}` from
       the LAN returns Traefik's 404 — the correct answer with no routes defined.
+      — *Verified against the exact pin, not generic docs: k3s v1.35.7+k3s1's
+      own `manifests/traefik.yaml` resolves chart `traefik-40.1.4+up40.1.0`
+      (upstream `traefik-helm-chart` v40.1.0), whose schema nests TLS at
+      `ports.websecure.http.tls.enabled` — not the flatter, still commonly
+      documented `ports.websecure.tls.enabled` from older chart lines, which
+      this chart's `additionalProperties: false` schema rejects outright
+      rather than silently ignoring. `loadBalancerIP` is
+      kube-vip-cloud-provider's documented "legacy" input (confirmed in
+      `pkg/provider/loadBalancer.go` at the pinned `v0.0.12`): it gets copied
+      once into the `kube-vip.io/loadbalancerIPs` annotation the provider
+      actually reads, so the chart's flat field is a real, supported way in
+      rather than a guess. `publishedService.enabled` is already set by k3s's
+      own base `valuesContent`, set again here anyway since the manifest is
+      this step's audit trail against the bullet above it. And
+      `HelmChartConfig` carries no status subresource at all (checked against
+      `k3s-io/helm-controller`'s Go types) — `infra-config`'s `wait: true`
+      reports this object Ready the instant it applies, whether or not k3s's
+      own controller has run the Job yet, so this step's *Exit* line above is
+      the only real proof, the same gap 3b.5 documents for
+      `ClusterSecretStore`.*
 - [ ] **10. The wildcard certificate — staging, then prod.** The one step in 3b
       with a human in the middle, deliberately:
       1. Both `ClusterIssuer`s (`letsencrypt-staging`, `letsencrypt-prod`),
