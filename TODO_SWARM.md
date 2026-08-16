@@ -508,12 +508,12 @@ after it.*
 >   correctly; a chain of `dependsOn` between releases does not — and a Ready
 >   `HelmRelease` never did imply a synced Secret (3b.3).
 
-#### Phase 3a — Manual prerequisites
+#### [x] Phase 3a — Manual prerequisites
 
 *Six one-time steps. None of them are code, all of them block something below.
 Do these first, in order, and the whole of 3b runs unattended.*
 
-**1. Confirm Phase 2 actually landed.** Phase 2's `[x]`s mean the scripts exist,
+**[x] 1. Confirm Phase 2 actually landed.** Phase 2's `[x]`s mean the scripts exist,
 not that a cluster does. On any node, as `aerie`:
 
 ```sh
@@ -635,7 +635,7 @@ the same soak reasoning that pin carries — newest is not the goal, *known* is:
   on 2026-09-29 — inside this build window, so it would be an upgrade before
   Phase 4 finished rather than after.
 
-> **Gate:** the seven variables in step 5 are all set, and step 2's address
+> [x] **Gate:** the seven variables in step 5 are all set, and step 2's address
 > answers nothing on the LAN. 3b assumes both.
 
 #### Phase 3b — Scriptable, in this order
@@ -643,9 +643,10 @@ the same soak reasoning that pin carries — newest is not the goal, *known* is:
 *Each step's inputs come from the repo or from the ConfigMap planted in step 1 —
 nothing below waits on a human except the one explicit stop in step 10.*
 
-- [ ] **1. Provision 4: cluster configuration.**
-      `.github/workflows/provision-4-cluster-config.yml` →
-      `scripts/k3s/Set-ClusterConfig.ps1`. Renders ConfigMap
+- [x] **1. Provision 4: cluster configuration.**
+      [`.github/workflows/provision-4-cluster-config.yml`](.github/workflows/provision-4-cluster-config.yml)
+      → [`scripts/k3s/Set-ClusterConfig.ps1`](scripts/k3s/Set-ClusterConfig.ps1).
+      Renders ConfigMap
       `aerie-cluster-config` in `flux-system` from the 3a.5 variables and
       applies it over SSH stdin — same shape as Provision 2's bootstrap Secret,
       minus the secrecy, since every one of these is an operator *value*.
@@ -657,6 +658,25 @@ nothing below waits on a human except the one explicit stop in step 10.*
       or domain gets changed later, with no commit.
       *Exit:* `kubectl -n flux-system get cm aerie-cluster-config -o yaml` lists
       all seven keys.
+      — *Three things the one-line version didn't say.
+      [`scripts/k3s/cluster-config.json`](scripts/k3s/cluster-config.json) is
+      the committed pointer half — which keys exist, which variable supplies
+      each, what shape a valid value has — the same split as
+      [`parameters.json`](scripts/secrets/parameters.json), so the workflow
+      only ever gains a `vars.` line and the script learns the rest from the
+      file. **Values are validated before anything is applied**, and
+      case-sensitively: PowerShell's `-match` is case-**in**sensitive, so
+      `^Z[A-Z0-9]+$` silently accepted a lowercased hosted zone id, which is a
+      zone that doesn't exist and surfaces from inside cert-manager at 3b.10 as
+      `NoSuchHostedZone`. A domain, being case-insensitive by RFC, is folded
+      rather than rejected. And the two values the **node** can settle are
+      checked against it: `NODE_INTERFACE` must exist (the failure lists the
+      node's real interfaces), and `INGRESS_VIP` must sit on that interface's
+      subnet and not be the node's own address — kube-vip's ARP mode installs
+      cleanly against a wrong interface and simply never answers, which is a
+      day spent on what presents as a networking bug. `preflight_only` runs
+      every check and the live diff without applying, which is what to dispatch
+      before changing a value on a cluster that's already serving.*
 - [ ] **2. Provision 5: node storage prep.**
       `.github/workflows/provision-5-node-storage.yml` →
       `scripts/k3s/Initialize-NodeStorage.ps1`, run once per node. Over SSH:
@@ -958,11 +978,13 @@ Ranked by what actually bites:
 [`.github/workflows/provision-2-seed-secrets.yml`](.github/workflows/provision-2-seed-secrets.yml),
 [`.github/workflows/provision-3-bootstrap-flux.yml`](.github/workflows/provision-3-bootstrap-flux.yml)
 
-*Phase 3 adds:* `scripts/k3s/Set-ClusterConfig.ps1`,
+*Phase 3 adds:*
+[`scripts/k3s/Set-ClusterConfig.ps1`](scripts/k3s/Set-ClusterConfig.ps1),
+[`scripts/k3s/cluster-config.json`](scripts/k3s/cluster-config.json),
 `scripts/k3s/Initialize-NodeStorage.ps1`,
 `scripts/k3s/Test-ClusterPlatform.ps1`,
 `scripts/secrets/New-ExternalSecrets.ps1`,
-`.github/workflows/provision-4-cluster-config.yml`,
+[`.github/workflows/provision-4-cluster-config.yml`](.github/workflows/provision-4-cluster-config.yml),
 `.github/workflows/provision-5-node-storage.yml`, and the
 `deploy/cluster/infrastructure/` tree.
 
