@@ -947,7 +947,7 @@ nothing below waits on a human except the one explicit stop in step 10.*
       `HelmRelease` here mean "the API accepts Certificates", which is the exact
       precondition step 10 needs and what `infra-config`'s `dependsOn` is waiting
       to be told.*
-- [ ] **8. kube-vip** — two components, which the original single bullet hid:
+- [x] **8. kube-vip** — two components, which the original single bullet hid:
       - **`kube-vip-cloud-provider`**, which assigns addresses to
         `Service type=LoadBalancer`. Phase 2's `--disable servicelb` means the
         cluster has no such implementation at all right now
@@ -961,6 +961,37 @@ nothing below waits on a human except the one explicit stop in step 10.*
       is unchanged by this and stays open until Phase 7.
       *Exit:* `ping ${INGRESS_VIP}` answers from the LAN, and
       `ip addr show ${NODE_INTERFACE}` on the elected leader shows it.
+      — *[`controllers/kube-vip.yaml`](deploy/cluster/infrastructure/controllers/kube-vip.yaml),
+      one file for both releases, plus the pool ConfigMap. Three things the
+      bullets above didn't say. **`configMapName` and the auto-created
+      ConfigMap are two different objects, not one** — the cloud-provider
+      chart's own template always names what it creates after the release
+      (`kube-vip-cloud-provider`), ignoring `configMapName` entirely; that
+      field only changes which name the *Deployment* looks for. Getting this
+      backwards ships a correctly-named-but-empty ConfigMap the Deployment
+      never reads, sitting right next to the one it does — so `cm.data` is
+      left empty and the pool is a plain manifest named `kubevip` instead,
+      which is also what makes the bullet above literally true rather than
+      approximately true. **Neither chart carries a `values.schema.json`** —
+      checked directly against both at the pinned versions, not assumed —
+      so every key in both `values:` blocks is exactly as unvalidated as
+      3b.4's `extraArgs` warning describes: a typo is a controller that
+      installs cleanly and never reads the setting. And **the chart's
+      defaults for every election-related env key
+      (`svc_election: false`, `vip_leaderelection: false`) are not "election
+      off"** — that reading would mean every DaemonSet pod ARP-announces the
+      same address at once, an actual IP conflict, and is wrong. Traced
+      through the release's own source at the pinned appVersion rather than
+      trusted from the values file: with `svc_election: false`, kube-vip's ARP
+      worker (`pkg/manager/worker/arp.go`, `StartServices`) falls back to what
+      its own code calls `GlobalLeader` — a separate, always-on Kubernetes
+      Lease election every kube-vip pod participates in, independent of
+      `vip_leaderelection` (which only governs the control-plane VIP path,
+      unused here since `cp_enable` stays false) and of `svc_election` (which
+      would give each Service its own lease — no benefit with the single
+      deliberate address this pool hands out). That Lease is what the exit
+      criterion's "elected leader" is actually reading, and it's the same
+      mechanism Phase 7's HA proof exercises with a hard power-off.*
 - [ ] **9. Traefik `HelmChartConfig`** — `config/traefik-helmchartconfig.yaml`,
       `helm.cattle.io/v1`, named `traefik` in `kube-system`. k3s's bundled
       Traefik is a `HelmChart` CR owned by k3s's own helm-controller;

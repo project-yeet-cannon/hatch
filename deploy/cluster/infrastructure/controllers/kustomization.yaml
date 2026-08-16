@@ -27,3 +27,4 @@ kind: Kustomization
 resources:
   - external-secrets.yaml
   - cert-manager.yaml
+  - kube-vip.yaml
