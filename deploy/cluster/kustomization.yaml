@@ -11,8 +11,11 @@
 # scripts/versions.json, and the sync configuration is a per-installation fact
 # that lives in the cluster. See docs/ethos.md.
 #
-# Phase 3 fills this in (TODO_SWARM.md): infrastructure.yaml first, carrying
-# the two layered Kustomizations and their postBuild.substituteFrom.
+# What this root contains is deliberately only pointers. It applies no workload
+# of its own, because the Kustomization Provision 3 created for it carries no
+# postBuild.substituteFrom - that lives on the two child Kustomizations in
+# infrastructure.yaml, which is the only place a ${...} token resolves.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-resources: []
+resources:
+  - infrastructure.yaml

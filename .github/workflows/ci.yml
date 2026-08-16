@@ -58,6 +58,44 @@ jobs:
         working-directory: src/Aerie.Web/apps/${{ matrix.app }}
         run: npm run build
 
+  deploy-manifests:
+    # From TODO_SWARM.md Phase 3b.3 onward, everything under deploy/ reaches the
+    # cluster by being committed - there is no apply step to fail in front of a
+    # human. A kustomization that does not build is otherwise discovered as a
+    # Flux Kustomization that silently stopped reconciling, so it gets found
+    # here instead.
+    #
+    # Every directory carrying a kustomization.yaml is built, discovered rather
+    # than listed, so the layers added by 3b.4-3b.12 are covered without editing
+    # this file. `kubectl kustomize` is the runner image's own, deliberately
+    # unpinned: this is a lint whose worst failure is a false red, not
+    # provisioning tooling whose version changes what a node becomes - those are
+    # pinned in scripts/versions.json.
+    #
+    # What this does *not* check is the Flux CRD schemas, so a misspelled field
+    # in a Kustomization or HelmRelease spec still passes. 3b.13's
+    # Test-ClusterPlatform.ps1 is the gate that catches those, against a real
+    # cluster.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Build every kustomization under deploy/
+        run: |
+          set -euo pipefail
+          found=0
+          while IFS= read -r dir; do
+            found=$((found + 1))
+            echo "==> $dir"
+            kubectl kustomize "$dir" > /dev/null
+          done < <(find deploy -name kustomization.yaml -exec dirname {} \; | sort)
+          if [ "$found" -eq 0 ]; then
+            echo "No kustomization.yaml found under deploy/ - the Flux root is missing." >&2
+            exit 1
+          fi
+          echo "$found kustomization(s) built."
+
   detect-kiosk-changes:
     runs-on: ubuntu-latest
     outputs:

@@ -1,0 +1,24 @@
+# Layer 1 of the split described in ../../infrastructure.yaml: operators, and
+# with them the CRDs everything in ../config depends on. One HelmRepository +
+# HelmRelease pair per component, one file each.
+#
+# Chart versions are pinned here rather than supplied as variables. They are
+# structural in the sense docs/ethos.md means it - identical for every
+# installation - exactly like the k3s and Flux pins in scripts/versions.json.
+# The versions to use were chosen in TODO_SWARM.md 3a.6, with the reasoning for
+# each one written down there; a bump is a commit against that table.
+#
+# Reconciled with wait: true, so anything added here has to become healthy
+# before ../config is applied at all. That is the point of the layer, and it is
+# also the cost: a HelmRelease that never converges blocks the other layer
+# entirely rather than degrading around it.
+#
+# Filled in by TODO_SWARM.md 3b.4 (external-secrets), 3b.7 (cert-manager),
+# 3b.8 (kube-vip and kube-vip-cloud-provider), 3b.11 (longhorn) and
+# 3b.12 (cloudnative-pg). Empty until then, which reconciles cleanly to
+# nothing - the directory has to exist and carry this file, because git does
+# not track an empty one and a Kustomization pointing at a missing path never
+# goes Ready.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []

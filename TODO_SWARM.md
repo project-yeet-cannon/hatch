@@ -718,7 +718,7 @@ nothing below waits on a human except the one explicit stop in step 10.*
       the mount, not before** — it counts a not-yet-existing mount point as an
       error, and what it adds over `mount` having worked is the boot-time
       reading: duplicate targets, an unresolvable UUID.*
-- [ ] **3. The Flux tree skeleton** — commit only, no cluster access:
+- [x] **3. The Flux tree skeleton** — commit only, no cluster access:
       - `deploy/cluster/kustomization.yaml` — the root Flux reconciles.
         Already committed as an empty-`resources` skeleton, since Provision 3
         neither creates nor writes to this path. There is deliberately no
@@ -736,6 +736,32 @@ nothing below waits on a human except the one explicit stop in step 10.*
       converge first, then everything that needs them. This replaces the
       original plan's release-to-release `dependsOn` chain, for the reason in
       the preamble.
+      — *Two things the bullets above didn't say. **`dependsOn` alone does not
+      order anything here** — a Kustomization without `wait: true` reports Ready
+      as soon as its objects are *applied*, which for a `HelmRelease` means the
+      CR exists, not that the chart installed or that one CRD landed.
+      `infra-config` would then start against a cluster with none of the types
+      it uses, which is the exact failure the two-layer split exists to prevent.
+      Both layers carry `wait: true`; `infra-controllers` gets a 10-minute
+      timeout to go with it, because Longhorn's DaemonSets and engine images
+      take minutes on a cold node and a short timeout reports slowness as
+      failure and then blocks the other layer behind it. Expect `infra-config`
+      to sit NotReady through step 10's deliberate stop at the staging issuer —
+      that is the report, not a fault. And **`postBuild` substitution is not
+      scoped to the tokens we chose**: Flux expands every `$VAR` in the built
+      output, so an upstream chart value containing a bare `$` needs `$$` or the
+      `kustomize.toolkit.fluxcd.io/substitute: disabled` annotation — while an
+      undefined token expands to an empty string rather than erroring, so
+      `${DOMIAN}` is not a failed reconciliation, it is an Ingress with no host.
+      Both notes are written into the manifests themselves, since steps 4–12 are
+      where they get paid for. The matching automation is a `deploy-manifests`
+      job in [`ci.yml`](.github/workflows/ci.yml) that builds every directory
+      under `deploy/` carrying a `kustomization.yaml`, discovered rather than
+      listed: from here on the tree reaches the cluster by commit alone, with no
+      apply step in front of a human, so a kustomization that doesn't build is
+      otherwise found as a Flux Kustomization that quietly stopped reconciling.
+      It does not validate Flux's CRD schemas — a misspelled `spec` field still
+      passes, and step 13 against a real cluster is what catches those.*
 - [ ] **4. External Secrets Operator** — `controllers/external-secrets.yaml`,
       pinned, `installCRDs: true`. Commit the `external-secrets` Namespace too
       even though Provision 2 already created it: applying an existing namespace

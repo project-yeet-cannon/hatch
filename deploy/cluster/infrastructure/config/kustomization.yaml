@@ -1,0 +1,22 @@
+# Layer 2 of the split described in ../../infrastructure.yaml: instances of the
+# types the controllers in ../controllers install. Nothing here can be applied
+# to a cluster that has not converged that layer first, which is what
+# infra-config's dependsOn expresses.
+#
+# This is also where nearly every ${...} substitution in the tree lands - the
+# domain, the VIP, the region, the hosted zone id. Read the note in
+# ../../infrastructure.yaml about undefined tokens expanding to empty strings
+# before adding a file here.
+#
+# Filled in by TODO_SWARM.md 3b.5 (the ClusterSecretStore, alone in its own file
+# because it is the single object that changes when Parameter Store is swapped
+# for in-cluster OpenBao), 3b.6 (one ExternalSecret per required entry in
+# scripts/secrets/parameters.json), 3b.9 (Traefik's HelmChartConfig),
+# 3b.10 (both ClusterIssuers, the wildcard Certificate, and the TLSStore that
+# actually serves it) and 3b.11 (the longhorn-r2 / longhorn-r3 StorageClasses).
+#
+# Empty until then, for the same reason as ../controllers: the directory has to
+# exist and carry this file, because git does not track an empty one.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []
