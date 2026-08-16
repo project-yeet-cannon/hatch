@@ -35,3 +35,10 @@ resources:
   - cluster-secret-store.yaml
   - external-secrets
   - traefik-helmchartconfig.yaml
+  # 3b.10, in three files rather than one: the issuers are a pair that must stay
+  # identical, the Certificate is the object with the human stop in it, and the
+  # TLSStore is what serves the result. Splitting them keeps the flip from
+  # staging to production a one-word diff in a file that changes nothing else.
+  - cluster-issuers.yaml
+  - wildcard-certificate.yaml
+  - traefik-tlsstore.yaml

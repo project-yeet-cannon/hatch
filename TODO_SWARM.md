@@ -1049,6 +1049,49 @@ nothing below waits on a human except the one explicit stop in step 10.*
       *Exit:* `openssl s_client -connect ${INGRESS_VIP}:443 -servername
       home.${DOMAIN} </dev/null | openssl x509 -noout -issuer -ext
       subjectAltName` shows a Let's Encrypt production issuer and `*.${DOMAIN}`.
+      — *Committed as three files, not one:
+      [`config/cluster-issuers.yaml`](deploy/cluster/infrastructure/config/cluster-issuers.yaml)
+      (the pair that must stay identical),
+      [`config/wildcard-certificate.yaml`](deploy/cluster/infrastructure/config/wildcard-certificate.yaml)
+      (the object the stop is in) and
+      [`config/traefik-tlsstore.yaml`](deploy/cluster/infrastructure/config/traefik-tlsstore.yaml)
+      (what serves the result) — so the staging-to-production flip is a one-word
+      diff in a file that changes nothing else. **This step stays unticked until
+      that flip is committed**, which is the only entry in 3b whose `[ ]` means a
+      human, not code. Four things the bullets above didn't say. **The apex costs
+      a second challenge at the same record name, and that is only safe for a
+      reason worth naming**: both identifiers authorize through
+      `_acme-challenge.${DOMAIN}` — the wildcard's challenge is not
+      `_acme-challenge.*.${DOMAIN}` — with different tokens, so two TXT values
+      are needed at one name, and cert-manager's Route53 solver UPSERTs a
+      single-valued record set without merging what is already there (read at the
+      pin, not assumed). Run concurrently they would overwrite each other and
+      both fail; they never are, because the challenge scheduler refuses to
+      process two challenges sharing a DNS name and type at once. The cost is
+      that issuance is two serialized propagation waits, which routinely outruns
+      `infra-config`'s 5m timeout on a first order — the NotReady the preamble
+      predicts, arriving for a more specific reason than "the stop". **Step 3's
+      "delete the staging Secret" is unnecessary, and it is not free.** A changed
+      `issuerRef` is itself a re-issuance trigger — `SecretIssuerAnnotationsMismatch`
+      is in the trigger policy chain, matching the issuer annotation cert-manager
+      stamps on the Secret — so the flip re-orders on its own. Deleting the
+      Secret first leaves the cluster with no default certificate until the new
+      order completes, which is Traefik answering 443 with its self-signed one
+      for the length of a DNS-01 round trip. **The `TLSStore` has a
+      cluster-uniqueness rule with a silent failure behind it**: Traefik
+      special-cases the name `default` so the store is keyed as `default` rather
+      than by namespace/name, and finding two of them in different namespaces it
+      deletes the default store outright and logs — every hostname in the cluster
+      silently back on the self-signed certificate. It also resolves
+      `defaultCertificate.secretName` in its own namespace with no
+      cross-namespace path in the call at all, which is what puts the
+      `Certificate` in `kube-system` rather than somewhere tidier: the store must
+      sit beside the Traefik k3s ships, and the Secret must sit beside the store.
+      And **the two issuers' account keys are the one difference that is
+      load-bearing** rather than cosmetic — an ACME account key is registered
+      with one server, so pointing both at one Secret makes whichever reconciles
+      second fail against a key already registered elsewhere, reported as an
+      account error over a Secret that plainly contains a key.*
 - [ ] **11. Longhorn** — `defaultDataPath: /var/lib/longhorn` matching step 2,
       and two settings that are easy to get wrong:
       - `defaultReplicaCount: ${LONGHORN_REPLICA_COUNT}` — **2 during the build

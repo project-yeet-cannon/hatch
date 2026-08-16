@@ -1,0 +1,140 @@
+# TODO_SWARM.md Phase 3b.10, part 2 of 3 - the one wildcard certificate the
+# whole cluster serves.
+#
+# One Certificate covers every hostname Phase 5 and everything after it will
+# add. That is the entire argument for a wildcard: seven hostnames today, and
+# the eighth costs an Ingress and nothing else - no new order, no new Secret, no
+# rate-limit arithmetic, and no per-Ingress `tls:` block, which part 3 of this
+# step (./traefik-tlsstore.yaml) is what makes true.
+#
+# ---------------------------------------------------------------------------
+# Why this lives in kube-system
+#
+# cert-manager writes the Secret into the Certificate's own namespace, and
+# Traefik resolves a TLSStore's defaultCertificate.secretName in the TLSStore's
+# own namespace (verified in traefik's pkg/provider/kubernetes/crd/kubernetes.go
+# at v3.7.1: client.GetSecret(t.Namespace, secretName), with no cross-namespace
+# path at all). The store has to be `default` and there can be only one of those
+# in the cluster, so it sits next to the Traefik k3s ships in kube-system - and
+# therefore so does this. The alternative is a Secret-copying controller, which
+# is a component to own forever in exchange for tidier namespacing.
+#
+# ---------------------------------------------------------------------------
+# The apex is listed explicitly, and it is not redundant
+#
+# A wildcard does not match the domain it wildcards: `*.example.com` covers
+# home.example.com and misses example.com. RFC 6125 is unambiguous about this
+# and every browser implements it, so an apex left off here is a certificate
+# error on exactly the bare-domain URL an operator is most likely to type first.
+#
+# It costs a second DNS-01 challenge, at the same record name. Both identifiers
+# authorize through _acme-challenge.${DOMAIN} - the wildcard's challenge is not
+# _acme-challenge.*.${DOMAIN} - with two different tokens, so two different TXT
+# values are needed at one name. cert-manager's Route53 solver UPSERTs a
+# single-valued record set and does not merge with what is already there
+# (read at v1.21.1: changeRecord builds one ResourceRecordSet from one value),
+# so run concurrently these two would overwrite each other and both fail. They
+# do not run concurrently: the challenge scheduler refuses to process two
+# challenges sharing a DNS name and type at once, in so many words
+# (pkg/controller/acmechallenges/scheduler/scheduler.go, "Never process multiple
+# challenges for the same DNS name and ACME challenge type at any one time").
+# The apex is safe to list because of that rule, not by luck - and the cost of
+# it is that issuance takes two serialized propagation waits rather than one.
+#
+# ---------------------------------------------------------------------------
+# Expect infra-config to report NotReady while this is issuing
+#
+# A Certificate carries real status conditions, so infra-config's `wait: true`
+# genuinely blocks on this object - unlike the TLSStore beside it, which has no
+# status at all. Two serialized challenges, each waiting for a Route53 change to
+# reach INSYNC (up to 120s) and then for the public resolvers in
+# ../controllers/cert-manager.yaml to return the TXT, will routinely outrun
+# infra-config's 5m timeout on a first issuance.
+#
+# That is the intended report and not a fault. The Kustomization retries, the
+# Certificate keeps its own state across the retry, and the layer goes Ready
+# once the order completes. The number worth reading is
+# `kubectl describe certificate aerie-wildcard`, not the Kustomization's.
+# ---------------------------------------------------------------------------
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: aerie-wildcard
+  namespace: kube-system
+spec:
+  secretName: aerie-wildcard-tls
+  # ###################################################################
+  # THE ONE DELIBERATE STOP IN PHASE 3b.
+  #
+  # This says `letsencrypt-staging`, and it is committed that way on
+  # purpose. Issue against staging first, read the result, and only then
+  # change this one word to `letsencrypt-prod` and commit again.
+  #
+  #   1. Watch the order:
+  #        kubectl describe certificate aerie-wildcard -n kube-system
+  #        kubectl get challenges -A
+  #      Two challenges, appearing one after the other, both reaching
+  #      valid. A challenge stuck `pending` for minutes is the thing to
+  #      diagnose, and the two candidates are:
+  #        - the split-horizon problem 3a.4 exists to confirm, if the
+  #          self-check never sees the TXT it just wrote. The fix is
+  #          already in ../controllers/cert-manager.yaml; the symptom
+  #          returning means that value is not being read.
+  #        - a hosted-zone-id or IAM mismatch, which reports as
+  #          NoSuchHostedZone or AccessDenied on the Challenge itself.
+  #          ../cluster-issuers.yaml lists the three actions needed.
+  #      Either one is what staging is for. Diagnosed against production
+  #      instead, each attempt spends one of five duplicate certificates
+  #      per week and the debugging loop closes in days rather than
+  #      minutes.
+  #   2. When the certificate reports Ready=True, confirm what signed it:
+  #        kubectl get secret aerie-wildcard-tls -n kube-system \
+  #          -o jsonpath='{.data.tls\.crt}' | base64 -d | \
+  #          openssl x509 -noout -issuer -ext subjectAltName
+  #      Expect a STAGING issuer and both names in the SAN list.
+  #   3. Then flip the name below to `letsencrypt-prod` and commit.
+  #
+  # Nothing else has to be done to make that flip take effect. The
+  # certificates-trigger controller's policy chain includes
+  # SecretIssuerAnnotationsMismatch (verified at v1.21.1 in
+  # internal/controller/certificates/policies/policies.go), so a changed
+  # issuerRef is itself a re-issuance trigger - the Secret carries the
+  # issuer it was signed by as an annotation and the mismatch is what
+  # fires. The original plan said to delete the staging Secret so a fresh
+  # order runs; that is unnecessary, and it is not free: between the
+  # delete and the new order completing there is no default certificate,
+  # so Traefik answers 443 with its own self-signed one. Change the word,
+  # commit, and watch the same describe output.
+  # ###################################################################
+  issuerRef:
+    name: letsencrypt-staging
+    kind: ClusterIssuer
+  dnsNames:
+    - "*.${DOMAIN}"
+    # Not redundant - see the header. A wildcard does not match its own apex.
+    - "${DOMAIN}"
+# ---------------------------------------------------------------------------
+# What is deliberately absent.
+#
+# No `commonName`. Let's Encrypt stopped including a CN in issued certificates
+# in 2025 and every validator has read the SAN list for far longer, so setting
+# it either does nothing or - if it names something not also in dnsNames - fails
+# the order outright.
+#
+# No `duration` / `renewBefore`. Let's Encrypt issues for 90 days and
+# cert-manager renews at two thirds of the certificate's actual lifetime, so the
+# default is a renewal 30 days out. Naming a duration Let's Encrypt does not
+# honour would put a number in this file that the certificate does not have.
+#
+# No `privateKey.rotationPolicy`. It defaults to `Always` since cert-manager
+# v1.18, which is what is wanted - a new key on every re-issuance, including the
+# staging-to-production flip above. Set explicitly it would read as a decision;
+# the decision here is to take the default and to know what it is.
+#
+# No `revisionHistoryLimit`, which defaults to 1: one CertificateRequest kept
+# per Certificate. A cluster that keeps every revision accumulates one object
+# per renewal forever, and nothing here wants that history.
+#
+# No Namespace object for kube-system - see the same note at the foot of
+# ./traefik-helmchartconfig.yaml. Nothing in this tree should ever own it.
+# ---------------------------------------------------------------------------

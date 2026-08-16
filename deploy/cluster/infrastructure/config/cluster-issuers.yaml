@@ -1,0 +1,155 @@
+# TODO_SWARM.md Phase 3b.10, part 1 of 3 - the two ACME issuers.
+#
+# Both are committed and only one is ever referenced at a time. That asymmetry
+# is the whole shape of this step: ./wildcard-certificate.yaml points at
+# letsencrypt-staging until a human has read a completed DNS-01 challenge, and
+# is then flipped to letsencrypt-prod in a second commit. The flip, and the
+# reasoning for stopping in the middle at all, lives in that file.
+#
+# The staging issuer is not scaffolding to delete afterwards. Let's Encrypt
+# allows five duplicate certificates per registered domain per week on a rolling
+# window: an afternoon spent debugging a DNS-01 problem against production
+# spends the entire allowance and then waits days to get it back, with the
+# cluster serving nothing in the meantime. Staging has no comparable limit and
+# signs from an untrusted root, which is exactly the right trade while
+# diagnosing. Leaving it committed means the next person to debug a renewal - in
+# a year, on a rebuilt cluster, under pressure - points a scratch Certificate at
+# an issuer that already exists rather than reconstructing this file from memory.
+#
+# ---------------------------------------------------------------------------
+# What the two objects share, and why sharing it is not automated
+#
+# They differ in exactly two fields: the ACME directory URL, and the name of the
+# Secret holding that account's private key. Solver, credential, hosted zone and
+# email must stay in step between them, and nothing enforces that. Kustomize
+# could generate the second from the first with a patch - at the cost of making
+# the one file whose entire purpose is "these differ in exactly two ways"
+# unreadable without running a build first. They are written out in full
+# instead, adjacent, so that a diff between them is a diff on screen.
+#
+# The account keys must NOT be shared, and that is the one difference that is
+# load-bearing rather than cosmetic. An ACME account key is registered with one
+# server; pointing both issuers at one Secret means whichever reconciles second
+# finds a key already registered elsewhere, and the failure surfaces as an
+# unregistered-account error against a Secret that plainly contains a key.
+# cert-manager creates each of these on first use - neither is an ExternalSecret
+# and neither belongs in the /aerie tree, because losing one costs a re-
+# registration and nothing else.
+#
+# ---------------------------------------------------------------------------
+# The credential, and the three namespaces involved
+#
+# A ClusterIssuer is cluster-scoped, so the secretRefs below carry no namespace.
+# They resolve in cert-manager's `clusterResourceNamespace`, set explicitly to
+# `cert-manager` in ../controllers/cert-manager.yaml, which is where 3b.6's
+# generated ExternalSecret puts `route53-credentials`. Three files have to agree
+# on that and only the controller's can say so; the comment there is the one
+# that explains it.
+#
+# Both halves of the credential come from that one Secret. The access key ID is
+# not sensitive and could have been a ConfigMap value or a literal - splitting a
+# single credential across two delivery mechanisms is how the halves drift apart
+# at the first rotation, and a rotation that reaches one half and not the other
+# is an outage that reads as an IAM problem.
+#
+# The IAM user is the one Caddy already uses (scripts/secrets/parameters.json:
+# "Same IAM user Caddy uses today"), scoped per docs/reverse-proxy-architecture.md
+# to `_acme-challenge.*` TXT records on the one hosted zone. cert-manager needs
+# three actions on top of nothing: route53:ChangeResourceRecordSets and
+# route53:ListResourceRecordSets on that zone, and route53:GetChange on
+# arn:aws:route53:::change/* - the last because changeRecord polls the change id
+# until it reports INSYNC (verified in cert-manager's own
+# pkg/issuer/acme/dns/route53/route53.go at v1.21.1). An AccessDenied naming
+# GetChange is that permission missing, not a solver misconfiguration.
+# ---------------------------------------------------------------------------
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    # DIFFERENCE 1 OF 2 from the production issuer below.
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: ${ACME_EMAIL}
+    # DIFFERENCE 2 OF 2. Created by cert-manager on first registration; see the
+    # header on why this is not the same Secret as production's.
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      - dns01:
+          route53:
+            # Route53 is a global service with no regional endpoints. This is a
+            # hint for credential scope and partition only (the CRD's own
+            # description says so), and it is the SSM region rather than a key
+            # of its own because both are facts about the same AWS account in
+            # the same partition. It is not a claim about where the zone lives -
+            # there is no such place.
+            region: ${AWS_REGION}
+            # Naming the zone is what stops cert-manager calling
+            # route53:ListHostedZonesByName to find it, which the scoped IAM
+            # policy above does not permit. Getting the id wrong surfaces as
+            # NoSuchHostedZone, which is why Provision 4 validates its case
+            # sensitively (scripts/k3s/cluster-config.json).
+            hostedZoneID: ${ROUTE53_HOSTED_ZONE_ID}
+            accessKeyIDSecretRef:
+              name: route53-credentials
+              key: access-key-id
+            secretAccessKeySecretRef:
+              name: route53-credentials
+              key: secret-access-key
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    # DIFFERENCE 1 OF 2 - the same URL without `-staging`. This is the only
+    # field that decides whether the resulting certificate is trusted by a
+    # browser, and it is one hyphenated word apart from the one above it.
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: ${ACME_EMAIL}
+    # DIFFERENCE 2 OF 2.
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - dns01:
+          route53:
+            region: ${AWS_REGION}
+            hostedZoneID: ${ROUTE53_HOSTED_ZONE_ID}
+            accessKeyIDSecretRef:
+              name: route53-credentials
+              key: access-key-id
+            secretAccessKeySecretRef:
+              name: route53-credentials
+              key: secret-access-key
+# ---------------------------------------------------------------------------
+# What is deliberately absent.
+#
+# No `selector` on either solver. A solver with no selector matches every dnsName
+# on every Certificate that names the issuer, which is what a single-zone
+# installation wants; selectors exist to route different suffixes to different
+# providers. Adding one that fails to match is a Certificate whose Order sits
+# with no solver configured and says so only in an event.
+#
+# No `profile`. Let's Encrypt now offers named certificate profiles and
+# cert-manager v1.21 can request one (spec.acme.profile). Leaving it unset takes
+# whatever the server's directory advertises as its default, which is the one
+# behaviour that stays correct as Let's Encrypt retires and replaces profile
+# names on its own schedule. This is the opposite of the pinning rule the rest
+# of the phase follows, and deliberately: a chart version is ours to hold still,
+# a CA's profile catalogue is not.
+#
+# No ordering against 3b.6's ExternalSecret, which is applied in the same layer
+# and could easily land after these. A ClusterIssuer whose credential Secret is
+# not there yet reports Ready=False once, and the issuer controller retries; by
+# the time the Certificate next door has an Order to solve, it has resolved.
+# What that retry does not survive is infra-config's 5m wait - see the timing
+# note in ./wildcard-certificate.yaml, which is the object that actually spends
+# that budget.
+#
+# No Namespace object. Both of these are cluster-scoped, and the namespace their
+# secretRefs resolve in is created by ../controllers/cert-manager.yaml, with the
+# controller that owns it.
+# ---------------------------------------------------------------------------
