@@ -592,20 +592,48 @@ Actions → **Variables**. Provision 4 (3b.1) reads these and nothing else.
 | `ROUTE53_HOSTED_ZONE_ID` | from step 4 | **new** |
 | `LONGHORN_REPLICA_COUNT` | **`2`** — see 3b.11 | **new** |
 
-**6. Look up and record the chart versions to pin.** Every `HelmRelease` below
+**[x] 6. Look up and record the chart versions to pin.** Every `HelmRelease` below
 pins an exact chart version, for the same reproducibility reason as the k3s
 pin. Unlike everything else in 3a these are *structural* — identical for every
 installation — so they are committed in the manifests, exactly like the k3s,
 Flux and qemu-img pins in [`scripts/versions.json`](scripts/versions.json), and
 not entered as variables. Collect them once so 3b is a straight line:
 
-| Component | Chart repository |
-|---|---|
-| external-secrets | `https://charts.external-secrets.io` |
-| cert-manager | `https://charts.jetstack.io` |
-| longhorn | `https://charts.longhorn.io` |
-| kube-vip / kube-vip-cloud-provider | `https://kube-vip.github.io/helm-charts` |
-| cloudnative-pg | `https://cloudnative-pg.github.io/charts` |
+| Component | Chart repository | Chart | App | Step |
+|---|---|---|---|---|
+| external-secrets | `https://charts.external-secrets.io` | `2.8.0` | `v2.8.0` | 3b.4 |
+| cert-manager | `https://charts.jetstack.io` | `v1.21.1` | `v1.21.1` | 3b.7 |
+| kube-vip | `https://kube-vip.github.io/helm-charts` | `0.11.0` | `v1.2.2` → pin `image.tag: v1.2.3` | 3b.8 |
+| kube-vip-cloud-provider | `https://kube-vip.github.io/helm-charts` | `0.2.10` | `v0.0.12` | 3b.8 |
+| longhorn | `https://charts.longhorn.io` | `1.11.3` | `v1.11.3` | 3b.11 |
+| cloudnative-pg | `https://cloudnative-pg.github.io/charts` | `0.29.0` | `1.30.0` | 3b.12 |
+
+Read from each repository's `index.yaml` on 2026-08-15, and chosen against the
+k3s pin in [`scripts/versions.json`](scripts/versions.json) (`v1.35.7+k3s1`) on
+the same soak reasoning that pin carries — newest is not the goal, *known* is:
+
+- **external-secrets `2.8.0`** over the same-week `2.9.0`. Neither declares a
+  breaking change and the chart floor is only `>= 1.19`, so this is soak alone.
+  `2.8.0` is also the release that added the OpenBao provider, which is the
+  eventual destination of 3b.5's isolated `ClusterSecretStore`. `installCRDs`
+  is still a real top-level value in this chart, so 3b.4's wording holds.
+- **cert-manager `v1.21.1`** supports Kubernetes 1.33–1.36 and is the last patch
+  of a line five weeks old. `v1.20` goes EOL at the 1.22 release and only the
+  final patch of a branch is supported upstream, so the older line buys nothing.
+- **kube-vip `0.11.0`** is the only chart carrying the v1.2 line, and v1.2 is
+  where the service handling was refactored — the exact path `svc_enable` uses.
+  Its `appVersion` is `v1.2.2`, but `v1.2.3` fixes regressions in lease
+  management and route cleanup introduced by that refactor, so set `image.tag`
+  explicitly and drop the override once a chart ships with it as the default.
+  Staying on `0.10.0`/`v1.1.2` was the alternative: pre-refactor and stable
+  since March, but two minors back and receiving no fixes.
+- **longhorn `1.11.3`**, which upstream lists as the stable, widely-adopted
+  release; `1.12.1` is a day old. `1.11.3` requires Kubernetes ≥ 1.34, which the
+  k3s pin satisfies, and its node prerequisites are exactly 3b.2's package list.
+- **cloudnative-pg `0.29.0`** (operator 1.30) supports Kubernetes 1.34–1.36.
+  The `0.28.x` line ships operator 1.29, which supports 1.33–1.35 but goes EOL
+  on 2026-09-29 — inside this build window, so it would be an upgrade before
+  Phase 4 finished rather than after.
 
 > **Gate:** the seven variables in step 5 are all set, and step 2's address
 > answers nothing on the LAN. 3b assumes both.
