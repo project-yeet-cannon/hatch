@@ -1,0 +1,194 @@
+# TODO_SWARM.md Phase 3b.7 - cert-manager, the controller and nothing else.
+#
+# Second component of layer 1 (../../infrastructure.yaml). What it registers is
+# the Certificate / Issuer / ClusterIssuer / CertificateRequest / Order /
+# Challenge types; what actually asks Let's Encrypt for the wildcard is 3b.10,
+# under ../config, and it is deliberately not here. Splitting them is the same
+# rule ../external-secrets.yaml follows - a controller in this layer, every
+# instance of its CRDs in the next - and here it buys something concrete: 3b.10
+# is the one step in the phase with a human in the middle, stopping at the
+# staging issuer to read a DNS-01 challenge. A controller that installs itself
+# has no business being entangled with that.
+#
+# This file also brings the cert-manager Namespace, and that closes something
+# 3b.6 deliberately left open: the generated
+# ../config/external-secrets/cert-manager-route53-credentials.yaml targets this
+# namespace, so between that commit and this one it was a single object
+# infra-config could not apply. Expected there, resolved here.
+#
+# Nothing in this file is per-installation, so it carries no ${...} token - see
+# the note at the bottom about the two nameservers, which look site-specific and
+# are the opposite.
+---
+# Deleting this file deletes the namespace, because infra-controllers prunes -
+# and with it route53-credentials, the wildcard's Secret and any Certificate
+# living here. Unlike external-secrets' namespace, none of that is unrecoverable:
+# ESO re-syncs the credential from the /aerie tree and 3b.10 re-orders the
+# certificate. The cost of removing cert-manager is a new ACME order against
+# Let's Encrypt's duplicate-certificate limit, not a secret nothing can recreate.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager
+---
+# Named for the vendor rather than the component, because this repository is
+# jetstack's chart host and the chart is one of several it serves. Kept in the
+# component's own namespace for the reason ../external-secrets.yaml gives: the
+# whole component is this one file, and the HelmRelease's sourceRef then needs
+# no namespace field and so does not rely on cross-namespace source references
+# being permitted.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: jetstack
+  namespace: cert-manager
+spec:
+  # Only new *versions* are discovered by this poll, and the release below names
+  # one exact version, so it changes nothing until a commit does.
+  interval: 1h
+  url: https://charts.jetstack.io
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cert-manager
+  namespace: cert-manager
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: cert-manager
+      # The leading `v` is not a typo and not a range: cert-manager keeps its
+      # chart version identical to its app version, so the chart is literally
+      # published as `v1.21.1`. Flux parses this as an exact semver, the same as
+      # `2.8.0` next door - `>=v1.21.1` or `~v1.21.1` would be the range, and
+      # would mean an unattended upgrade the next time upstream published one.
+      #
+      # Chosen in TODO_SWARM.md 3a.6: v1.21 supports Kubernetes 1.33-1.36, which
+      # the v1.35.7+k3s1 pin in scripts/versions.json sits inside, and .1 is the
+      # last patch of a line five weeks old. Only the final patch of a branch is
+      # supported upstream and v1.20 goes EOL at the 1.22 release, so the older
+      # line buys no soak - just an upgrade sooner.
+      version: v1.21.1
+      sourceRef:
+        kind: HelmRepository
+        name: jetstack
+  # A minute longer than external-secrets' 4m, for one reason: this chart's
+  # install ends in a post-install hook Job (startupapicheck) that waits for the
+  # webhook to actually answer, retrying up to five times at a minute each. That
+  # wait is worth having - see note 1 below - but it means the honest worst case
+  # for a *slow* install is minutes past what three plain Deployments need.
+  #
+  # The arithmetic against the layer, stated because it is the reason not to go
+  # higher: infra-controllers waits 10m for everything in this directory, so 5m
+  # plus one retry is exactly that budget. A cert-manager that is genuinely
+  # broken therefore surfaces as the layer timing out rather than as this release
+  # failing on its own - correct, but it is why a third retry would be a
+  # component that hides the others' status rather than one that tries harder.
+  timeout: 5m
+  install:
+    remediation:
+      retries: 1
+  upgrade:
+    remediation:
+      retries: 1
+    # Otherwise a failed upgrade leaves behind whatever it managed to create
+    # before it stopped, and the next attempt collides with objects Helm does
+    # not believe it owns.
+    cleanupOnFail: true
+  values:
+    # ---------------------------------------------------------------------
+    # CRDs
+    # ---------------------------------------------------------------------
+    # Note the shape differs from external-secrets, where `installCRDs: true` is
+    # the live value - here that spelling is deprecated and defaults to false,
+    # and these two are what it aliases. Copying the neighbouring file's line
+    # would install a controller with none of its types, which presents as every
+    # object in 3b.10 failing as an unknown kind.
+    crds:
+      # false by default, unlike external-secrets' chart. The exit criterion for
+      # this step is this line.
+      enabled: true
+      # Already the default, and set explicitly because of what it guards
+      # against *here specifically*: `keep` stamps helm.sh/resource-policy on
+      # the CRDs, so a Helm uninstall leaves them alone. install.remediation
+      # above uninstalls before it retries. Without `keep`, one failed install -
+      # a timed-out image pull is enough - would drop the CRDs on the way out
+      # and the garbage collector would take every Certificate, Issuer and
+      # ClusterIssuer in the cluster with them. The retry would then succeed and
+      # the damage would look unrelated to it.
+      keep: true
+
+    # ---------------------------------------------------------------------
+    # DNS-01 self-check - the two settings TODO_SWARM.md 3a.4 exists to justify
+    # ---------------------------------------------------------------------
+    # Before signing, cert-manager resolves the _acme-challenge TXT it just
+    # wrote to Route53 and waits to see it. By default that lookup goes through
+    # CoreDNS to the node's resolver, which is pfSense Unbound - and Unbound
+    # answers authoritatively for the *internal* view of ${DOMAIN}, where no
+    # such record exists and never will. The self-check then never passes: the
+    # order sits in pending until it times out, and the failure reads like a
+    # Route53 permissions or hosted-zone problem, which is a day spent on IAM
+    # that was never wrong.
+    #
+    # These two send the check straight to public recursive resolvers instead,
+    # bypassing the split-horizon view entirely. 3a.4's third command is the
+    # check that the problem is real here; it is real on any network that
+    # overrides its own domain internally, which is most of them.
+    dns01RecursiveNameserversOnly: true
+    dns01RecursiveNameservers: "1.1.1.1:53,8.8.8.8:53"
+
+    # ---------------------------------------------------------------------
+    # Where ClusterIssuers look for their credentials
+    # ---------------------------------------------------------------------
+    # A ClusterIssuer is cluster-scoped, so its secretRefs carry no namespace -
+    # they resolve in this one namespace, for every issuer in the cluster. The
+    # chart's default is "same namespace as the release", which is already
+    # cert-manager, so this line changes nothing today and is written out
+    # because it is the only place the coupling is visible: 3b.6 puts
+    # route53-credentials in `cert-manager` and 3b.10's ClusterIssuer names it
+    # with no namespace, and neither of those files can show why that works.
+    #
+    # It is also the value to change if that credential is ever moved, and the
+    # symptom of getting it wrong is a ClusterIssuer stuck Ready=False on a
+    # Secret that plainly exists.
+    clusterResourceNamespace: cert-manager
+# ---------------------------------------------------------------------------
+# Four properties of this release that later steps depend on, recorded here
+# because none of them are visible from the manifest.
+#
+#   1. The chart's post-install hook (startupapicheck, on by default and left
+#      on) runs `cert-manager-ctl check api` and does not let the install report
+#      success until the webhook answers. That is deliberately kept: it is what
+#      makes a Ready HelmRelease here mean "the API accepts Certificates", which
+#      is exactly the precondition 3b.10 needs and exactly what infra-config's
+#      dependsOn is waiting to be told. The hook is post-install only - on an
+#      upgrade the guarantee comes from helm-controller waiting on the webhook
+#      Deployment instead - and it deletes its own Job on success, so it leaves
+#      nothing behind for Flux to reconcile against.
+#   2. cert-manager installs a ValidatingWebhookConfiguration with
+#      failurePolicy: Fail over Certificates, Issuers and ClusterIssuers. So
+#      3b.10's objects are not merely late against a cluster where this has not
+#      converged - they are *rejected*. Layer 1's wait: true is the whole reason
+#      that cannot happen.
+#   3. That webhook's serving certificate is self-signed by cert-manager's own
+#      CA and distributed by its cainjector. It does not come from a
+#      ClusterIssuer, so there is no bootstrap loop, and it does not come from
+#      ESO either - nothing in this release needs a credential. That is why 3b.4
+#      and 3b.7 sit in the same layer with no ordering between them, and it is
+#      the correction to the original plan's dependsOn chain that
+#      ../../infrastructure.yaml describes.
+#   4. One replica, the chart default, deliberately. cert-manager is not on the
+#      HA-required list in TODO_SWARM.md's decision table and it leader-elects
+#      anyway, so a second replica would idle. What a node failure costs is a
+#      reschedule, against a certificate renewed 30 days before a 90-day expiry.
+#
+# And one note on portability, because the two nameservers above look exactly
+# like the kind of value docs/ethos.md says belongs in aerie-cluster-config, and
+# are the opposite. They are not the operator's DNS: they are public recursive
+# resolvers, chosen *because* they are outside the installation. An operator who
+# substituted their own LAN resolver here would be putting back the split-horizon
+# answer this setting exists to route around - so the correct value is identical
+# for every installation, which is the definition that makes it structural and
+# keeps it in git.
+# ---------------------------------------------------------------------------

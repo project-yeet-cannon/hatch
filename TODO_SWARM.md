@@ -900,7 +900,9 @@ nothing below waits on a human except the one explicit stop in step 10.*
       good value. `creationPolicy: Owner` is the opposite trade and deliberate:
       deleting a manifest deletes its Secret, which is what keeps `prune: true`
       honest.*
-- [ ] **7. cert-manager** — controller only; the issuer comes in step 10.
+- [x] **7. cert-manager** —
+      [`controllers/cert-manager.yaml`](deploy/cluster/infrastructure/controllers/cert-manager.yaml),
+      controller only; the issuer comes in step 10.
       Pinned, `crds.enabled: true`, and the two `extraArgs` that 3a.4 exists to
       justify: `--dns01-recursive-nameservers-only` and
       `--dns01-recursive-nameservers=1.1.1.1:53,8.8.8.8:53`.
@@ -909,6 +911,42 @@ nothing below waits on a human except the one explicit stop in step 10.*
       *internal* view of `${DOMAIN}` and will never return the public TXT
       record cert-manager just wrote. The order then hangs until timeout and
       reports what reads like a Route53 permissions failure.
+      *Exit:* `kubectl get crd certificates.cert-manager.io`, and
+      `kubectl -n cert-manager get helmrelease cert-manager` Ready.
+      — *Four things the bullets above didn't say. **Those two flags are set as
+      chart values, not `extraArgs`** — the chart has carried first-class
+      `dns01RecursiveNameserversOnly` / `dns01RecursiveNameservers` for years,
+      and they render precisely the flags named above. It matters because this
+      chart ships a `values.schema.json` with `additionalProperties: false`, so
+      a mistyped value fails the install; `extraArgs` is an unvalidated list of
+      strings, where the same typo is a controller that starts cleanly and
+      simply never reads the setting — which is indistinguishable, from the
+      outside, from the split-horizon failure it was supposed to fix. **The CRD
+      values do not have the shape the neighbouring file does**, which is the
+      trap in reading 3b.4 and 3b.7 together: here `installCRDs` is deprecated
+      and defaults to `false`, and `crds.enabled` is what it aliases. Its
+      partner `crds.keep: true` is a default set explicitly for a failure with
+      no other guard — helm-controller's `install.remediation` **uninstalls**
+      before it retries, so without `keep` a single timed-out image pull would
+      drop the CRDs on the way out and the garbage collector would take every
+      `Certificate`, `Issuer` and `ClusterIssuer` in the cluster with them. The
+      retry then succeeds, and the damage looks unrelated to it. **`clusterResourceNamespace`
+      is the invisible link between 3b.6 and 3b.10** — a `ClusterIssuer` is
+      cluster-scoped, so the `secretRef`s in step 10 carry no namespace and
+      resolve in this one for every issuer in the cluster. It already defaults
+      to the release's namespace, which is already where 3b.6 put
+      `route53-credentials`, so writing it out changes nothing and is the only
+      place that coupling is visible from. And **this file is what makes 3b.6
+      whole**: `cert-manager-route53-credentials.yaml` targets a namespace that
+      only arrives with the component owning it, so between that commit and this
+      one `infra-config` had exactly one object it could not apply. Expected
+      there, resolved here. The budget note is on the release itself — `timeout:
+      5m` rather than 3b.4's `4m`, because this chart's install ends in a
+      post-install hook (`startupapicheck`) that holds success until the webhook
+      actually answers. That wait is kept deliberately: it is what makes a Ready
+      `HelmRelease` here mean "the API accepts Certificates", which is the exact
+      precondition step 10 needs and what `infra-config`'s `dependsOn` is waiting
+      to be told.*
 - [ ] **8. kube-vip** — two components, which the original single bullet hid:
       - **`kube-vip-cloud-provider`**, which assigns addresses to
         `Service type=LoadBalancer`. Phase 2's `--disable servicelb` means the
