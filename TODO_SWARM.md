@@ -762,12 +762,43 @@ nothing below waits on a human except the one explicit stop in step 10.*
       otherwise found as a Flux Kustomization that quietly stopped reconciling.
       It does not validate Flux's CRD schemas — a misspelled `spec` field still
       passes, and step 13 against a real cluster is what catches those.*
-- [ ] **4. External Secrets Operator** — `controllers/external-secrets.yaml`,
+- [x] **4. External Secrets Operator** —
+      [`controllers/external-secrets.yaml`](deploy/cluster/infrastructure/controllers/external-secrets.yaml),
       pinned, `installCRDs: true`. Commit the `external-secrets` Namespace too
       even though Provision 2 already created it: applying an existing namespace
       is a no-op, and a rebuilt cluster shouldn't depend on which of the two ran
       first.
       *Exit:* `kubectl get crd externalsecrets.external-secrets.io`.
+      — *Four things the bullets above didn't say. **The Namespace being
+      committed has a cost, and it is the one Secret nothing can recreate**:
+      `infra-controllers` prunes, so deleting this file deletes the namespace
+      and `aerie-eso-bootstrap` with it, and the only way back is Provision 2's
+      `bootstrap-only` stage. **`installCRDs: true` is already the chart
+      default and is set anyway** — a default that flips upstream would take
+      the CRDs, and therefore every object under `config/`, in a bump that read
+      as routine. This chart templates its CRDs rather than shipping a `crds/`
+      directory, so Helm upgrades them like any other resource (the usual Helm
+      CRD caveat doesn't apply) and `spec.install.crds` / `spec.upgrade.crds`
+      are deliberately absent: they govern a directory this chart doesn't use,
+      so setting them would look like configuration while doing nothing.
+      **Nothing here waits on cert-manager**, despite the release installing a
+      `failurePolicy: Fail` webhook over `SecretStore` and `ExternalSecret` —
+      the serving certificate comes from ESO's own bundled cert-controller,
+      which is why 3b.4 and 3b.7 can share a layer with no ordering between
+      them. What that webhook does mean is that step 5 cannot apply against a
+      cluster where it isn't serving yet: `infra-controllers`' `wait: true`
+      plus helm-controller's own default wait is the whole reason the next step
+      works. And **`timeout` and `retries` are set against the layer's budget,
+      not in isolation** — the 10m on `infra-controllers` is shared by every
+      release in that directory, so an unbounded remediation loop here doesn't
+      fail alone, it starves Longhorn behind it. One retry inside a four-minute
+      ceiling absorbs a timed-out image pull and still reports a real failure
+      as a failure, inside the window. (One note for step 5, from reading the
+      installed CRDs: `external-secrets.io/v1` is the served and stored
+      version, `v1beta1` is gated behind `crds.unsafeServeV1Beta1: false`, and
+      the webhook rules match `v1` only — so a store written against the
+      `v1beta1` examples still findable in older docs fails as an unknown API
+      version.)*
 - [ ] **5. `ClusterSecretStore`** — `config/cluster-secret-store.yaml`, **alone
       in its own file, nothing else beside it**. AWS provider, service
       `ParameterStore`, region `${AWS_REGION}`, authenticating by `secretRef` to

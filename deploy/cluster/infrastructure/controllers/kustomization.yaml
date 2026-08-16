@@ -15,10 +15,14 @@
 #
 # Filled in by TODO_SWARM.md 3b.4 (external-secrets), 3b.7 (cert-manager),
 # 3b.8 (kube-vip and kube-vip-cloud-provider), 3b.11 (longhorn) and
-# 3b.12 (cloudnative-pg). Empty until then, which reconciles cleanly to
-# nothing - the directory has to exist and carry this file, because git does
-# not track an empty one and a Kustomization pointing at a missing path never
-# goes Ready.
+# 3b.12 (cloudnative-pg).
+#
+# The order of this list is not an ordering. Nothing in this layer depends on
+# anything else in it - that was the original plan's mistake, corrected in
+# ../../infrastructure.yaml - so these are listed in step order purely so the
+# file reads against TODO_SWARM.md. Each component brings its own Namespace,
+# HelmRepository and HelmRelease in one file.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-resources: []
+resources:
+  - external-secrets.yaml
