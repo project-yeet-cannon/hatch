@@ -677,9 +677,10 @@ nothing below waits on a human except the one explicit stop in step 10.*
       day spent on what presents as a networking bug. `preflight_only` runs
       every check and the live diff without applying, which is what to dispatch
       before changing a value on a cluster that's already serving.*
-- [ ] **2. Provision 5: node storage prep.**
-      `.github/workflows/provision-5-node-storage.yml` →
-      `scripts/k3s/Initialize-NodeStorage.ps1`, run once per node. Over SSH:
+- [x] **2. Provision 5: node storage prep.**
+      [`.github/workflows/provision-5-node-storage.yml`](.github/workflows/provision-5-node-storage.yml)
+      → [`scripts/k3s/Initialize-NodeStorage.ps1`](scripts/k3s/Initialize-NodeStorage.ps1),
+      run once per node. Over SSH:
       - install `open-iscsi`, `nfs-common`, `cryptsetup`; `systemctl enable
         --now iscsid`. Longhorn attaches volumes over iSCSI to the *host*, so
         these are node packages, not container ones
@@ -697,6 +698,26 @@ nothing below waits on a human except the one explicit stop in step 10.*
       root filesystem, so installing it first means silently filling the OS disk.
       *Exit:* `findmnt /var/lib/longhorn` on every node, with capacity matching
       `-DataDiskSizeGB`.
+      — *Four things the bullets above didn't say. **The disk is never named,
+      and neither is it guessed from one signal**: the script takes whatever is
+      already mounted, else the device carrying the `longhorn` label, else the
+      one empty unpartitioned disk of about the expected size — and refuses
+      ambiguity at every level, including two disks wearing the label. Two
+      rules survive `-Force`, which otherwise only permits wiping an idle
+      formatted disk: a disk with anything mounted from it is never a
+      candidate, and neither is the one holding `/`. **The node has to agree it
+      is the node you named** — `vm_name` is checked against its hostname
+      before anything is written, because a wrong address here formats a disk
+      on the wrong machine. **`nofail` is in the fstab entry on purpose**: no
+      `nofail` means a missing disk halts boot in emergency mode on a headless
+      VM, so instead the node boots and the empty mount point underneath is
+      left `chattr +i`, which is what actually stops Longhorn writing to the OS
+      disk when the mount is absent — it gets `EPERM` rather than free space.
+      (Verified on a live kernel: mounting over an immutable directory works,
+      writing into it unmounted does not.) And **`findmnt --verify` runs after
+      the mount, not before** — it counts a not-yet-existing mount point as an
+      error, and what it adds over `mount` having worked is the boot-time
+      reading: duplicate targets, an unresolvable UUID.*
 - [ ] **3. The Flux tree skeleton** — commit only, no cluster access:
       - `deploy/cluster/kustomization.yaml` — the root Flux reconciles.
         Already committed as an empty-`resources` skeleton, since Provision 3
@@ -981,12 +1002,12 @@ Ranked by what actually bites:
 *Phase 3 adds:*
 [`scripts/k3s/Set-ClusterConfig.ps1`](scripts/k3s/Set-ClusterConfig.ps1),
 [`scripts/k3s/cluster-config.json`](scripts/k3s/cluster-config.json),
-`scripts/k3s/Initialize-NodeStorage.ps1`,
+[`scripts/k3s/Initialize-NodeStorage.ps1`](scripts/k3s/Initialize-NodeStorage.ps1),
 `scripts/k3s/Test-ClusterPlatform.ps1`,
 `scripts/secrets/New-ExternalSecrets.ps1`,
 [`.github/workflows/provision-4-cluster-config.yml`](.github/workflows/provision-4-cluster-config.yml),
-`.github/workflows/provision-5-node-storage.yml`, and the
-`deploy/cluster/infrastructure/` tree.
+[`.github/workflows/provision-5-node-storage.yml`](.github/workflows/provision-5-node-storage.yml),
+and the `deploy/cluster/infrastructure/` tree.
 
 **Modified:** [Program.cs](src/Aerie.Api/Program.cs) (migrations → Job),
 [appsettings.Docker.json](src/Aerie.Api/appsettings.Docker.json) (connection

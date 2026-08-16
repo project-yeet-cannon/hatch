@@ -6,6 +6,7 @@ The cluster's own provisioning scripts, in the order they run:
 |---|---|---|
 | [`Install-K3sNode.ps1`](Install-K3sNode.ps1) | *Provision 1: Install k3s* | **once per node** |
 | [`Set-ClusterConfig.ps1`](Set-ClusterConfig.ps1) | *Provision 4: Cluster configuration* | **once per cluster** |
+| [`Initialize-NodeStorage.ps1`](Initialize-NodeStorage.ps1) | *Provision 5: Node storage* | **once per node** |
 
 Between them sit [`scripts/secrets/`](../secrets/) (Provision 2) and
 [`scripts/flux/`](../flux/) (Provision 3), which are also once per cluster.
@@ -208,8 +209,89 @@ Because every run applies the full key set, a key deleted from
 whole truth rather than an append-only log. The run reports any such key
 before it does it.
 
+## Provision 5 — node storage
+
+TODO_SWARM.md Phase 3b's second step, and the last one that runs **once per
+node**: it prepares the Longhorn data disk Phase 1 attached and deliberately
+left unformatted.
+
+> **Run it before step 3b.11 installs Longhorn.** Longhorn's default data path
+> is `/var/lib/longhorn` *on the root filesystem*, so a cluster that gets
+> Longhorn first quietly fills every node's OS disk with replica data while the
+> 200GB disk attached for exactly this purpose sits idle. The first symptom is a
+> node under disk pressure, not a storage error.
+
+Dispatch it once per node. Nothing it does is shared through etcd — a mounted
+disk lives on one node's own filesystem — which is what puts it in the "once per
+node" column with Provision 1 rather than with 2, 3 and 4.
+
+### Finding the disk without naming it
+
+The one thing this script will not do is take a device name. `/dev/sdb` is not
+stable across reboots under Hyper-V, and a script that hardcodes it is one
+disk-controller reorder away from formatting the wrong thing — which is also
+why the `fstab` entry it writes is keyed by **UUID**. It identifies the disk
+three ways instead, in descending order of certainty:
+
+1. whatever is already mounted at `/var/lib/longhorn`;
+2. otherwise, the device carrying the `longhorn` filesystem label — which
+   survives a wiped fstab, a reordered controller, and a rebuilt OS disk;
+3. otherwise, **the unpartitioned, empty disk of about `data_disk_gb`**.
+
+Ambiguity is refused rather than resolved: two disks that could equally be it,
+or two carrying the label, fails the run and names both. Two rules hold no
+matter what, and `force` does **not** relax either — a disk with anything
+mounted from it anywhere in its tree is never a candidate, and neither is the
+one holding the root filesystem. `force` only allows wiping a disk that has a
+partition table or a filesystem but is otherwise idle.
+
+Before any of that, the node has to agree it is the node you named: the run
+compares `vm_name` against the node's own hostname and stops on a mismatch,
+since a wrong `ip_address` here means formatting a disk on the wrong machine.
+
+### What a run actually does (Provision 5)
+
+1. **Preflight.** Resolves the SSH key, confirms the OpenSSH client is on the
+   runner, confirms the node answers port 22.
+2. **Inspect.** One read-only probe collects the node's identity, its whole
+   block-device tree, the current mount, `/etc/fstab`, and the package state.
+   Everything below is decided from that one snapshot — eight round trips
+   would be eight moments at which the node could change under a decision
+   whose next action is `mkfs`. Prints the disk it picked and the plan.
+3. **Packages.** `open-iscsi`, `nfs-common`, `cryptsetup`, then `systemctl
+   enable --now iscsid`. These are *node* packages: Longhorn attaches volumes
+   over iSCSI to the host, not into a container. `multipath-tools` is expected
+   to be absent on a Debian cloud image; if it isn't, Longhorn's devices are
+   blacklisted from `multipathd` rather than fought with — multipathd claiming
+   them is the classic "volume stuck in Attaching" failure.
+4. **Disk.** `mkfs.ext4 -m 0` (whole disk, no partition table), labelled
+   `longhorn`, then an fstab entry keyed by UUID and the mount.
+5. **Verify.** Re-reads the mount, the generated systemd mount unit, the fstab
+   entry, `findmnt --verify` and `iscsid` from the node — the state Longhorn
+   will actually find at 3b.11 — and checks the capacity is the disk that was
+   asked for rather than the root filesystem.
+
+`preflight_only` runs 1 and 2 and stops, printing which disk it would use and
+what it would change. Re-running against a prepared node reports *nothing
+needed changing* and means it: nothing is reformatted, remounted or rewritten.
+
+### `nofail`, and the immutable mount point
+
+The fstab entry is `defaults,nofail,x-systemd.device-timeout=30s`. Without
+`nofail`, a missing or unreadable data disk stops the boot in emergency mode —
+on a headless VM that is a node which is simply gone until someone opens
+`vmconnect`. With it, the node boots, and the *empty directory underneath* the
+mount is left `chattr +i` so nothing can quietly write Longhorn data to the OS
+disk in the mount's absence. Longhorn fails loudly with `EPERM` instead, which
+is the outcome worth engineering for. Mounting over an immutable directory is
+unaffected — the flag governs writes through the inode, not the mount
+namespace. One consequence: while something *is* mounted there, `lsattr` reads
+the mounted filesystem's root rather than the directory underneath, so the
+guard can't be inspected without unmounting.
+
+The original `/etc/fstab` is copied to `/etc/fstab.aerie-orig` on the first run.
+
 ### Next
 
-- **Provision 5: node storage prep** — the next step, and the next one that
-  genuinely runs **once per node**: it formats and mounts each node's
-  Longhorn data disk. Everything after that is a commit under `deploy/`.
+Everything after this is a commit under [`deploy/`](../../deploy/) — from here
+the cluster changes by commit rather than by command.
