@@ -1003,16 +1003,30 @@ nothing below waits on a human except the one explicit stop in step 10.*
       the LAN returns Traefik's 404 — the correct answer with no routes defined.
       — *Verified against the exact pin, not generic docs: k3s v1.35.7+k3s1's
       own `manifests/traefik.yaml` resolves chart `traefik-40.1.4+up40.1.0`
-      (upstream `traefik-helm-chart` v40.1.0), whose schema nests TLS at
+      (upstream `traefik-helm-chart` v40.1.0), which nests TLS at
       `ports.websecure.http.tls.enabled` — not the flatter, still commonly
-      documented `ports.websecure.tls.enabled` from older chart lines, which
-      this chart's `additionalProperties: false` schema rejects outright
-      rather than silently ignoring. `loadBalancerIP` is
-      kube-vip-cloud-provider's documented "legacy" input (confirmed in
-      `pkg/provider/loadBalancer.go` at the pinned `v0.0.12`): it gets copied
-      once into the `kube-vip.io/loadbalancerIPs` annotation the provider
-      actually reads, so the chart's flat field is a real, supported way in
-      rather than a guess. `publishedService.enabled` is already set by k3s's
+      documented `ports.websecure.tls.enabled` from older chart lines. **Two
+      corrections, both found on 2026-08-16 while diagnosing why the VIP
+      refused every connection.** First, this chart is not schema-validated at
+      all: the Rancher repackage k3s serves ships no `values.schema.json`
+      (verified by extracting it from
+      `/var/lib/rancher/k3s/server/static/charts`), so the
+      `additionalProperties: false` rejection claimed here never happens and
+      the legacy path would be accepted and silently ignored. Second, the VIP
+      is now set as the `kube-vip.io/loadbalancerIPs` annotation via
+      `service.annotations`, **not** as `spec.loadBalancerIP`. The deprecated
+      field does work — kube-vip-cloud-provider's
+      `checkLegacyLoadBalancerIPAnnotation` copies it into that same annotation
+      (`pkg/provider/loadBalancer.go` at the pinned `v0.0.12`) — but only
+      *after* Helm has rendered the Service without it, and in that window
+      kube-vip's watcher sees an address-less Service, builds an instance with
+      `addresses=[] hostnames=[]`, and dies on `lookup : no such host` before
+      it patches `status.loadBalancer.ingress`. The VIP lands on the interface
+      and answers ARP, the Service sits `<pending>` forever, kube-proxy
+      programs nothing, and every connection to `${INGRESS_VIP}:443` is refused
+      by the node's own stack with every object Ready. Rendering the annotation
+      as part of the Service removes the window.
+      `publishedService.enabled` is already set by k3s's
       own base `valuesContent`, set again here anyway since the manifest is
       this step's audit trail against the bullet above it. And
       `HelmChartConfig` carries no status subresource at all (checked against

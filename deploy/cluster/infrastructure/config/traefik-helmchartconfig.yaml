@@ -68,31 +68,58 @@ metadata:
 spec:
   valuesContent: |-
     service:
-      spec:
-        # The one setting this whole step exists for: without it,
-        # kube-vip-cloud-provider still assigns *an* address to this Service
-        # (3b.8's pool holds exactly one), but nothing pins it to the specific
-        # VIP 3a.2 chose and verified free - a real risk the day the pool ever
-        # grows past one entry for a second LoadBalancer Service.
-        #
-        # loadBalancerIP is deprecated in the core Kubernetes API (since 1.24,
-        # superseded everywhere else by provider-specific annotations) but not
-        # removed, and kube-vip-cloud-provider treats it as a first-class,
-        # explicitly-supported "legacy" input: verified against
-        # pkg/provider/loadBalancer.go at the pinned v0.0.12,
-        # checkLegacyLoadBalancerIPAnnotation reads this field once and copies
-        # it into its own kube-vip.io/loadbalancerIPs annotation, which is what
-        # actually drives allocation from then on. Nothing to migrate later -
-        # this is the field the chart exposes, and the chart has no values.
-        # path for setting an annotation directly.
-        #
-        # Unvalidated: unlike the tls block below, `service.spec` has no
-        # values.schema.json shape beyond `type` (checked directly against the
-        # pinned chart's schema), so a typo'd key here - loadBalancerIp, wrong
-        # case - installs cleanly and is silently never read, the same trap
-        # 3b.7's cert-manager footnote and 3b.8's kube-vip footnote both flag
-        # for their own unvalidated values blocks.
-        loadBalancerIP: "${INGRESS_VIP}"
+      # The one setting this whole step exists for: without it,
+      # kube-vip-cloud-provider still assigns *an* address to this Service
+      # (3b.8's pool holds exactly one), but nothing pins it to the specific
+      # VIP 3a.2 chose and verified free - a real risk the day the pool ever
+      # grows past one entry for a second LoadBalancer Service.
+      #
+      # Written as the annotation kube-vip reads directly, and deliberately not
+      # as the core `service.spec.loadBalancerIP` field. Both are supported
+      # inputs that end at the same place - the deprecated field is picked up by
+      # kube-vip-cloud-provider's checkLegacyLoadBalancerIPAnnotation
+      # (pkg/provider/loadBalancer.go at the pinned v0.0.12) and copied into
+      # kube-vip.io/loadbalancerIPs. What differs is *when*, and that turns out
+      # to matter:
+      #
+      # Helm renders the Service carrying no annotation, and the cloud provider
+      # adds it only afterwards. Every helm upgrade therefore re-renders an
+      # address-less Service, and in that window kube-vip's own service watcher
+      # sees a MODIFIED event with nothing to advertise, builds an instance with
+      # `addresses=[] hostnames=[]`, falls through to its hostname path, and
+      # fails on `lookup : no such host`. That error aborts the service-add
+      # before it patches status.loadBalancer.ingress - and the VIP is already
+      # on the interface by that point, so kube-vip goes on answering ARP for an
+      # address whose Service is stuck <pending> with an empty status. kube-proxy
+      # builds its rules from that status, so nothing ever catches 80/443: the
+      # VIP pings, and every TCP connection to it is refused by the node's own
+      # stack. Nothing reports a fault - HelmChartConfig, the helm-install Job,
+      # the Traefik pod and its EndpointSlice are all healthy and Ready.
+      #
+      # Observed exactly this way on 2026-08-16, with `iptables-save | grep
+      # ${INGRESS_VIP}` on the VIP-holding node returning zero rules while the
+      # websecure nodePort had its own. Rendering the annotation as part of the
+      # Service closes the window - it is present in every render, so kube-vip
+      # never sees the address-less state and never enters the failing path.
+      #
+      # `service.annotations` is a first-class value in the pinned chart,
+      # documented in its values.yaml as "Additional annotations applied to both
+      # TCP and UDP services (e.g. for cloud provider specific config)" - which
+      # is this case precisely. An earlier revision of this file asserted the
+      # chart had no way to set an annotation directly; that was wrong.
+      #
+      # Unvalidated, and more broadly than this file used to claim: the Rancher
+      # repackage of traefik-40.1.4+up40.1.0 ships no values.schema.json at all
+      # (verified by extracting the chart k3s actually serves from
+      # /var/lib/rancher/k3s/server/static/charts - its root holds only
+      # Chart.yaml, values.yaml, templates/ and docs). The `# @schema` comments
+      # in values.yaml are inputs to a generator that never ran for this
+      # artifact. Nothing here is schema-checked at install time, so a
+      # misspelled key installs cleanly and is silently never read - the same
+      # trap 3b.7's cert-manager footnote and 3b.8's kube-vip footnote flag for
+      # their own values blocks, and it applies to the ports block below too.
+      annotations:
+        kube-vip.io/loadbalancerIPs: "${INGRESS_VIP}"
     ports:
       websecure:
         http:
@@ -111,14 +138,17 @@ spec:
             # (no `http`) is not this chart's shape at the pinned version -
             # v3's chart nests TLS under the entrypoint's `http` block, next
             # to `redirections` and `middlewares`, because `http` and `http3`
-            # now carry independent settings. Unlike `service.spec` above,
-            # this one *is* schema-validated: `ports.<entrypoint>` sets
-            # `additionalProperties: false` (confirmed in the chart's
-            # generated values.schema.json), so the flatter legacy path is not
-            # silently ignored here - `helm template`/`install` rejects it
-            # outright as an unknown property. A install-time failure either
-            # way, which is the better failure mode of the two footnotes above
-            # and below it.
+            # now carry independent settings. This file previously recorded
+            # that the flatter legacy path would be *rejected* here, on the
+            # strength of `additionalProperties: false` under
+            # `ports.<entrypoint>` in the chart's generated values.schema.json.
+            # It would not be: as the service footnote above now records, the
+            # repackaged chart k3s serves carries no values.schema.json at all,
+            # so `additionalProperties` is never enforced and the legacy path
+            # would be accepted and silently ignored - websecure serving
+            # plaintext on 443 with every object Ready. Getting the path right
+            # is load-bearing on its own; there is no install-time failure
+            # underneath it to catch a mistake.
             enabled: true
     providers:
       kubernetesIngress:
