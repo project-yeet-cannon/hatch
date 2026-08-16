@@ -15,8 +15,13 @@
 # 3b.10 (both ClusterIssuers, the wildcard Certificate, and the TLSStore that
 # actually serves it) and 3b.11 (the longhorn-r2 / longhorn-r3 StorageClasses).
 #
-# Empty until then, for the same reason as ../controllers: the directory has to
-# exist and carry this file, because git does not track an empty one.
+# As in ../controllers, the order of this list is not an ordering: everything
+# here is applied together, and what sequencing exists inside the layer is the
+# objects' own retry loops - an ExternalSecret reconciled a moment before its
+# store is Ready fails once and succeeds on its next attempt. What that retry
+# does not survive is infra-config's 5m wait: an object still not Ready when it
+# expires is a NotReady Kustomization, which is the intended report.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-resources: []
+resources:
+  - cluster-secret-store.yaml

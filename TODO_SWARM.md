@@ -799,13 +799,47 @@ nothing below waits on a human except the one explicit stop in step 10.*
       the webhook rules match `v1` only — so a store written against the
       `v1beta1` examples still findable in older docs fails as an unknown API
       version.)*
-- [ ] **5. `ClusterSecretStore`** — `config/cluster-secret-store.yaml`, **alone
-      in its own file, nothing else beside it**. AWS provider, service
+- [x] **5. `ClusterSecretStore`** —
+      [`config/cluster-secret-store.yaml`](deploy/cluster/infrastructure/config/cluster-secret-store.yaml),
+      **alone in its own file, nothing else beside it**. AWS provider, service
       `ParameterStore`, region `${AWS_REGION}`, authenticating by `secretRef` to
       `aerie-eso-bootstrap`. This is the single file that changes when the
       provider is swapped for in-cluster OpenBao before open-sourcing, which is
       the only reason it's isolated.
-      *Exit:* the store reports `Ready=True`.
+      *Exit:* `kubectl get clustersecretstore aerie-secrets` reports
+      `Ready=True`.
+      — *Four things the bullets above didn't say. **The store's name carries no
+      provider**, which is what actually makes the isolation real: every
+      `ExternalSecret` from step 6 onward names it in `secretStoreRef`, so a
+      store called `aws-parameter-store` would turn the one-file OpenBao swap
+      into a rename across the whole tree. It is `aerie-secrets`. **Omitting
+      `namespace` from the two `secretRef`s is not an error, and that is the
+      trap** — on a `ClusterSecretStore` it means *referent auth*: resolve the
+      Secret in each consuming `ExternalSecret`'s own namespace. ESO then skips
+      validation entirely and the controller still marks the store
+      `Ready=True, Valid`, so this step's exit criterion is satisfiable by a
+      store that has never once looked at a credential, with the failure
+      surfacing later as every `ExternalSecret` unable to find a Secret sitting
+      in `external-secrets`. Both refs name it. **`Ready=True` is enforced but
+      cheap.** Enforced: the CR sets no `Reconciling`/`Stalled` condition and no
+      `observedGeneration`, so kstatus falls through to its last rule — a plain
+      `Ready` condition — and `infra-config`'s `wait: true` holds on it, which
+      is the layer's design working without being told about this object.
+      Cheap: it proves the region string resolves to an endpoint, the bootstrap
+      Secret exists and both keys are readable, and nothing else. Static
+      credentials are validated by *retrieving* them locally, which never calls
+      AWS, so an expired key, a policy missing the bare-path ARN, or a tree
+      seeded into another region all report a perfectly Ready store. Step 6's
+      first synced `ExternalSecret` is the earliest honest proof — the argument
+      for creating `ha/token` and the shipper token now, while nothing consumes
+      them. And **two fields are deliberately absent**: `prefix`, which would
+      let step 6 carry bare keys at the cost of `/aerie` living both here and
+      in [`parameters.json`](scripts/secrets/parameters.json), the one file both
+      halves are supposed to read; and `conditions`, since scoping the store to
+      a namespace list would have to be edited by Phases 4–8 in turn to guard
+      against a tenant creating an `ExternalSecret` — not the threat model of a
+      cluster where write access to this repository is strictly more powerful
+      than the store.*
 - [ ] **6. `ExternalSecret`s** — `config/external-secrets/`, one per entry in
       [`parameters.json`](scripts/secrets/parameters.json) that is
       **`required: true`**. That rule is the correction to the original list,

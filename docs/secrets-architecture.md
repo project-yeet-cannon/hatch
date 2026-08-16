@@ -51,7 +51,11 @@ the nodes it protects.
 **A self-hosted provider — in-cluster OpenBao — is required before
 open-sourcing.** Forcing every home user to open an AWS account to run a home
 server defeats the premise. The `ClusterSecretStore` is deliberately kept in its
-own manifest so that swap touches one file.
+own manifest —
+[`deploy/cluster/infrastructure/config/cluster-secret-store.yaml`](../deploy/cluster/infrastructure/config/cluster-secret-store.yaml)
+— so that swap touches one file. It is named `aerie-secrets` for the same
+reason: every `ExternalSecret` names the store in its `secretStoreRef`, so a
+name describing the provider would make the swap a rename across the tree.
 
 ## Naming convention
 
