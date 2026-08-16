@@ -107,7 +107,7 @@ spec:
   # commit, and watch the same describe output.
   # ###################################################################
   issuerRef:
-    name: letsencrypt-staging
+    name: letsencrypt-prod
     kind: ClusterIssuer
   dnsNames:
     - "*.${DOMAIN}"
