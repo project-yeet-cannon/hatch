@@ -379,16 +379,30 @@ try {
         # kubectl through --from-file, never passing through a shell variable
         # or an argv any local `ps` could read.
         #
-        # tr is what strips the CRLF Windows PowerShell appends when it pipes a
-        # string to a native command. Left in, the carriage return reaches
-        # GitHub as part of the credential - the same baffling 401.
+        # The token crosses as base64 and is decoded here, because -StdIn is a
+        # text channel whose encoding this script does not control and a
+        # credential is the one payload where "near enough" is a 401.
+        #
+        # Two separate corruptions have already been paid for on this pipe: the
+        # CRLF Windows PowerShell appends to a piped string, and a UTF-8 BOM it
+        # prepends on this repo's runner even with $OutputEncoding pinned to a
+        # BOM-less encoding (see Invoke-NodeSsh). Stripping each one as it is
+        # discovered is a losing game - every ambient encoding setting on every
+        # future runner gets a turn, and each one costs a 15-minute round trip
+        # to find. base64 ends the game instead of playing it.
+        #
+        # `tr -dc` is the whole trick: it keeps only the base64 alphabet, so a
+        # BOM, a CR, an LF, or the interleaved NULs of a UTF-16 conversion are
+        # all deleted before the decode without any of them having to be
+        # anticipated by name. What comes out is the exact byte sequence
+        # preflight proved against GitHub, or nothing.
         #
         # $AERIE_TOKEN_FILE is left unquoted deliberately: mktemp's template is
         # fixed here, so the path can't contain whitespace, and a " would not
         # survive the trip anyway.
         $syncLines.Add('AERIE_TOKEN_FILE=$(mktemp /tmp/aerie-flux-token.XXXXXX)')
         $syncLines.Add('trap ''rm -f $AERIE_TOKEN_FILE'' EXIT INT TERM')
-        $syncLines.Add('tr -d ''\r\n'' > $AERIE_TOKEN_FILE')
+        $syncLines.Add('tr -dc ''A-Za-z0-9+/='' | base64 -d > $AERIE_TOKEN_FILE || { echo ''the base64 token payload did not decode on this node - it was truncated or mangled in transit'' >&2; exit 1; }')
         $syncLines.Add('test -s $AERIE_TOKEN_FILE || { echo ''the token never arrived on standard input'' >&2; exit 1; }')
         # Every GitHub PAT - classic, fine-grained, or the legacy 40 hex
         # characters - is drawn from [A-Za-z0-9_] and nothing else. So anything
@@ -398,10 +412,10 @@ try {
         # 401 from source-controller a quarter of an hour later, against a
         # credential preflight has already proved works.
         #
-        # Both known corruptions land here. A UTF-8 BOM from $OutputEncoding
-        # (see Invoke-NodeSsh, which now pins the encoding) and the r/n erasure
-        # from unescaped double quotes (see the same file, which now refuses
-        # them) both leave bytes this rejects.
+        # Belt to the base64 handoff's braces. That transport should make this
+        # unreachable, which is exactly why it stays: it is the assertion that
+        # says so, and it costs one grep. If it ever fires again, the transport
+        # is wrong and this says so in seconds instead of a quarter of an hour.
         $syncLines.Add('grep -qE ''^[A-Za-z0-9_]+$'' $AERIE_TOKEN_FILE || { echo ''the token arrived on this node containing characters no GitHub PAT contains, so something between the runner and here corrupted it in transit - a byte-order mark or an encoding conversion. Refusing to store a credential that would only fail as a 401 much later.'' >&2; exit 1; }')
         # create|apply rather than create: this run may be a re-run, and
         # `kubectl create secret` on an existing Secret is a hard failure.
@@ -436,8 +450,17 @@ try {
     # -StdIn only when there is something to send: Invoke-NodeSsh keys off
     # PSBoundParameters, so passing $null would still pipe an empty line into a
     # remote script that isn't reading one.
+    #
+    # ASCII deliberately, and not merely because a PAT is ASCII: preflight
+    # proved this token against GitHub by encoding it with exactly this
+    # encoding, so these are the same bytes it validated. Anything that somehow
+    # isn't ASCII becomes '?' here, which the node-side grep then rejects - a
+    # loud failure rather than a quiet substitution. The `tr -dc` on the far end
+    # undoes whatever the pipe adds to this; see the remote script above.
     $syncStdIn = @{}
-    if ($token) { $syncStdIn['StdIn'] = $token }
+    if ($token) {
+        $syncStdIn['StdIn'] = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($token))
+    }
 
     Write-Host "Pointing the cluster at $repoUrl ($Branch) at $Path ..."
     $sync = Invoke-NodeSsh @ssh @syncStdIn -Command ($syncLines -join "`n") -ConnectTimeoutSec 30

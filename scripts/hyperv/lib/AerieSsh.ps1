@@ -311,26 +311,38 @@ $Command
         # Function-scoped, so it doesn't leak back to the caller.
         $ErrorActionPreference = 'Continue'
 
-        # $OutputEncoding is what PowerShell encodes a piped string with on its
-        # way into a native command's stdin, and it is ambient state: a machine
-        # profile that has run the widely-copied `$OutputEncoding =
-        # [Text.Encoding]::UTF8` sets it to a UTF8Encoding whose
-        # encoderShouldEmitUTF8Identifier is $true, and PowerShell 5.1 then
-        # writes that preamble - EF BB BF - ahead of the first byte the remote
-        # command reads.
+        # -StdIn is a *text* channel whose encoding this function does not
+        # control, and callers must treat it as one. Read the next paragraph
+        # before sending anything whose exact bytes matter.
         #
-        # Which is exactly as invisible as it sounds. It cost a Flux bootstrap:
-        # the PAT arrived on the node with a BOM welded to its front, `tr -d
-        # '\r\n'` had no reason to remove it, and the credential was written
-        # into the flux-system Secret three bytes too long. Preflight passed,
-        # because preflight encodes the in-process string itself and never
-        # touches this pipe; GitHub answered 401 to a demonstrably correct
-        # token 15 minutes later, inside source-controller, where nothing about
-        # the failure pointed back here.
+        # On this repo's own runner, a string piped through here arrives on the
+        # node with a UTF-8 BOM - EF BB BF - welded to its front. That cost a
+        # Flux bootstrap: the PAT reached the cluster three bytes too long,
+        # preflight passed because preflight encodes the in-process string and
+        # never touches this pipe, and GitHub answered 401 to a demonstrably
+        # correct credential 15 minutes later inside source-controller, where
+        # nothing pointed back here.
         #
-        # Pinned to BOM-less UTF-8 rather than left to whatever the runner
-        # happens to have: stdin to a remote sh is bytes, and no encoding
-        # preamble belongs in it.
+        # $OutputEncoding is the documented knob for this and is pinned below
+        # to a BOM-less encoding. It is not sufficient: the BOM survived the
+        # pin, so on Windows PowerShell 5.1 something other than this variable
+        # is emitting the preamble - the StreamWriter .NET Framework builds
+        # over the child's stdin from [Console]::InputEncoding is the likely
+        # culprit, and that is process-wide state a library function has no
+        # business mutating. The pin stays because it is free and correct in
+        # its own right; it is just not a guarantee.
+        #
+        # So: anything that must arrive byte-exact gets base64'd by the caller
+        # and decoded on the node, which is immune to every ambient encoding
+        # this pipe might acquire rather than a bet on one of them. See
+        # Bootstrap-Flux.ps1's token handoff for the pattern.
+        #
+        # Sync-AerieSecrets.ps1 sends a YAML manifest through here and is left
+        # alone deliberately - the YAML spec permits a byte order mark at the
+        # start of a stream, so kubectl has always accepted what this pipe
+        # hands it. That is luck about the format, not a property of this
+        # channel, and it is exactly why the rule above is written as "byte-
+        # exact payloads base64" rather than "this pipe is fine".
         $OutputEncoding = New-Object Text.UTF8Encoding($false)
 
         if ($PSBoundParameters.ContainsKey('StdIn')) {

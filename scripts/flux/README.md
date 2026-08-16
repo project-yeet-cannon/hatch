@@ -141,6 +141,40 @@ error anywhere. That is not theoretical: it is what broke this stage. `tr -d
 "\r\n"` arrived as `tr -d rn`, silently deleting every `r` and `n` from the
 token, and GitHub answered 401 on a PAT that was perfectly good.
 
+## The token crosses as base64
+
+Standard input is a *text* channel, and PowerShell picks its encoding from
+ambient state no script here owns. On this repo's runner a piped string reaches
+the node with a UTF-8 BOM (`EF BB BF`) welded to its front — pinning
+`$OutputEncoding` to a BOM-less encoding does not stop it, so something below
+that variable is emitting the preamble. The PAT went into the `flux-system`
+Secret three bytes too long, preflight passed because it encodes the
+in-process string and never touches the pipe, and `source-controller` answered
+`401` fifteen minutes later.
+
+Note *why* only this step noticed. Provision 2 pipes a YAML manifest through
+the same helper and is unharmed, because the YAML spec explicitly permits a
+byte order mark at the start of a stream. A credential permits nothing.
+
+Chasing each encoding artifact as it turns up is a losing game — the CRLF was
+the first, the BOM the second, and every future runner's console settings get a
+turn — so the token is base64-encoded before the pipe and decoded on the node:
+
+```sh
+tr -dc 'A-Za-z0-9+/=' | base64 -d > $AERIE_TOKEN_FILE
+```
+
+`tr -dc` keeps only the base64 alphabet, so a BOM, a CR, an LF, or the
+interleaved NULs of a UTF-16 conversion are all dropped without any of them
+having to be anticipated by name. What comes out is byte-for-byte what preflight
+validated against GitHub, or nothing.
+
+A `grep -qE '^[A-Za-z0-9_]+$'` still guards the decoded result, even though the
+transport should make it unreachable. That is the point of it: every GitHub PAT
+is drawn from that set, so if it ever fires, the transport is wrong — and it
+says so in seconds, at the node, instead of as a `401` a quarter of an hour
+later inside a controller.
+
 ## After it succeeds
 
 Nothing new appears in this repo — that's the point. The cluster holds a
