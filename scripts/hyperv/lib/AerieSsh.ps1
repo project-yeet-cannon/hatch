@@ -310,6 +310,29 @@ $Command
 
         # Function-scoped, so it doesn't leak back to the caller.
         $ErrorActionPreference = 'Continue'
+
+        # $OutputEncoding is what PowerShell encodes a piped string with on its
+        # way into a native command's stdin, and it is ambient state: a machine
+        # profile that has run the widely-copied `$OutputEncoding =
+        # [Text.Encoding]::UTF8` sets it to a UTF8Encoding whose
+        # encoderShouldEmitUTF8Identifier is $true, and PowerShell 5.1 then
+        # writes that preamble - EF BB BF - ahead of the first byte the remote
+        # command reads.
+        #
+        # Which is exactly as invisible as it sounds. It cost a Flux bootstrap:
+        # the PAT arrived on the node with a BOM welded to its front, `tr -d
+        # '\r\n'` had no reason to remove it, and the credential was written
+        # into the flux-system Secret three bytes too long. Preflight passed,
+        # because preflight encodes the in-process string itself and never
+        # touches this pipe; GitHub answered 401 to a demonstrably correct
+        # token 15 minutes later, inside source-controller, where nothing about
+        # the failure pointed back here.
+        #
+        # Pinned to BOM-less UTF-8 rather than left to whatever the runner
+        # happens to have: stdin to a remote sh is bytes, and no encoding
+        # preamble belongs in it.
+        $OutputEncoding = New-Object Text.UTF8Encoding($false)
+
         if ($PSBoundParameters.ContainsKey('StdIn')) {
             $StdIn | & ssh.exe @sshArgs 1> $stdout 2> $stderr
         }

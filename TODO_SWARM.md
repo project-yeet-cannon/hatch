@@ -536,7 +536,7 @@ lives only in the cluster. Any of the five failing means re-running the
 matching Provision workflow; all of them are idempotent, so a re-run is the fix
 rather than a repair.
 
-**2. Pick and reserve the ingress VIP.** This is the floating address kube-vip
+**[x] 2. Pick and reserve the ingress VIP.** This is the floating address kube-vip
 answers ARP for, and the one pfSense will eventually point `*.${DOMAIN}` at in
 Phase 7.
 
@@ -556,7 +556,7 @@ Phase 7.
 
   Do not point any DNS at it yet — that's Phase 7, after the cluster serves.
 
-**3. Read the node's network interface name.** kube-vip's ARP mode advertises on
+**[x] 3. Read the node's network interface name.** kube-vip's ARP mode advertises on
 a named interface.
 
 ```sh
@@ -567,9 +567,8 @@ Expect one line, e.g. `eth0` or `ens18`. It will be identical on every node —
 they're built from one golden image — and if it isn't, stop and find out why
 before continuing. Record it as `NODE_INTERFACE`.
 
-**4. Collect the Route53 facts, and confirm the split-horizon problem is real.**
+**[x] 4. Collect the Route53 facts, and confirm the split-horizon problem is real.**
 
-  1. AWS console → **Route53 → Hosted zones →** the zone for `${DOMAIN}` → copy
      the **Hosted zone ID** (`Z...`). Record it as `ROUTE53_HOSTED_ZONE_ID`.
   2. Confirm the zone is publicly delegated:
      `dig +short NS ${DOMAIN} @1.1.1.1` must return four `awsdns` nameservers.
@@ -580,7 +579,7 @@ before continuing. Record it as `NODE_INTERFACE`.
      `dig +short A home.${DOMAIN} @1.1.1.1` returns nothing. That difference is
      expected and is exactly what 3b.7's resolver override exists to survive.
 
-**5. Set the new repository variables.** Settings → Secrets and variables →
+**[x] 5. Set the new repository variables.** Settings → Secrets and variables →
 Actions → **Variables**. Provision 4 (3b.1) reads these and nothing else.
 
 | Variable | Value | New? |

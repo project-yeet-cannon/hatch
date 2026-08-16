@@ -390,6 +390,19 @@ try {
         $syncLines.Add('trap ''rm -f $AERIE_TOKEN_FILE'' EXIT INT TERM')
         $syncLines.Add('tr -d ''\r\n'' > $AERIE_TOKEN_FILE')
         $syncLines.Add('test -s $AERIE_TOKEN_FILE || { echo ''the token never arrived on standard input'' >&2; exit 1; }')
+        # Every GitHub PAT - classic, fine-grained, or the legacy 40 hex
+        # characters - is drawn from [A-Za-z0-9_] and nothing else. So anything
+        # outside that set is damage done in transit rather than a bad token,
+        # and this is the last point at which that is still distinguishable:
+        # one line further on it is a Secret, and the only symptom left is a
+        # 401 from source-controller a quarter of an hour later, against a
+        # credential preflight has already proved works.
+        #
+        # Both known corruptions land here. A UTF-8 BOM from $OutputEncoding
+        # (see Invoke-NodeSsh, which now pins the encoding) and the r/n erasure
+        # from unescaped double quotes (see the same file, which now refuses
+        # them) both leave bytes this rejects.
+        $syncLines.Add('grep -qE ''^[A-Za-z0-9_]+$'' $AERIE_TOKEN_FILE || { echo ''the token arrived on this node containing characters no GitHub PAT contains, so something between the runner and here corrupted it in transit - a byte-order mark or an encoding conversion. Refusing to store a credential that would only fail as a 401 much later.'' >&2; exit 1; }')
         # create|apply rather than create: this run may be a re-run, and
         # `kubectl create secret` on an existing Secret is a hard failure.
         $syncLines.Add('sudo k3s kubectl create secret generic flux-system -n flux-system' +
