@@ -10,8 +10,9 @@
 #
 # Filled in by TODO_SWARM.md 3b.5 (the ClusterSecretStore, alone in its own file
 # because it is the single object that changes when Parameter Store is swapped
-# for in-cluster OpenBao), 3b.6 (one ExternalSecret per required entry in
-# scripts/secrets/parameters.json), 3b.9 (Traefik's HelmChartConfig),
+# for in-cluster OpenBao), 3b.6 (the generated external-secrets/ directory, one
+# ExternalSecret per target Secret named in scripts/secrets/parameters.json,
+# plus the app Namespace two of them land in), 3b.9 (Traefik's HelmChartConfig),
 # 3b.10 (both ClusterIssuers, the wildcard Certificate, and the TLSStore that
 # actually serves it) and 3b.11 (the longhorn-r2 / longhorn-r3 StorageClasses).
 #
@@ -21,7 +22,15 @@
 # store is Ready fails once and succeeds on its next attempt. What that retry
 # does not survive is infra-config's 5m wait: an object still not Ready when it
 # expires is a NotReady Kustomization, which is the intended report.
+# One entry here is a directory rather than a file: external-secrets/ is
+# generated from scripts/secrets/parameters.json by
+# scripts/secrets/New-ExternalSecrets.ps1 and verified by ci.yml, so its own
+# kustomization.yaml is generated with it and this list does not name each
+# manifest. Adding a secret is an edit to parameters.json and a regeneration -
+# nothing in this file moves.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - namespaces.yaml
   - cluster-secret-store.yaml
+  - external-secrets

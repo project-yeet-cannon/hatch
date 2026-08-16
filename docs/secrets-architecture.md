@@ -110,6 +110,34 @@ exists to diagnose: a node that never reaches the network. See
 [`scripts/secrets/README.md`](../scripts/secrets/README.md#secrets-with-no-issuer)
 for the three consumers that have to agree on the value.
 
+### From parameter to Secret
+
+A parameter that nothing reads is not a credential, it is a string in AWS. The
+manifests that read them back — `ExternalSecret`s under
+[`deploy/cluster/infrastructure/config/external-secrets/`](../deploy/cluster/infrastructure/config/external-secrets/)
+— are **generated** from the same `parameters.json`, by
+[`New-ExternalSecrets.ps1`](../scripts/secrets/New-ExternalSecrets.ps1), and
+`ci.yml` fails a build where the two disagree. "Both halves read one file" is
+otherwise a promise that survives exactly as long as someone remembers it.
+
+| Parameter | Kubernetes Secret | From |
+|---|---|---|
+| `cert-manager/route53-*` | `route53-credentials` in `cert-manager`, keys `access-key-id` / `secret-access-key` | Phase 3b.6 |
+| `ha/token` | `home-assistant` in `aerie`, key `token` | Phase 3b.6 |
+| `logging/vm-log-shipper-token` | `vm-log-shipper` in `aerie`, key `token` | Phase 3b.6 |
+| `backup/*`, `postgres/wal-s3-*`, `kiosk/wifi-password`, `tailscale/auth-key` | none yet | the phase that creates the workload reading them |
+
+A credential *pair* is one Secret with two keys, not two Secrets: the two halves
+of an AWS key are useless apart, and splitting them is how a rotation gets
+applied to one and not the other.
+
+The rule for whether a manifest exists at all is `required: true` — enforced,
+not conventional. An `ExternalSecret` pointing at a parameter no run ever seeded
+reports `SecretSyncError` indefinitely, and Flux's `wait: true` promotes that to
+a NotReady Kustomization and a stuck phase gate. The generator refuses the
+combination, and refuses the reverse too: a required parameter with no manifest
+must say in writing which phase adds one.
+
 ### What deliberately stays out
 
 - **`K3S_CLUSTER_TOKEN`, `NODE_SSH_PRIVATE_KEY`** — needed to *build* the

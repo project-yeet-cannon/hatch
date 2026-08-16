@@ -1,0 +1,49 @@
+# GENERATED FILE - do not edit.
+#
+# Secret 'home-assistant' in namespace 'aerie', synced from the 1 parameter(s) below.
+#
+# Source:    scripts/secrets/parameters.json
+# Generator: scripts/secrets/New-ExternalSecrets.ps1
+# Step:      TODO_SWARM.md Phase 3b.6
+#
+# Regenerate:  pwsh ./scripts/secrets/New-ExternalSecrets.ps1
+# Verify:      pwsh ./scripts/secrets/New-ExternalSecrets.ps1 -Check   (ci.yml runs this)
+#
+# An edit here survives until the next run of either, and then loses. The
+# paths, the target namespace, the Secret name and the key inside it are all
+# fields of parameters.json - change one there.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: home-assistant
+  namespace: aerie
+spec:
+  # How long a rotated parameter takes to reach the cluster, worst case.
+  # Each tick is one SSM read per data entry, so this is also the cost: the
+  # whole tree is a handful of calls an hour.
+  refreshInterval: 1h
+  secretStoreRef:
+    # ClusterSecretStore, not SecretStore - one store serves every namespace,
+    # and its name carries no provider so swapping Parameter Store for OpenBao
+    # stays the one-file change ../cluster-secret-store.yaml describes. That
+    # store names the namespace of its own credential explicitly, so nothing
+    # here needs a copy of the bootstrap Secret alongside it.
+    kind: ClusterSecretStore
+    name: aerie-secrets
+  target:
+    name: home-assistant
+    # Owner: ESO creates the Secret and owns it, so deleting this manifest
+    # deletes the Secret with it - which is what makes the git tree the whole
+    # truth. Merge would leave orphans behind after a prune.
+    creationPolicy: Owner
+    # Retain is the default and is set anyway, because the failure it governs
+    # is silent and severe: if the parameter disappears upstream, keep the last
+    # good value and report SecretSyncError, rather than deleting a live
+    # credential out from under a running workload.
+    deletionPolicy: Retain
+  data:
+    # Home Assistant long-lived access token used by Aerie.Api.
+    # Consumed by: Phase 5 Aerie.Api. Synced from 3b.6 with nothing reading it yet, as the end-to-end proof that the store works.
+    - secretKey: token
+      remoteRef:
+        key: /aerie/ha/token

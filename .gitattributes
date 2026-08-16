@@ -3,6 +3,12 @@
 # "unexpected word" syntax errors, since the stray \r becomes part of a token.
 *.sh    text eol=lf
 
+# Manifests under deploy/ are generated with LF by
+# scripts/secrets/New-ExternalSecrets.ps1 and compared against the checkout,
+# byte for byte, by ci.yml. Without this, a checkout on the Windows box turns
+# every generated file into drift the moment core.autocrlf touches it.
+*.yaml  text eol=lf
+
 # necessary for standard line endings for some reason
 *.cs    text
 *.json  text

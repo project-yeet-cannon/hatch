@@ -18,16 +18,66 @@ what "seeding secrets" means here. Running
 when the runner isn't reachable; the workflow is a thin wrapper around the same
 script with the same parameters, so the two can't drift.
 
-## The two files
+## The three files
 
 | File | What |
 |---|---|
-| [`parameters.json`](parameters.json) | The map: every secret the cluster needs, its path under the prefix, and which environment variable supplies it. **No values, ever.** Committed because it's identical for every installation. |
+| [`parameters.json`](parameters.json) | The map: every secret the cluster needs, its path under the prefix, which environment variable supplies it, and — from Phase 3 — which Kubernetes Secret it lands in. **No values, ever.** Committed because it's identical for every installation. |
 | [`Sync-AerieSecrets.ps1`](Sync-AerieSecrets.ps1) | Reads the map, writes the values, verifies them as the ESO identity, applies the bootstrap Secret. |
+| [`New-ExternalSecrets.ps1`](New-ExternalSecrets.ps1) | Reads the same map and renders the `ExternalSecret` manifests that pull the values back out. |
 
 Adding a secret is: add an entry to `parameters.json`, map the repository
-secret or variable onto its `env` name in the workflow, re-run. The Phase 3 `ExternalSecret`
-that consumes it reads the same path.
+secret or variable onto its `env` name in the workflow, re-run — then give it a
+`kubernetes` block and regenerate. Both halves read the one file, so the path
+is written once.
+
+## Getting a secret into the cluster
+
+[`New-ExternalSecrets.ps1`](New-ExternalSecrets.ps1) generates
+[`deploy/cluster/infrastructure/config/external-secrets/`](../../deploy/cluster/infrastructure/config/external-secrets/)
+from the map — one `ExternalSecret` per target Secret, referencing the
+`aerie-secrets` `ClusterSecretStore`. Those manifests are **not hand-edited**;
+`ci.yml` runs the generator with `-Check` and fails the build if the tree and
+the map disagree.
+
+```powershell
+pwsh ./scripts/secrets/New-ExternalSecrets.ps1           # write
+pwsh ./scripts/secrets/New-ExternalSecrets.ps1 -Check    # what CI runs
+```
+
+A parameter reaches the cluster by carrying a `kubernetes` block:
+
+```json
+"kubernetes": {
+  "namespace": "cert-manager",
+  "secretName": "route53-credentials",
+  "secretKey": "access-key-id",
+  "consumedBy": "3b.10 ClusterIssuer, accessKeyIDSecretRef"
+}
+```
+
+Two parameters naming the same `namespace` + `secretName` become **one**
+`ExternalSecret` with two keys — which is how an access key id and its secret
+half stay a single object that can't half-rotate.
+
+The generator refuses two things, and both are the failure it exists to
+prevent:
+
+- a `kubernetes` block on a `required: false` parameter. Nothing seeds an
+  optional value this installation didn't supply, and an `ExternalSecret`
+  pointing at an absent parameter sits in `SecretSyncError` forever — which
+  `infra-config`'s `wait: true` turns into a NotReady Kustomization and a phase
+  gate nobody can pass.
+- a `required: true` parameter with neither a `kubernetes` block nor a
+  `kubernetesDeferred` note. That's the direction that rots quietly: a value
+  seeded on every run and read by nothing looks, from every angle, like a value
+  that works. `backup/*` carries such a note — its CronJob and namespace arrive
+  in Phase 8.
+
+It also rejects a namespace, Secret name or key Kubernetes would reject, two
+parameters claiming one key inside one Secret, and a `$` anywhere in the
+rendered output (Flux's `postBuild` would expand it, and an undefined token
+expands to an empty string rather than an error).
 
 ## One-time setup
 

@@ -1,0 +1,38 @@
+# TODO_SWARM.md Phase 3b.6 - the application namespace, created here because
+# something in this layer has to hold a Secret before Phase 5 exists.
+#
+# 3b.6 syncs ha/token and logging/vm-log-shipper-token now, ahead of anything
+# that reads them, as the first honest proof that the ClusterSecretStore works:
+# Ready=True on the store proves the region parses and the bootstrap Secret is
+# readable, and nothing more (../cluster-secret-store.yaml explains why). An
+# ExternalSecret that reaches SecretSynced is the first thing that has actually
+# called AWS. Both of those parameters belong to the app, so the app's namespace
+# is where they land - which means it exists from here rather than from Phase 5.
+#
+# Consequences worth stating, since this is one object with a long reach:
+#
+#   - Phase 5's Helm chart targets this namespace and must not create it. A
+#     HelmRelease with createNamespace, or a chart that templates its own, gives
+#     two owners to one object and the second to reconcile fights the first.
+#   - infra-config prunes, so deleting this file deletes the namespace and
+#     everything Phase 5 put in it. Unlike external-secrets (3b.4) nothing here
+#     is irreplaceable - every Secret in it comes back from the store - but the
+#     workloads do not.
+#   - Order inside the layer is not a concern: kustomize-controller applies
+#     Namespaces and CRDs as a first stage and waits for them before applying
+#     anything else, so this and the ExternalSecrets in external-secrets/ can
+#     sit in one Kustomization without a dependsOn between them.
+#
+# The other namespace 3b.6 writes into, cert-manager, is deliberately NOT here:
+# it arrives with the component that owns it, in ../../controllers, the same way
+# external-secrets does. That is also the only ordering that works - the layer
+# boundary guarantees a controller's namespace exists before this layer's
+# objects are applied into it. Until 3b.7 lands, expect
+# cert-manager-route53-credentials to be the one object in infra-config that
+# cannot apply.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aerie
+  labels:
+    app.kubernetes.io/part-of: aerie

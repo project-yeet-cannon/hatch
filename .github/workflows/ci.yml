@@ -81,6 +81,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      # The ExternalSecrets under config/external-secrets/ are a rendering of
+      # scripts/secrets/parameters.json (TODO_SWARM.md 3b.6), and
+      # docs/secrets-architecture.md promises both halves of the secret story
+      # read that one file. Hand-maintained duplication is how a promise like
+      # that stops being true quietly, so the rendering is checked rather than
+      # trusted: this fails on an edited manifest, on a parameter that gained a
+      # target and never got one, and on a required parameter nothing consumes
+      # and nothing explains.
+      #
+      # Ahead of the build below because it is the more specific failure - a
+      # stale manifest still builds perfectly, and a missing one is reported
+      # here as "regenerate" rather than as a kustomize resource-not-found.
+      # pwsh is preinstalled on the GitHub-hosted Ubuntu image.
+      - name: Check the generated ExternalSecrets match parameters.json
+        run: pwsh -NoProfile -File scripts/secrets/New-ExternalSecrets.ps1 -Check
+
       - name: Build every kustomization under deploy/
         run: |
           set -euo pipefail

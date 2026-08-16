@@ -840,7 +840,9 @@ nothing below waits on a human except the one explicit stop in step 10.*
       against a tenant creating an `ExternalSecret` — not the threat model of a
       cluster where write access to this repository is strictly more powerful
       than the store.*
-- [ ] **6. `ExternalSecret`s** — `config/external-secrets/`, one per entry in
+- [x] **6. `ExternalSecret`s** —
+      [`config/external-secrets/`](deploy/cluster/infrastructure/config/external-secrets/),
+      one per entry in
       [`parameters.json`](scripts/secrets/parameters.json) that is
       **`required: true`**. That rule is the correction to the original list,
       which named the kiosk Wi-Fi password and CNPG's S3 WAL credentials: both
@@ -852,10 +854,52 @@ nothing below waits on a human except the one explicit stop in step 10.*
       plus `ha/token` and `logging/vm-log-shipper-token` — not consumed until
       Phase 5, but created now as the end-to-end proof that the store works
       while there's still nothing depending on it.
-      Worth a small generator (`scripts/secrets/New-ExternalSecrets.ps1`) plus a
-      CI check that the tree matches `parameters.json`: the docs already promise
-      both halves read one file, and hand-maintained duplication is how that
-      stops being true.
+      Worth a small generator
+      ([`scripts/secrets/New-ExternalSecrets.ps1`](scripts/secrets/New-ExternalSecrets.ps1))
+      plus a CI check that the tree matches `parameters.json`: the docs already
+      promise both halves read one file, and hand-maintained duplication is how
+      that stops being true.
+      *Exit:* every `ExternalSecret` reports `SecretSynced` —
+      `kubectl get externalsecrets -A`. This is the first thing in the build
+      that has actually called AWS.
+      — *Four things the bullets above didn't say. **`required: true` is the
+      rule and it is not the whole rule**, which the paragraph above shows
+      without noticing: `backup/*` is required, is seeded by every Provision 2
+      run, and gets no manifest here, because its CronJob and the namespace it
+      runs in are Phase 8. Left as prose, the rule and the enumeration disagree
+      and whichever a future reader trusts wins silently. So the switch is an
+      explicit `kubernetes` block on the entry — namespace, Secret name, key —
+      and the generator enforces the implication in **both** directions: a
+      block on a `required: false` entry is refused (it is the
+      `SecretSyncError` that never clears, and `infra-config`'s `wait: true`
+      turns that into a stuck phase gate), and a required entry with no block
+      must carry a `kubernetesDeferred` note naming the phase that adds one. A
+      value seeded on every run and read by nothing is otherwise
+      indistinguishable, from every angle, from a value that works. **A
+      credential pair is one Secret with two keys**, so the grouping is by
+      (namespace, Secret name) rather than one object per parameter — the two
+      halves of an AWS key are useless apart, and separate objects are how a
+      rotation reaches one and not the other. That is also why the generator
+      refuses two parameters claiming the same key inside one Secret, which
+      would otherwise resolve as a silent overwrite at sync time. **The two
+      proof secrets needed a namespace, so Phase 3 now creates the app's** —
+      [`config/namespaces.yaml`](deploy/cluster/infrastructure/config/namespaces.yaml),
+      `aerie`, which Phase 5's chart must therefore target rather than create,
+      or two owners fight over one object. No ordering is needed against the
+      `ExternalSecret`s beside it: kustomize-controller applies Namespaces and
+      CRDs as a first stage and waits for them before the rest, which is the
+      same property the whole two-layer split leans on. The one namespace
+      **not** created here is `cert-manager` — it arrives with the component
+      that owns it in 3b.7, exactly as `external-secrets` does — so between this
+      commit and that one, `route53-credentials` is a single object
+      `infra-config` cannot apply. Expected, and it resolves itself. And
+      **`deletionPolicy: Retain` is set explicitly for a failure that is
+      otherwise silent**: it is the default, but if it ever weren't, a
+      parameter that disappeared upstream would take a live credential out from
+      under a running workload rather than reporting a sync error over the last
+      good value. `creationPolicy: Owner` is the opposite trade and deliberate:
+      deleting a manifest deletes its Secret, which is what keeps `prune: true`
+      honest.*
 - [ ] **7. cert-manager** — controller only; the issuer comes in step 10.
       Pinned, `crds.enabled: true`, and the two `extraArgs` that 3a.4 exists to
       justify: `--dns01-recursive-nameservers-only` and
@@ -959,7 +1003,9 @@ nothing below waits on a human except the one explicit stop in step 10.*
 - [ ] The CNPG WAL `ExternalSecret`, deferred here from Phase 3 — its IAM user
       doesn't exist yet, which is why `postgres/wal-s3-*` is `required: false`
       in [`parameters.json`](scripts/secrets/parameters.json). Create the user,
-      seed via Provision 2, flip the entries to required, then add the manifest
+      seed via Provision 2, flip the entries to required, give them a
+      `kubernetes` block and regenerate (3b.6) — the manifest isn't written by
+      hand, and a block on an entry still marked optional is refused
 - [ ] `quartz` database via the `Database` CRD
 - [ ] Quartz DDL via a one-shot Job — mind the missing `IF NOT EXISTS` (Finding 3)
 - [ ] WAL archiving + base backups to S3 → continuous PITR, a strictly better
@@ -975,7 +1021,9 @@ nothing below waits on a human except the one explicit stop in step 10.*
 - [ ] The `kiosk` host's `/` → `/apps/dashboard/` rewrite as a Traefik `Middleware`
 - [ ] The kiosk Wi-Fi `ExternalSecret`, deferred here from Phase 3 — it stays
       `required: false` until the value moves out of `SiteSettings`, and an
-      `ExternalSecret` for an unseeded parameter never reaches `SecretSynced`
+      `ExternalSecret` for an unseeded parameter never reaches `SecretSynced` —
+      which 3b.6's generator now refuses outright rather than leaving to be
+      remembered
 - [ ] **Resource requests and limits on every workload**
 - [ ] Flux image-update-automation watching GHCR and committing tag bumps —
       which removes `cd.yml` entirely rather than rewriting it
@@ -1009,6 +1057,13 @@ nothing below waits on a human except the one explicit stop in step 10.*
 
 - [ ] Migrate to cluster-native backup: CNPG/S3 for Postgres, Longhorn backup
       target → S3 for volumes, restic CronJob for the rest plus the local copy
+- [ ] The `backup/*` `ExternalSecret`, deferred here from Phase 3b.6 — all three
+      values are `required: true` and have been seeded since Phase 2, so this is
+      a `kubernetes` block on each entry in
+      [`parameters.json`](scripts/secrets/parameters.json) and a regeneration,
+      landing them in whatever namespace the CronJob above runs in. Until then
+      the entries carry a `kubernetesDeferred` note pointing here, which is what
+      keeps "seeded but consumed by nothing" a decision rather than an oversight
 - [ ] **Alert on backup age and backup-job failure** — the single most valuable
       alert that doesn't exist today
 - [ ] Export the `/aerie/*` parameter tree into the restic repos on the same
@@ -1095,7 +1150,7 @@ Ranked by what actually bites:
 [`scripts/k3s/cluster-config.json`](scripts/k3s/cluster-config.json),
 [`scripts/k3s/Initialize-NodeStorage.ps1`](scripts/k3s/Initialize-NodeStorage.ps1),
 `scripts/k3s/Test-ClusterPlatform.ps1`,
-`scripts/secrets/New-ExternalSecrets.ps1`,
+[`scripts/secrets/New-ExternalSecrets.ps1`](scripts/secrets/New-ExternalSecrets.ps1),
 [`.github/workflows/provision-4-cluster-config.yml`](.github/workflows/provision-4-cluster-config.yml),
 [`.github/workflows/provision-5-node-storage.yml`](.github/workflows/provision-5-node-storage.yml),
 and the `deploy/cluster/infrastructure/` tree.
