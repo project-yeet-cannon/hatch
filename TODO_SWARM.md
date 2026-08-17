@@ -1226,6 +1226,69 @@ nothing below waits on a human except the one explicit stop in step 10.*
       Run the [portability check](#verification) over `deploy/` before ticking:
       grep the new tree for the base domain, any LAN address, and the VIP. Every
       one of them should appear as a `${...}` substitution and nowhere else.
+      — *[`scripts/k3s/Test-ClusterPlatform.ps1`](scripts/k3s/Test-ClusterPlatform.ps1),
+      wrapped by
+      [`verify-cluster-platform.yml`](.github/workflows/verify-cluster-platform.yml)
+      — deliberately **not** "Provision 6": every Provision workflow changes the
+      cluster and this one writes nothing, so numbering it into that sequence
+      would misdescribe it. **Unticked until its first green run**, for the same
+      reason as 3b.10: the script is committed and the portability grep is clean,
+      but a gate that has never exited 0 has not proved anything. Five things the
+      bullets above didn't say. **It does not stop at the first failure, and that
+      is the one place it departs from every other script here.** The Provision
+      scripts throw immediately and are right to — their next action writes to a
+      disk or to etcd, so continuing past a surprise is how a wrong assumption
+      becomes a wrong filesystem. Nothing here writes anything, and a gate that
+      stops at the first failure costs one dispatch per problem, which across
+      twelve steps is how a bad afternoon becomes a bad week. Its counterpart
+      rule: a check that cannot be **evaluated** is a failure, never a skip —
+      an absent object and an unreachable node both mean *not proven*, and an
+      exit code that treats those as anything else is satisfiable by a cluster
+      that is switched off. **Where a check is made from is part of the check.**
+      3b.8, 3b.9 and 3b.10's exit criteria are evaluated from the runner over the
+      LAN — one raw TLS handshake to `${INGRESS_VIP}:443` carrying
+      `home.${DOMAIN}` as SNI, which is what `openssl s_client -servername` does
+      and what no DNS record resolves until Phase 7 — because a node asked
+      whether the VIP answers can say yes about its own loopback while every LAN
+      client sees nothing, which is precisely the failure 3b.9 spent a day on.
+      For the same reason 3b.2's mount is checked on **every node the cluster
+      reports**, not on the one dispatched against: a mounted disk is not shared
+      through etcd, so asking one node has proven one third of the property.
+      **It takes no repository variables at all.** Everything it compares against
+      comes from the cluster's own `aerie-cluster-config` and from the two
+      committed maps, so adding a key to
+      [`cluster-config.json`](scripts/k3s/cluster-config.json) or a `kubernetes`
+      block to [`parameters.json`](scripts/secrets/parameters.json) makes this
+      gate require it with no edit here — the same pointer-half discipline 3b.1
+      and 3b.6 already lean on. **Several checks assert the trap rather than the
+      happy path**, which is what makes them worth a script: that both of the
+      `ClusterSecretStore`'s `secretRef`s carry a namespace (without it ESO
+      skips validation entirely and reports `Ready=True` over a store that has
+      never read a credential — 3b.5's exit criterion is satisfiable by a store
+      that does nothing); that cert-manager's two DNS-01 flags are on the
+      running container's **command line**, not merely in the manifest, since a
+      value the chart never read is indistinguishable from the split-horizon
+      failure it was set to fix; that exactly one `TLSStore` is named `default`
+      cluster-wide, since Traefik deletes the default store outright on finding
+      two and puts every hostname silently back on its self-signed certificate;
+      that the Traefik Service carries `kube-vip.io/loadbalancerIPs` rather than
+      the deprecated field; that Longhorn's **read-back** `default-replica-count`
+      and the `longhorn` class's own `numberOfReplicas` both match, since
+      Longhorn logs and skips a setting it cannot parse; and that no Flux object
+      is `suspend`ed, which is how an object reports Ready about a
+      reconciliation that stopped weeks ago. And **the portability check splits
+      in two, because its halves need different things.** The repo-only half is
+      in [`ci.yml`](.github/workflows/ci.yml) and runs on every PR: no address
+      literal anywhere under `deploy/` (bar the two public DNS-01 resolvers),
+      and every `${TOKEN}` in the **built** output — comments stripped, so the
+      ones in `infrastructure.yaml` explaining this hazard don't trip it — is a
+      key `cluster-config.json` declares, which is the only thing that catches
+      `${DOMIAN}`, an undefined token being an empty string rather than an
+      error. The half that greps for the base domain and the VIP themselves
+      cannot live there at all: [ethos](docs/ethos.md) keeps those values out of
+      the repository, so the gate is the only place the tree and the values are
+      both present.*
+- [ ] **14. K3s apply failure alerting** - user question: what happens if a push to main fails to apply when the cluster pulls it down? will there be an ability to run a check as a gate on a PR for changes? it would be great to see a failed build in github if possible, not sure how feasible that is. what other options are there?
 
 ### Phase 4 — Data tier
 
@@ -1353,7 +1416,8 @@ Ranked by what actually bites:
 - **Phase 0 gate** — a real restore completed onto a scratch VM before any
   cluster work begins
 - **Per phase** — `flux get all` clean; `kubectl get nodes` all Ready
-- **Phase 3 gate** — `scripts/k3s/Test-ClusterPlatform.ps1` exits 0 (Phase 3b.13)
+- **Phase 3 gate** — [`scripts/k3s/Test-ClusterPlatform.ps1`](scripts/k3s/Test-ClusterPlatform.ps1)
+  exits 0 (Phase 3b.13), dispatched as *Verify: Cluster platform*
 - **HA proof (the real test)** — hard-power-off one node and confirm the VIP
   moves and the site stays up, CNPG promotes a replica, API pods reschedule, and
   Longhorn volumes rebuild. Do this for **each** of the three nodes, not just one
@@ -1382,15 +1446,17 @@ Ranked by what actually bites:
 [`scripts/k3s/Set-ClusterConfig.ps1`](scripts/k3s/Set-ClusterConfig.ps1),
 [`scripts/k3s/cluster-config.json`](scripts/k3s/cluster-config.json),
 [`scripts/k3s/Initialize-NodeStorage.ps1`](scripts/k3s/Initialize-NodeStorage.ps1),
-`scripts/k3s/Test-ClusterPlatform.ps1`,
+[`scripts/k3s/Test-ClusterPlatform.ps1`](scripts/k3s/Test-ClusterPlatform.ps1),
 [`scripts/secrets/New-ExternalSecrets.ps1`](scripts/secrets/New-ExternalSecrets.ps1),
 [`.github/workflows/provision-4-cluster-config.yml`](.github/workflows/provision-4-cluster-config.yml),
 [`.github/workflows/provision-5-node-storage.yml`](.github/workflows/provision-5-node-storage.yml),
+[`.github/workflows/verify-cluster-platform.yml`](.github/workflows/verify-cluster-platform.yml),
 and the `deploy/cluster/infrastructure/` tree.
 
 **Modified:** [Program.cs](src/Aerie.Api/Program.cs) (migrations → Job),
 [appsettings.Docker.json](src/Aerie.Api/appsettings.Docker.json) (connection
-strings → env), [ci.yml](.github/workflows/ci.yml) (secret scanning),
+strings → env), [ci.yml](.github/workflows/ci.yml) (secret scanning; the
+repo-side half of 3b.13's portability check),
 [containers/fluent-bit/](containers/fluent-bit/),
 [containers/prometheus/prometheus.yml](containers/prometheus/prometheus.yml),
 [containers/aerie-db/pginit.sql](containers/aerie-db/pginit.sql)

@@ -7,6 +7,7 @@ The cluster's own provisioning scripts, in the order they run:
 | [`Install-K3sNode.ps1`](Install-K3sNode.ps1) | *Provision 1: Install k3s* | **once per node** |
 | [`Set-ClusterConfig.ps1`](Set-ClusterConfig.ps1) | *Provision 4: Cluster configuration* | **once per cluster** |
 | [`Initialize-NodeStorage.ps1`](Initialize-NodeStorage.ps1) | *Provision 5: Node storage* | **once per node** |
+| [`Test-ClusterPlatform.ps1`](Test-ClusterPlatform.ps1) | *Verify: Cluster platform* | **read-only, any time** |
 
 Between them sit [`scripts/secrets/`](../secrets/) (Provision 2) and
 [`scripts/flux/`](../flux/) (Provision 3), which are also once per cluster.
@@ -295,3 +296,63 @@ The original `/etc/fstab` is copied to `/etc/fstab.aerie-orig` on the first run.
 
 Everything after this is a commit under [`deploy/`](../../deploy/) — from here
 the cluster changes by commit rather than by command.
+
+## Verify — the Phase 3 gate
+
+TODO_SWARM.md Phase 3b's last step. Steps 3b.1–3b.12 each carry an *Exit* line;
+[`Test-ClusterPlatform.ps1`](Test-ClusterPlatform.ps1) asserts all of them in
+one run and exits 0 or non-zero. "Phase 3 is done" should be something that
+exits 0, not something remembered — and the same run is the smoke test after a
+node rebuild, a restore, or before starting Phase 4.
+
+**Read-only.** It writes nothing, to the cluster or to a node, so it is safe to
+dispatch at any time and safe to re-run. That is also why its workflow is
+*Verify: Cluster platform* rather than "Provision 6": every Provision workflow
+changes something, and numbering a verification step into that sequence would
+misdescribe it.
+
+### It takes no repository variables
+
+Everything it compares against comes from the cluster's own
+`aerie-cluster-config` ConfigMap and from the two committed maps —
+[`cluster-config.json`](cluster-config.json) and
+[`parameters.json`](../secrets/parameters.json). Add a key to the first, or a
+`kubernetes` block to the second, and this gate requires it without being
+edited. The one input is `data_disk_gb`, which describes what Phase 1 attached
+and must match what Provision 5 was given.
+
+### Three properties that make it a gate
+
+- **It does not stop at the first failure.** Every other script here throws
+  immediately, correctly — their next action writes to a disk or to etcd. This
+  one changes nothing, so it evaluates everything and prints one table. A gate
+  that stops at the first failure costs one dispatch per problem.
+- **A check it cannot evaluate is a failure, not a skip.** An absent object and
+  an unreachable node both mean *not proven*, and an exit code that treats
+  those as anything else can be satisfied by a cluster that is switched off.
+- **Where a check is made from is part of the check.** The VIP answering,
+  Traefik answering and the certificate being the production wildcard are all
+  evaluated **from the runner, over the LAN** — a raw TLS handshake against
+  `${INGRESS_VIP}:443` with `home.${DOMAIN}` as SNI, which is what
+  `openssl s_client -servername` does and what no DNS record yet resolves. A
+  node asked the same question can answer yes about its own loopback while
+  every client on the LAN sees nothing, which is exactly the kube-vip failure
+  3b.9 documents. Everything else is cluster state, read through
+  `sudo k3s kubectl` on whichever server was named.
+
+`3b.2`'s mount is checked on **every node the cluster reports**, not on the one
+dispatched against — a mounted disk is not shared through etcd, so asking one
+node has proven one third of the property.
+
+### The portability half
+
+3b.13 also asks for the [portability
+check](../../TODO_SWARM.md#verification) over `deploy/`: the base domain, any
+LAN address and the VIP should appear as `${...}` substitutions and nowhere
+else. That splits in two, because the two halves need different things:
+
+| Check | Where | Why there |
+|---|---|---|
+| No address literal anywhere under `deploy/` | [`ci.yml`](../../.github/workflows/ci.yml) | Needs no per-installation value, so it runs on every PR |
+| Every `${TOKEN}` in the built output is a declared key | [`ci.yml`](../../.github/workflows/ci.yml) | Flux expands an undefined token to the empty string, so `${DOMIAN}` is not a failed reconciliation — it is an Ingress with no host |
+| The base domain and VIP appear in no file under `deploy/` | this script | Needs the actual values, which [`docs/ethos.md`](../../docs/ethos.md) keeps out of the repository — the cluster's ConfigMap is the only place both halves exist at once |
