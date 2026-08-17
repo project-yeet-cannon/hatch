@@ -6,6 +6,14 @@ Aerie is built to be redeployed, not just deployed — every operator-specific
 value is a parameter, and no secret material is committed. See
 [docs/ethos.md](docs/ethos.md) before adding configuration.
 
+## Deployment
+
+Two delivery paths, running in opposite directions: the legacy Windows host is
+pushed to by GitHub Actions, and the k3s cluster pulls from this repo via Flux.
+See [docs/delivery-architecture.md](docs/delivery-architecture.md) for what
+happens when you push, what a push *doesn't* change, and how to watch a cluster
+change land.
+
 ## Aerie.API
 
 `make run` to run it.

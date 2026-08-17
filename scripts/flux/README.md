@@ -189,6 +189,11 @@ sudo env KUBECONFIG=/etc/rancher/k3s/k3s.yaml flux get sources git
 sudo env KUBECONFIG=/etc/rancher/k3s/k3s.yaml flux get kustomizations
 ```
 
+For the steady state this bootstraps into — what a push to `main` actually
+triggers, the poll and reconcile intervals, what still needs a dispatched
+workflow instead of a commit, and how to debug a change that hasn't landed —
+see [`docs/delivery-architecture.md`](../../docs/delivery-architecture.md).
+
 ## Still manual
 
 - **Choosing which node to install from.** `kubectl` and Flux target one
