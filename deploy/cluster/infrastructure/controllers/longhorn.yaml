@@ -252,6 +252,13 @@ spec:
 #      default-replica-count -o jsonpath='{.value}'` is the read-back, and
 #      3b.13's gate is where it belongs.
 #
+#      Expect `{"v1":"2","v2":"2"}` rather than `2`. On this chart version the
+#      data-engine-specific settings hold one value per engine, and a scalar
+#      written here is expanded into both - so the read-back does not compare
+#      equal to what was set, and a hand check against "2" concludes the
+#      opposite of the truth. Longhorn 1.11 is what this repository pins; a
+#      cluster that answers with a bare scalar is an older one.
+#
 # And one thing deliberately absent: no Ingress. The chart can publish the
 # Longhorn UI (ingress.enabled), and the wildcard certificate from 3b.10 would
 # serve it happily - but the UI has no authentication of its own, so that is an

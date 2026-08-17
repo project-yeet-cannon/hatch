@@ -344,6 +344,26 @@ and must match what Provision 5 was given.
 dispatched against — a mounted disk is not shared through etcd, so asking one
 node has proven one third of the property.
 
+### A roll-out in flight looks like a failure, so it is named as one
+
+The gate takes one instantaneous sample. Push a commit and dispatch it a minute
+later and `infra-config` reports
+`DependencyNotReady: dependency 'flux-system/infra-controllers' revision is not
+up to date` — which reads like a broken `dependsOn` and is nothing of the kind.
+`Ready` is reported against whatever revision a layer last *applied*, while
+`dependsOn` is enforced against the revision the *source* currently holds, so
+the two disagree for as long as `infra-controllers` takes to roll the new
+commit forward — up to its `timeout: 10m`, because `wait: true` holds it until
+every HelmRelease under it is healthy.
+
+The **Layers are at the committed revision** check exists to say which case it
+is: it prints the GitRepository's revision and each layer's applied one, so a
+lag is visible as a lag. It is still a failure — three Ready Kustomizations
+pinned to last week's commit satisfy every other assertion in this file, and
+"the cluster matches the tree" is what 3b.3 actually claims — but it is a
+failure that clears by re-running once the roll-out lands, rather than one to
+debug.
+
 ### The portability half
 
 3b.13 also asks for the [portability

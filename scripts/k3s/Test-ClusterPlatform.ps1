@@ -314,6 +314,69 @@ function Format-Size {
     return '{0:N1} GiB' -f ($Bytes / 1GB)
 }
 
+function Format-Revision {
+    <#
+    .SYNOPSIS
+        Shortens a Flux source revision to something a table column can hold.
+    #>
+    param([AllowNull()][string]$Revision)
+    if ([string]::IsNullOrWhiteSpace($Revision)) { return '(none)' }
+    # `main@sha1:6b59a9...` - the branch is the half that identifies it to a
+    # human, and seven hex digits is what git itself considers enough.
+    if ($Revision -match '^(?<branch>[^@]+)@sha\d+:(?<sha>[0-9a-f]{7})') {
+        return "$($Matches['branch'])@$($Matches['sha'])"
+    }
+    if ($Revision.Length -gt 24) { return $Revision.Substring(0, 23) + '…' }
+    return $Revision
+}
+
+function Get-LonghornSettingValues {
+    <#
+    .SYNOPSIS
+        Splits a Longhorn Setting's value into one entry per data engine,
+        covering both shapes the field takes.
+
+    .DESCRIPTION
+        Longhorn made its data-engine-specific settings - default-replica-count
+        among them - hold a JSON object keyed by engine rather than a bare
+        string, so a chart that writes `defaultReplicaCount: "2"` reads back as
+        {"v1":"2","v2":"2"} on 1.11. Settings that are not engine-specific are
+        still plain scalars, and both forms are current in the same cluster.
+
+        This matters more than a format detail, because the check above it is a
+        *read-back*: comparing the raw string to the expected count reports a
+        correctly configured cluster as broken, which is the one failure mode a
+        gate cannot have. A gate that cries wolf is a gate that gets ignored,
+        and then the real wrong-replica-count goes with it.
+
+        Returns one object per engine (Engine = $null for the scalar form), or
+        an empty array for a value that is neither - which the caller reports as
+        a failure rather than as a pass, since an unrecognised shape means the
+        setting was not read at all.
+    #>
+    param([AllowNull()][AllowEmptyString()][string]$Value)
+
+    $trimmed = ([string]$Value).Trim()
+    if ([string]::IsNullOrWhiteSpace($trimmed)) { return @() }
+
+    if (-not $trimmed.StartsWith('{')) {
+        return @([pscustomobject]@{ Engine = $null; Value = $trimmed })
+    }
+
+    $parsed = $null
+    try { $parsed = $trimmed | ConvertFrom-Json }
+    catch { return @() }
+    if ($null -eq $parsed) { return @() }
+
+    $entries = New-Object Collections.Generic.List[psobject]
+    foreach ($property in $parsed.PSObject.Properties) {
+        $entries.Add([pscustomobject]@{ Engine = $property.Name; Value = [string]$property.Value })
+    }
+    # Plain `@( )`, never `,@( )` - see Get-Items for why the comma operator
+    # cannot be used here.
+    return @($entries)
+}
+
 $script:Checks = New-Object Collections.Generic.List[psobject]
 function Add-Check {
     <#
@@ -618,48 +681,62 @@ try {
     # the difference between this reporting eleven results and one error.
     # `-o json` throughout rather than jsonpath or custom-columns: the parsing
     # happens here, where a shape that is not what was expected can be reported
-    # as such instead of silently yielding an empty string.
+    # as such instead of silently yielding an empty string. That is a rule with
+    # teeth - the one line that broke it, a jsonpath read of Longhorn's replica
+    # setting, is also the one whose output carried no trailing newline and so
+    # arrived glued to the marker after it as `{"v1":"2","v2":"2"}--- end`.
+    #
+    # Hence `printf` rather than `echo` for the markers: the leading \n means a
+    # command whose last line is unterminated can no longer swallow the section
+    # boundary behind it. Get-ProbeSection trims, so the extra blank line
+    # between sections costs nothing, and the next command added here cannot
+    # re-arm the trap by forgetting.
     $probeScript = @(
-        'echo ''--- nodes'''
+        'printf ''\n--- nodes\n'''
         'sudo k3s kubectl get nodes -o json 2>/dev/null || echo {}'
-        'echo ''--- clusterconfig'''
+        'printf ''\n--- clusterconfig\n'''
         'sudo k3s kubectl -n flux-system get configmap aerie-cluster-config -o json 2>/dev/null || echo {}'
-        'echo ''--- kustomizations'''
+        # The source every Kustomization below is measured against. Ready is
+        # reported against whatever revision a layer last applied, which is not
+        # necessarily the one that is committed.
+        'printf ''\n--- gitrepository\n'''
+        'sudo k3s kubectl -n flux-system get gitrepositories.source.toolkit.fluxcd.io flux-system -o json 2>/dev/null || echo {}'
+        'printf ''\n--- kustomizations\n'''
         'sudo k3s kubectl -n flux-system get kustomizations.kustomize.toolkit.fluxcd.io -o json 2>/dev/null || echo {}'
-        'echo ''--- helmreleases'''
+        'printf ''\n--- helmreleases\n'''
         'sudo k3s kubectl get helmreleases.helm.toolkit.fluxcd.io -A -o json 2>/dev/null || echo {}'
-        'echo ''--- crds'''
+        'printf ''\n--- crds\n'''
         'sudo k3s kubectl get crd -o name 2>/dev/null || true'
-        'echo ''--- clustersecretstores'''
+        'printf ''\n--- clustersecretstores\n'''
         'sudo k3s kubectl get clustersecretstores.external-secrets.io -o json 2>/dev/null || echo {}'
-        'echo ''--- externalsecrets'''
+        'printf ''\n--- externalsecrets\n'''
         'sudo k3s kubectl get externalsecrets.external-secrets.io -A -o json 2>/dev/null || echo {}'
         # Names only. Never `-o json` over Secrets: this output is printed to a
         # run log, and the one thing that must not reach a run log is the thing
         # the whole ESO design exists to keep out of git.
-        'echo ''--- secretnames'''
+        'printf ''\n--- secretnames\n'''
         'sudo k3s kubectl get secret -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name --no-headers 2>/dev/null || true'
-        'echo ''--- certmanagerdeploy'''
+        'printf ''\n--- certmanagerdeploy\n'''
         'sudo k3s kubectl -n cert-manager get deployment cert-manager -o json 2>/dev/null || echo {}'
-        'echo ''--- clusterissuers'''
+        'printf ''\n--- clusterissuers\n'''
         'sudo k3s kubectl get clusterissuers.cert-manager.io -o json 2>/dev/null || echo {}'
-        'echo ''--- certificates'''
+        'printf ''\n--- certificates\n'''
         'sudo k3s kubectl get certificates.cert-manager.io -A -o json 2>/dev/null || echo {}'
-        'echo ''--- kubevippool'''
+        'printf ''\n--- kubevippool\n'''
         'sudo k3s kubectl -n kube-system get configmap kubevip -o json 2>/dev/null || echo {}'
-        'echo ''--- traefiksvc'''
+        'printf ''\n--- traefiksvc\n'''
         'sudo k3s kubectl -n kube-system get service traefik -o json 2>/dev/null || echo {}'
-        'echo ''--- helmchartconfig'''
+        'printf ''\n--- helmchartconfig\n'''
         'sudo k3s kubectl -n kube-system get helmchartconfigs.helm.cattle.io traefik -o json 2>/dev/null || echo {}'
-        'echo ''--- tlsstores'''
+        'printf ''\n--- tlsstores\n'''
         'sudo k3s kubectl get tlsstores.traefik.io -A -o json 2>/dev/null || echo {}'
-        'echo ''--- storageclasses'''
+        'printf ''\n--- storageclasses\n'''
         'sudo k3s kubectl get storageclasses.storage.k8s.io -o json 2>/dev/null || echo {}'
-        'echo ''--- longhornnodes'''
+        'printf ''\n--- longhornnodes\n'''
         'sudo k3s kubectl -n longhorn-system get nodes.longhorn.io -o json 2>/dev/null || echo {}'
-        'echo ''--- longhornreplicas'''
-        'sudo k3s kubectl -n longhorn-system get settings.longhorn.io default-replica-count -o jsonpath=''{.value}'' 2>/dev/null || true'
-        'echo ''--- end'''
+        'printf ''\n--- longhornreplicas\n'''
+        'sudo k3s kubectl -n longhorn-system get settings.longhorn.io default-replica-count -o json 2>/dev/null || echo {}'
+        'printf ''\n--- end\n'''
     ) -join '; '
 
     $probe = Invoke-NodeSsh @ssh -Command $probeScript -ConnectTimeoutSec 30
@@ -674,6 +751,7 @@ try {
 
     $nodeList = ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'nodes'
     $clusterConfig = ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'clusterconfig'
+    $gitRepository = ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'gitrepository'
     $kustomizations = @(Get-Items (ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'kustomizations'))
     $helmReleases = @(Get-Items (ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'helmreleases'))
     $crdNames = @((Get-ProbeSection -Output $probe.StdOut -Name 'crds') -split "`n" | ForEach-Object { $_.Trim() -replace '^customresourcedefinition\.apiextensions\.k8s\.io/', '' } | Where-Object { $_ })
@@ -689,7 +767,7 @@ try {
     $tlsStores = @(Get-Items (ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'tlsstores'))
     $storageClasses = @(Get-Items (ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'storageclasses'))
     $longhornNodes = @(Get-Items (ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'longhornnodes'))
-    $longhornReplicas = (Get-ProbeSection -Output $probe.StdOut -Name 'longhornreplicas').Trim()
+    $longhornReplicas = [string](Get-Path (ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'longhornreplicas') 'value')
 
     # ---------------------------------------------------------------- #
     Write-Stage 'Cluster'
@@ -753,6 +831,43 @@ try {
         $kustomization = $kustomizations | Where-Object { (Get-Path $_ 'metadata.name') -eq $name } | Select-Object -First 1
         [void](Add-ObjectReadyCheck -Step '3b.3' -Name "Kustomization $name" -Object $kustomization `
                 -MissingDetail 'not found in flux-system')
+    }
+
+    # Ready is reported against whatever revision a layer last *applied*, while
+    # dependsOn is enforced against the revision the source currently holds. A
+    # commit that has reached the GitRepository but not yet reached
+    # infra-controllers therefore surfaces above as infra-config failing with
+    # "dependency 'flux-system/infra-controllers' revision is not up to date" -
+    # which reads like a broken dependency and is usually a roll-out in flight.
+    # Without this line the operator debugs the wrong thing.
+    #
+    # It earns its place as a check rather than a diagnostic, though: 3b.3's
+    # exit criterion is that the cluster matches the tree, and three Ready
+    # Kustomizations all pinned to last week's commit satisfy every other
+    # assertion in this file.
+    $sourceRevision = [string](Get-Path $gitRepository 'status.artifact.revision')
+    if ([string]::IsNullOrWhiteSpace($sourceRevision)) {
+        Add-Check -Step '3b.3' -Name 'Layers are at the committed revision' -Status 'Fail' `
+            -Detail 'the flux-system GitRepository has no artifact, so Flux has never fetched the repository and the layers above are reconciling against nothing'
+    }
+    else {
+        $behind = New-Object Collections.Generic.List[string]
+        foreach ($name in @('flux-system', 'infra-controllers', 'infra-config')) {
+            $kustomization = $kustomizations | Where-Object { (Get-Path $_ 'metadata.name') -eq $name } | Select-Object -First 1
+            # A missing one already failed above; reporting it twice buries the
+            # finding that matters under the one that follows from it.
+            if ($null -eq $kustomization) { continue }
+            $applied = [string](Get-Path $kustomization 'status.lastAppliedRevision')
+            if ($applied -ne $sourceRevision) { $behind.Add("$name at $(Format-Revision $applied)") }
+        }
+
+        if ($behind.Count -eq 0) {
+            Add-Check -Step '3b.3' -Name 'Layers are at the committed revision' -Status 'Pass' -Detail (Format-Revision $sourceRevision)
+        }
+        else {
+            Add-Check -Step '3b.3' -Name 'Layers are at the committed revision' -Status 'Fail' `
+                -Detail "the repository is at $(Format-Revision $sourceRevision); $($behind -join ', '). kustomize-controller reconciles on a source change rather than waiting for its interval, so this is a roll-out still in flight - re-run once it lands - unless the layer is also not Ready above, which is the case where the commit is being refused"
+        }
     }
 
     # --- CRDs, per the step that installs each ------------------------
@@ -1017,15 +1132,38 @@ try {
     # ships no values schema and its manager logs and *skips* a value that
     # fails to parse or falls out of range, so a wrong replica count is not a
     # failed install - it is Longhorn quietly running on 3.
+    #
+    # The value arrives in one of two shapes - a bare count, or one count per
+    # data engine - so it is compared per engine. Every engine present has to
+    # match, because both are written from the single ${LONGHORN_REPLICA_COUNT}
+    # token: a divergence between v1 and v2 means something other than this
+    # repository set one of them. An operator who wants them to differ has a
+    # one-line edit here and a reason to write down.
+    $settingValues = @(Get-LonghornSettingValues -Value $longhornReplicas)
     if ($null -eq $replicaCount) {
         Add-Check -Step '3b.11' -Name 'default-replica-count setting' -Status 'Fail' -Detail 'LONGHORN_REPLICA_COUNT is not in the ConfigMap'
     }
-    elseif ($longhornReplicas -eq $replicaCount) {
-        Add-Check -Step '3b.11' -Name 'default-replica-count setting' -Status 'Pass' -Detail $longhornReplicas
+    elseif ($settingValues.Count -eq 0) {
+        Add-Check -Step '3b.11' -Name 'default-replica-count setting' -Status 'Fail' `
+            -Detail $(if ([string]::IsNullOrWhiteSpace($longhornReplicas)) {
+                    'the Setting default-replica-count has no value, or does not exist - Longhorn creates it on first start, so an empty one means the manager never came up'
+                }
+                else {
+                    "Longhorn reports '$longhornReplicas', which is neither a count nor a per-engine JSON object. Longhorn changes this shape between versions; the reader in Get-LonghornSettingValues needs teaching about the new one"
+                })
     }
     else {
-        Add-Check -Step '3b.11' -Name 'default-replica-count setting' -Status 'Fail' `
-            -Detail "Longhorn reports '$longhornReplicas', the ConfigMap says '$replicaCount'. Longhorn skips a setting it cannot parse and logs about it, so the install succeeds either way"
+        $describe = ($settingValues | ForEach-Object {
+                if ($_.Engine) { "$($_.Engine)=$($_.Value)" } else { $_.Value }
+            }) -join ', '
+        $wrong = @($settingValues | Where-Object { $_.Value -ne $replicaCount })
+        if ($wrong.Count -eq 0) {
+            Add-Check -Step '3b.11' -Name 'default-replica-count setting' -Status 'Pass' -Detail $describe
+        }
+        else {
+            Add-Check -Step '3b.11' -Name 'default-replica-count setting' -Status 'Fail' `
+                -Detail "Longhorn reports $describe, the ConfigMap says '$replicaCount'. Longhorn skips a setting it cannot parse and logs about it, so the install succeeds either way"
+        }
     }
 
     $expectedClasses = @(

@@ -1162,7 +1162,10 @@ nothing below waits on a human except the one explicit stop in step 10.*
       parse or falls out of range — so a wrong replica count is not a failed
       install, it is Longhorn running on 3. `kubectl -n longhorn-system get
       settings.longhorn.io default-replica-count -o jsonpath='{.value}'` is the
-      read-back, and 3b.13 is where it belongs. (One correction to 3a.6 while
+      read-back, and 3b.13 is where it belongs — reading `{"v1":"2","v2":"2"}`,
+      not `2`, because 1.11 holds the data-engine-specific settings as one value
+      per engine and expands the scalar written in the chart into both. Compare
+      it to `2` by hand and the answer is backwards. (One correction to 3a.6 while
       reading the chart: its declared floor is `kubeVersion: '>= 1.25.0-0'`, not
       the ≥ 1.34 the table asserts — that figure is Longhorn's release-note
       recommendation. The k3s pin satisfies both.) And **the two StorageClasses
