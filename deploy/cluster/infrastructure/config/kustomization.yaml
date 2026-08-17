@@ -42,3 +42,6 @@ resources:
   - cluster-issuers.yaml
   - wildcard-certificate.yaml
   - traefik-tlsstore.yaml
+  # 3b.11's two classes, in one file: they differ on a single parameter, and the
+  # argument for each count is an argument about the other one.
+  - longhorn-storageclasses.yaml

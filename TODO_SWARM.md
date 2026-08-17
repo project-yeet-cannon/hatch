@@ -1035,7 +1035,7 @@ nothing below waits on a human except the one explicit stop in step 10.*
       own controller has run the Job yet, so this step's *Exit* line above is
       the only real proof, the same gap 3b.5 documents for
       `ClusterSecretStore`.*
-- [ ] **10. The wildcard certificate — staging, then prod.** The one step in 3b
+- [x] **10. The wildcard certificate — staging, then prod.** The one step in 3b
       with a human in the middle, deliberately:
       1. Both `ClusterIssuer`s (`letsencrypt-staging`, `letsencrypt-prod`),
          identical but for the ACME server URL. Route53 DNS-01 solver,
@@ -1106,7 +1106,7 @@ nothing below waits on a human except the one explicit stop in step 10.*
       with one server, so pointing both at one Secret makes whichever reconciles
       second fail against a key already registered elsewhere, reported as an
       account error over a Secret that plainly contains a key.*
-- [ ] **11. Longhorn** — `defaultDataPath: /var/lib/longhorn` matching step 2,
+- [x] **11. Longhorn** — `defaultDataPath: /var/lib/longhorn` matching step 2,
       and two settings that are easy to get wrong:
       - `defaultReplicaCount: ${LONGHORN_REPLICA_COUNT}` — **2 during the build
         window.** Only two nodes exist until Phase 7; a three-replica volume on
@@ -1127,6 +1127,54 @@ nothing below waits on a human except the one explicit stop in step 10.*
       *Exit:* `kubectl -n longhorn-system get nodes.longhorn.io -o wide` shows
       each disk schedulable at the data disk's capacity — which is what actually
       proves step 2 worked, more than `df` does.
+      — *[`controllers/longhorn.yaml`](deploy/cluster/infrastructure/controllers/longhorn.yaml)
+      and
+      [`config/longhorn-storageclasses.yaml`](deploy/cluster/infrastructure/config/longhorn-storageclasses.yaml).
+      Five things the bullets above didn't say. **`defaultReplicaCount` is not
+      the value that matters, and on its own it would have shipped the exact
+      failure it was written to prevent**: it governs volumes created outside a
+      StorageClass, while the `longhorn` class the chart installs reads
+      `persistence.defaultClassReplicaCount`, whose default is 3. That class is
+      created unconditionally — `persistence.defaultClass: false` removes the
+      *default* annotation, not the class — so setting only the setting leaves a
+      three-replica class installed on a two-node cluster, permanently Degraded,
+      which is the alarm noise `LONGHORN_REPLICA_COUNT` exists to avoid. Both
+      values carry it. **Uninstalling this release destroys every volume, and
+      two lines exist to keep an automated retry from doing it**: the chart's
+      pre-delete hook runs `longhorn-manager uninstall --force` — its own flag
+      help is "uninstall even if volumes are in use" — and the CRDs carry no
+      `resource-policy: keep`, so a Helm uninstall is total. helm-controller's
+      install remediation has no strategy *but* uninstall (unlike upgrade, which
+      can roll back), and that hook's `activeDeadlineSeconds: 900` is 1.5× the
+      whole layer's budget, so this is the one release in the tree with
+      `retries: 0`, and `strategy: rollback` is written out on the upgrade side
+      where the alternative value is `uninstall`. The same hazard is what
+      `prune: true` means here: deleting the file is deleting the data.
+      **`storageReservedPercentageForDefaultDisk` had to be lowered for the
+      *Exit* line above to be honest** — Longhorn reserves 30% by default
+      because its default data path is normally the root filesystem, which 3b.2
+      deliberately made untrue, and the number is multiplied into a fixed byte
+      count when the node's default disk is created and stamped into its
+      DiskSpec, so it is a before-first-registration decision, not a setting to
+      revisit. 10, with the live guard left to `storageMinimalAvailablePercentage`.
+      **Longhorn swallows a bad setting**: no `values.schema.json` in the chart
+      and, underneath it, a manager that logs and skips a value that fails to
+      parse or falls out of range — so a wrong replica count is not a failed
+      install, it is Longhorn running on 3. `kubectl -n longhorn-system get
+      settings.longhorn.io default-replica-count -o jsonpath='{.value}'` is the
+      read-back, and 3b.13 is where it belongs. (One correction to 3a.6 while
+      reading the chart: its declared floor is `kubeVersion: '>= 1.25.0-0'`, not
+      the ≥ 1.34 the table asserts — that figure is Longhorn's release-note
+      recommendation. The k3s pin satisfies both.) And **the two StorageClasses
+      are literals on purpose, because a StorageClass cannot be edited** —
+      Kubernetes rejects updates to `parameters`, `provisioner`, `reclaimPolicy`
+      and `volumeBindingMode`, and a bound volume keeps the count it was created
+      with regardless. So Phase 7 raises the ConfigMap variable and nothing in
+      `deploy/` moves; `longhorn-r3`'s volumes rebuild their third replica on
+      their own when the node joins. Both classes take `reclaimPolicy: Retain`
+      over the chart's `Delete`, which is not the axis their names describe: with
+      `prune: true` everywhere, a mistaken commit deletes a PVC as easily as a
+      mistaken `kubectl`, and until Phase 8 that would be the data with it.*
 - [ ] **12. CloudNativePG operator** — pinned `HelmRelease`, no credentials, no
       configuration. Last because nothing else waits on it and Phase 4 is what
       makes it do anything.
