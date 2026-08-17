@@ -257,6 +257,18 @@ gating the apply — a syntactically valid but wrong manifest reaches the cluste
 without anything having tried it first. The observability section below is how
 you get that feedback back.
 
+Be precise about what "failures surface in cluster state" means, because three
+unlike things wear the same `Ready=False` condition. A **build** failure applies
+nothing and prunes nothing — the cluster keeps serving the last good state. An
+**apply** failure lands the objects it can and reports the rest, leaving a
+cluster no single commit describes. And an object can apply perfectly and never
+become healthy, which needs no push at all: helm-controller can fail an upgrade
+on its own interval hours after a commit that was fine. All three retry forever
+and none of them tell anyone. [`TODO_SWARM.md`](../TODO_SWARM.md) Phase 3b.14 is
+where that gets closed — two pre-merge checks against the first two, and a Phase
+6 alert on `gotk_reconcile_condition` for the third, which is the only one no
+gate in front of a merge can reach.
+
 ## What a push does *not* do
 
 | Change | How it actually reaches the cluster |

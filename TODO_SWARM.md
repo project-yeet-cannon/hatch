@@ -1291,7 +1291,6 @@ nothing below waits on a human except the one explicit stop in step 10.*
       cannot live there at all: [ethos](docs/ethos.md) keeps those values out of
       the repository, so the gate is the only place the tree and the values are
       both present.*
-- [ ] **14. K3s apply failure alerting** - user question: what happens if a push to main fails to apply when the cluster pulls it down? will there be an ability to run a check as a gate on a PR for changes? it would be great to see a failed build in github if possible, not sure how feasible that is. what other options are there?
 
 ### Phase 4 — Data tier
 
@@ -1331,6 +1330,10 @@ nothing below waits on a human except the one explicit stop in step 10.*
 
 - [ ] fluent-bit rewrite (Finding 4), preserving the `State.Service` attribution
 - [ ] `kube-prometheus-stack` with windows_exporter as additional targets (Finding 5)
+- [ ] **Alert on `gotk_reconcile_condition{type="Ready",status="False"}`**, held
+      for a few minutes to ride out a retry — the durable half of Phase 3b.14.
+      Both checks there run before a merge; this is the only thing that notices a
+      `HelmRelease` that breaks its own upgrade at 3am with no commit involved
 - [ ] Provisioning Jobs (Finding 6)
 - [ ] Longhorn PVCs for Grafana / Kuma / OpenSearch / Prometheus
 - [ ] OpenSearch stays **single-node** — biggest RAM consumer, and observability
