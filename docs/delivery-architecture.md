@@ -45,7 +45,8 @@ matches desired."
 **A "controller" is one of those loops.** Kubernetes ships with controllers for
 its built-in types (Deployments, Services). Everything else in
 [`deploy/cluster/infrastructure/controllers/`](../deploy/cluster/infrastructure/controllers/)
-— cert-manager, External Secrets, Longhorn, kube-vip — is a third-party
+— cert-manager, External Secrets, Longhorn, kube-vip, CloudNativePG — is a
+third-party
 controller you install, each of which watches for its own object types and acts
 on them. cert-manager watches for `Certificate` objects and goes and gets TLS
 certificates. External Secrets watches for `ExternalSecret` objects and copies
@@ -176,7 +177,8 @@ one ordering constraint, and it's the CRD constraint from the primer above:
 ```
 infra-controllers   (path: infrastructure/controllers/,  wait: true)
         │             HelmReleases: External Secrets, cert-manager,
-        │             kube-vip, Longhorn — these register the types
+        │             kube-vip, Longhorn, CloudNativePG — these
+        │             register the types
         ▼
 infra-config        (path: infrastructure/config/,  dependsOn: infra-controllers)
                       Instances of those types: ClusterSecretStore,

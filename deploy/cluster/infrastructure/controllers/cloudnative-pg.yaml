@@ -1,0 +1,228 @@
+# TODO_SWARM.md Phase 3b.12 - the CloudNativePG operator, and nothing it runs.
+#
+# Sixth and last component of layer 1 (../../infrastructure.yaml), and last for
+# the reason 3b.12 gives rather than for an ordering one: nothing else in Phase 3
+# waits on it. What it registers is the Cluster / Backup / ScheduledBackup /
+# Database / Pooler types; the Cluster that becomes Aerie's Postgres is Phase 4,
+# in the application's namespace, and until that exists this release manages
+# nothing at all. Installing it here means Phase 4 opens against a cluster that
+# already understands the noun.
+#
+# So this file has no companion under ../config, unlike every other component in
+# this directory - the instances of these CRDs are a later phase's, not this
+# one's. Also deliberately absent: the S3 WAL credentials. They are
+# postgres/wal-s3-* in scripts/secrets/parameters.json, marked required: false
+# because their IAM user does not exist yet, and 3b.6 therefore did not generate
+# an ExternalSecret for them. Phase 4 creates the user and flips both. The
+# operator itself needs no credential of any kind, which is why it sits in this
+# layer with no dependsOn - see note 2 at the bottom for the webhook certificate,
+# the one place that would otherwise be a dependency.
+#
+# Nothing here is per-installation, so the file carries no ${...} token.
+#
+# Unlike ./longhorn.yaml and ./kube-vip.yaml, this chart does ship a
+# values.schema.json - but read what it buys before trusting it. It sets no
+# additionalProperties: false, at the root or anywhere below it, so a misspelled
+# key is still accepted and still silently unread. What it does catch is a wrong
+# *type* - a quoted "true" where a boolean belongs fails at render, which is the
+# class of mistake postBuild substitution makes easy to introduce elsewhere in
+# this tree and which nothing catches next door.
+---
+# The operator's namespace, created here rather than by Helm, for the reason the
+# rest of this directory gives: one file is the whole component, and it arrives
+# or leaves as a unit.
+#
+# infra-controllers prunes, so deleting this file uninstalls the release - and
+# unlike ./longhorn.yaml, that is recoverable. The CRDs carry
+# helm.sh/resource-policy: keep (note 4), so they and every Cluster, Backup and
+# ScheduledBackup object survive a Helm uninstall, and those objects live in the
+# application's namespace rather than this one, so deleting this namespace does
+# not reach them. Running Postgres pods keep serving while the operator is gone;
+# what stops is reconciliation - no failover, no switchover, no scheduled backup,
+# no rollout of a config change - which is a bad state to be in unknowingly and
+# not a destroyed one.
+#
+# No PodSecurity label, and that is a decision rather than an omission. Longhorn
+# needs `privileged` because its DaemonSets genuinely are; this operator's pod
+# spec is already restricted-compliant as the chart ships it - runAsNonRoot with
+# uid 10001, readOnlyRootFilesystem, all capabilities dropped, seccomp
+# RuntimeDefault, and only an emptyDir and a Secret for volumes. There is no
+# exemption to grant, so labelling it would only be a promise about a pod spec
+# this repository does not own.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cnpg-system
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: cloudnative-pg
+  namespace: cnpg-system
+spec:
+  # As everywhere else in this directory: the poll only discovers new versions,
+  # and the release below names one exactly, so nothing moves until a commit
+  # does. Like Longhorn's, this index points its download URLs at github.com
+  # release assets rather than at the pages host serving the index.
+  interval: 1h
+  url: https://cloudnative-pg.github.io/charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cloudnative-pg
+  namespace: cnpg-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: cloudnative-pg
+      # Chosen in TODO_SWARM.md 3a.6: chart 0.29.0 carries appVersion 1.30.0,
+      # against an 0.28.x line whose operator 1.29 goes EOL on 2026-09-29 -
+      # inside this build window, so the older line would have been an upgrade
+      # before Phase 4 finished rather than after it.
+      #
+      # One correction to that table while reading the chart, the same one
+      # ./longhorn.yaml records: the chart's declared floor is
+      # kubeVersion '>= 1.29.0-0', not the 1.34-1.36 the table asserts. That
+      # range is the operator's own supported-Kubernetes matrix from its release
+      # notes, which is the number that actually matters for a database
+      # operator - and the v1.35.7+k3s1 pin in scripts/versions.json sits inside
+      # both.
+      version: 0.29.0
+      sourceRef:
+        kind: HelmRepository
+        name: cloudnative-pg
+  # Four minutes, the same as ./external-secrets.yaml and for the
+  # same arithmetic against the layer's shared 10m: what installs is one small
+  # Deployment, a Service, RBAC, two webhook configurations and eleven CRDs. No
+  # hooks at all - this chart has none, so unlike cert-manager there is no
+  # post-install Job to wait on, and helm-controller's own wait on the
+  # Deployment is what "Ready" means here.
+  #
+  # The eleven CRDs are the only bulk: clusters.postgresql.cnpg.io alone is a
+  # few thousand lines of OpenAPI schema, and applying it is a slow-ish API
+  # server write, not a slow image pull.
+  timeout: 4m
+  install:
+    # One, not Longhorn's zero, and note 4 is why: helm-controller remediates a
+    # failed install by uninstalling, and here that uninstall leaves the CRDs -
+    # and therefore every Cluster and Backup object in the cluster - untouched.
+    # The blast radius of the retry is the operator Deployment. That is the
+    # ordinary case this directory sets `retries: 1` for, and the reason
+    # ./longhorn.yaml is the exception rather than this being the exception.
+    remediation:
+      retries: 1
+  upgrade:
+    remediation:
+      retries: 1
+    # As next door: a failed upgrade otherwise leaves behind whatever it managed
+    # to create before it stopped, and the next attempt collides with objects
+    # Helm does not believe it owns.
+    cleanupOnFail: true
+  values:
+    # ---------------------------------------------------------------------
+    # CRDs - this step's exit criterion
+    # ---------------------------------------------------------------------
+    crds:
+      # `kubectl get crd clusters.postgresql.cnpg.io` is this line. Already the
+      # chart default, and written out for the reason
+      # ./external-secrets.yaml gives for its own: a default that
+      # flipped upstream would take the CRDs, and with them Phase 4, in a
+      # version bump that read as routine.
+      create: true
+
+    # ---------------------------------------------------------------------
+    # Scope - the one value here that Phase 4 actually depends on
+    # ---------------------------------------------------------------------
+    config:
+      # Already the default, and the most consequential default in this file to
+      # state out loud, because the failure mode of the other value is silence.
+      # Phase 4's Cluster lives in the application's namespace, not in
+      # cnpg-system. Setting this false makes the chart inject
+      # WATCH_NAMESPACE: cnpg-system into the operator and drop the common rules
+      # from its ClusterRole into a namespaced Role - so a Cluster created
+      # anywhere else is accepted by the API server, admitted by the webhook,
+      # and then simply never reconciled. No error, no event, no pods: an object
+      # sitting at an empty status forever, which reads as a broken operator
+      # rather than as a scope setting.
+      clusterWide: true
+
+    # ---------------------------------------------------------------------
+    # Monitoring - off until Phase 6 exists to receive it
+    # ---------------------------------------------------------------------
+    monitoring:
+      # Already the default, and written out because of what the alternative
+      # costs *today*: the template renders a monitoring.coreos.com/v1
+      # PodMonitor, and nothing has registered that type until Phase 6 installs
+      # the Prometheus operator. An unknown kind is a failed Helm install, and
+      # this layer reconciles with wait: true, so it would not fail alone - it
+      # would hold every other component in this directory, and infra-config
+      # behind them, on a metrics scrape config.
+      #
+      # Phase 6 flips this to true once the CRD exists. The queries the scrape
+      # would collect are already installed either way - see note 3.
+      podMonitorEnabled: false
+# ---------------------------------------------------------------------------
+# Five properties of this release that Phases 4 and 6 depend on, none of them
+# visible from the values above.
+#
+#   1. The operator installs a MutatingWebhookConfiguration and a
+#      ValidatingWebhookConfiguration, both with failurePolicy: Fail, covering
+#      clusters, backups, scheduledbackups and databases - plus poolers, on the
+#      validating side only. So Phase 4's Cluster is not merely early against a
+#      cluster where this has not converged - it is *rejected*, the same way
+#      3b.10's Certificates are by cert-manager's. Both
+#      configurations are cluster-scoped with fixed names
+#      (cnpg-{mutating,validating}-webhook-configuration), which is the
+#      mechanical reason there can only ever be one CloudNativePG install per
+#      cluster, whatever the namespace.
+#
+#   2. That webhook's serving certificate is the operator's own. Its ClusterRole
+#      holds get/patch on {mutating,validating}webhookconfigurations - granted
+#      unconditionally, not as part of the clusterWide rules - and it injects
+#      its own caBundle at startup; the Deployment mounts the
+#      cnpg-webhook-cert Secret with optional: true precisely so the first boot
+#      works before that Secret exists. Nothing here comes from cert-manager and
+#      nothing comes from ESO, which is why this release sits alongside 3b.4 and
+#      3b.7 with no ordering between them, exactly as
+#      ../../infrastructure.yaml's correction to the original plan describes.
+#
+#   3. The chart creates a cnpg-default-monitoring ConfigMap in this namespace -
+#      roughly 480 lines of Postgres exporter queries, covering replication lag,
+#      the WAL archiver, per-database size and xid age - and points the operator
+#      at it through MONITORING_QUERIES_CONFIGMAP. Every Cluster the operator
+#      manages gets those queries unless it sets
+#      spec.monitoring.disableDefaultQueries. That is Phase 6's raw material and
+#      it is already here; what Phase 6 adds is the scrape (note above) and the
+#      pg_stat_archiver series that Phase 8's backup-age alert wants.
+#
+#   4. The CRDs are templated (templates/crds/crds.yaml, gated by crds.create)
+#      rather than shipped in the chart's crds/ directory, the same shape
+#      ./external-secrets.yaml describes - so a chart bump does
+#      upgrade them, the usual Helm caveat about CRDs never being upgraded does
+#      not apply, and spec.install.crds / spec.upgrade.crds are absent above
+#      because those policies govern a directory this chart does not use.
+#
+#      What differs from external-secrets, and what makes install.remediation
+#      safe here, is that all eleven carry helm.sh/resource-policy: keep. A Helm
+#      uninstall skips them, and they keep the ownership metadata Helm stamped
+#      on them, so the reinstall that follows a remediated failure adopts them
+#      instead of colliding with them. Both halves matter: the annotation is
+#      what stops the garbage collector taking every Cluster on the way out, and
+#      the retained metadata is what stops the retry failing on objects it does
+#      not believe it owns.
+#
+#   5. Chart.yaml declares a dependency this repository never fetches: `cluster`
+#      from cloudnative-pg.github.io/grafana-dashboards, aliased `monitoring`
+#      and conditioned on monitoring.grafanaDashboard.create, which is false. It
+#      is vendored inside the packaged chart (charts/cluster/), so
+#      source-controller needs no second HelmRepository and nothing renders from
+#      it - worth knowing before reading that line as a missing source. Phase 6
+#      can turn it on for the dashboard ConfigMap, or bring its own.
+#
+# One thing left at its default and worth naming: a single replica. The operator
+# leader-elects, it is not in Postgres's data path - a Cluster keeps serving
+# through the operator being away - and TODO_SWARM.md's decision table does not
+# list it as HA-required. What a node failure costs is a reschedule.
+# ---------------------------------------------------------------------------

@@ -29,3 +29,4 @@ resources:
   - cert-manager.yaml
   - kube-vip.yaml
   - longhorn.yaml
+  - cloudnative-pg.yaml

@@ -1175,10 +1175,49 @@ nothing below waits on a human except the one explicit stop in step 10.*
       over the chart's `Delete`, which is not the axis their names describe: with
       `prune: true` everywhere, a mistaken commit deletes a PVC as easily as a
       mistaken `kubectl`, and until Phase 8 that would be the data with it.*
-- [ ] **12. CloudNativePG operator** — pinned `HelmRelease`, no credentials, no
+- [x] **12. CloudNativePG operator** — pinned `HelmRelease`, no credentials, no
       configuration. Last because nothing else waits on it and Phase 4 is what
       makes it do anything.
       *Exit:* `kubectl get crd clusters.postgresql.cnpg.io`.
+      — *[`controllers/cloudnative-pg.yaml`](deploy/cluster/infrastructure/controllers/cloudnative-pg.yaml),
+      and the only component in layer 1 with no companion under `config/` —
+      the instances of these CRDs are Phase 4's, not this phase's. Four things
+      the bullet didn't say. **`config.clusterWide` is written out although it
+      is already the default, because the other value fails silently and Phase 4
+      is where it would surface**: `false` makes the chart inject
+      `WATCH_NAMESPACE: cnpg-system` and demote the operator's common rules from
+      a `ClusterRole` to a namespaced `Role`, so a `Cluster` created in the
+      application's namespace is accepted by the API server, admitted by the
+      webhook, and then never reconciled — no error, no event, no pods, just an
+      empty status, which reads as a broken operator rather than as a scope
+      setting. **`monitoring.podMonitorEnabled` is written out for the opposite
+      reason — it is the one value here that cannot be flipped yet.** The
+      template renders a `monitoring.coreos.com/v1` `PodMonitor`, nothing
+      registers that type until Phase 6 installs the Prometheus operator, and an
+      unknown kind is a failed Helm install — which under `wait: true` does not
+      fail alone, it holds every other component in this directory and
+      `infra-config` behind them. The queries it would scrape are installed
+      regardless: the chart plants ~480 lines of them in
+      `cnpg-default-monitoring` and every `Cluster` inherits them unless it sets
+      `disableDefaultQueries`, so Phase 6 gains a scrape, not a metric.
+      **`retries: 1` here is the inverse of 3b.11's `retries: 0`, and for a
+      reason worth stating next to it**: helm-controller still remediates a
+      failed install by uninstalling, but all eleven CNPG CRDs carry
+      `helm.sh/resource-policy: keep`, so the uninstall skips them and every
+      `Cluster` and `Backup` survives it — and because they keep the ownership
+      metadata Helm stamped on them, the reinstall adopts them instead of
+      colliding. The blast radius of a retry is the operator Deployment, and
+      losing that costs reconciliation (no failover, no scheduled backup) rather
+      than data; running Postgres pods keep serving. And **the chart ships a
+      `values.schema.json`, which is less than it sounds** — it sets no
+      `additionalProperties: false` anywhere, so a misspelled key is still
+      accepted and still silently unread, exactly as in 3b.8 and 3b.11. What it
+      does catch is a wrong *type*, which is the mistake `postBuild`
+      substitution makes easy elsewhere in this tree. (One correction to 3a.6,
+      the same one 3b.11 records: the chart's declared floor is
+      `kubeVersion: '>=1.29.0-0'`, not the 1.34–1.36 in the table — that range
+      is the operator's own supported-Kubernetes matrix, which for a database
+      operator is the number that matters. The k3s pin satisfies both.)*
 - [ ] **13. Phase gate as a command** — `scripts/k3s/Test-ClusterPlatform.ps1`,
       asserting every *Exit* above in one run, in the same verification-stage
       shape as the other scripts. "Phase 3 is done" should be something that
