@@ -5,7 +5,7 @@
     one, over SSH from the Hyper-V host - no hand-typed SSH session.
 
 .DESCRIPTION
-    This is the entry point for TODO_SWARM.md Phase 2's first step. It is the
+    This is the entry point for the cluster plan Phase 2's first step. It is the
     same shape as Initialize-AerieNode.ps1 one phase up: it reuses
     ..\hyperv\lib\AerieSsh.ps1 to reach the node over SSH (the node itself was
     already built by that script in Phase 1), so the same key material and
@@ -44,7 +44,7 @@
     ('k3s.version'), which is committed so every node - and every rebuild of
     an old node - installs the same k3s. Pass this only for a one-off by-hand
     run; a real bump is a commit to that file. Never a latest/stable channel.
-    See TODO_SWARM.md Phase 2 for why (same reproducibility reasoning as the
+    See the cluster plan Phase 2 for why (same reproducibility reasoning as the
     Renovate ask under Goal 6.5).
 
 .PARAMETER Token
@@ -188,7 +188,7 @@ try {
         # Only proves these ports answer from this machine, not from the
         # joining node itself - but a miss here is almost always a typo'd
         # -JoinServer or a firewalled node, so it's worth catching before the
-        # remote install even starts. TODO_SWARM.md Phase 2 calls out
+        # remote install even starts. The cluster plan Phase 2 calls out
         # 6443/2379-2380/10250/8472 as the ports node-to-node traffic needs;
         # UDP 8472 (flannel VXLAN) is deliberately not probed here - a TCP
         # connect can't meaningfully test a connectionless port, and
@@ -330,10 +330,10 @@ try {
     $elapsed = [math]::Round(((Get-Date).ToUniversalTime() - $startedUtc).TotalMinutes, 1)
     Write-Host "'$VMName' is running k3s $K3sVersion in ${elapsed} min." -ForegroundColor Green
     if (-not $ClusterInit) {
-        Write-Warning 'Two-node embedded etcd has worse availability than one node (tolerates zero losses, not one) - TODO_SWARM.md flags this build window as non-production until the third server rejoins in Phase 7.'
+        Write-Warning 'Two-node embedded etcd has worse availability than one node (tolerates zero losses, not one) - the cluster plan flags this build window as non-production until the third server rejoins in Phase 7.'
     }
     Write-Host ''
-    Write-Host 'Phase 2 checklist - confirm and tick off in TODO_SWARM.md:'
+    Write-Host 'Phase 2 checklist - confirm and tick off in docs/plans/swarm/phase-2-k3s-flux-secrets.md:'
     Write-Host "  - this node installed and Ready                 (verified above)"
     Write-Host '  - cluster token generated once, stored like the SSH keys, never in git'
     Write-Host '  - node-to-node TCP ports open (6443/2379-2380/10250)   (verified above for -JoinServer runs; UDP 8472/flannel is not checked)'

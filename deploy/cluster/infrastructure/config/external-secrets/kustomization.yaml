@@ -4,7 +4,7 @@
 #
 # Source:    scripts/secrets/parameters.json
 # Generator: scripts/secrets/New-ExternalSecrets.ps1
-# Step:      TODO_SWARM.md Phase 3b.6
+# Step:      docs/plans/swarm/phase-3-platform-services.md 3b.6
 #
 # Regenerate:  pwsh ./scripts/secrets/New-ExternalSecrets.ps1
 # Verify:      pwsh ./scripts/secrets/New-ExternalSecrets.ps1 -Check   (ci.yml runs this)

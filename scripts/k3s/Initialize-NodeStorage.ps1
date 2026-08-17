@@ -5,7 +5,7 @@
     formats it, and mounts it at /var/lib/longhorn from /etc/fstab by UUID.
 
 .DESCRIPTION
-    TODO_SWARM.md Phase 3b's second step, and the last one that runs **once per
+    the cluster plan Phase 3b's second step, and the last one that runs **once per
     node** - everything after it is a commit under deploy/. Same shape as
     Install-K3sNode.ps1: it reuses ..\hyperv\lib\AerieSsh.ps1 to reach a node
     that Phase 1 built and Phase 2 installed k3s on, so the same key material
@@ -551,7 +551,7 @@ try {
         # excluded instead.
         Write-Warning 'multipath-tools is installed on this node. Longhorn devices will be blacklisted from multipathd - see /etc/multipath/conf.d/longhorn.conf.'
         $multipathConf = @(
-            '# Managed by Aerie: scripts/k3s/Initialize-NodeStorage.ps1 (TODO_SWARM.md Phase 3b.2).'
+            '# Managed by Aerie: scripts/k3s/Initialize-NodeStorage.ps1 (the cluster plan Phase 3b.2).'
             '# multipathd otherwise claims the block devices Longhorn attaches over iSCSI,'
             '# and the volume stays in Attaching with nothing in Longhorn saying why.'
             'blacklist {'
@@ -713,7 +713,7 @@ try {
     # ---------------------------------------------------------------- #
 
     # Re-read from the node rather than trusting what was just done - this is
-    # the state Longhorn will actually find at 3b.11, and TODO_SWARM.md's exit
+    # the state Longhorn will actually find at 3b.11, and the cluster plan's exit
     # criterion for this step is literally this command.
     $verifyScript = @(
         'echo ''--- findmnt'''

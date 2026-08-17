@@ -5,7 +5,7 @@
     kubectl apply.
 
 .DESCRIPTION
-    TODO_SWARM.md Phase 2's last step. The plan originally wrote this one as
+    the cluster plan Phase 2's last step. The plan originally wrote this one as
     "run once from an operator machine", which would have made it the only
     provisioning step in the repo with no auditable, repeatable path. It
     automates the same way Provision 0-2 did, so it is scripted here and

@@ -1,6 +1,6 @@
 # Secret seeding
 
-Step 2 of the provisioning pipeline (TODO_SWARM.md Phase 2): pushes this
+Step 2 of the provisioning pipeline ([the cluster plan](../../docs/plans/swarm/phase-2-k3s-flux-secrets.md) Phase 2): pushes this
 installation's secrets into the AWS SSM Parameter Store tree, then plants the
 one bootstrap Secret the cluster needs to read that tree back.
 

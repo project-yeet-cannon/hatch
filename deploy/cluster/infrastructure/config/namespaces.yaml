@@ -1,4 +1,4 @@
-# TODO_SWARM.md Phase 3b.6 - the application namespace, created here because
+# The cluster plan Phase 3b.6 - the application namespace, created here because
 # something in this layer has to hold a Secret before Phase 5 exists.
 #
 # 3b.6 syncs ha/token and logging/vm-log-shipper-token now, ahead of anything

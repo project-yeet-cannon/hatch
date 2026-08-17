@@ -1,4 +1,4 @@
-# TODO_SWARM.md Phase 3b.12 - the CloudNativePG operator, and nothing it runs.
+# The cluster plan Phase 3b.12 - the CloudNativePG operator, and nothing it runs.
 #
 # Sixth and last component of layer 1 (../../infrastructure.yaml), and last for
 # the reason 3b.12 gives rather than for an ordering one: nothing else in Phase 3
@@ -77,7 +77,7 @@ spec:
   chart:
     spec:
       chart: cloudnative-pg
-      # Chosen in TODO_SWARM.md 3a.6: chart 0.29.0 carries appVersion 1.30.0,
+      # Chosen in the cluster plan 3a.6: chart 0.29.0 carries appVersion 1.30.0,
       # against an 0.28.x line whose operator 1.29 goes EOL on 2026-09-29 -
       # inside this build window, so the older line would have been an upgrade
       # before Phase 4 finished rather than after it.
@@ -223,6 +223,6 @@ spec:
 #
 # One thing left at its default and worth naming: a single replica. The operator
 # leader-elects, it is not in Postgres's data path - a Cluster keeps serving
-# through the operator being away - and TODO_SWARM.md's decision table does not
+# through the operator being away - and the cluster plan's decision table does not
 # list it as HA-required. What a node failure costs is a reschedule.
 # ---------------------------------------------------------------------------

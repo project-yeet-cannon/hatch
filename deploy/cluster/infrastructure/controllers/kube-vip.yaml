@@ -1,4 +1,4 @@
-# TODO_SWARM.md Phase 3b.8 - kube-vip, the two components the original single
+# The cluster plan Phase 3b.8 - kube-vip, the two components the original single
 # bullet hid.
 #
 # Third and fourth components of layer 1 (../../infrastructure.yaml), and the
@@ -68,7 +68,7 @@ spec:
   chart:
     spec:
       chart: kube-vip-cloud-provider
-      # Chosen in TODO_SWARM.md 3a.6: the chart carrying appVersion v0.0.12.
+      # Chosen in the cluster plan 3a.6: the chart carrying appVersion v0.0.12.
       version: 0.2.10
       sourceRef:
         kind: HelmRepository
@@ -96,7 +96,7 @@ spec:
       data: {}
     # "kubevip" and not the chart's own name: this is the name every
     # kube-vip-cloud-provider quickstart outside this Helm chart uses, and
-    # matching it is what makes TODO_SWARM.md 3b.8's own wording ("ConfigMap
+    # matching it is what makes the cluster plan 3b.8's own wording ("ConfigMap
     # kubevip in kube-system") literally true rather than approximately true.
     configMapName: kubevip
 ---
@@ -130,7 +130,7 @@ spec:
   chart:
     spec:
       chart: kube-vip
-      # Chosen in TODO_SWARM.md 3a.6: the only chart carrying the v1.2 line,
+      # Chosen in the cluster plan 3a.6: the only chart carrying the v1.2 line,
       # where service handling was refactored - the exact path svc_enable
       # below uses.
       version: 0.11.0
@@ -149,7 +149,7 @@ spec:
     image:
       # The chart's appVersion is v1.2.2; v1.2.3 fixes regressions in lease
       # management and route cleanup introduced by the v1.2 refactor, per
-      # TODO_SWARM.md 3a.6. Drop this override once a chart ships v1.2.3 or
+      # The cluster plan 3a.6. Drop this override once a chart ships v1.2.3 or
       # later as the default.
       tag: v1.2.3
     env:

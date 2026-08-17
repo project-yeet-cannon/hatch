@@ -36,8 +36,8 @@ export function App() {
         <main className="docs-content">
           <Routes>
             <Route path="/" element={<IndexRoute docs={docs} />} />
-            <Route path="/:slug" element={<DocPage docs={docs ?? []} />} />
-            <Route path="*" element={<p className="text-muted">Document not found.</p>} />
+            {/* Catch-all rather than ":slug": a slug is a path once docs live in subdirectories. */}
+            <Route path="/*" element={<DocPage docs={docs ?? []} />} />
           </Routes>
         </main>
       </div>

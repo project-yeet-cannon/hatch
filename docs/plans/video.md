@@ -1,3 +1,5 @@
+# Video Digitization
+
 I have [this USB hdmi capture card](https://www.walmart.com/ip/Monster-LED-4K-Black-Audio-Video-USB-3-0-HDMI-Capture-Card-Record-High-Quality-Videos-Live-Stream/5550338999) hooked up to a small media pc. I want to use it to digitize old physical media that I have.
 
 In the overall workflow, I want to:
@@ -90,7 +92,7 @@ Atomic-move-on-complete is what makes this safe without any coordination protoco
 | Component | Role | Why this one |
 | --- | --- | --- |
 | **ffmpeg** (Gyan build, pinned) | Sole opener of the capture device; writes the archival file and tees the preview | Nothing else is needed. OBS is a GUI wrapped around the same libraries and adds a scene graph, a plugin surface, and a websocket API for a job that is one command line. |
-| **go2rtc** (pinned) | Republishes the preview as WebRTC/HLS/MSE for browsers | **Already the chosen sidecar in [TODO_CAMERAS.md](TODO_CAMERAS.md) Phase 7.** One streaming concept across the product instead of two. MediaMTX is the equally good alternative that would make it two. |
+| **go2rtc** (pinned) | Republishes the preview as WebRTC/HLS/MSE for browsers | **Already the chosen sidecar in [the cameras plan](cameras.md) Phase 7.** One streaming concept across the product instead of two. MediaMTX is the equally good alternative that would make it two. |
 | **Capture agent** | Session lifecycle: start/stop, naming, sidecar, atomic move, retry | The seam the future Aerie actor plugs into. See Q4. |
 | **WinSW** (pinned) | Runs go2rtc and the agent as Windows services | Single exe + XML, pins by hash, no installer. NSSM is the alternative; its last release is 2018. |
 
@@ -115,12 +117,12 @@ Phases 1–4 below are the archive path. Phase 5 is the monitor path, separable 
 
 ### Repo fit
 
-Follows the conventions already set by [scripts/k3s/](scripts/k3s/) and [scripts/hyperv/](scripts/hyperv/) rather than inventing a shape:
+Follows the conventions already set by [scripts/k3s/](../../scripts/k3s/) and [scripts/hyperv/](../../scripts/hyperv/) rather than inventing a shape:
 
 - **Stages**: Preflight → Discover → Install → Configure → Harden → Register → Verify, mirroring `Install-K3sNode.ps1`'s Preflight/Inspect/Install/Verify, with a full comment-based help block carrying the reasoning.
-- **Pins in [scripts/versions.json](scripts/versions.json)**, not in the script: `ffmpeg`, `go2rtc`, `winsw`, each with a version-specific immutable URL and a SHA256, with a `_comment` explaining the pin — same treatment as `awsCli`. Never a `latest` URL. Read through `scripts/lib/AerieVersions.ps1`, with a `-FfmpegVersion`-style override parameter for a by-hand run.
-- **Parameterized per [docs/ethos.md](docs/ethos.md)**: `-InboxPath`, `-StagingPath`, `-CaptureDeviceName`, `-AudioDeviceName`, `-CaptureProfile`, `-MonitorPort`. No domain, no IP, no share path, no device string baked in. The card's device name is *discovered* and written to config, not committed — it differs per card and per USB port.
-- **GHA wrapper alongside the script**, per the established rule: `provision-6-capture-host.yml`, `runs-on: self-hosted`, thin — checks out and hands every decision to the script, so the manual path and the automated path can't drift. This requires the capture PC to be a self-hosted runner ([scripts/runner/](scripts/runner/) already exists for that). Drives Q5.
+- **Pins in [scripts/versions.json](../../scripts/versions.json)**, not in the script: `ffmpeg`, `go2rtc`, `winsw`, each with a version-specific immutable URL and a SHA256, with a `_comment` explaining the pin — same treatment as `awsCli`. Never a `latest` URL. Read through `scripts/lib/AerieVersions.ps1`, with a `-FfmpegVersion`-style override parameter for a by-hand run.
+- **Parameterized per [docs/ethos.md](../ethos.md)**: `-InboxPath`, `-StagingPath`, `-CaptureDeviceName`, `-AudioDeviceName`, `-CaptureProfile`, `-MonitorPort`. No domain, no IP, no share path, no device string baked in. The card's device name is *discovered* and written to config, not committed — it differs per card and per USB port.
+- **GHA wrapper alongside the script**, per the established rule: `provision-6-capture-host.yml`, `runs-on: self-hosted`, thin — checks out and hands every decision to the script, so the manual path and the automated path can't drift. This requires the capture PC to be a self-hosted runner ([scripts/runner/](../../scripts/runner/) already exists for that). Drives Q5.
 
 ## Open questions
 
@@ -204,12 +206,12 @@ Each bullet is a stage that can be written and tested independently.
 - [ ] Crash recovery on service start: anything left in `staging/` from a killed capture gets a sidecar marked `incomplete` and is moved to inbox rather than silently orphaned
 - [ ] Wrap both in the HTTP agent if Q3 lands there — one `POST /capture/start`, one `POST /capture/stop`, one `GET /capture/status`
 - [ ] `provision-6-capture-host.yml`: thin `self-hosted` wrapper, host choice input, every decision delegated to the script
-- [ ] Pester tests for the pure parts (format selection from an enumerated list, path/name construction, sidecar shape) — the device-touching parts stay untested, same precedent as the HA-facing code in TODO_CAMERAS Phase 4
+- [ ] Pester tests for the pure parts (format selection from an enumerated list, path/name construction, sidecar shape) — the device-touching parts stay untested, same precedent as the HA-facing code in the cameras plan Phase 4
 - [ ] `docs/video-capture-architecture.md` documenting the two paths, the inbox contract, and the sidecar schema — this is what the next plan's actor is written against
 
 ### Phase 5 — Monitor path (deferred; see Scope call)
 
 - [ ] Add the low-bitrate H.264 RTSP branch to the `tee` and confirm the archival write is unaffected when the sink stalls
 - [ ] go2rtc config + WinSW service; firewall rule scoped to the LAN
-- [ ] Confirm WebRTC playback in a plain `<video>` element, reusing whatever TODO_CAMERAS Phase 7 settles on
+- [ ] Confirm WebRTC playback in a plain `<video>` element, reusing whatever the cameras plan Phase 7 settles on
 - [ ] Decide whether this surfaces in the kiosk as a "currently digitizing" tile — likely belongs in the *next* plan, with the actor

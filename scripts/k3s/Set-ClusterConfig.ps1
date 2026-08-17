@@ -5,7 +5,7 @@
     every Kustomization under deploy/ reads through postBuild.substituteFrom.
 
 .DESCRIPTION
-    TODO_SWARM.md Phase 3b's first step, and the one that has to run before the
+    the cluster plan Phase 3b's first step, and the one that has to run before the
     first commit under deploy/. Flux reconciles from git, where docs/ethos.md
     forbids operator values; Phases 0-2 passed them as vars.* at deploy time,
     which a Flux-reconciled manifest has no equivalent of. This is the bridge:

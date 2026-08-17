@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Idempotently sets this host's Windows Update install/reboot schedule
-    (TODO_SWARM.md Phase 1: stagger reboots across hosts).
+    (the cluster plan Phase 1: stagger reboots across hosts).
 
 .DESCRIPTION
     Configures the "Configure Automatic Updates" AU policy under

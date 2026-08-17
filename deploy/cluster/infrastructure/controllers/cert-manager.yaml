@@ -1,4 +1,4 @@
-# TODO_SWARM.md Phase 3b.7 - cert-manager, the controller and nothing else.
+# The cluster plan Phase 3b.7 - cert-manager, the controller and nothing else.
 #
 # Second component of layer 1 (../../infrastructure.yaml). What it registers is
 # the Certificate / Issuer / ClusterIssuer / CertificateRequest / Order /
@@ -64,7 +64,7 @@ spec:
       # `2.8.0` next door - `>=v1.21.1` or `~v1.21.1` would be the range, and
       # would mean an unattended upgrade the next time upstream published one.
       #
-      # Chosen in TODO_SWARM.md 3a.6: v1.21 supports Kubernetes 1.33-1.36, which
+      # Chosen in the cluster plan 3a.6: v1.21 supports Kubernetes 1.33-1.36, which
       # the v1.35.7+k3s1 pin in scripts/versions.json sits inside, and .1 is the
       # last patch of a line five weeks old. Only the final patch of a branch is
       # supported upstream and v1.20 goes EOL at the 1.22 release, so the older
@@ -120,7 +120,7 @@ spec:
       keep: true
 
     # ---------------------------------------------------------------------
-    # DNS-01 self-check - the two settings TODO_SWARM.md 3a.4 exists to justify
+    # DNS-01 self-check - the two settings the cluster plan 3a.4 exists to justify
     # ---------------------------------------------------------------------
     # Before signing, cert-manager resolves the _acme-challenge TXT it just
     # wrote to Route53 and waits to see it. By default that lookup goes through
@@ -179,7 +179,7 @@ spec:
 #      the correction to the original plan's dependsOn chain that
 #      ../../infrastructure.yaml describes.
 #   4. One replica, the chart default, deliberately. cert-manager is not on the
-#      HA-required list in TODO_SWARM.md's decision table and it leader-elects
+#      HA-required list in the cluster plan's decision table and it leader-elects
 #      anyway, so a second replica would idle. What a node failure costs is a
 #      reschedule, against a certificate renewed 30 days before a 90-day expiry.
 #

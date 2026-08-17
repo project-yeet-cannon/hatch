@@ -4,7 +4,7 @@
     from: preflight -> golden image -> VM -> wait for cloud-init -> report.
 
 .DESCRIPTION
-    This is the single entry point for TODO_SWARM.md Phase 1. The primary way
+    This is the single entry point for the cluster plan Phase 1. The primary way
     to run it is dispatching .github/workflows/provision-0-new-node.yml - a
     thin wrapper that checks out the repo and invokes this script, holding no
     provisioning logic of its own so the two paths can't drift. Running it by
@@ -71,7 +71,7 @@ param(
     [ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$')]
     [string]$VMName,
 
-    # Locally administered, Hyper-V's assigned OUI. TODO_SWARM.md Phase 1
+    # Locally administered, Hyper-V's assigned OUI. The cluster plan Phase 1
     # wants DHCP reservations keyed to these, so they're chosen up front
     # rather than drawn from Hyper-V's dynamic pool. Convention is
     # 00-15-5D-<host>-<vm>-<nic>.
@@ -488,7 +488,7 @@ try {
         Write-Host "  ssh $Username@$ExpectedIPAddress"
     }
     Write-Host ''
-    Write-Host 'Phase 1 checklist for this node - confirm and tick off in TODO_SWARM.md:'
+    Write-Host 'Phase 1 checklist for this node - confirm and tick off in docs/plans/swarm/phase-1-node-substrate.md:'
     Write-Host '  - external switch, DHCP-reserved LAN address    (verified above)'
     Write-Host '  - MAC spoofing on the vNIC                      (set by New-AerieVM.ps1)'
     Write-Host '  - second fixed VHDX for Longhorn                ' -NoNewline

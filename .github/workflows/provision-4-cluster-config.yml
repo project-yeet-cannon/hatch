@@ -1,4 +1,4 @@
-# Step 4 of the provisioning pipeline, and the first step of TODO_SWARM.md
+# Step 4 of the provisioning pipeline, and the first step of the cluster plan
 # Phase 3b: plant this installation's operator values in the cluster as the
 # `aerie-cluster-config` ConfigMap, which every Kustomization under deploy/
 # then reads through postBuild.substituteFrom.
@@ -104,7 +104,7 @@ jobs:
           IP_ADDRESS: ${{ inputs.ip_address }}
           PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
 
-          # The seven operator values, per TODO_SWARM.md Phase 3a.5. Names on
+          # The seven operator values, per the cluster plan Phase 3a.5. Names on
           # the left come from cluster-config.json's `env` field; names on the
           # right are the repository variables that hold them. The script
           # validates each one's shape before anything is applied - a typo'd

@@ -1,4 +1,4 @@
-# TODO_SWARM.md Phase 3b's last step: the phase gate, as something that exits 0.
+# The cluster plan Phase 3b's last step: the phase gate, as something that exits 0.
 #
 # Steps 3b.1-3b.12 each carry an *Exit* line - a command whose output proves
 # that step landed. This dispatches the one script that asserts all of them and

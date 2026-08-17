@@ -1,9 +1,9 @@
 # Step 3 of the provisioning pipeline: install Flux on the cluster and point
-# it at this repository (TODO_SWARM.md Phase 2's last item). After this runs,
+# it at this repository (the cluster plan Phase 2's last item). After this runs,
 # changing the cluster means committing to deploy/ - there is no further
 # kubectl apply in the design.
 #
-# TODO_SWARM.md originally wrote this step as "run once from an operator
+# The cluster plan originally wrote this step as "run once from an operator
 # machine", which would have made it the only provisioning step with no
 # repeatable, auditable path. It is scripted instead, same thin-wrapper shape
 # as Provision 0-2: this file checks out the repo and hands every decision to

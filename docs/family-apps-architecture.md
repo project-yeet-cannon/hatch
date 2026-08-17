@@ -49,7 +49,7 @@ code, in [`src/Aerie.Api/Modules/README.md`](../src/Aerie.Api/Modules/README.md)
 The alternative — a service per app — costs a Deployment, Service, Ingress,
 database, backup entry, and uptime monitor *per app*. That is the exact opposite
 of goal 1, and it's worse than usual with the k3s migration in flight
-([`TODO_SWARM.md`](../TODO_SWARM.md)). As a module, a new app rides the existing
+([the cluster plan](plans/swarm/design.md)). As a module, a new app rides the existing
 pod, inherits CNPG backups automatically, and appears in the existing
 observability pipeline with no new configuration.
 
@@ -230,7 +230,7 @@ Named so they're decisions rather than oversights.
   feature for this app class; seeing a crate's contents without unpacking it is
   most of the point. Deferred on *timing*, not value: blob storage should land on
   Longhorn after the k3s cutover rather than on the current host's disk and then
-  get migrated. Revisit at [`TODO_SWARM.md`](../TODO_SWARM.md) Phase 7.
+  get migrated. Revisit at [the cluster plan](plans/swarm/phase-7-cutover.md) Phase 7.
 - **Auth / identity** — see the tripwire above.
 - **Offline writes** — offline reads ship with the shell; write sync needs
   conflict resolution that no current use case justifies.

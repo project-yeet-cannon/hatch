@@ -1,4 +1,4 @@
-# TODO_SWARM.md Phase 3b.10, part 1 of 3 - the two ACME issuers.
+# The cluster plan Phase 3b.10, part 1 of 3 - the two ACME issuers.
 #
 # Both are committed and only one is ever referenced at a time. That asymmetry
 # is the whole shape of this step: ./wildcard-certificate.yaml points at

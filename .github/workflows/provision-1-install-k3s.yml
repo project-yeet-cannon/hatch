@@ -1,5 +1,5 @@
 # Step 1 of the provisioning pipeline: install k3s server on one node
-# (TODO_SWARM.md Phase 2), either forming the cluster's embedded etcd or
+# (the cluster plan Phase 2), either forming the cluster's embedded etcd or
 # joining an existing one. Dispatch-only, one node per run.
 #
 # This workflow is deliberately thin: it checks out the repo and hands every

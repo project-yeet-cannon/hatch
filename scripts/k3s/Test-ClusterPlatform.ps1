@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Asserts every *Exit* criterion of TODO_SWARM.md Phase 3b in one run, and
+    Asserts every *Exit* criterion of the cluster plan Phase 3b in one run, and
     exits non-zero if any of them is not met. "Phase 3 is done" as a command
     rather than as a memory.
 
@@ -774,7 +774,7 @@ try {
     # ---------------------------------------------------------------- #
 
     # --- The cluster itself. Not one of the twelve steps; the thing all
-    # --- twelve are about. TODO_SWARM.md's Verification section asks for it
+    # --- twelve are about. The cluster plan's Verification section asks for it
     # --- once per phase, and every check below is meaningless without it.
     $nodes = @(Get-Items $nodeList)
     if ($nodes.Count -eq 0) {
@@ -1426,7 +1426,7 @@ try {
     Write-Stage 'Portability'
     # ---------------------------------------------------------------- #
 
-    # TODO_SWARM.md's Verification section: no phase is done if a second
+    # The cluster plan's Verification section: no phase is done if a second
     # operator could not run it on their own hardware. 3b.13 asks for the grep
     # explicitly - the base domain, any LAN address, the VIP - and this is the
     # only place it can honestly be made, because it needs the repository and
@@ -1509,7 +1509,7 @@ if ($env:GITHUB_STEP_SUMMARY) {
     }
     $lines += @(
         ''
-        '_TODO_SWARM.md Phase 3b.13. Read-only: this run changed nothing._'
+        '_The cluster plan, Phase 3b.13. Read-only: this run changed nothing._'
     )
     Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ($lines -join "`n")
 }
@@ -1517,7 +1517,7 @@ if ($env:GITHUB_STEP_SUMMARY) {
 Write-Host ''
 if ($failed -gt 0) {
     Write-Host "Phase 3 platform gate FAILED: $failed check(s) of $($script:Checks.Count) in ${elapsed} min." -ForegroundColor Red
-    Write-Host 'Nothing was changed. Every failure above names the step it belongs to; TODO_SWARM.md Phase 3b has the reasoning for each.'
+    Write-Host 'Nothing was changed. Every failure above names the step it belongs to; the cluster plan Phase 3b has the reasoning for each.'
     exit 1
 }
 
@@ -1526,7 +1526,7 @@ if ($warned -gt 0) {
     Write-Host "$warned advisory warning(s) above - they do not fail the gate, and each says why."
 }
 Write-Host ''
-Write-Host 'Every *Exit* criterion in TODO_SWARM.md Phase 3b.1-3b.12 has been asserted against this'
+Write-Host 'Every *Exit* criterion in the cluster plan Phase 3b.1-3b.12 has been asserted against this'
 Write-Host 'cluster, from a LAN client where that is what the criterion means. Re-run this after a node'
 Write-Host 'rebuild or a restore; it is read-only and safe at any time.'
 exit 0

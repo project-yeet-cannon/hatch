@@ -12,7 +12,8 @@ public class DocsController(IDocsService docs) : ControllerBase
     [HttpGet]
     public ActionResult<IReadOnlyList<DocSummary>> GetAll() => Ok(docs.GetAll());
 
-    [HttpGet("{slug}")]
+    // Catch-all: slugs are paths now ("plans/swarm/design"), not bare filenames.
+    [HttpGet("{**slug}")]
     public async Task<IActionResult> GetContent(string slug, CancellationToken ct)
     {
         var content = await docs.GetContentAsync(slug, ct);

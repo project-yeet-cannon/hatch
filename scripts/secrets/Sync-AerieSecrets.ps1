@@ -6,7 +6,7 @@
     Aerie's ethos allows.
 
 .DESCRIPTION
-    This is TODO_SWARM.md Phase 2's "Provision 2: Seed secrets" step, and the
+    This is the cluster plan Phase 2's "Provision 2: Seed secrets" step, and the
     same shape as Install-K3sNode.ps1 one step before it: every machine-
     specific fact is a parameter, the SSH plumbing is reused from
     ..\hyperv\lib\AerieSsh.ps1, and the GitHub Actions workflow that wraps it

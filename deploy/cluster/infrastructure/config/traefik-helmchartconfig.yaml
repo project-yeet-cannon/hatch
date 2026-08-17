@@ -1,4 +1,4 @@
-# TODO_SWARM.md Phase 3b.9 - Traefik's HelmChartConfig.
+# The cluster plan Phase 3b.9 - Traefik's HelmChartConfig.
 #
 # k3s ships Traefik itself: a HelmChart CR named `traefik` in `kube-system`,
 # reconciled by k3s's own bundled helm-controller (a different controller from

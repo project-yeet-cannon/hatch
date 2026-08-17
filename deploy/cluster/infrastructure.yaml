@@ -1,4 +1,4 @@
-# The two-layer split that orders the whole of Phase 3 (TODO_SWARM.md 3b.3).
+# The two-layer split that orders the whole of Phase 3 (the cluster plan 3b.3).
 #
 # Layer 1, infra-controllers: the HelmRepositories and HelmReleases that install
 # operators and, with them, their CRDs - External Secrets, cert-manager,

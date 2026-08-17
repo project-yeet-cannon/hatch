@@ -262,7 +262,7 @@ Consequences, stated so they're a decision and not a surprise:
 Acceptable for a home cluster, and cheap to revisit: an apiserver VIP is
 another kube-vip instance, or an haproxy in front of `:6443`. Revisit if the
 manual repoint ever costs more than that. Tracked in
-[`TODO_SWARM.md`](../TODO_SWARM.md) Phase 2.
+[the cluster plan](plans/swarm/phase-2-k3s-flux-secrets.md) Phase 2.
 
 ## Related
 

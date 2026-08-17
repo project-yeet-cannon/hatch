@@ -1,6 +1,6 @@
 # Hyper-V node provisioning
 
-Repeatable creation of the Hyper-V Linux VMs `TODO_SWARM.md` needs in two
+Repeatable creation of the Hyper-V Linux VMs [the cluster plan](../../docs/plans/swarm/design.md) needs in two
 places: the Phase 0 scratch VM for the DR-restore gate, and the Phase 1 node
 VMs (one per Windows host). Same VM shape both times — only the cloud-init
 payload (`-ExtraPackages` / `-RunCmd`) differs.
@@ -265,7 +265,7 @@ Docker, not a Longhorn disk. `-RunCmd` can carry anything else it turns out to
 need (e.g. `git`, if you'd rather clone the repo than copy compose files over).
 
 **Phase 1 — node VMs.** Use the real per-host memory split from
-`TODO_SWARM.md` (16 / 24 / 24 GB) via `-MemoryGB`, and set `-DataDiskSizeGB`
+[the cluster plan](../../docs/plans/swarm/design.md) (16 / 24 / 24 GB) via `-MemoryGB`, and set `-DataDiskSizeGB`
 to whatever you're carving out of the TB storage for Longhorn on that host.
 Nothing k3s-specific goes in `-RunCmd` — that's a separate step, once this
 node answers SSH: see [`../k3s/README.md`](../k3s/README.md) or dispatch

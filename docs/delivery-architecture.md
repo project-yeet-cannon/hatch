@@ -17,7 +17,7 @@ opposite directions:
 | Credential direction | The runner holds a Docker socket on the host | The cluster holds a read-only git credential |
 | Where the deploy logic lives | [`.github/workflows/cd.yml`](../.github/workflows/cd.yml) | In the cluster, as `GitRepository` + `Kustomization` objects |
 
-This split is temporary by design. [`TODO_SWARM.md`](../TODO_SWARM.md) Phase 7 is
+This split is temporary by design. [the cluster plan](plans/swarm/phase-7-cutover.md) Phase 7 is
 the cutover that retires the left column. Until then, **the deploy workflow never
 touches Kubernetes and Kubernetes never reads the deploy workflow.**
 
@@ -264,7 +264,7 @@ nothing and prunes nothing — the cluster keeps serving the last good state. An
 cluster no single commit describes. And an object can apply perfectly and never
 become healthy, which needs no push at all: helm-controller can fail an upgrade
 on its own interval hours after a commit that was fine. All three retry forever
-and none of them tell anyone. [`TODO_SWARM.md`](../TODO_SWARM.md) Phase 3b.14 is
+and none of them tell anyone. [the cluster plan](plans/swarm/phase-3-platform-services.md) Phase 3b.14 is
 where that gets closed — two pre-merge checks against the first two, and a Phase
 6 alert on `gotk_reconcile_condition` for the third, which is the only one no
 gate in front of a merge can reach.
@@ -364,7 +364,7 @@ For an application architect coming from managed SaaS platforms:
 
 ## Where this is going
 
-The two paths converge at [`TODO_SWARM.md`](../TODO_SWARM.md) Phase 7. Phases 4–6
+The two paths converge at [the cluster plan](plans/swarm/phase-7-cutover.md) Phase 7. Phases 4–6
 move the data tier (CloudNativePG), app tier, and observability into
 `deploy/cluster/`; Phase 7 points DNS at the cluster VIP and retires the Windows
 host. At that point `cd.yml`, the `legacy-deployer` runner, and the root
@@ -382,4 +382,4 @@ retarget its runner only when the stack itself moves, not before.
 - [`docs/secrets-architecture.md`](secrets-architecture.md) — the SSM → External
   Secrets path that `deploy/` holds pointers into
 - [`docs/disaster-recovery.md`](disaster-recovery.md) — rebuild procedure
-- [`TODO_SWARM.md`](../TODO_SWARM.md) — the migration plan these phases belong to
+- [the cluster plan](plans/swarm/design.md) — the migration plan these phases belong to

@@ -1,6 +1,6 @@
 {
   "comment": [
-    "The operator-value half of Aerie's cluster configuration (TODO_SWARM.md Phase 3b.1).",
+    "The operator-value half of Aerie's cluster configuration (the cluster plan Phase 3b.1).",
     "Flux reconciles from git, and docs/ethos.md keeps operator values out of git - so the values",
     "arrive out of band as one ConfigMap, and every Kustomization under deploy/ reaches them with",
     "postBuild.substituteFrom. This file is the pointer half: it names each key, says where its",
@@ -39,7 +39,7 @@
     "                 a zone that does not exist. When in doubt, leave it out and reject instead.",
     "  hint         - appended to the failure message when 'pattern' rejects a value.",
     "  example      - a syntactically valid value. Deliberately not this installation's.",
-    "  consumedBy   - the TODO_SWARM.md step that first substitutes it.",
+    "  consumedBy   - the the cluster plan step that first substitutes it.",
     "  description  - what it is and where the operator got it."
   ],
   "namespace": "flux-system",

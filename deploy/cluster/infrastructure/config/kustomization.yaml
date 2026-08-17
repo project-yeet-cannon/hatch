@@ -8,7 +8,7 @@
 # ../../infrastructure.yaml about undefined tokens expanding to empty strings
 # before adding a file here.
 #
-# Filled in by TODO_SWARM.md 3b.5 (the ClusterSecretStore, alone in its own file
+# Filled in by the cluster plan 3b.5 (the ClusterSecretStore, alone in its own file
 # because it is the single object that changes when Parameter Store is swapped
 # for in-cluster OpenBao), 3b.6 (the generated external-secrets/ directory, one
 # ExternalSecret per target Secret named in scripts/secrets/parameters.json,

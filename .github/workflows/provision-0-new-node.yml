@@ -1,5 +1,5 @@
 # Step 0 of the provisioning pipeline: build a Hyper-V node VM
-# (TODO_SWARM.md Phase 1). Dispatch-only, one host per run.
+# (the cluster plan Phase 1). Dispatch-only, one host per run.
 #
 # This is the primary way to run Initialize-AerieNode.ps1 - the workflow is
 # deliberately thin, checking out the repo on the target Hyper-V host and
@@ -52,7 +52,7 @@ on:
         required: true
         type: string
       memory_gb:
-        description: 'RAM in GB (TODO_SWARM.md: 16 / 24 / 24 across the three hosts)'
+        description: 'RAM in GB (the cluster plan: 16 / 24 / 24 across the three hosts)'
         required: true
         default: '16'
         type: string

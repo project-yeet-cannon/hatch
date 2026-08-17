@@ -3,7 +3,7 @@
     Repeatably provisions a Hyper-V Linux VM from the golden image built by
     Get-GoldenImage.ps1 — the scratch VM for the Phase 0 DR-restore gate and
     the per-host node VMs in Phase 1 are the same shape, just different
-    -RunCmd / -ExtraPackages payloads. See TODO_SWARM.md.
+    -RunCmd / -ExtraPackages payloads. See the cluster plan.
 
 .DESCRIPTION
     Initialize-AerieNode.ps1 is the usual entry point - it preflights the
@@ -62,7 +62,7 @@ param(
     [ValidateScript({ Get-VMSwitch -Name $_ -ErrorAction SilentlyContinue })]
     [string]$SwitchName,
 
-    # Fixed on purpose — TODO_SWARM.md Phase 1 calls for DHCP reservations
+    # Fixed on purpose — the cluster plan Phase 1 calls for DHCP reservations
     # keyed to each VM's MAC, which only works if the MAC is known before
     # first boot rather than picked at random from Hyper-V's pool.
     [Parameter(Mandatory)]

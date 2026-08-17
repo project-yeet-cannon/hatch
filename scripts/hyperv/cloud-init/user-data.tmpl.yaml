@@ -23,7 +23,7 @@ packages:
 __PACKAGES__
 
 # cloud-init installs the chrony client itself; pfSense is the source of
-# truth for time here (TODO_SWARM.md Phase 1) — the Hyper-V "Time
+# truth for time here (the cluster plan Phase 1) — the Hyper-V "Time
 # Synchronization" integration service is disabled separately by
 # New-AerieVM.ps1 so it can't fight this.
 ntp:

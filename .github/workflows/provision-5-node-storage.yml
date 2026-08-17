@@ -1,4 +1,4 @@
-# Step 5 of the provisioning pipeline, and the second step of TODO_SWARM.md
+# Step 5 of the provisioning pipeline, and the second step of the cluster plan
 # Phase 3b: prepare one node's Longhorn data disk. Installs the host packages
 # Longhorn needs, finds the data disk by shape rather than by name, formats it
 # ext4, and mounts it at /var/lib/longhorn from /etc/fstab by UUID.

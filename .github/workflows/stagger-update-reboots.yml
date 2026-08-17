@@ -1,4 +1,4 @@
-# Stagger Windows Update reboots across the k3s hosts (TODO_SWARM.md Phase 1)
+# Stagger Windows Update reboots across the k3s hosts (the cluster plan Phase 1)
 #
 # The 3-node cluster runs embedded etcd with quorum 3 - it tolerates exactly
 # one node down. Left to its own defaults, Windows Update reboots each host

@@ -1,6 +1,6 @@
 # Flux install
 
-Step 3 of the provisioning pipeline, and the last item in TODO_SWARM.md
+Step 3 of the provisioning pipeline, and the last item in [the cluster plan](../../docs/plans/swarm/phase-2-k3s-flux-secrets.md)
 Phase 2: installs Flux on the cluster and points it at this repository. After
 this run, changing the cluster means committing to `deploy/` — there is no
 further `kubectl apply` in the design.
@@ -43,7 +43,7 @@ shape as every other pin in that file.
 
 **Actions → *Provision 3: Bootstrap Flux* → Run workflow**.
 
-TODO_SWARM.md originally described this step as "run once from an operator
+[The cluster plan](../../docs/plans/swarm/phase-2-k3s-flux-secrets.md) originally described this step as "run once from an operator
 machine". That would have made it the only provisioning step in the repo with
 no repeatable, auditable path — and the one that matters most to be able to
 re-run, since it's what a rebuilt control plane needs. It's scripted instead,

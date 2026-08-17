@@ -1,6 +1,6 @@
 # Climate Brain — build log
 
-**Plan of record:** [docs/climate-brain-architecture.md](docs/climate-brain-architecture.md). That doc holds the reasoning — why each table exists, what the objective function is, what's deliberately out of scope. This file holds the sequencing.
+**Plan of record:** [docs/climate-brain-architecture.md](../climate-brain-architecture.md). That doc holds the reasoning — why each table exists, what the objective function is, what's deliberately out of scope. This file holds the sequencing.
 
 **How to use this file:** one phase (or lettered sub-phase) per commit, each leaving the app working. Every phase below is written to be picked up from a cold context: it names the goal, the files, the steps, and how to know it's done. Start a phase by reading the architecture doc's matching section, then this entry.
 
@@ -141,7 +141,7 @@ Architecture doc section 8. The loop runs and records; it dispatches nothing.
 1. `EfClimateScore` — hourly, per zone plus a whole-home row: `DiscomfortMinutes`, `WeightedDiscomfortMinutes`, `ActuatorWattMinutes`, `EstimatedCost`. Migration.
 2. Hourly rollup job over `Measurement` ⋈ `EfCommand`, computing actuator on-time from `hvac_action`/`PowerState` history and pricing it with the Phase 2a wattage + rate.
 3. Dashboard trend for weighted discomfort-minutes and estimated cost.
-4. Optional follow-on: export the same figures to the existing Prometheus/Grafana stack ([docs/metrics-architecture.md](docs/metrics-architecture.md)). Postgres stays the source of truth — Phase 7 has to join against it.
+4. Optional follow-on: export the same figures to the existing Prometheus/Grafana stack ([docs/metrics-architecture.md](../metrics-architecture.md)). Postgres stays the source of truth — Phase 7 has to join against it.
 
 **Done when:** you can answer "is this better than leaving the AC at 72" with a number instead of an impression.
 
@@ -167,7 +167,7 @@ Architecture doc section 8. The loop runs and records; it dispatches nothing.
 1. Experiment scheduler targeting the highest-uncertainty coefficients (e.g. fan A on/off at a fixed AC setpoint, overnight, controlled for outside temperature), dispatching through the ledger with `Source = Experiment` under the Phase 2a policy — enabled, in-window, zone opted in, within `MaxDeviationF`, under `MaxMinutes`, after `MinHoursBetween`.
 2. Effect sizes reported against `EfClimateScore`.
 3. `HumanTask` table + kiosk card for what the brain can't do itself: "move fan 2 to the hallway for 3 days, then report."
-4. CFD stays offline — the modeler and the validated OpenFOAM pipeline ([docs/cfd-validation.md](docs/cfd-validation.md)) generate placement hypotheses that become experiments here. A simulation that hasn't been checked against a measurement doesn't steer the house.
+4. CFD stays offline — the modeler and the validated OpenFOAM pipeline ([docs/cfd-validation.md](../cfd-validation.md)) generate placement hypotheses that become experiments here. A simulation that hasn't been checked against a measurement doesn't steer the house.
 
 ---
 

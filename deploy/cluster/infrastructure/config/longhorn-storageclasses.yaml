@@ -1,6 +1,6 @@
-# TODO_SWARM.md Phase 3b.11 - the two explicit Longhorn StorageClasses.
+# The cluster plan Phase 3b.11 - the two explicit Longhorn StorageClasses.
 #
-# The storage split in TODO_SWARM.md asks for per-volume replica counts rather
+# The storage split in the cluster plan asks for per-volume replica counts rather
 # than one global default: 3 for the tiny critical volumes (Grafana, Kuma) and 2
 # for bulk where loss is tolerable (OpenSearch, Prometheus). These are those two
 # classes, so Phase 6 chooses per volume by naming one, instead of inheriting

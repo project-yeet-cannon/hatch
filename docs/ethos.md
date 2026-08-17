@@ -125,6 +125,6 @@ Before committing, ask of every new file:
 4. Can a second operator run this **without asking the author a question**? If
    not, the missing answer belongs in a parameter or the README.
 
-The measure of every phase in [`TODO_SWARM.md`](../TODO_SWARM.md) is not "does
+The measure of every phase in [the cluster plan](plans/swarm/design.md) is not "does
 the author's cluster run" but "could a stranger run this on their own three
 boxes."

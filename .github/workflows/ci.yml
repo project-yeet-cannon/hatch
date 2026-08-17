@@ -59,7 +59,7 @@ jobs:
         run: npm run build
 
   deploy-manifests:
-    # From TODO_SWARM.md Phase 3b.3 onward, everything under deploy/ reaches the
+    # From the cluster plan Phase 3b.3 onward, everything under deploy/ reaches the
     # cluster by being committed - there is no apply step to fail in front of a
     # human. A kustomization that does not build is otherwise discovered as a
     # Flux Kustomization that silently stopped reconciling, so it gets found
@@ -82,7 +82,7 @@ jobs:
         uses: actions/checkout@v7
 
       # The ExternalSecrets under config/external-secrets/ are a rendering of
-      # scripts/secrets/parameters.json (TODO_SWARM.md 3b.6), and
+      # scripts/secrets/parameters.json (the cluster plan 3b.6), and
       # docs/secrets-architecture.md promises both halves of the secret story
       # read that one file. Hand-maintained duplication is how a promise like
       # that stops being true quietly, so the rendering is checked rather than
@@ -112,7 +112,7 @@ jobs:
           fi
           echo "$found kustomization(s) built."
 
-      # The half of TODO_SWARM.md 3b.13's portability check that can be made
+      # The half of the cluster plan 3b.13's portability check that can be made
       # without knowing this installation's values: no address literal reaches
       # deploy/ at all. The other half - that the base domain and the VIP appear
       # nowhere in the tree - needs the values themselves, which docs/ethos.md

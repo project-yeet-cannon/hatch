@@ -37,7 +37,7 @@ client Phase 1 needed for its own post-boot verification.
 
 ## Provision 1 — install k3s
 
-TODO_SWARM.md Phase 2's first item: installs k3s server on one node that
+[The cluster plan](../../docs/plans/swarm/phase-2-k3s-flux-secrets.md) Phase 2's first item: installs k3s server on one node that
 Phase 1 already built, either forming the cluster's embedded etcd or joining
 an existing one.
 
@@ -51,7 +51,7 @@ Running node 2 before node 1 exists fails preflight: the workflow checks
 `join_server:6443` answers before it ever touches the node being installed.
 
 > Two-node embedded etcd has *worse* availability than one node (tolerates
-> zero losses, not one). TODO_SWARM.md calls this build window explicitly
+> zero losses, not one). [The cluster plan](../../docs/plans/swarm/phase-2-k3s-flux-secrets.md) calls this build window explicitly
 > non-production — the third server doesn't rejoin until Phase 7, when the
 > current prod box is rebuilt as a node.
 
@@ -67,7 +67,7 @@ Nothing else to set: the k3s version is **not** a variable. It's pinned in
 was dispatched from, so the version is a property of the commit rather than of
 the repository's settings — a node rebuilt from an old tag gets that tag's k3s.
 Bump it in a commit; **never** point it at the latest/stable channel, for the
-reason TODO_SWARM.md Phase 2 gives. To try a bump before merging, dispatch the
+reason [the cluster plan](../../docs/plans/swarm/phase-2-k3s-flux-secrets.md) Phase 2 gives. To try a bump before merging, dispatch the
 workflow from its branch.
 
 ### What a run actually does
@@ -102,7 +102,7 @@ workflow from its branch.
   connect can't meaningfully probe a connectionless port. The TCP ports
   (6443, 2379-2380, 10250) are checked; see "Order of operations" above.
   Debian/Ubuntu cloud images ship with no firewall active, so this has stayed
-  a non-issue in practice — TODO_SWARM.md flags it as worth revisiting only
+  a non-issue in practice — [the cluster plan](../../docs/plans/swarm/phase-2-k3s-flux-secrets.md) flags it as worth revisiting only
   if that default ever changes.
 - **Generating `K3S_CLUSTER_TOKEN`** — a one-time secret-bootstrap action,
   same tier as `NODE_SSH_PRIVATE_KEY` and Phase 0's `RESTIC_PASSWORD`.
@@ -122,7 +122,7 @@ shape as this one:
 
 ## Provision 4 — cluster configuration
 
-TODO_SWARM.md Phase 3b's first step: plants this installation's operator
+[The cluster plan](../../docs/plans/swarm/phase-3-platform-services.md) Phase 3b's first step: plants this installation's operator
 values in the cluster as the `aerie-cluster-config` ConfigMap in
 `flux-system`, which every Kustomization under [`deploy/`](../../deploy/) then
 reads through `postBuild.substituteFrom`.
@@ -212,7 +212,7 @@ before it does it.
 
 ## Provision 5 — node storage
 
-TODO_SWARM.md Phase 3b's second step, and the last one that runs **once per
+[The cluster plan](../../docs/plans/swarm/phase-3-platform-services.md) Phase 3b's second step, and the last one that runs **once per
 node**: it prepares the Longhorn data disk Phase 1 attached and deliberately
 left unformatted.
 
@@ -299,7 +299,7 @@ the cluster changes by commit rather than by command.
 
 ## Verify — the Phase 3 gate
 
-TODO_SWARM.md Phase 3b's last step. Steps 3b.1–3b.12 each carry an *Exit* line;
+[The cluster plan](../../docs/plans/swarm/phase-3-platform-services.md) Phase 3b's last step. Steps 3b.1–3b.12 each carry an *Exit* line;
 [`Test-ClusterPlatform.ps1`](Test-ClusterPlatform.ps1) asserts all of them in
 one run and exits 0 or non-zero. "Phase 3 is done" should be something that
 exits 0, not something remembered — and the same run is the smoke test after a
@@ -367,7 +367,7 @@ debug.
 ### The portability half
 
 3b.13 also asks for the [portability
-check](../../TODO_SWARM.md#verification) over `deploy/`: the base domain, any
+check](../../docs/plans/swarm/design.md#verification) over `deploy/`: the base domain, any
 LAN address and the VIP should appear as `${...}` substitutions and nowhere
 else. That splits in two, because the two halves need different things:
 

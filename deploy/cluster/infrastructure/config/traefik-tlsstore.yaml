@@ -1,4 +1,4 @@
-# TODO_SWARM.md Phase 3b.10, part 3 of 3 - what actually serves the wildcard.
+# The cluster plan Phase 3b.10, part 3 of 3 - what actually serves the wildcard.
 #
 # Missing from the original plan, and the failure it causes is the quiet kind:
 # the Certificate is issued, the Secret exists, everything reports Ready, and

@@ -5,7 +5,7 @@
 # Chart versions are pinned here rather than supplied as variables. They are
 # structural in the sense docs/ethos.md means it - identical for every
 # installation - exactly like the k3s and Flux pins in scripts/versions.json.
-# The versions to use were chosen in TODO_SWARM.md 3a.6, with the reasoning for
+# The versions to use were chosen in the cluster plan 3a.6, with the reasoning for
 # each one written down there; a bump is a commit against that table.
 #
 # Reconciled with wait: true, so anything added here has to become healthy
@@ -13,14 +13,14 @@
 # also the cost: a HelmRelease that never converges blocks the other layer
 # entirely rather than degrading around it.
 #
-# Filled in by TODO_SWARM.md 3b.4 (external-secrets), 3b.7 (cert-manager),
+# Filled in by the cluster plan 3b.4 (external-secrets), 3b.7 (cert-manager),
 # 3b.8 (kube-vip and kube-vip-cloud-provider), 3b.11 (longhorn) and
 # 3b.12 (cloudnative-pg).
 #
 # The order of this list is not an ordering. Nothing in this layer depends on
 # anything else in it - that was the original plan's mistake, corrected in
 # ../../infrastructure.yaml - so these are listed in step order purely so the
-# file reads against TODO_SWARM.md. Each component brings its own Namespace,
+# file reads against the cluster plan. Each component brings its own Namespace,
 # HelmRepository and HelmRelease in one file.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

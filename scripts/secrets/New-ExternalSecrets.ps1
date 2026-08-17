@@ -4,7 +4,7 @@
     or checks the committed ones still match it.
 
 .DESCRIPTION
-    This is TODO_SWARM.md Phase 3b.6. docs/secrets-architecture.md promises
+    This is the cluster plan Phase 3b.6. docs/secrets-architecture.md promises
     that both halves of the secret story - the seeding script and the manifests
     that read the values back out - agree on one file, and that promise is only
     true if nobody has to remember it. So the manifests are not written by
@@ -190,7 +190,7 @@ function New-ManifestHeader {
         '#'
         '# Source:    scripts/secrets/parameters.json'
         '# Generator: scripts/secrets/New-ExternalSecrets.ps1'
-        '# Step:      TODO_SWARM.md Phase 3b.6'
+        '# Step:      docs/plans/swarm/phase-3-platform-services.md 3b.6'
         '#'
         '# Regenerate:  pwsh ./scripts/secrets/New-ExternalSecrets.ps1'
         '# Verify:      pwsh ./scripts/secrets/New-ExternalSecrets.ps1 -Check   (ci.yml runs this)'

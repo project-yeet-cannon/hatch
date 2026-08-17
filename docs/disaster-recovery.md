@@ -4,7 +4,7 @@
 
 Every stateful service is backed up nightly to two [restic](https://restic.readthedocs.io/) repositories — one on a local, physically separate disk (`E:\restic-repo` on the host), one on S3 (`aerie-restic-backups`) — by a dedicated `backup` service ([`compose.backup.yml`](../compose.backup.yml), image built from [`containers/backup/`](../containers/backup/)). A weekly job restores the latest snapshot into a throwaway Postgres and sanity-queries it, so a silently broken backup gets caught automatically rather than discovered during an actual emergency.
 
-This is Phase 0 of [`TODO_SWARM.md`](../TODO_SWARM.md): backup + DR exist before any cluster work starts, on the current single Windows host.
+This is Phase 0 of [the cluster plan](plans/swarm/phase-0-backup-and-dr.md): backup + DR exist before any cluster work starts, on the current single Windows host.
 
 > **The offline-stored `RESTIC_PASSWORD` is the actual recovery credential.** It lives as a GitHub Actions secret so `cd.yml` can inject it into the `backup` container at deploy time — but GitHub Actions secrets are **write-only**; nobody can read `RESTIC_PASSWORD` back out of GitHub once it's set, not even a repo admin. Every manual restore procedure in this document assumes you have the password from wherever you printed and stored it offline. Without it, both restic repositories are permanently unreadable — that's the whole point of encryption, but it means the offline copy isn't optional paperwork.
 
@@ -13,7 +13,7 @@ This is Phase 0 of [`TODO_SWARM.md`](../TODO_SWARM.md): backup + DR exist before
 - **`backup` service**: always-on container running [supercronic](https://github.com/aptible/supercronic) (crontab: [`containers/backup/crontab`](../containers/backup/crontab)), on the `local`/`observability`/`metrics` networks so it can reach `db`, `opensearch`, and `prometheus` by service name.
 - **Image**: built on `postgres:18.4-alpine` — version-matched to the `db` service so `pg_dumpall` is never older than the server it's dumping from — plus `restic`, `sqlite3`, and `curl`.
 - **Two repos, one dump**: each service is dumped/snapshotted once per run into a scratch directory, then pushed to both the local and S3 repos, so a Postgres outage never gets dumped twice.
-- **Secrets**: injected as plain environment variables by `cd.yml` at deploy time (`RESTIC_PASSWORD` and `RESTIC_AWS_SECRET_ACCESS_KEY` as repository secrets, `RESTIC_AWS_ACCESS_KEY_ID` as a repository variable — see [`scripts/secrets/README.md`](../scripts/secrets/README.md#which-tab-ids-are-variables-everything-else-is-a-secret)), the same pattern already used for the Route53 and Home Assistant credentials. The AWS credentials belong to a dedicated `aerie-restic` IAM user scoped to only the `aerie-restic-backups` bucket — a leak of these can't touch Route53, and vice versa. See [`TODO_SWARM.md`](../TODO_SWARM.md)'s Phase 0 section for why this is GitHub Actions secrets rather than the SOPS + age setup planned for Phase 2.
+- **Secrets**: injected as plain environment variables by `cd.yml` at deploy time (`RESTIC_PASSWORD` and `RESTIC_AWS_SECRET_ACCESS_KEY` as repository secrets, `RESTIC_AWS_ACCESS_KEY_ID` as a repository variable — see [`scripts/secrets/README.md`](../scripts/secrets/README.md#which-tab-ids-are-variables-everything-else-is-a-secret)), the same pattern already used for the Route53 and Home Assistant credentials. The AWS credentials belong to a dedicated `aerie-restic` IAM user scoped to only the `aerie-restic-backups` bucket — a leak of these can't touch Route53, and vice versa. See [the cluster plan](plans/swarm/phase-0-backup-and-dr.md) for why this is GitHub Actions secrets rather than the SOPS + age setup planned for Phase 2.
 
 ## What's backed up, and how
 
@@ -114,7 +114,7 @@ The last command lists the restored snapshot's name. Restore it with:
 curl -fsS -X POST "http://opensearch:9200/_snapshot/aerie_backup/<snapshot-name>/_restore?wait_for_completion=true" -H "Content-Type: application/json" -d '{"indices":"*","include_global_state":true}'
 ```
 
-(run from inside the `backup` container, same as above). If indices from before the loss still exist, OpenSearch refuses to restore over them — close or delete the conflicting indices first. Observability data is explicitly out of scope for HA in this stack (see `TODO_SWARM.md`), so this is the lowest-priority restore of the five.
+(run from inside the `backup` container, same as above). If indices from before the loss still exist, OpenSearch refuses to restore over them — close or delete the conflicting indices first. Observability data is explicitly out of scope for HA in this stack (see [the cluster plan](plans/swarm/design.md)), so this is the lowest-priority restore of the five.
 
 ### Prometheus
 
@@ -143,4 +143,4 @@ This is the Phase 0 gate: **do not start Phase 1 until this has actually been pe
 
 ## Known gap
 
-Per `TODO_SWARM.md` goal 6: the local repo and the live host are in the same building on the same circuit — fire, flood, theft, or a bad surge takes out both at once. Until a UPS and a genuinely offsite second copy exist, S3 is the *real* second copy, not the third, and the full-DR procedure above (S3-only) is the one to trust.
+Per [the cluster plan](plans/swarm/design.md) goal 6: the local repo and the live host are in the same building on the same circuit — fire, flood, theft, or a bad surge takes out both at once. Until a UPS and a genuinely offsite second copy exist, S3 is the *real* second copy, not the third, and the full-DR procedure above (S3-only) is the one to trust.
