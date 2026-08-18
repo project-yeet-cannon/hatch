@@ -23,3 +23,7 @@ resources:
   # The cluster plan Phase 4: data-cluster -> data-schema, depending on
   # infra-config the same way infra-config depends on infra-controllers.
   - data.yaml
+  # The cluster plan Phase 5b.4: site-source -> site-config, reaching the
+  # private per-installation site repo that 5b.10's apps layer and 5b.12's
+  # image automation both depend on.
+  - site.yaml

@@ -446,7 +446,7 @@ demands of any workload, plus the automation. 14 is the gate.
       *Exit:* `dotnet test` passes; the image built from this commit runs
       migrations and exits when given the migrate mode, and serves when not.
 
-- [ ] **3. `csi-driver-smb`, and the share credential** —
+- [x] **3. `csi-driver-smb`, and the share credential** —
       `deploy/cluster/infrastructure/controllers/csi-driver-smb.yaml`, one line in
       that directory's
       [`kustomization.yaml`](../../../deploy/cluster/infrastructure/controllers/kustomization.yaml),
@@ -472,7 +472,7 @@ demands of any workload, plus the automation. 14 is the gate.
       namespace; that is what a CSI node plugin is, and it is worth knowing
       before it appears in a security review as a surprise.*
 
-- [ ] **4. Eight new `cluster-config.json` keys, the site repo source, and a
+- [x] **4. Eight new `cluster-config.json` keys, the site repo source, and a
       Provision 4 re-dispatch** —
       [`cluster-config.json`](../../../scripts/k3s/cluster-config.json),
       [`provision-4-cluster-config.yml`](../../../.github/workflows/provision-4-cluster-config.yml),

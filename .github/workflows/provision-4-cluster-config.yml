@@ -125,6 +125,20 @@ jobs:
           POSTGRES_INSTANCES: ${{ vars.POSTGRES_INSTANCES }}
           WAL_BUCKET: ${{ vars.WAL_BUCKET }}
 
+          # Phase 5b.4. Dispatch this workflow, and confirm it lands, before
+          # the 5b.10 HelmRelease commit reaches the cluster - Flux expands an
+          # undefined token to the empty string, so landing first is not a
+          # failed reconciliation, it's a Deployment pulling /aerie-api:...
+          # and an Ingress with host home..
+          SITE_REPO_URL: ${{ vars.SITE_REPO_URL }}
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          SHARE_HOST: ${{ vars.SHARE_HOST }}
+          SHARE_NAME: ${{ vars.SHARE_NAME }}
+          MEDIA_LIBRARY_SUBPATH: ${{ vars.MEDIA_LIBRARY_SUBPATH }}
+          TZ: ${{ vars.TZ }}
+          HA_HOST: ${{ vars.HA_HOST }}
+          HA_PORT: ${{ vars.HA_PORT }}
+
           # Same keypair provision-0/1/2/3 used.
           NODE_SSH_PRIVATE_KEY: ${{ secrets.NODE_SSH_PRIVATE_KEY }}
         run: |
