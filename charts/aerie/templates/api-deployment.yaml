@@ -1,7 +1,7 @@
 # The cluster plan Phase 5b.5 - the api Deployment, replacing compose.prod.yml
-# and compose.share.yml's `api` service (and, once 5b.6 exists, run a second
-# way by the migrate hook Job, which shares ./_helpers.tpl's postgresEnv
-# rather than duplicating it). No resources block yet - 5b.11 sizes it from a
+# and compose.share.yml's `api` service. Run a second way by the migrate hook
+# Job (5b.6, migrate-job.yaml), which shares ./_helpers.tpl's postgresEnv
+# rather than duplicating it. No resources block yet - 5b.11 sizes it from a
 # real reading (5a.6) rather than this step guessing; no volumeMount for the
 # SMB share either - that arrives with 5b.8's files/share workloads.
 apiVersion: apps/v1

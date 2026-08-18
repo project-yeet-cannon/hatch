@@ -590,7 +590,7 @@ demands of any workload, plus the automation. 14 is the gate.
       *Exit:* `helm template charts/aerie` renders; `helm lint` is clean.
       Nothing is deployed yet — 5b.10 is what reconciles.
 
-- [ ] **6. The migration hook Job** — `charts/aerie/templates/migrate-job.yaml`.
+- [x] **6. The migration hook Job** — `charts/aerie/templates/migrate-job.yaml`.
       Finding 1's actual answer, and the reason this tier is a chart at all.
 
       ```yaml
