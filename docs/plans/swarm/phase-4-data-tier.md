@@ -250,7 +250,7 @@ closes; 11 is the gate.
       matching the neighbouring files; there is no data behind this release, so
       the uninstall-and-retry blast radius is one Deployment.
       *Exit:* `kubectl get crd objectstores.barmancloud.cnpg.io` and
-      `kubectl -n cnpg-system rollout status deployment barman-cloud`.
+      `kubectl -n cnpg-system rollout status deployment plugin-barman-cloud`.
       — *Two traps. The chart's `values.schema.json`, like the operator's, sets
       no `additionalProperties: false`, so a misspelled key is accepted and
       silently unread. And `service.name` is documented as unchangeable because

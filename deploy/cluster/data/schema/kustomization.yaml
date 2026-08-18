@@ -5,6 +5,14 @@
 # Cluster is Ready.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+# Every hand-written resource below already sets metadata.namespace: aerie
+# inline, but the two configMapGenerator entries don't - kustomize gives a
+# generated resource no namespace at all unless the Kustomization declares
+# one here, and a namespaced kind with no namespace is what Flux's
+# server-side apply rejects as "namespace not specified". This field also
+# covers the hand-written resources with no conflict, since they already
+# agree with it.
+namespace: aerie
 resources:
   - quartz-database.yaml
   - quartz-ddl-job.yaml

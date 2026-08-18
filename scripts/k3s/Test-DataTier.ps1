@@ -351,7 +351,7 @@ try {
         'printf ''\n--- objectstore\n'''
         'sudo k3s kubectl -n aerie get objectstores.barmancloud.cnpg.io aerie-pg-wal -o json 2>/dev/null || echo {}'
         'printf ''\n--- plugindeploy\n'''
-        'sudo k3s kubectl -n cnpg-system get deployment barman-cloud -o json 2>/dev/null || echo {}'
+        'sudo k3s kubectl -n cnpg-system get deployment plugin-barman-cloud -o json 2>/dev/null || echo {}'
         'printf ''\n--- plugincerts\n'''
         'sudo k3s kubectl -n cnpg-system get certificates.cert-manager.io -o json 2>/dev/null || echo {}'
         'printf ''\n--- externalsecret\n'''
@@ -582,16 +582,16 @@ try {
 
     # --- 4b.4: plugin Deployment rolled out and both certificates Ready -
     if ($null -eq $pluginDeploy -or -not (Get-Field $pluginDeploy 'status')) {
-        Add-Check -Step '4b.4' -Name 'Deployment barman-cloud' -Status 'Fail' -Detail 'not found in namespace cnpg-system'
+        Add-Check -Step '4b.4' -Name 'Deployment plugin-barman-cloud' -Status 'Fail' -Detail 'not found in namespace cnpg-system'
     }
     else {
         $desired = [int](Get-Path $pluginDeploy 'spec.replicas')
         $available = [int](Get-Path $pluginDeploy 'status.availableReplicas')
         if ($desired -gt 0 -and $available -eq $desired) {
-            Add-Check -Step '4b.4' -Name 'Deployment barman-cloud' -Status 'Pass' -Detail "$available/$desired available"
+            Add-Check -Step '4b.4' -Name 'Deployment plugin-barman-cloud' -Status 'Pass' -Detail "$available/$desired available"
         }
         else {
-            Add-Check -Step '4b.4' -Name 'Deployment barman-cloud' -Status 'Fail' -Detail "$available/$desired available"
+            Add-Check -Step '4b.4' -Name 'Deployment plugin-barman-cloud' -Status 'Fail' -Detail "$available/$desired available"
         }
     }
     if ($pluginCerts.Count -eq 0) {
