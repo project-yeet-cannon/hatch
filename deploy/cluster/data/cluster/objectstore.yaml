@@ -56,14 +56,20 @@ spec:
   # has no field for. This is the other half of ./cluster.yaml's own
   # spec.resources: same instances, same reasoning, sized for the sidecar
   # rather than for Postgres itself.
+  #
+  # 128Mi was the original guess and it OOMKilled mid-backup (exit 137)
+  # against this cluster's own first base backup - WAL archiving's small
+  # 16MB segments fit fine, but barman-cloud-backup buffers and multipart-
+  # uploads a full base backup, and that needs real headroom. 512Mi observed
+  # comfortable on this database's current size; revisit if it grows a lot.
   instanceSidecarConfiguration:
     resources:
       requests:
         cpu: 50m
-        memory: 64Mi
-      limits:
-        cpu: 200m
         memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
   # Left empty on purpose. serverName exists only for API compatibility with
   # the deprecated in-tree barmanObjectStore; the live path names the server
   # through the plugin parameters in ./cluster.yaml's `plugins:` block
