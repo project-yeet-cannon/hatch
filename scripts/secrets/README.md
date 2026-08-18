@@ -60,6 +60,24 @@ Two parameters naming the same `namespace` + `secretName` become **one**
 `ExternalSecret` with two keys — which is how an access key id and its secret
 half stay a single object that can't half-rotate.
 
+`kubernetes` may also be an **array** of blocks, for a value that lands in
+more than one namespace — a registry pull secret both the kubelet (`aerie`)
+and image-reflector-controller (`flux-system`) need:
+
+```json
+"kubernetes": [
+  { "namespace": "aerie",        "secretName": "ghcr-pull", "secretKey": "token", "dockerconfigjson": "ghcr.io" },
+  { "namespace": "flux-system",  "secretName": "ghcr-pull", "secretKey": "token", "dockerconfigjson": "ghcr.io" }
+]
+```
+
+A block's `dockerconfigjson` names a registry host and renders that Secret as
+`kubernetes.io/dockerconfigjson` via ESO's `target.template` — `engineVersion:
+v2`, since `b64enc` is a v2 template function and v1 renders the call as
+literal text — instead of the plain data list above. Every block landing in
+the same Secret must agree on the host, and the group must have exactly two
+keys, one of them literally named `username`.
+
 The generator refuses two things, and both are the failure it exists to
 prevent:
 

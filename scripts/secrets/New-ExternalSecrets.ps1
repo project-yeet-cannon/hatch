@@ -15,7 +15,18 @@
     by the map's 'kubernetes' blocks, with one 'data' entry per parameter that
     names it. A credential pair - an access key id and its secret half - is
     therefore a single object with two keys, not two objects that can
-    half-rotate.
+    half-rotate. 'kubernetes' may be a single block or an array of them, for a
+    value that lands in more than one namespace (a pull secret both the
+    kubelet and image-reflector-controller need); every block across every
+    parameter that names the same (namespace, secretName) still folds into one
+    ExternalSecret.
+
+    A block may also carry 'dockerconfigjson', naming a registry host. That
+    Secret renders with ESO's target.template instead of a plain data list -
+    kubernetes.io/dockerconfigjson, keyed by whichever entry's secretKey is
+    literally 'username' and the other one, whatever it's called - because a
+    kubelet or image-reflector-controller pull secret is not a value a
+    Deployment reads as an env var.
 
     Which parameters get a manifest is entirely the map's business, and it is
     checked here rather than assumed:
@@ -211,7 +222,11 @@ function New-ExternalSecretManifest {
         [Parameter(Mandatory)][string]$SecretName,
         [Parameter(Mandatory)][object[]]$Entries,
         [Parameter(Mandatory)][string]$StoreName,
-        [Parameter(Mandatory)][string]$RefreshInterval
+        [Parameter(Mandatory)][string]$RefreshInterval,
+        # Set when any entry in this group named a 'dockerconfigjson' host -
+        # every entry in the group agreed on it, Assert-DockerConfigJsonGroup
+        # already checked that.
+        [string]$DockerConfigJsonHost
     )
 
     $lines = New-Object Collections.Generic.List[string]
@@ -249,8 +264,34 @@ function New-ExternalSecretManifest {
             '    # good value and report SecretSyncError, rather than deleting a live'
             '    # credential out from under a running workload.'
             '    deletionPolicy: Retain'
-            '  data:'
         ))
+
+    if ($DockerConfigJsonHost) {
+        $userEntry = @($Entries | Where-Object { $_.SecretKey -eq 'username' })
+        $passEntry = @($Entries | Where-Object { $_.SecretKey -ne 'username' })
+        if ($Entries.Count -ne 2 -or $userEntry.Count -ne 1 -or $passEntry.Count -ne 1) {
+            throw "Secret '$SecretName' in namespace '$Namespace' targets dockerconfigjson host '$DockerConfigJsonHost' but doesn't have exactly two keys, one of them named 'username'. Got: $((($Entries | ForEach-Object { $_.SecretKey }) -join ', '))."
+        }
+        $passKey = $passEntry[0].SecretKey
+        # A literal template, not an interpolated string: '{{ }}' is ESO's Go
+        # template syntax, not PowerShell's, and every '"' below is data. Only
+        # the host and the pass-side key name are ever substituted in.
+        $authTemplate = '{"auths":{"__HOST__":{"username":"{{ .username }}","password":"{{ .__PASSKEY__ }}","auth":"{{ printf "%s:%s" .username .__PASSKEY__ | b64enc }}"}}}'
+        $authJson = $authTemplate.Replace('__HOST__', $DockerConfigJsonHost).Replace('__PASSKEY__', $passKey)
+        $lines.AddRange([string[]]@(
+                '    template:'
+                '      type: kubernetes.io/dockerconfigjson'
+                '      # v2 is not optional: b64enc is a v2 template function. v1 renders the'
+                '      # call as literal text instead, producing a Secret that is structurally'
+                '      # valid and rejected by every registry.'
+                '      engineVersion: v2'
+                '      data:'
+                '        .dockerconfigjson: |'
+                "          $authJson"
+            ))
+    }
+
+    $lines.Add('  data:')
 
     foreach ($entry in $Entries) {
         if ($entry.Description) { $lines.Add("    # $($entry.Description)") }
@@ -323,12 +364,24 @@ foreach ($parameter in (Get-Field $map 'parameters')) {
     $target = Get-Field $parameter 'kubernetes'
     $deferral = [string](Get-Field $parameter 'kubernetesDeferred')
 
-    if ($target -and $deferral) {
+    # A single block is the common case; an array is a value landing in more
+    # than one namespace (the registry pull secret: kubelet in 'aerie',
+    # image-reflector-controller in 'flux-system'). Normalizing here means
+    # everything below - including the empty case - only has one shape to
+    # handle.
+    # @(...) around the whole expression, not just the empty-array branch:
+    # PowerShell unravels a script block's pipeline output on assignment, and
+    # an if-branch that emits zero objects becomes $null rather than an empty
+    # array - which is exactly the branch this takes most often, since most
+    # parameters carry no 'kubernetes' block at all.
+    $targets = @(if ($null -eq $target) { } elseif ($target -is [array]) { $target } else { $target })
+
+    if ($targets.Count -gt 0 -and $deferral) {
         $failures.Add("$key has both 'kubernetes' and 'kubernetesDeferred'. It is one or the other: either a manifest is generated for it or it is written down why not.")
         continue
     }
 
-    if (-not $target) {
+    if ($targets.Count -eq 0) {
         if ($required -and -not $deferral) {
             $failures.Add("$key is required but has neither a 'kubernetes' block nor a 'kubernetesDeferred' note. A required parameter is seeded by every run of Sync-AerieSecrets.ps1, so if nothing consumes it, that has to be a decision on the record - name the phase that adds the manifest.")
         }
@@ -347,23 +400,26 @@ foreach ($parameter in (Get-Field $map 'parameters')) {
         continue
     }
 
-    $namespace = [string](Get-Field $target 'namespace')
-    $secretName = [string](Get-Field $target 'secretName')
-    $secretKey = [string](Get-Field $target 'secretKey')
+    foreach ($t in $targets) {
+        $namespace = [string](Get-Field $t 'namespace')
+        $secretName = [string](Get-Field $t 'secretName')
+        $secretKey = [string](Get-Field $t 'secretKey')
 
-    Assert-Name -Value $namespace -Kind 'Namespace' -Context "$key's kubernetes block" -Failures $failures
-    Assert-Name -Value $secretName -Kind 'SecretName' -Context "$key's kubernetes block" -Failures $failures
-    Assert-Name -Value $secretKey -Kind 'SecretKey' -Context "$key's kubernetes block" -Failures $failures
+        Assert-Name -Value $namespace -Kind 'Namespace' -Context "$key's kubernetes block" -Failures $failures
+        Assert-Name -Value $secretName -Kind 'SecretName' -Context "$key's kubernetes block" -Failures $failures
+        Assert-Name -Value $secretKey -Kind 'SecretKey' -Context "$key's kubernetes block" -Failures $failures
 
-    $entries.Add([pscustomobject]@{
-            Key         = $key
-            Path        = "$prefix/$key"
-            Namespace   = $namespace
-            SecretName  = $secretName
-            SecretKey   = $secretKey
-            ConsumedBy  = [string](Get-Field $target 'consumedBy')
-            Description = [string](Get-Field $parameter 'description')
-        })
+        $entries.Add([pscustomobject]@{
+                Key              = $key
+                Path             = "$prefix/$key"
+                Namespace        = $namespace
+                SecretName       = $secretName
+                SecretKey        = $secretKey
+                ConsumedBy       = [string](Get-Field $t 'consumedBy')
+                Description      = [string](Get-Field $parameter 'description')
+                DockerConfigJson = [string](Get-Field $t 'dockerconfigjson')
+            })
+    }
 }
 
 # Two parameters may share a Secret - that is how a credential pair stays one
@@ -372,6 +428,23 @@ foreach ($parameter in (Get-Field $map 'parameters')) {
 foreach ($collision in ($entries | Group-Object { "$($_.Namespace)/$($_.SecretName)/$($_.SecretKey)" } | Where-Object { $_.Count -gt 1 })) {
     $keys = ($collision.Group | ForEach-Object { $_.Key }) -join ', '
     $failures.Add("$($collision.Name) is claimed by more than one parameter ($keys). Two parameters can share a Secret, but not a key inside it - one would overwrite the other with no error anywhere.")
+}
+
+# Every block landing in the same Secret has to agree on 'dockerconfigjson':
+# it decides the whole Secret's shape (a template, not a plain data list), so
+# one key opting in while another doesn't is a contradiction, not a merge.
+foreach ($group in ($entries | Group-Object { "$($_.Namespace)/$($_.SecretName)" })) {
+    $hosts = @($group.Group | ForEach-Object { $_.DockerConfigJson } | Where-Object { $_ } | Select-Object -Unique)
+    if ($hosts.Count -gt 1) {
+        $failures.Add("$($group.Name) names more than one 'dockerconfigjson' host across its parameters ($($hosts -join ', ')). Every key landing in the same Secret has to agree on the registry host.")
+    }
+    elseif ($hosts.Count -eq 1) {
+        $plain = @($group.Group | Where-Object { -not $_.DockerConfigJson })
+        if ($plain.Count -gt 0) {
+            $names = ($plain | ForEach-Object { $_.Key }) -join ', '
+            $failures.Add("$($group.Name) mixes a 'dockerconfigjson' block with a plain one ($names). The whole Secret renders as one shape or the other - give every key in it the same 'dockerconfigjson' host.")
+        }
+    }
 }
 
 if ($failures.Count -gt 0) {
@@ -403,12 +476,14 @@ foreach ($group in $groups) {
     if ($rendered.Contains($fileName)) {
         throw "Two Secrets render to the same file name '$fileName'. Rename one in parameters.json."
     }
+    $dockerConfigJsonHost = ($group.Group | ForEach-Object { $_.DockerConfigJson } | Where-Object { $_ } | Select-Object -First 1)
     $rendered[$fileName] = New-ExternalSecretManifest `
         -Namespace $first.Namespace `
         -SecretName $first.SecretName `
         -Entries ([object[]]$group.Group) `
         -StoreName $StoreName `
-        -RefreshInterval $RefreshInterval
+        -RefreshInterval $RefreshInterval `
+        -DockerConfigJsonHost $dockerConfigJsonHost
 }
 
 $rendered['kustomization.yaml'] = New-KustomizationManifest -FileNames ([string[]]@($rendered.Keys))
