@@ -520,7 +520,7 @@ try {
         $newest = $backups | Sort-Object { [string](Get-Path $_ 'status.startedAt') } -Descending | Select-Object -First 1
         $phase = [string](Get-Path $newest 'status.phase')
         $startedAtRaw = [string](Get-Path $newest 'status.startedAt')
-        $started = $null
+        [DateTimeOffset]$started = [DateTimeOffset]::MinValue
         if ($phase -ne 'completed') {
             Add-Check -Step '4b.10' -Name 'Newest Backup' -Status 'Fail' -Detail "phase is '$phase', not completed - $(Get-Path $newest 'metadata.name')"
         }
