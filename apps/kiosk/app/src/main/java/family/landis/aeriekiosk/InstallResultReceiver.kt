@@ -22,6 +22,7 @@ class InstallResultReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
+        KioskLogger.init(context)
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
         val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
         val targetVersionCode = intent.getIntExtra(EXTRA_TARGET_VERSION_CODE, -1)

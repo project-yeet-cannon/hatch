@@ -32,9 +32,21 @@ public class VmConsoleLogsController(ILogger<VmConsoleLogsController> logger, IS
             return Unauthorized();
         }
 
+        var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString();
         foreach (var entry in entries)
         {
-            logger.LogInformation("{Service} {Line}", $"vm-console.{entry.VmName}", entry.Line);
+            // {ClientIp}/{HostName} identify the shipping Hyper-V host (the
+            // actor), separately from {Service}'s VmName, which identifies
+            // the console the line came from - the two diverge once there's
+            // more than one Hyper-V host. ClientIp comes from
+            // UseForwardedHeaders (Program.cs); see UiLogsController for why
+            // that's trusted on this network.
+            logger.LogInformation(
+                "{Service} {Line} :: ip={ClientIp} host={HostName}",
+                $"vm-console.{entry.VmName}",
+                entry.Line,
+                clientIp,
+                entry.HostName);
         }
 
         return NoContent();

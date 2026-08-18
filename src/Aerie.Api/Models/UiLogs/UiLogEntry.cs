@@ -10,4 +10,10 @@ public record UiLogEntry(
     DateTimeOffset? Timestamp,
     string? SessionId,
     string? Url,
-    JsonElement? Metadata);
+    JsonElement? Metadata,
+    // Persisted client-side (localStorage on web, ANDROID_ID for the kiosk
+    // shell - see clientLogger.ts/KioskLogger.kt) so the same physical
+    // device's lines correlate across page loads/process restarts, unlike
+    // SessionId which is per-load. Client-supplied and thus spoofable, same
+    // trust level as every other field here - see UiLogsController's remarks.
+    string? DeviceId = null);

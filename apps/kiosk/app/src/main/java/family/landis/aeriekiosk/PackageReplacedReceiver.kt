@@ -14,6 +14,7 @@ class PackageReplacedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
 
+        KioskLogger.init(context)
         KioskLogger.info(
             "Kiosk app updated, relaunching",
             mapOf("versionCode" to BuildConfig.VERSION_CODE, "versionName" to BuildConfig.VERSION_NAME),

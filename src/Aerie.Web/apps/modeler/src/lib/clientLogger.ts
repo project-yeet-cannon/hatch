@@ -8,6 +8,7 @@ interface OutgoingEntry {
   message: string;
   timestamp: string;
   sessionId: string;
+  deviceId: string;
   url: string;
   metadata: Record<string, unknown>;
 }
@@ -15,6 +16,22 @@ interface OutgoingEntry {
 declare global {
   interface Window {
     __uiLogSessionId?: string;
+  }
+}
+
+const DEVICE_ID_STORAGE_KEY = 'aerie-device-id';
+
+function getOrCreateDeviceId(): string {
+  try {
+    const existing = localStorage.getItem(DEVICE_ID_STORAGE_KEY);
+    if (existing) return existing;
+    const created = crypto.randomUUID();
+    localStorage.setItem(DEVICE_ID_STORAGE_KEY, created);
+    return created;
+  } catch {
+    // Storage disabled/unavailable (private browsing, quota) - fall back to a
+    // per-load id rather than losing the field entirely.
+    return crypto.randomUUID();
   }
 }
 
@@ -26,6 +43,10 @@ const MAX_QUEUE = 25;
 // index.html pings the endpoint before any of this module's code runs; reuse
 // its session id (if present) so every log line from this page load correlates.
 const sessionId = window.__uiLogSessionId ?? crypto.randomUUID();
+// Unlike sessionId, this survives across page loads/reboots (persisted in
+// localStorage) so the same physical device's lines correlate over time -
+// e.g. telling kiosk tablets apart in OpenSearch even when they share an IP.
+const deviceId = getOrCreateDeviceId();
 const staticMetadata = collectStaticMetadata();
 
 let queue: OutgoingEntry[] = [];
@@ -38,6 +59,7 @@ function buildEntry(level: LogLevel, message: string, extra?: Record<string, unk
     message,
     timestamp: new Date().toISOString(),
     sessionId,
+    deviceId,
     url: location.href,
     metadata: { ...staticMetadata, ...collectDynamicMetadata(), ...extra },
   };

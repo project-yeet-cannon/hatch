@@ -1,5 +1,7 @@
 package family.landis.aeriekiosk
 
+import android.content.Context
+import android.provider.Settings
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
@@ -26,6 +28,18 @@ private const val APP_NAME = "kiosk-android"
 object KioskLogger {
     private val sessionId = UUID.randomUUID().toString()
 
+    // ANDROID_ID rather than a generated-and-stored UUID: it's already
+    // unique per device (per app-signing-key) and survives process/app
+    // restarts with no storage of our own to manage. init() must run before
+    // the first send() - every call site (Activity/BroadcastReceiver) has a
+    // Context available, see MainActivity.onCreate and the receivers.
+    private var deviceId: String? = null
+
+    fun init(context: Context) {
+        if (deviceId != null) return
+        deviceId = Settings.Secure.getString(context.applicationContext.contentResolver, Settings.Secure.ANDROID_ID)
+    }
+
     fun info(message: String, metadata: Map<String, Any?> = emptyMap()) = send("info", message, metadata)
     fun warn(message: String, metadata: Map<String, Any?> = emptyMap()) = send("warn", message, metadata)
     fun error(message: String, metadata: Map<String, Any?> = emptyMap()) = send("error", message, metadata)
@@ -39,6 +53,7 @@ object KioskLogger {
                     put("message", message)
                     put("timestamp", Instant.now().toString())
                     put("sessionId", sessionId)
+                    put("deviceId", deviceId)
                     put("metadata", JSONObject(metadata.filterValues { it != null }))
                 }
                 val body = JSONArray().put(entry).toString().toByteArray(Charsets.UTF_8)

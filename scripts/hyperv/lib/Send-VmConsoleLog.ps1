@@ -77,7 +77,7 @@ function Send-LineBatch {
     # to a bare JSON object instead of a one-element array on Windows
     # PowerShell 5.1.
     $entries = $Lines | ForEach-Object {
-        [PSCustomObject]@{ vmName = $VMName; line = $_ } | ConvertTo-Json -Compress
+        [PSCustomObject]@{ vmName = $VMName; line = $_; hostName = $env:COMPUTERNAME } | ConvertTo-Json -Compress
     }
     $json = '[' + ($entries -join ',') + ']'
 

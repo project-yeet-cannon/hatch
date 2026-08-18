@@ -32,14 +32,24 @@ public class UiLogsController(ILogger<UiLogsController> logger) : ControllerBase
             // console line (see Program.cs), which fluent-bit's service_tag.lua then
             // reads to override the container-level default `service` (aerie-api)
             // with the specific frontend app for these lines.
+            //
+            // {ClientIp} comes from RemoteIpAddress, which UseForwardedHeaders
+            // (Program.cs) resolves from Caddy's X-Forwarded-For - trusted here
+            // because `api` is only reachable from `caddy` on the isolated `edge`
+            // Docker network (see docs/reverse-proxy-architecture.md), never
+            // published to the host directly. {DeviceId} is client-supplied (same
+            // trust level as every other field on entry) so multiple kiosks can be
+            // told apart in OpenSearch even though they share IPs from the same LAN.
             logger.Log(
                 level,
-                "{Service}[{SessionId}] {Message} ({Url}) :: {Metadata}",
+                "{Service}[{SessionId}] {Message} ({Url}) :: {Metadata} :: ip={ClientIp} device={DeviceId}",
                 entry.App,
                 entry.SessionId,
                 entry.Message,
                 entry.Url,
-                entry.Metadata?.GetRawText() ?? "{}");
+                entry.Metadata?.GetRawText() ?? "{}",
+                HttpContext.Connection.RemoteIpAddress?.ToString(),
+                entry.DeviceId);
         }
 
         return NoContent();

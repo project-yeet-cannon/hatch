@@ -1,6 +1,9 @@
-# Runs alongside compose.prod.yml / compose.observability.yml / compose.metrics.yml
-# (all four combined via -f in cd.yml) so this container can reach every
-# service it backs up by name on their existing networks.
+# Runs alongside compose.prod.yml (and, incidentally, compose.observability.yml
+# / compose.metrics.yml / compose.share.yml, since cd.yml always combines all
+# of them via -f) so this container can reach db by name on its network.
+# OpenSearch and Prometheus are intentionally not backed up here — both
+# rebootstrap cleanly from their own config, so there's nothing in them worth
+# restic's storage/complexity budget.
 x-logging: &container-log-tag
   options:
     labels: "com.docker.compose.service"
@@ -11,8 +14,6 @@ services:
     restart: always
     networks:
       - local
-      - observability
-      - metrics
     volumes:
       # Local restic repo, on E: — a physically separate disk from pgdata.
       - E:/restic-repo:/mnt/restic-local
@@ -21,13 +22,6 @@ services:
       # backed up: nothing there is customized, and it's expected to be
       # rebootstrapped by automation rather than restored.
       - uptime_kuma_data:/mnt/kuma:ro
-      # OpenSearch's snapshot API writes here (see compose.observability.yml's
-      # path.repo); read-write so backup.sh can clear it after restic has the
-      # data durably, since OpenSearch never prunes its own snapshots.
-      - opensearch_snapshots:/mnt/opensearch-snapshots
-      # Prometheus's admin API writes TSDB snapshots inside its own data dir;
-      # read-write for the same staging-cleanup reason as opensearch above.
-      - prometheus_data:/mnt/prometheus
     environment:
       - POSTGRES_USER=user
       - POSTGRES_PASSWORD=password
@@ -43,12 +37,6 @@ services:
 networks:
   local:
     driver: bridge
-  observability:
-    driver: bridge
-  metrics:
-    driver: bridge
 
 volumes:
   uptime_kuma_data:
-  opensearch_snapshots:
-  prometheus_data:

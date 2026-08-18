@@ -12,6 +12,7 @@ class BootCompletedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
 
+        KioskLogger.init(context)
         KioskLogger.info("Device rebooted, relaunching kiosk")
 
         val launchIntent = Intent(context, MainActivity::class.java).apply {

@@ -11,6 +11,7 @@ using Aerie.Api.Services.Media;
 using Aerie.Api.Services.Routines;
 using HADotNet.Core;
 using HADotNet.Core.Clients;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Rewrite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -204,6 +205,25 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
+
+// `api` is reached only via `caddy`'s reverse_proxy, both on the isolated
+// `edge` Docker network with no port of `api`'s own published to the host
+// (see docs/reverse-proxy-architecture.md) - so the immediate proxy is always
+// trustworthy, but its container IP is assigned by Docker at startup and
+// can't be pinned as a KnownProxy. Clearing KnownNetworks/KnownProxies trusts
+// X-Forwarded-For from whatever peer connects, which here is only ever Caddy.
+// Without this, RemoteIpAddress (used by UiLogsController/VmConsoleLogsController
+// for actor telemetry) would just be Caddy's container IP for every request.
+var forwardedHeadersOptions = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+};
+// KnownIPNetworks/KnownProxies default to loopback only; Clear() (rather than
+// an object-initializer collection, which would just add to those defaults)
+// is what actually drops that restriction.
+forwardedHeadersOptions.KnownIPNetworks.Clear();
+forwardedHeadersOptions.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedHeadersOptions);
 
 app.UseHttpsRedirection();
 
