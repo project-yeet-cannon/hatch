@@ -28,20 +28,36 @@ export function RoutinesSection({ routines }: { routines: RoutineSummary[] }) {
 
   return (
     <div className="hf-routines">
-      {routines.map((routine) => (
-        <button
-          key={routine.id}
-          type="button"
-          className="hf-routine-btn"
-          disabled={pendingId === routine.id}
-          onClick={() => handleTap(routine)}
-        >
-          <FontAwesomeIcon icon={iconFor(routine.icon)} className="hf-routine-icon" style={{ color: routine.color ?? undefined }} />
-          <span className="hf-routine-name">{routine.name}</span>
-          {pendingId === routine.id && <span className="hf-routine-status">Triggering…</span>}
-          {status?.id === routine.id && <span className="hf-routine-status hf-routine-error">Couldn’t trigger — {status.error}</span>}
-        </button>
-      ))}
+      {routines.map((routine) => {
+        const pending = pendingId === routine.id;
+        return (
+          <button
+            key={routine.id}
+            type="button"
+            className="hf-routine-btn"
+            disabled={pending}
+            onClick={() => handleTap(routine)}
+          >
+            <span
+              className="hf-routine-circle"
+              style={{
+                background: routine.color ? `color-mix(in srgb, ${routine.color} 16%, transparent)` : 'var(--line)',
+                boxShadow: pending && routine.color ? `0 0 0 5px color-mix(in srgb, ${routine.color} 35%, transparent)` : undefined,
+                transform: pending ? 'scale(1.08)' : undefined,
+              }}
+            >
+              <FontAwesomeIcon icon={iconFor(routine.icon)} className="hf-routine-icon" style={{ color: routine.color ?? undefined }} />
+            </span>
+            {pending ? (
+              <span className="hf-routine-status">Triggering…</span>
+            ) : status?.id === routine.id ? (
+              <span className="hf-routine-status hf-routine-error">Couldn’t trigger — {status.error}</span>
+            ) : (
+              <span className="hf-routine-name">{routine.name}</span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }

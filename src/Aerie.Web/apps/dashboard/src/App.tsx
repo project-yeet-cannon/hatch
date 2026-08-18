@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 import type { DashboardData } from './types';
 import { getDashboardDataSource } from './dataSource';
 import { DEFAULT_TIME_ZONE } from './config';
-import { formatClock, formatMonthDay, formatWeekday } from './lib/format';
+import { formatClockParts, formatMonthDay, formatWeekday } from './lib/format';
 import { getCircadianPhase, resolveThemeStyle } from './lib/circadianTheme';
 import { circadianTokens } from './theme/tokens';
 import { ZoneCard } from './components/ZoneCard';
@@ -65,6 +65,7 @@ export function App() {
   const themeStyle = data
     ? resolveThemeStyle(getCircadianPhase(now, data.sunEvents), circadianTokens)
     : resolveThemeStyle({ kind: 'day' }, circadianTokens);
+  const clock = formatClockParts(now, timeZone);
 
   return (
     <div className="hf-page" style={themeStyle as CSSProperties}>
@@ -75,7 +76,10 @@ export function App() {
             <span className="hf-date">{formatWeekday(data?.generatedAt ?? now.toISOString(), timeZone)}</span>
           </div>
           <div className="hf-hr">
-            <span className="hf-clock">{formatClock(now, timeZone)}</span>
+            <span className="hf-clock">
+              {clock.time}
+              <span className="hf-ampm">{clock.period}</span>
+            </span>
           </div>
         </div>
         {data ? (

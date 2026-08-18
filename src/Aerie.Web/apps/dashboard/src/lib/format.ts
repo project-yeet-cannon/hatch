@@ -8,12 +8,18 @@ export function formatMonthDay(iso: string, timeZone: string): string {
   );
 }
 
-export function formatClock(date: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat('en-US', {
+/** Clock time split from its AM/PM period, so they can be sized independently. */
+export function formatClockParts(date: Date, timeZone: string): { time: string; period: string } {
+  const parts = new Intl.DateTimeFormat('en-US', {
     hour: 'numeric',
     minute: '2-digit',
+    hour12: true,
     timeZone,
-  }).format(date);
+  }).formatToParts(date);
+  const hour = parts.find((p) => p.type === 'hour')?.value ?? '';
+  const minute = parts.find((p) => p.type === 'minute')?.value ?? '';
+  const period = parts.find((p) => p.type === 'dayPeriod')?.value ?? '';
+  return { time: `${hour}:${minute}`, period };
 }
 
 /** Compact axis label, e.g. "6a", "10p", "now". */
