@@ -1,0 +1,63 @@
+# GENERATED FILE - do not edit.
+#
+# Secret 'ghcr-pull' in namespace 'flux-system', synced from the 2 parameter(s) below.
+#
+# Source:    scripts/secrets/parameters.json
+# Generator: scripts/secrets/New-ExternalSecrets.ps1
+# Step:      docs/plans/swarm/phase-3-platform-services.md 3b.6
+#
+# Regenerate:  pwsh ./scripts/secrets/New-ExternalSecrets.ps1
+# Verify:      pwsh ./scripts/secrets/New-ExternalSecrets.ps1 -Check   (ci.yml runs this)
+#
+# An edit here survives until the next run of either, and then loses. The
+# paths, the target namespace, the Secret name and the key inside it are all
+# fields of parameters.json - change one there.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: ghcr-pull
+  namespace: flux-system
+spec:
+  # How long a rotated parameter takes to reach the cluster, worst case.
+  # Each tick is one SSM read per data entry, so this is also the cost: the
+  # whole tree is a handful of calls an hour.
+  refreshInterval: 1h
+  secretStoreRef:
+    # ClusterSecretStore, not SecretStore - one store serves every namespace,
+    # and its name carries no provider so swapping Parameter Store for OpenBao
+    # stays the one-file change ../cluster-secret-store.yaml describes. That
+    # store names the namespace of its own credential explicitly, so nothing
+    # here needs a copy of the bootstrap Secret alongside it.
+    kind: ClusterSecretStore
+    name: aerie-secrets
+  target:
+    name: ghcr-pull
+    # Owner: ESO creates the Secret and owns it, so deleting this manifest
+    # deletes the Secret with it - which is what makes the git tree the whole
+    # truth. Merge would leave orphans behind after a prune.
+    creationPolicy: Owner
+    # Retain is the default and is set anyway, because the failure it governs
+    # is silent and severe: if the parameter disappears upstream, keep the last
+    # good value and report SecretSyncError, rather than deleting a live
+    # credential out from under a running workload.
+    deletionPolicy: Retain
+    template:
+      type: kubernetes.io/dockerconfigjson
+      # v2 is not optional: b64enc is a v2 template function. v1 renders the
+      # call as literal text instead, producing a Secret that is structurally
+      # valid and rejected by every registry.
+      engineVersion: v2
+      data:
+        .dockerconfigjson: |
+          {"auths":{"ghcr.io":{"username":"{{ .username }}","password":"{{ .token }}","auth":"{{ printf "%s:%s" .username .token | b64enc }}"}}}
+  data:
+    # GitHub username backing the classic PAT that pulls private GHCR images. Identifies, does not authenticate - same split as every access key id.
+    # Consumed by: 5b.12 ImageRepository secretRef
+    - secretKey: username
+      remoteRef:
+        key: /aerie/registry/pull-username
+    # Classic PAT, read:packages scope, for pulling ghcr.io/eouw0o83hf/aerie-* images. Fine-grained tokens do not grant GHCR pull.
+    # Consumed by: 5b.12 ImageRepository secretRef
+    - secretKey: token
+      remoteRef:
+        key: /aerie/registry/pull-token

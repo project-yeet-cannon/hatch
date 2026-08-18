@@ -21,6 +21,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - aerie-cnpg-wal-s3.yaml
+  - aerie-ghcr-pull.yaml
   - aerie-home-assistant.yaml
   - aerie-vm-log-shipper.yaml
   - cert-manager-route53-credentials.yaml
+  - flux-system-aerie-site-git.yaml
+  - flux-system-ghcr-pull.yaml
