@@ -129,14 +129,23 @@ function Get-Items {
     return @(Get-Field $List 'items' | Where-Object { $_ })
 }
 
+function Get-Condition {
+    <#
+    .SYNOPSIS
+        The named entry of an object's status.conditions, or $null.
+    #>
+    param([Parameter(Mandatory)][AllowNull()]$Object, [Parameter(Mandatory)][string]$Type)
+    $conditions = @(Get-Path $Object 'status.conditions' | Where-Object { $_ })
+    return ($conditions | Where-Object { (Get-Field $_ 'type') -eq $Type } | Select-Object -First 1)
+}
+
 function Get-ReadyCondition {
     <#
     .SYNOPSIS
         The `Ready` entry of an object's status.conditions, or $null.
     #>
     param([Parameter(Mandatory)][AllowNull()]$Object)
-    $conditions = @(Get-Path $Object 'status.conditions' | Where-Object { $_ })
-    return ($conditions | Where-Object { (Get-Field $_ 'type') -eq 'Ready' } | Select-Object -First 1)
+    return (Get-Condition $Object 'Ready')
 }
 
 function Format-Condition {
@@ -486,35 +495,21 @@ try {
     }
 
     # --- 4b.4/4b.5/4b.6: continuous archiving --------------------------
-    $lastArchiveStatus = [string](Get-Path $cluster 'status.lastArchivedWALTime')
-    $lastFailedStatus = [string](Get-Path $cluster 'status.lastFailedWALTime')
-    if ([string]::IsNullOrWhiteSpace($lastArchiveStatus)) {
-        Add-Check -Step '4b.6' -Name 'Continuous archiving' -Status 'Fail' -Detail 'status.lastArchivedWALTime is empty - no WAL has ever archived successfully. Check the ObjectStore credential (4b.3) and the plugin (4b.4)'
+    # CNPG 1.30's Cluster has no status.lastArchivedWALTime/lastFailedWALTime
+    # scalar fields at all - that shape is from older docs. The live signal
+    # is a status.conditions entry of type ContinuousArchiving, which the
+    # operator flips to False (with a message) the moment an archive attempt
+    # fails, and back to True on the next success - so, unlike a timestamp,
+    # it never needs an age/staleness judgment call on a quiet cluster.
+    $archivingCondition = Get-Condition $cluster 'ContinuousArchiving'
+    if ($null -eq $archivingCondition) {
+        Add-Check -Step '4b.6' -Name 'Continuous archiving' -Status 'Fail' -Detail 'no ContinuousArchiving condition reported - no WAL has ever archived successfully. Check the ObjectStore credential (4b.3) and the plugin (4b.4)'
+    }
+    elseif ((Get-Field $archivingCondition 'status') -eq 'True') {
+        Add-Check -Step '4b.6' -Name 'Continuous archiving' -Status 'Pass' -Detail (Format-Condition $archivingCondition -MaxLength 60)
     }
     else {
-        $lastArchived = $null
-        if ([DateTimeOffset]::TryParse($lastArchiveStatus, [ref]$lastArchived)) {
-            $age = (Get-Date).ToUniversalTime() - $lastArchived.UtcDateTime
-            # Generous on purpose: a two-instance, low-write Postgres can go a
-            # while between WAL segment switches under normal operation, and
-            # this is not a production alerting threshold (Phase 8's is) -
-            # only a sign archiving has actually run at least once recently.
-            if ($age.TotalHours -le 24) {
-                Add-Check -Step '4b.6' -Name 'Continuous archiving' -Status 'Pass' -Detail "last archived $([math]::Round($age.TotalMinutes, 0))m ago"
-            }
-            else {
-                Add-Check -Step '4b.6' -Name 'Continuous archiving' -Status 'Warn' -Detail "last archived $([math]::Round($age.TotalHours, 1))h ago - stale on a cluster this new, but not necessarily broken on a quiet one"
-            }
-        }
-        else {
-            Add-Check -Step '4b.6' -Name 'Continuous archiving' -Status 'Fail' -Detail "status.lastArchivedWALTime ('$lastArchiveStatus') didn't parse as a timestamp"
-        }
-        if ($lastFailedStatus -and $lastArchived -and [DateTimeOffset]::TryParse($lastFailedStatus, [ref]$null)) {
-            $lastFailed = [DateTimeOffset]::Parse($lastFailedStatus)
-            if ($lastFailed -gt $lastArchived) {
-                Add-Check -Step '4b.6' -Name 'No archiving failures since the last success' -Status 'Warn' -Detail "lastFailedWALTime ($lastFailedStatus) is newer than lastArchivedWALTime - archiving is intermittently failing"
-            }
-        }
+        Add-Check -Step '4b.6' -Name 'Continuous archiving' -Status 'Fail' -Detail (Format-Condition $archivingCondition)
     }
 
     # --- 4b.10: newest Backup completed and recent ---------------------
@@ -555,14 +550,31 @@ try {
     }
 
     # --- 4b.8: quartz Database ready and eleven tables ------------------
-    [void](Add-ObjectReadyCheck -Step '4b.8' -Name 'Database aerie-pg-quartz' -Object $database)
+    # CNPG's Database CRD carries status.applied, not a Ready condition - its
+    # status is only ever { applied, observedGeneration, message } - so this
+    # normalises into the same shape Add-ObjectReadyCheck expects rather than
+    # duplicating its missing/suspend logic for one CRD.
+    $databaseNormalized = $null
+    if ($database -and (Get-Path $database 'status.applied') -eq $true) {
+        $databaseNormalized = [pscustomobject]@{ status = [pscustomobject]@{ conditions = @([pscustomobject]@{ type = 'Ready'; status = 'True'; reason = 'Applied' }) } }
+    }
+    $databaseMissingDetail = if ($database) { "not applied - status.applied=$(Get-Path $database 'status.applied'), message=$(Get-Path $database 'status.message')" } else { 'not found' }
+    [void](Add-ObjectReadyCheck -Step '4b.8' -Name 'Database aerie-pg-quartz' -Object $databaseNormalized -MissingDetail $databaseMissingDetail)
 
     # Jobs carry a Complete condition, not Ready - normalised into the same
     # shape Add-ObjectReadyCheck expects so this reuses it rather than
     # duplicating its suspend/condition logic.
+    #
+    # The condition itself must be a [pscustomobject], not a bare hashtable:
+    # Get-Field reads via .PSObject.Properties[$Name], and a [hashtable]'s
+    # dictionary keys never show up there - only the Hashtable type's own
+    # members do (Keys, Values, Count...). A bare @{ type = 'Ready'; ... }
+    # here makes Get-ReadyCondition's `type -eq 'Ready'` filter silently miss
+    # every time, which is what produced "no Ready condition" for a Job that
+    # had, in fact, completed.
     $ddlJobNormalized = $null
     if ($ddlJob -and [int](Get-Path $ddlJob 'status.succeeded') -ge 1) {
-        $ddlJobNormalized = [pscustomobject]@{ status = [pscustomobject]@{ conditions = @(@{ type = 'Ready'; status = 'True'; reason = 'Complete' }) } }
+        $ddlJobNormalized = [pscustomobject]@{ status = [pscustomobject]@{ conditions = @([pscustomobject]@{ type = 'Ready'; status = 'True'; reason = 'Complete' }) } }
     }
     $ddlJobMissingDetail = if ($ddlJob) { "not complete - succeeded=$(Get-Path $ddlJob 'status.succeeded'), failed=$(Get-Path $ddlJob 'status.failed')" } else { 'not found' }
     [void](Add-ObjectReadyCheck -Step '4b.8' -Name 'Job aerie-quartz-ddl' -Object $ddlJobNormalized -MissingDetail $ddlJobMissingDetail)
