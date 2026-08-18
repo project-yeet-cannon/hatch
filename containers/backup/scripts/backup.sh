@@ -28,9 +28,6 @@ PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -Fc -h db -U "$POSTGRES_USER" aerie > "$
 echo "[backup] dumping quartz (custom format)"
 PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -Fc -h db -U "$POSTGRES_USER" quartz > "$SCRATCH/quartz.dump"
 
-echo "[backup] snapshotting grafana sqlite"
-sqlite3 /mnt/grafana/grafana.db ".backup '$SCRATCH/grafana.db'"
-
 echo "[backup] snapshotting kuma sqlite"
 sqlite3 /mnt/kuma/kuma.db ".backup '$SCRATCH/kuma.db'"
 
@@ -59,7 +56,6 @@ for REPO in "$RESTIC_REPOSITORY_LOCAL" "$RESTIC_REPOSITORY_S3"; do
     "$SCRATCH/postgres-dumpall.sql" \
     "$SCRATCH/aerie.dump" \
     "$SCRATCH/quartz.dump" \
-    "$SCRATCH/grafana.db" \
     "$SCRATCH/kuma.db" \
     /mnt/opensearch-snapshots \
     "/mnt/prometheus/snapshots/$PROM_SNAPSHOT" \

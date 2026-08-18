@@ -16,9 +16,10 @@ services:
     volumes:
       # Local restic repo, on E: — a physically separate disk from pgdata.
       - E:/restic-repo:/mnt/restic-local
-      # Read-only sqlite sources — .backup takes its own consistent snapshot,
-      # so a live, read-only mount of the source file is safe.
-      - grafana_data:/mnt/grafana:ro
+      # Read-only sqlite source — .backup takes its own consistent snapshot,
+      # so a live, read-only mount of the source file is safe. Grafana isn't
+      # backed up: nothing there is customized, and it's expected to be
+      # rebootstrapped by automation rather than restored.
       - uptime_kuma_data:/mnt/kuma:ro
       # OpenSearch's snapshot API writes here (see compose.observability.yml's
       # path.repo); read-write so backup.sh can clear it after restic has the
@@ -48,7 +49,6 @@ networks:
     driver: bridge
 
 volumes:
-  grafana_data:
   uptime_kuma_data:
   opensearch_snapshots:
   prometheus_data:
