@@ -133,7 +133,7 @@ writes to it, so no `Cluster` ever exists with archiving switched off; 6–8 bui
 the database and its schema; 9–10 load real data and prove the backup loop
 closes; 11 is the gate.
 
-- [ ] **1. Per-database dumps in the Phase 0 backup** —
+- [x] **1. Per-database dumps in the Phase 0 backup** —
       [`containers/backup/scripts/backup.sh`](../../../containers/backup/scripts/backup.sh).
       Add, alongside the existing `pg_dumpall` (which stays — it is the globals
       and roles carrier and the DR artifact
@@ -157,7 +157,7 @@ closes; 11 is the gate.
       `restic -r "$RESTIC_REPOSITORY_LOCAL" ls latest` lists `aerie.dump` and
       `quartz.dump`.
 
-- [ ] **2. The `aerie-cnpg` IAM policy, committed and applied** —
+- [x] **2. The `aerie-cnpg` IAM policy, committed and applied** —
       `scripts/secrets/iam/aerie-cnpg.policy.json`, plus a
       `-CnpgUserName` parameter on
       [`Set-AerieSecretsIam.ps1`](../../../scripts/secrets/Set-AerieSecretsIam.ps1).
@@ -180,7 +180,7 @@ closes; 11 is the gate.
       completes, and `aws s3 ls s3://<bucket>` succeeds under that user's keys
       and fails against the restic bucket.
 
-- [ ] **3. `parameters.json`: three entries, then regenerate** —
+- [x] **3. `parameters.json`: three entries, then regenerate** —
       [`scripts/secrets/parameters.json`](../../../scripts/secrets/parameters.json).
       This is the step 3b.6's machinery was built for, and doing it in the wrong
       order poisons the phase gate, so the order inside this bullet is part of
@@ -222,7 +222,7 @@ closes; 11 is the gate.
       `kubectl -n aerie get externalsecret cnpg-wal-s3` reports `SecretSynced`
       with three keys in the Secret.
 
-- [ ] **4. The Barman Cloud Plugin** —
+- [x] **4. The Barman Cloud Plugin** —
       `deploy/cluster/infrastructure/controllers/plugin-barman-cloud.yaml`, and
       one line in that directory's
       [`kustomization.yaml`](../../../deploy/cluster/infrastructure/controllers/kustomization.yaml).
@@ -257,7 +257,7 @@ closes; 11 is the gate.
       the certificate SANs are generated from it — leave the whole `service`
       block alone.*
 
-- [ ] **5. The `ObjectStore`** — `deploy/cluster/data/objectstore.yaml`.
+- [x] **5. The `ObjectStore`** — `deploy/cluster/data/objectstore.yaml`.
       Namespace **`aerie`**, alongside the `Cluster` that references it: the
       `barmanObjectName` parameter in 4b.6 is a bare name that resolves in the
       `Cluster`'s own namespace, and the credential it names is the Secret ESO
@@ -299,7 +299,7 @@ closes; 11 is the gate.
       meaningful status of its own until a `Cluster` uses it — 4b.6's WAL
       archiving is what proves the credential.
 
-- [ ] **6. The `Cluster`** — `deploy/cluster/data/cluster.yaml`, in namespace
+- [x] **6. The `Cluster`** — `deploy/cluster/data/cluster.yaml`, in namespace
       `aerie`. The centre of the phase. Field by field, with the reasoning for
       the ones that are not obvious:
 
@@ -394,7 +394,7 @@ closes; 11 is the gate.
       successful last WAL. That last clause is the one that proves 4b.2, 4b.3,
       4b.4 and 4b.5 all worked, and it is the only thing that does.
 
-- [ ] **7. Two new `cluster-config.json` keys, and a Provision 4 re-dispatch** —
+- [x] **7. Two new `cluster-config.json` keys, and a Provision 4 re-dispatch** —
       [`scripts/k3s/cluster-config.json`](../../../scripts/k3s/cluster-config.json).
       `POSTGRES_INSTANCES` (pattern `^[1-3]$`, hint: never more than the number
       of nodes; `consumedBy` 4b.6) and `WAL_BUCKET` (an S3 bucket-name pattern —
@@ -414,7 +414,7 @@ closes; 11 is the gate.
       *Exit:* `kubectl -n flux-system get configmap aerie-cluster-config -o yaml`
       shows both keys with values.
 
-- [ ] **8. `quartz`: the `Database` CRD, then the DDL Job** —
+- [x] **8. `quartz`: the `Database` CRD, then the DDL Job** —
       `deploy/cluster/data/quartz-database.yaml` and
       `deploy/cluster/data/quartz-ddl-job.yaml`.
 
@@ -473,7 +473,7 @@ closes; 11 is the gate.
       is a smaller change now than it will be after Phase 5 ships connection
       strings for two databases.*
 
-- [ ] **9. The restore, as a re-runnable Job** —
+- [x] **9. The restore, as a re-runnable Job** —
       `deploy/cluster/data/restore-job.yaml`, **suspended by default**.
       This is the step the phase exists to make safe, and it is built to run
       more than once: Phase 7 needs a final sync before the old prod box is
@@ -518,7 +518,7 @@ closes; 11 is the gate.
       writing, which means a short deliberate outage — and that is the cutover,
       so it belongs in the cutover phase.*
 
-- [ ] **10. `ScheduledBackup`, and prove PITR** —
+- [x] **10. `ScheduledBackup`, and prove PITR** —
       `deploy/cluster/data/scheduledbackup.yaml`:
 
       ```yaml
