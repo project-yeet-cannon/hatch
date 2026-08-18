@@ -11,17 +11,19 @@ public interface IAerieJob : IJob
 
 public class JobsInit(IScheduler scheduler, IEnumerable<IAerieJob> jobs)
 {
+    /// <summary>
+    /// Registers every recurring job, replacing whatever is already there.
+    /// Quartz clustering handles execution (only one node in the cluster runs
+    /// a given firing), not registration - every replica calls this on every
+    /// boot, so `replace: true` is load-bearing: without it, two replicas
+    /// racing between "does this job exist" and "create it" both win the
+    /// race and the loser throws ObjectAlreadyExistsException and
+    /// crash-loops.
+    /// </summary>
     public async Task WireUpJobs()
     {
         foreach (var j in jobs)
         {
-            var jd = await scheduler.GetJobDetail(JobKey.Create(j.Name, j.Group));
-            if (jd is not null)
-            {
-                // TODO handle update case
-                continue;
-            }
-
             var qj = JobBuilder.Create(j.GetType())
                 .WithIdentity(j.Name, j.Group)
                 .Build();
@@ -34,7 +36,7 @@ public class JobsInit(IScheduler scheduler, IEnumerable<IAerieJob> jobs)
                 .StartNow()
                 .Build();
 
-            await scheduler.ScheduleJob(qj, qt);
+            await scheduler.ScheduleJob(qj, [qt], replace: true);
         }
     }
 
@@ -47,16 +49,11 @@ public class JobsInit(IScheduler scheduler, IEnumerable<IAerieJob> jobs)
     /// </summary>
     public async Task WireUpTriggerableJob<TJob>(string name, string group) where TJob : IJob
     {
-        if (await scheduler.CheckExists(JobKey.Create(name, group)))
-        {
-            return;
-        }
-
         var jd = JobBuilder.Create<TJob>()
             .WithIdentity(name, group)
             .StoreDurably()
             .Build();
 
-        await scheduler.AddJob(jd, replace: false);
+        await scheduler.AddJob(jd, replace: true);
     }
 }

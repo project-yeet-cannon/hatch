@@ -377,16 +377,33 @@ demands of any workload, plus the automation. 14 is the gate.
       Prove the registry one end to end before trusting it:
       `kubectl -n aerie run pull-probe --rm -it --image=${IMAGE_REGISTRY}/aerie-api:latest --overrides='{"spec":{"imagePullSecrets":[{"name":"ghcr-pull"}]}}' --command -- true`.
 
-- [ ] **2. The app changes** — [Program.cs](../../../src/Aerie.Api/Program.cs) and its
+- [x] **2. The app changes** — [Program.cs](../../../src/Aerie.Api/Program.cs) and its
       neighbours. Finding 1, and the only code this phase writes. Six things:
 
       1. **Migrations become a mode of the same image.** Move the
-         `MigrateAsync` loop, `SeedAsync` and `haConnection.ApplyAsync` out of
-         the boot path and behind an entry point the hook Job invokes — an
-         `AERIE_MIGRATE=1` env check that runs them and exits before
-         `app.Run()`, or `args` carrying `--migrate`. One image, two modes, so
-         the migration provably runs the same code as the pods it precedes;
-         a second image is a second thing to build, tag, scan and get wrong.
+         `MigrateAsync` loop and `SeedAsync` out of the boot path and behind
+         an entry point the hook Job invokes — an `AERIE_MIGRATE=1` env check
+         that runs them and exits before `app.Run()`. One image, two modes,
+         so the migration provably runs the same code as the pods it
+         precedes; a second image is a second thing to build, tag, scan and
+         get wrong. **`haConnection.ApplyAsync` does *not* move with them.**
+         It looks like the same kind of boot-time setup, but it isn't: it
+         calls `ClientFactory.Initialize`, which is HADotNet's own
+         process-static state (confirmed from the IL — a private static
+         `HttpClient` field, null until `Initialize` runs), not a database
+         row. The migrate Job is a separate process that runs once and exits;
+         if `ApplyAsync` only ran there, none of the three `api` replicas
+         would ever initialize their own `ClientFactory`, and every
+         HA-dependent call would fail on all three until an admin re-saved
+         HA connection settings through `SettingsController` — which even
+         then only fixes whichever one replica handled that request. Instead,
+         `ApplyAsync` is lazy: every `AddTransient` registration for an HA
+         client (`EntityClient`, `HistoryClient`, etc.) routes through a
+         `HomeAssistantClientFactoryGate` first, which checks
+         `ClientFactory.IsInitialized` and — the first time only, gated by a
+         semaphore so concurrent callers coalesce onto one attempt — calls
+         `ApplyAsync` before handing back the client. Each replica pays for
+         this once, the first time anything on it actually needs HA.
       2. **`JobsInit.WireUpJobs()` stays per-replica and must prove it.**
          Quartz clustering handles execution, not registration. Confirm every
          `AddJob`/`ScheduleJob` in [JobsInit](../../../src/Aerie.Api/Jobs/) passes

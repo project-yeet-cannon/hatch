@@ -11,10 +11,12 @@ using Aerie.Api.Services.Media;
 using Aerie.Api.Services.Routines;
 using HADotNet.Core;
 using HADotNet.Core.Clients;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Rewrite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
@@ -93,16 +95,24 @@ builder.Services.AddQuartzHostedService(opt =>
 builder.Services.AddSingleton(sp =>
     sp.GetRequiredService<ISchedulerFactory>().GetScheduler().GetAwaiter().GetResult());
 
-// HADotNet - ClientFactory itself is initialized later, once SiteSettings is
-// migrated/seeded and HomeAssistantConnectionManager can read it (see below).
-// These registrations just wire up transient clients against whatever the
-// factory is initialized to at request time.
-builder.Services.AddTransient(_ => ClientFactory.GetClient<EntityClient>());
-builder.Services.AddTransient(_ => ClientFactory.GetClient<HistoryClient>());
-builder.Services.AddTransient(_ => ClientFactory.GetClient<StatesClient>());
-builder.Services.AddTransient(_ => ClientFactory.GetClient<ServiceClient>());
-builder.Services.AddTransient(_ => ClientFactory.GetClient<DiscoveryClient>());
-builder.Services.AddTransient(_ => ClientFactory.GetClient<TemplateClient>());
+// HADotNet - ClientFactory is static, process-local state (see
+// HomeAssistantClientFactoryGate), so unlike the DB rows behind it, each api
+// replica has to initialize its own. Every registration below runs the gate
+// first; it no-ops after the first successful ApplyAsync on this process.
+builder.Services.AddSingleton<HomeAssistantClientFactoryGate>();
+AddHaClient<EntityClient>();
+AddHaClient<HistoryClient>();
+AddHaClient<StatesClient>();
+AddHaClient<ServiceClient>();
+AddHaClient<DiscoveryClient>();
+AddHaClient<TemplateClient>();
+
+void AddHaClient<TClient>() where TClient : BaseClient =>
+    builder.Services.AddTransient(sp =>
+    {
+        sp.GetRequiredService<HomeAssistantClientFactoryGate>().EnsureInitialized(sp);
+        return ClientFactory.GetClient<TClient>();
+    });
 
 // Services
 builder.Services.AddTransient<IEnvironmentService, EnvironmentService>();
@@ -133,15 +143,27 @@ builder.Services.AddTransient<IAerieJob, ReconcileCommands>();
 builder.Services.AddTransient<BackfillChannelHistory>();
 builder.Services.AddTransient<JobsInit>();
 
-// Reaches the `files` container (kiosk APK + signature checksum) over the
-// internal `edge` Docker network, the same network `api` and `files` share
-// in compose.prod.yml - see KioskProvisioningController.
-builder.Services.AddHttpClient("KioskFiles", c => c.BaseAddress = new Uri("http://files/"));
+// Reaches the `files` peer (kiosk APK + signature checksum) - see
+// KioskProvisioningController. "http://files/" is correct in both
+// deployments today (the internal `edge` Docker network in compose.prod.yml,
+// and the k8s Service named `files` in this pod's own namespace) but only by
+// coincidence of both calling it "files"; KioskFiles:BaseAddress overrides it
+// so a rename on either side doesn't become a silent 404.
+var kioskFilesBaseAddress = builder.Configuration["KioskFiles:BaseAddress"] ?? "http://files/";
+builder.Services.AddHttpClient("KioskFiles", c => c.BaseAddress = new Uri(kioskFilesBaseAddress));
 
 builder.Services.Configure<MediaLibraryOptions>(builder.Configuration.GetSection(MediaLibraryOptions.SectionName));
 
 // API / HTTP
-builder.Services.AddHealthChecks();
+
+// DataProtection: nothing here uses antiforgery tokens, cookie
+// authentication, session state or TempData (grepped for all four, no
+// matches), so there's no key ring that needs persisting across the three
+// replicas. If any of that shows up later, its keys have to move to
+// Postgres before replicas > 1 - otherwise each replica issues from its own
+// ephemeral ring and can't read what another replica issued.
+builder.Services.AddHealthChecks()
+    .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"]);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -160,9 +182,15 @@ builder.Services.AddOpenApi();
 var app = builder.Build();
 
 ////////
-/// Migrations
-using (var scope = app.Services.CreateScope())
+/// Migrate mode - the chart's pre-install/pre-upgrade hook Job (5b.6) runs
+/// this same image with AERIE_MIGRATE=1 instead of serving traffic, so the
+/// migration provably runs the same code as the pods it precedes rather than
+/// a second image that can drift from it. Runs once per deploy, ahead of any
+/// replica; the serving pods below never take this branch.
+if (builder.Configuration["AERIE_MIGRATE"] == "1")
 {
+    using var scope = app.Services.CreateScope();
+
     var db = scope.ServiceProvider.GetRequiredService<AerieContext>();
     await db.Database.MigrateAsync();
 
@@ -180,6 +208,8 @@ using (var scope = app.Services.CreateScope())
 
     var haConnection = scope.ServiceProvider.GetRequiredService<IHomeAssistantConnectionManager>();
     await haConnection.ApplyAsync(CancellationToken.None);
+
+    return;
 }
 
 // Quartz
@@ -206,14 +236,17 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-// `api` is reached only via `caddy`'s reverse_proxy, both on the isolated
-// `edge` Docker network with no port of `api`'s own published to the host
-// (see docs/reverse-proxy-architecture.md) - so the immediate proxy is always
-// trustworthy, but its container IP is assigned by Docker at startup and
-// can't be pinned as a KnownProxy. Clearing KnownNetworks/KnownProxies trusts
-// X-Forwarded-For from whatever peer connects, which here is only ever Caddy.
-// Without this, RemoteIpAddress (used by UiLogsController/VmConsoleLogsController
-// for actor telemetry) would just be Caddy's container IP for every request.
+// `api` is reached only via a reverse proxy with no port of its own exposed
+// beyond that proxy - Caddy on the isolated `edge` Docker network (see
+// docs/reverse-proxy-architecture.md) on the old host, Traefik's Ingress
+// controller in the cluster (docs/plans/swarm/phase-5-app-tier.md) - so the
+// immediate proxy is always trustworthy, but its container/pod IP is
+// assigned at startup and can't be pinned as a KnownProxy. Clearing
+// KnownNetworks/KnownProxies trusts X-Forwarded-For from whatever peer
+// connects, which on either deployment is only ever that one proxy. Without
+// this, RemoteIpAddress (used by UiLogsController/VmConsoleLogsController for
+// actor telemetry) would just be the proxy's own container/pod IP for every
+// request.
 var forwardedHeadersOptions = new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
@@ -270,7 +303,11 @@ if (!string.IsNullOrWhiteSpace(mediaLibrary.RootPath))
 
 app.UseAuthorization();
 app.MapControllers();
-app.MapHealthChecks("/health");
+// Split so a database blip fails readiness (pod leaves the Service) without
+// failing liveness (pod gets restarted) - restarting every replica over a
+// dependency outage just turns one outage into a thundering-herd reconnect.
+app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });
+app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = c => c.Tags.Contains("ready") });
 
 // SPA fallback so client-side routes (e.g. /apps/admin/devices) survive a hard refresh.
 // The :nonfile constraint excludes paths with a dot in the last segment (e.g.
