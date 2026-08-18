@@ -1,0 +1,81 @@
+# The cluster plan Phase 5b.8 - the `share` Deployment: dufs, replacing
+# compose.share.yml's `share` service. 1 replica, strategy: Recreate -
+# design.md's HA list does not include this workload, and two replicas
+# writing one CIFS mount buys nothing but a second thing to reason about;
+# Recreate matters because the default RollingUpdate would let an old and a
+# new pod both hold the ReadWriteMany PVC for a moment, which the previous
+# point already ruled out as worth nothing.
+#
+# Command flags kept exactly as compose.share.yml had them, individually
+# listed rather than -A (which would additionally enable --allow-symlink and
+# let listings follow symlinks out of the share).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: share
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+    app.kubernetes.io/component: share
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "aerie.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: share
+  template:
+    metadata:
+      labels:
+        {{- include "aerie.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: share
+    spec:
+      containers:
+        - name: share
+          # Public image straight from Docker Hub, not IMAGE_REGISTRY/
+          # image.pullSecret - those exist for the first-party private images
+          # (aerie-api, aerie-kiosk-files) 5b.1's pull secret was built for.
+          image: sigoden/dufs:v0.46.0
+          securityContext:
+            # runAsUser 0, not "if the app tolerates it": share-volumes.yaml's
+            # rw PV mounts dir_mode=0775,uid=0,gid=0 (5b.7's comment explains
+            # why - a guest CIFS mount otherwise presents everything as owned
+            # by an unmapped id), so only a process whose fsuid is 0 passes
+            # the client-side permission check the mode's "other" bits would
+            # otherwise fail on write. dufs ships with no USER directive
+            # (confirmed via `docker image inspect` - root by default); this
+            # sets it explicitly rather than leaning on that default.
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          args:
+            - /share
+            - --auth
+            - "{{ .Values.share.auth.username }}:{{ .Values.share.auth.password }}@/:rw"
+            - --allow-upload
+            - --allow-delete
+            - --allow-search
+            - --allow-archive
+          ports:
+            # dufs's default listen port; nothing above overrides it.
+            - name: http
+              containerPort: 5000
+          volumeMounts:
+            - name: share
+              mountPath: /share
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        # aerie-share-rw, 5b.7's read-write PVC - dufs's whole purpose is
+        # uploading, so it gets the rw mount; the api container's media
+        # serving uses the ro one instead (api-deployment.yaml).
+        - name: share
+          persistentVolumeClaim:
+            claimName: aerie-share-rw
+        # readOnlyRootFilesystem above leaves nowhere for dufs's own
+        # temp-file writes (e.g. --allow-archive) to land - same reasoning as
+        # api-deployment.yaml's tmp volume.
+        - name: tmp
+          emptyDir: {}

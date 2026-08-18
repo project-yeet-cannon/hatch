@@ -20,6 +20,16 @@ image:
   pullSecret: ghcr-pull
   api:
     tag: latest
+  # ${KIOSK_FILES_IMAGE_TAG} - files-deployment.yaml (5b.8) appends
+  # /aerie-kiosk-files to image.registry the same way api does.
+  kioskFiles:
+    tag: latest
+
+files:
+  # 2, not a value api's replicaCount is missing a counterpart for by
+  # accident: design.md lists kiosk `files` as HA-required, same as api - a
+  # tablet that can't reach it can't self-update.
+  replicaCount: 2
 
 # ${DOMAIN}. Ingress hosts (5b.9) and Apps__PublicBaseUrl both key off this.
 domain: ""
@@ -45,6 +55,15 @@ share:
   # than pre-joined so the template is the one place that assembles it.
   host: ""
   name: ""
+  # dufs's --auth rule (share-deployment.yaml), "user:pass@path:permission" -
+  # gates *write* access to the actual share, everything else compose.share.yml
+  # already said about this pair still applies verbatim: a dummy credential,
+  # in source on purpose, for a LAN-only stack with no real secrets behind it.
+  # Moving it into ESO (5b.1's machinery) is a good idea and it is not this
+  # phase's - this is the note beside the value, not a TODO to act on here.
+  auth:
+    username: admin
+    password: password
 
 postgres:
   # <cluster-name>-rw, CNPG's own naming for the primary Service -

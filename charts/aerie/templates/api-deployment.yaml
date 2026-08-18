@@ -2,8 +2,15 @@
 # and compose.share.yml's `api` service. Run a second way by the migrate hook
 # Job (5b.6, migrate-job.yaml), which shares ./_helpers.tpl's postgresEnv
 # rather than duplicating it. No resources block yet - 5b.11 sizes it from a
-# real reading (5a.6) rather than this step guessing; no volumeMount for the
-# SMB share either - that arrives with 5b.8's files/share workloads.
+# real reading (5a.6) rather than this step guessing.
+#
+# aerie-share-ro (5b.8) is mounted unconditionally, not gated behind
+# mediaLibrarySubpath the way the MediaLibrary__RootPath env var already is
+# (5b.5's own env block, above): SHARE_HOST/SHARE_NAME are `required: true`
+# in cluster-config.json (5b.4), so the share itself is not optional the way
+# compose.share.yml's whole layer was - only which subdirectory of it gets
+# served is. An unmounted-but-configured RootPath would be a worse failure
+# mode (ENOENT on every request) than a mounted-but-unused volume.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -99,6 +106,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: share-ro
+              mountPath: /share-ro
+              readOnly: true
           # readinessProbe on /health/ready (DbContext included) is also the
           # startup probe: a slow first boot - EF taking the migration lock
           # behind a hook Job that's still finishing - is then a startup
@@ -129,3 +139,9 @@ spec:
         # needs it to find out.
         - name: tmp
           emptyDir: {}
+        # aerie-share-ro, 5b.7's read-only PVC - see the top-of-file note on
+        # why this is mounted unconditionally rather than gated behind
+        # mediaLibrarySubpath.
+        - name: share-ro
+          persistentVolumeClaim:
+            claimName: aerie-share-ro

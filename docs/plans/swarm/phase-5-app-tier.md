@@ -653,7 +653,7 @@ demands of any workload, plus the automation. 14 is the gate.
       else in the cluster can win the race for it.
       *Exit:* both PVCs report `Bound`.
 
-- [ ] **8. `files` and `share`** — `charts/aerie/templates/files-*.yaml`,
+- [x] **8. `files` and `share`** — `charts/aerie/templates/files-*.yaml`,
       `share-*.yaml`.
 
       `files` is the nginx image holding the kiosk APK, its signature checksum

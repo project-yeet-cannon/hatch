@@ -1,0 +1,85 @@
+# The cluster plan Phase 5b.8 - the `files` Deployment: nginx serving the
+# kiosk APK, its signature checksum and version.json, replacing
+# compose.prod.yml's `files` service. 2 replicas because design.md lists this
+# workload HA-required - a tablet that can't reach it can't self-update
+# (apps/kiosk's UpdateManager polls files.${DOMAIN}/version.json). Service
+# named "files" on port 80 (files-service.yaml) is what keeps 5b.2's
+# KioskFiles:BaseAddress default (http://files/) true.
+#
+# Fully locked down, unlike the "if the app tolerates it" hedge 5b.5 put on
+# the same properties for api - confirmed by running the stock nginx:alpine
+# image read-only, non-root, all capabilities dropped: it needs exactly one
+# capability back (NET_BIND_SERVICE, since port 80 is privileged and this
+# image's own nginx.conf still says "user nginx;" - harmless non-root, just
+# ignored) and three writable directories nginx itself expects
+# (/var/cache/nginx for its temp buffers, /var/run for nginx.pid - note
+# /var/run is a symlink to /run in this image, and mounting a volume at the
+# symlink path still lands on /run's real inode, the same as it would with a
+# Docker --tmpfs mount - and /tmp for the same reason api-deployment.yaml
+# mounts one). fsGroup 101 is nginx's own built-in uid/gid in this image
+# (confirmed via `getent passwd nginx`), which is what makes the emptyDirs
+# below group-writable to a container that no longer runs as root.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: files
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+    app.kubernetes.io/component: files
+spec:
+  replicas: {{ .Values.files.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "aerie.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: files
+  template:
+    metadata:
+      labels:
+        {{- include "aerie.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: files
+    spec:
+      # 5b.1's dockerconfigjson Secret - same reason as api-deployment.yaml.
+      imagePullSecrets:
+        - name: {{ .Values.image.pullSecret }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: files
+          image: "{{ .Values.image.registry }}/aerie-kiosk-files:{{ .Values.image.kioskFiles.tag }}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              # Port 80 is a privileged port; without this, a non-root
+              # container gets "bind() ... Permission denied" instead of
+              # "Permission denied" being the thing api-deployment.yaml's
+              # comment warns readOnlyRootFilesystem might produce.
+              add: ["NET_BIND_SERVICE"]
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /version.json
+              port: http
+            periodSeconds: 10
+          volumeMounts:
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
