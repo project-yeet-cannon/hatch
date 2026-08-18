@@ -1,8 +1,9 @@
 <#
 .SYNOPSIS
-    Renders and applies the two IAM policies Provision 2 depends on - the
-    read-only 'aerie-eso' policy and the seed writer's - from the committed
-    documents in iam\, scoped to this account, region and parameter prefix.
+    Renders and applies the IAM policies Provision 2 and Phase 4 depend on -
+    the read-only 'aerie-eso' policy, the seed writer's, and CNPG's WAL
+    archiving user - from the committed documents in iam\, scoped to this
+    account, region, parameter prefix and (for CNPG) WAL bucket.
 
 .DESCRIPTION
     The policies in iam\*.policy.json are the structural half: identical for
@@ -32,6 +33,15 @@
     The user behind SSM_AWS_ACCESS_KEY_ID. Omit to leave the writer's policy
     alone - useful when only the ESO half needs repair.
 
+.PARAMETER CnpgUserName
+    The user CloudNativePG's Barman Cloud Plugin holds for WAL archiving and
+    base backups (the cluster plan Phase 4a.3/4b.2). Omit to leave its policy
+    alone. Requires -WalBucket.
+
+.PARAMETER WalBucket
+    The S3 bucket -CnpgUserName is scoped to - a dedicated bucket, not the
+    restic one, per 4a.2. Required when -CnpgUserName is passed.
+
 .PARAMETER ParameterPrefix
     Overrides parameters.json's prefix. Must match what Sync-AerieSecrets.ps1
     and the Phase 3 ClusterSecretStore use, or ESO reads an empty tree.
@@ -58,12 +68,20 @@
 .EXAMPLE
     # Just show me the JSON to paste - no AWS CLI, no credentials
     .\Set-AerieSecretsIam.ps1 -Render -AwsAccountId 123456789012 -AwsRegion us-east-1
+
+.EXAMPLE
+    # The CNPG WAL archiving user, scoped to its own bucket
+    .\Set-AerieSecretsIam.ps1 -CnpgUserName aerie-cnpg -WalBucket my-aerie-cnpg-wal
 #>
 [CmdletBinding()]
 param(
     [string]$EsoUserName = 'aerie-eso',
 
     [string]$SeedWriterUserName,
+
+    [string]$CnpgUserName,
+
+    [string]$WalBucket,
 
     [string]$MapPath = (Join-Path $PSScriptRoot 'parameters.json'),
 
@@ -80,6 +98,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+if ($CnpgUserName -and -not $WalBucket) {
+    throw '-CnpgUserName needs -WalBucket: the policy scopes to one bucket and nothing else.'
+}
+if ($WalBucket -and -not $CnpgUserName) {
+    throw '-WalBucket has no effect without -CnpgUserName.'
+}
 
 $script:StageNumber = 0
 $script:AwsCommand = 'aws'
@@ -206,6 +231,16 @@ if ($SeedWriterUserName) {
 else {
     Write-Host 'No -SeedWriterUserName: leaving the writer policy untouched.'
 }
+if ($CnpgUserName) {
+    $targets.Add([pscustomobject]@{
+            UserName   = $CnpgUserName
+            PolicyName = 'aerie-cnpg-wal-s3'
+            FileName   = 'aerie-cnpg.policy.json'
+        })
+}
+else {
+    Write-Host 'No -CnpgUserName: leaving the CNPG WAL policy untouched.'
+}
 
 foreach ($target in $targets) {
     $path = Join-Path $PSScriptRoot (Join-Path 'iam' $target.FileName)
@@ -215,7 +250,8 @@ foreach ($target in $targets) {
     $document = (Get-Content -Path $path -Raw).
         Replace('<AWS_REGION>', $region).
         Replace('<AWS_ACCOUNT_ID>', $accountId).
-        Replace('<PARAMETER_PREFIX>', $prefix)
+        Replace('<PARAMETER_PREFIX>', $prefix).
+        Replace('<WAL_BUCKET>', [string]$WalBucket)
 
     # Catches a placeholder renamed in the JSON but not here, which would
     # otherwise be applied verbatim and deny everything at runtime.

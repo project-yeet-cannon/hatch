@@ -1,0 +1,116 @@
+# The cluster plan Phase 4b.9 - the restore, as a re-runnable Job. Committed
+# suspended so Flux reconciling this file can never itself trigger a data
+# load; a real run is always a deliberate human action:
+#
+#   kubectl -n aerie create job --from=job/aerie-pg-restore aerie-pg-restore-$(date +%Y%m%d)
+#
+# Before that command, two things this Job needs that nothing in Phase 4
+# generates automatically:
+#
+#   1. A `aerie-pg-restore-restic` Secret in this namespace, created by hand -
+#      not through ESO/parameters.json. scripts/secrets/parameters.json's
+#      backup/* parameters are seeded and required, but Phase 8 owns the
+#      namespace and CronJob that would turn them into an ExternalSecret
+#      (kubernetesDeferred), and this Job runs before Phase 8 exists. Rather
+#      than pre-empt that boundary, this one manually-created Secret carries
+#      the same values by hand for as long as Phase 4-7 need this Job:
+#        kubectl -n aerie create secret generic aerie-pg-restore-restic \
+#          --from-literal=repository='s3:s3.amazonaws.com/<bucket>' \
+#          --from-literal=password='<restic repository password>' \
+#          --from-literal=aws-access-key-id='<aerie-restic access key id>' \
+#          --from-literal=aws-secret-access-key='<aerie-restic secret access key>' \
+#          --from-literal=aws-region='<region>'
+#      Delete it once Phase 8's own ExternalSecret exists and this Job has
+#      been updated to read that instead.
+#   2. `aerie-pg` reporting Ready, since this Job runs as the `aerie` role
+#      from the aerie-pg-app Secret CNPG generates.
+#
+# From S3, not the local restic repo: see ./restore.sh for why. What it does,
+# in order, is documented there rather than split across command args here -
+# restic restore, pg_restore --no-owner --no-privileges into both databases,
+# then a sanity query. *That* is not this Job's real exit criterion, though:
+# run it against the post-4b.1 snapshot 4a.6 took, then hand-compare recent
+# channel history and row counts against the old host. The Job's own exit
+# code proves the restore didn't error; the hand comparison proves it's right.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: aerie-pg-restore
+  namespace: aerie
+spec:
+  suspend: true
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: restore
+          # Already ships restic and postgres:18.4's psql/pg_restore - see
+          # containers/backup/Dockerfile. Its own ENTRYPOINT (supercronic) is
+          # overridden below; this container runs the script once and exits.
+          image: ghcr.io/eouw0o83hf/aerie-backup:latest
+          command: ["sh", "/scripts/restore.sh"]
+          env:
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef:
+                  name: aerie-pg-app
+                  key: host
+            - name: PGPORT
+              valueFrom:
+                secretKeyRef:
+                  name: aerie-pg-app
+                  key: port
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: aerie-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aerie-pg-app
+                  key: password
+            - name: RESTIC_REPOSITORY
+              valueFrom:
+                secretKeyRef:
+                  name: aerie-pg-restore-restic
+                  key: repository
+            - name: RESTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aerie-pg-restore-restic
+                  key: password
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aerie-pg-restore-restic
+                  key: aws-access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aerie-pg-restore-restic
+                  key: aws-secret-access-key
+            - name: AWS_DEFAULT_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: aerie-pg-restore-restic
+                  key: aws-region
+          volumeMounts:
+            - name: restore-script
+              mountPath: /scripts
+              readOnly: true
+            - name: restore-data
+              mountPath: /restore
+      volumes:
+        - name: restore-script
+          configMap:
+            name: aerie-pg-restore-script
+            defaultMode: 0o555
+        # emptyDir, not a PVC: the restored dumps only need to exist for this
+        # one Job run, and its node has room for a Postgres-sized dump
+        # (local-path already assumes single-node-sized state for aerie-pg
+        # itself). A PVC would outlive the Job and need its own cleanup.
+        - name: restore-data
+          emptyDir: {}

@@ -13,9 +13,13 @@
 #
 # What this root contains is deliberately only pointers. It applies no workload
 # of its own, because the Kustomization Provision 3 created for it carries no
-# postBuild.substituteFrom - that lives on the two child Kustomizations in
-# infrastructure.yaml, which is the only place a ${...} token resolves.
+# postBuild.substituteFrom - that lives on the child Kustomizations in
+# infrastructure.yaml and data.yaml, which is the only place a ${...} token
+# resolves.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - infrastructure.yaml
+  # The cluster plan Phase 4: data-cluster -> data-schema, depending on
+  # infra-config the same way infra-config depends on infra-controllers.
+  - data.yaml

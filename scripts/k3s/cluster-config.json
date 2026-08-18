@@ -129,6 +129,30 @@
       "example": "2",
       "consumedBy": "3b.11 Longhorn defaultReplicaCount",
       "description": "2 during the two-node build window; Phase 7 raises it to 3 by changing this variable and re-running Provision 4 - no commit, which is the reason this is a ConfigMap and not a manifest."
+    },
+    {
+      "key": "POSTGRES_INSTANCES",
+      "env": "POSTGRES_INSTANCES",
+      "githubSource": "POSTGRES_INSTANCES",
+      "githubKind": "variable",
+      "required": true,
+      "pattern": "^[1-3]$",
+      "hint": "Never more than the number of nodes that exist - required anti-affinity leaves the excess pod permanently Pending. Same shape and the same reasoning as LONGHORN_REPLICA_COUNT.",
+      "example": "2",
+      "consumedBy": "4b.6 Cluster instances",
+      "description": "2 during the two-node build window; Phase 7 raises it to 3 alongside LONGHORN_REPLICA_COUNT by changing this variable and re-running Provision 4 - no commit."
+    },
+    {
+      "key": "WAL_BUCKET",
+      "env": "WAL_BUCKET",
+      "githubSource": "WAL_BUCKET",
+      "githubKind": "variable",
+      "required": true,
+      "pattern": "^(?!.*\\.\\.)(?!^[0-9.]+$)[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
+      "hint": "A valid S3 bucket name: lowercase, 3-63 characters, no underscores, no consecutive dots, not formatted as an IP address. The dedicated bucket from Phase 4a.2 - not the restic backup bucket.",
+      "example": "my-aerie-cnpg-wal",
+      "consumedBy": "4b.5 ObjectStore destinationPath",
+      "description": "S3 bucket CloudNativePG's Barman Cloud Plugin archives WAL and base backups to. Per-installation, so it stays out of git per docs/ethos.md."
     }
   ]
 }

@@ -1,0 +1,28 @@
+# Layer for the data-schema Flux Kustomization (../../data.yaml): everything
+# that assumes aerie-pg already answers - the quartz database, the DDL that
+# fills it, the restore Job and the ScheduledBackup. data-schema carries
+# dependsOn: data-cluster, so nothing here is even applied until ../cluster's
+# Cluster is Ready.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - quartz-database.yaml
+  - quartz-ddl-job.yaml
+  - restore-job.yaml
+  - scheduledbackup.yaml
+configMapGenerator:
+  - name: quartz-ddl
+    files:
+      - quartz-ddl.sql
+  - name: aerie-pg-restore-script
+    files:
+      - restore.sh
+generatorOptions:
+  # A fixed name, not the content-hash suffix kustomize adds by default. Both
+  # Jobs above (./quartz-ddl-job.yaml, ./restore-job.yaml) have immutable pod
+  # templates once created - a hashed name that changed on every script edit
+  # would mean kustomize rewriting a Job's volume reference on an object it
+  # can no longer apply over, rather than beside. A script change is picked
+  # up by deleting the completed/suspended Job and letting Flux recreate it
+  # against the (already updated) ConfigMap.
+  disableNameSuffixHash: true

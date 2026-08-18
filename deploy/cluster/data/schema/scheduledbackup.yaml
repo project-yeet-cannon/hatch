@@ -1,0 +1,32 @@
+# The cluster plan Phase 4b.10 - nightly base backups through the same
+# barman-cloud plugin ../cluster/cluster.yaml's `plugins:` block enables for
+# WAL archiving.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: aerie-pg-daily
+  namespace: aerie
+spec:
+  cluster:
+    name: aerie-pg
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+  # Six fields - CNPG's schedule carries a leading seconds field, unlike cron
+  # proper. A five-field expression is accepted and silently fires an hour
+  # off from what it reads as. 02:00 daily.
+  schedule: "0 0 2 * * *"
+  backupOwnerReference: self
+  # Take the first base backup on apply rather than waiting for 2am, which is
+  # what makes this step verifiable in the same sitting it's committed in.
+  immediate: true
+# ---------------------------------------------------------------------------
+# The PITR rehearsal this step's real exit criterion depends on is not a
+# manifest - see the phase doc, 4b.10. In outline: note a timestamp, make a
+# marker change in the 4b.9-restored data, bootstrap a *second, throwaway*
+# Cluster with `bootstrap.recovery` and an `externalClusters` entry naming
+# ../cluster/objectstore.yaml (serverName: aerie-pg) and a
+# `recoveryTarget.targetTime` before the marker, confirm the marker is
+# absent, then delete the throwaway Cluster. Recovery always bootstraps a new
+# Cluster rather than acting in place, which is why this is cheap to rehearse
+# and why skipping it leaves PITR a claim rather than a proven capability.

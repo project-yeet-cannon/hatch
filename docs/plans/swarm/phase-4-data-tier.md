@@ -69,7 +69,7 @@
 *Six one-time steps, none of them code. Do these first, in order, and the whole
 of 4b runs from commits and workflow dispatches.*
 
-**1. Confirm Phase 3 actually landed.** Not "the boxes are ticked" — dispatch
+**[x] 1. Confirm Phase 3 actually landed.** Not "the boxes are ticked" — dispatch
 *Verify: Cluster platform* ([`verify-cluster-platform.yml`](../../../.github/workflows/verify-cluster-platform.yml))
 and get a green run. Phase 4 is the first phase that creates objects the
 operator will keep reconciling forever, and every one of them is downstream of
@@ -81,7 +81,7 @@ something 3b.13 asserts. Specifically confirm in that output:
   mints its own serving certificates through cert-manager, so a cert-manager
   that is not actually healthy surfaces here as a plugin that never starts
 
-**2. Create the S3 bucket for WAL and base backups.** A **new, dedicated
+**[x] 2. Create the S3 bucket for WAL and base backups.** A **new, dedicated
 bucket** — not the restic bucket Phase 0 created. Two reasons, and the second
 is the one that matters: barman-cloud owns its prefix layout (`base/`, `wals/`)
 and expects to be the only writer, and Phase 8's "AWS account is gone" story is
@@ -94,14 +94,16 @@ underneath it produces a WAL gap that only shows up during a restore.
 Same region as the rest (`AWS_REGION`). Cross-region here buys nothing and
 costs egress on every WAL segment.
 
-**3. Create the `aerie-cnpg` IAM user.** Its own user, matching the isolation
+Bucket name: `landis-family-aerie-cnpg-wal`
+
+**[x] 3. Create the `aerie-cnpg` IAM user.** Its own user, matching the isolation
 discipline `aerie-restic` and `aerie-eso` already follow — the credential the
 database holds forever must not be able to read the backup repository, and vice
 versa. Create the user in the console (as with the others: nothing in this repo
 mints a credential, because a script that did would have to print it — see
 [ethos](../../ethos.md)), then apply its policy with the script 4b.2 extends.
 
-**4. Add the repository secret and variables.** `CNPG_AWS_ACCESS_KEY_ID` and
+**[x] 4. Add the repository secret and variables.** `CNPG_AWS_ACCESS_KEY_ID` and
 `CNPG_AWS_REGION` as **variables**, `CNPG_AWS_SECRET_ACCESS_KEY` as a
 **secret** — the split [`parameters.json`](../../../scripts/secrets/parameters.json)
 records as `githubKind`, and getting it backwards resolves to an empty string
@@ -109,7 +111,7 @@ rather than erroring. The first two names are already wired into
 [`provision-2-seed-secrets.yml`](../../../.github/workflows/provision-2-seed-secrets.yml#L139-L140)
 and unset; the region is new (4b.3).
 
-**5. Decide and record the PostgreSQL major version.** Read what prod runs —
+**[x] 5. Decide and record the PostgreSQL major version.** Read what prod runs —
 `postgres:18.4` today — and pick the CNPG operand image at that major or newer.
 `pg_restore` restores forwards across majors and never backwards, so this is a
 floor, not a preference. Pin it explicitly in 4b.6; do not leave `imageName`
@@ -594,23 +596,50 @@ deploy/cluster/
   infrastructure.yaml       # infra-controllers → infra-config   (Phase 3)
   data.yaml                 # data-cluster → data-schema         (Phase 4)
   data/
-    objectstore.yaml        # 4b.5  ┐ data-cluster
-    cluster.yaml            # 4b.6  ┘  wait: true
-    quartz-database.yaml    # 4b.8  ┐ data-schema
-    quartz-ddl-job.yaml     # 4b.8  │  dependsOn: data-cluster
-    quartz-ddl.sql          # 4b.8  │
-    restore-job.yaml        # 4b.9  │  suspended
-    scheduledbackup.yaml    # 4b.10 ┘
-    kustomization.yaml
+    cluster/                 # data-cluster's own path, wait: true
+      objectstore.yaml        # 4b.5
+      cluster.yaml             # 4b.6
+      kustomization.yaml
+    schema/                  # data-schema's own path, dependsOn: data-cluster
+      quartz-database.yaml    # 4b.8
+      quartz-ddl-job.yaml     # 4b.8
+      quartz-ddl.sql          # 4b.8, ConfigMap-generated
+      restore.sh               # 4b.9, ConfigMap-generated
+      restore-job.yaml        # 4b.9, suspended
+      scheduledbackup.yaml    # 4b.10
+      kustomization.yaml
 ```
 
-`data-cluster` carries `dependsOn: infra-config` and `wait: true`; `data-schema`
-carries `dependsOn: data-cluster`. The split is not decoration — a Job applied
-in the same pass as the `Cluster` starts against a database that does not
-answer yet, and burns its `backoffLimit` before the primary is up. `wait: true`
-makes a Kustomization wait for its objects to be *healthy*, but it does not
-order objects within itself, which is the same distinction
-`infra-controllers`/`infra-config` exists to draw.
+Two directories, not one flat `data/` — this is a deliberate departure from
+this section's original single-directory sketch, made while actually wiring
+`data.yaml`'s two Flux `Kustomization`s. `dependsOn` and `wait` are properties
+of a *Kustomization*, and a Kustomization's contents are exactly what
+`kubectl kustomize <path>` builds from its one `path` — there is no mechanism
+to point two Kustomizations at the same path and have each apply a different
+subset. So the split promised below needs two `path`s to be real rather than
+aspirational.
+
+`data-cluster` carries `dependsOn: infra-config` and `wait: true`, path
+`./deploy/cluster/data/cluster`; `data-schema` carries `dependsOn:
+data-cluster`, path `./deploy/cluster/data/schema`. The split is not
+decoration — a Job applied in the same pass as the `Cluster` starts against a
+database that does not answer yet, and burns its `backoffLimit` before the
+primary is up. `wait: true` makes a Kustomization wait for its objects to be
+*healthy*, but it does not order objects *within* one Kustomization's single
+apply pass, which is the same distinction `infra-controllers`/`infra-config`
+exists to draw — and the reason `objectstore.yaml` is still listed ahead of
+`cluster.yaml` in `data/cluster/kustomization.yaml`, even though both land in
+the one data-cluster pass: it is not a hard guarantee, but CNPG's WAL archiver
+retries continuously regardless, so the cost of the wrong order is a few
+extra archive attempts, not a stuck `Cluster`.
+
+`quartz-ddl.sql` and `restore.sh` are generated into ConfigMaps by
+`data/schema/kustomization.yaml`'s `configMapGenerator`, with
+`disableNameSuffixHash: true` — the two Jobs that mount them have immutable
+pod templates once created, so the usual content-hash suffix would mean
+kustomize rewriting a Job's volume reference on an object it can no longer
+apply over. A script edit is picked up by deleting the completed/suspended Job
+and letting Flux recreate it against the (already updated) ConfigMap.
 
 Both Kustomizations need `postBuild.substituteFrom` the `aerie-cluster-config`
 ConfigMap — that is the only way `${POSTGRES_INSTANCES}` and `${WAL_BUCKET}`

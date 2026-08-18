@@ -1,0 +1,68 @@
+# The cluster plan Phase 4b.5 - the WAL/base-backup destination. Listed before
+# ./cluster.yaml (4b.6) in ./kustomization.yaml, which kustomize-controller
+# generally honours as apply order within one pass - but this and cluster.yaml
+# both live in the same data-cluster Kustomization (../../data.yaml) with no
+# `wait` *between* them, only around the whole layer, so a Cluster created a
+# moment before this object exists is possible in principle. It is not a
+# correctness problem either way: CNPG's WAL archiver retries continuously
+# rather than failing once, so the cost of the wrong order is a few extra
+# archive attempts before this object appears, not a stuck Cluster.
+#
+# Namespace aerie, not cnpg-system - this is an instance the Cluster
+# references by bare name (barmanObjectName in 4b.6), which resolves in the
+# Cluster's own namespace, and it sits beside the object that uses it the same
+# way every Phase 4 data object does (see "Where these files live" at the
+# bottom of the phase doc).
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: aerie-pg-wal
+  namespace: aerie
+spec:
+  configuration:
+    # A dedicated bucket (4a.2), never the restic one: barman-cloud owns its
+    # own prefix layout (base/, wals/) and expects to be the only writer.
+    destinationPath: s3://${WAL_BUCKET}/
+    s3Credentials:
+      # The three keys ESO syncs into cnpg-wal-s3 (4b.3) - one Secret, so the
+      # pair (and the region alongside it) cannot half-rotate.
+      accessKeyId:
+        name: cnpg-wal-s3
+        key: access-key-id
+      secretAccessKey:
+        name: cnpg-wal-s3
+        key: secret-access-key
+      # A SecretKeySelector, not a string - the reason postgres/wal-s3-region
+      # exists as a Kubernetes-backed parameter in scripts/secrets/parameters.json
+      # rather than as a ${...} substitution, even though a region isn't secret.
+      region:
+        name: cnpg-wal-s3
+        key: region
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+    # barman's own pruning, and the only thing that deletes from this bucket -
+    # 4a.2's bucket-side lifecycle rule only cleans up noncurrent versions from
+    # S3 versioning, never current objects. A bucket policy that also deletes
+    # current objects produces a WAL gap that only shows up during a restore.
+    retentionPolicy: "30d"
+  # Goal 2 does not work without requests on every workload the scheduler
+  # places, and the plugin's sidecar - injected into every instance pod
+  # ./cluster.yaml's `plugins:` block names - is one the Cluster spec itself
+  # has no field for. This is the other half of ./cluster.yaml's own
+  # spec.resources: same instances, same reasoning, sized for the sidecar
+  # rather than for Postgres itself.
+  instanceSidecarConfiguration:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+  # Left empty on purpose. serverName exists only for API compatibility with
+  # the deprecated in-tree barmanObjectStore; the live path names the server
+  # through the plugin parameters in ./cluster.yaml's `plugins:` block
+  # instead (barmanObjectName), and through externalClusters.serverName on the
+  # PITR rehearsal in ../schema/scheduledbackup.yaml (4b.10).

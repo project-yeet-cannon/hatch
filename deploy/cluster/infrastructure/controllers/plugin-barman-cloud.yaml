@@ -1,0 +1,111 @@
+# The cluster plan Phase 4b.4 - the Barman Cloud Plugin, CNPG's WAL archiving
+# and base-backup path since the in-tree barmanObjectStore API was deprecated
+# in operator 1.26 (see the re-scope note at the top of
+# docs/plans/swarm/phase-4-data-tier.md).
+#
+# Layer 1, alongside ./cloudnative-pg.yaml, for the same reason every other
+# component in this directory sits here: it registers a CRD -
+# objectstores.barmancloud.cnpg.io - that 4b.5's ObjectStore is an instance of,
+# and the two-layer split (../../infrastructure.yaml) puts types before
+# instances. infra-controllers' wait: true is what makes 4b.5 open against a
+# cluster that already understands the noun.
+#
+# Deliberately in cnpg-system, not a namespace of its own: the plugin has to
+# run in the operator's own namespace to be reachable over the gRPC channel
+# the operator dials it on. Installing it anywhere else produces a plugin
+# Deployment that starts cleanly and that no Cluster can ever reach - a
+# failure with nothing to point at, since both sides report healthy.
+#
+# No second HelmRepository: the chart is published from the same
+# cloudnative-pg.github.io/charts index ./cloudnative-pg.yaml already added a
+# HelmRepository for, so this HelmRelease's sourceRef just points at it.
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: plugin-barman-cloud
+  namespace: cnpg-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: plugin-barman-cloud
+      # Chart 0.7.1, appVersion v0.14.0 - chosen when this file was added,
+      # against operator 1.30 (see ./cloudnative-pg.yaml). A bump is a commit
+      # against that pairing, not an unattended upgrade: this pins an exact
+      # version the same way every other release in this directory does.
+      version: 0.7.1
+      sourceRef:
+        kind: HelmRepository
+        name: cloudnative-pg
+  # Same arithmetic as ./cloudnative-pg.yaml: infra-controllers waits 10m for
+  # the whole layer, and this installs one small Deployment plus the
+  # cert-manager Issuer/Certificate pair note 2 below describes - no hooks, no
+  # image pulls heavier than Longhorn's.
+  timeout: 4m
+  install:
+    # One, matching every neighbour but Longhorn: there is no data behind this
+    # release, so the blast radius of a remediated retry is one Deployment and
+    # its certificates.
+    remediation:
+      retries: 1
+  upgrade:
+    remediation:
+      retries: 1
+    # As next door: a failed upgrade otherwise leaves behind whatever it
+    # managed to create before it stopped, and the retry collides with objects
+    # Helm does not believe it owns.
+    cleanupOnFail: true
+  values:
+    # ---------------------------------------------------------------------
+    # gRPC certificates - the one thing here that depends on 3b.7
+    # ---------------------------------------------------------------------
+    # All three left at the chart default (true), written out because that
+    # default is the whole reason this release can sit in layer 1 with no
+    # dependsOn on cert-manager: the chart mints its own self-signed Issuer
+    # and a client/server Certificate pair for the gRPC channel between the
+    # operator and this plugin, through whatever ClusterIssuer/Issuer support
+    # cert-manager provides - it does not reach out to 3b.10's ACME issuer or
+    # need the wildcard. What it does need is the cert-manager CRDs and
+    # webhook 3b.7 installs, which is why 4a.1 asks for a green Phase 3 gate
+    # rather than a glance: a cert-manager that installed but is not actually
+    # healthy surfaces here as this Issuer never going Ready and the plugin
+    # Deployment never getting a serving certificate to mount.
+    certificate:
+      createIssuer: true
+      createClientCertificate: true
+      createServerCertificate: true
+
+    # ---------------------------------------------------------------------
+    # Image tags - pinned explicitly rather than inherited from appVersion
+    # ---------------------------------------------------------------------
+    # sidecarImage is injected into every Postgres pod this operator manages,
+    # so leaving its tag implicit would make the database's pod spec change
+    # silently whenever this chart bumps - a Postgres restart riding in on
+    # what looks like a plugin-only release. Both pinned to the chart's own
+    # v0.14.0 appVersion; bump them together with the chart version above.
+    image:
+      tag: v0.14.0
+    sidecarImage:
+      tag: v0.14.0
+# ---------------------------------------------------------------------------
+# Two traps, both hit while writing this file rather than left for whoever
+# reads it next.
+#
+#   1. Like every chart in this directory except cert-manager's, this one's
+#      values.schema.json sets no additionalProperties: false anywhere, so a
+#      misspelled key under `values:` above is accepted and silently unread -
+#      the release reports Ready and the plugin runs with whatever the chart's
+#      own default was. There is no schema here to catch that; only care is.
+#   2. `service.name` is documented upstream as unchangeable once set, because
+#      the certificate pair above has its SANs generated from it. There is no
+#      `service:` block above for exactly that reason - leave the whole thing
+#      alone rather than writing out the default to "document" it, since
+#      writing it out is indistinguishable from a future edit that changes it.
+#
+# What Phase 4b.5 and 4b.6 depend on that is not visible above: this release
+# registers objectstores.barmancloud.cnpg.io (4b.5 is one) and the operator
+# picks up the plugin automatically once both sides' certificates are Ready -
+# nothing in cluster.yaml (4b.6) names this release directly beyond the
+# `barman-cloud.cloudnative-pg.io` plugin name in its own `plugins:` block.
+# ---------------------------------------------------------------------------

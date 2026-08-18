@@ -1,0 +1,72 @@
+# The cluster plan Phase 4b.8 - runs the DDL ./quartz-ddl.sql (loaded as a
+# ConfigMap by ./kustomization.yaml's configMapGenerator) against the quartz
+# database ./quartz-database.yaml declares.
+#
+# No dependsOn on the data-cluster Kustomization or ordering against quartz-database.yaml
+# within this Kustomization: both would need a second Flux layer for one
+# Job, and backoffLimit below already absorbs the ordinary race - the
+# operator creates `quartz` in well under the time it takes this pod's image
+# to pull, but if it ever loses that race, psql fails to connect and the Job
+# retries rather than exhausting its budget on the first attempt.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: aerie-quartz-ddl
+  namespace: aerie
+spec:
+  # ON_ERROR_STOP=1 below is deliberate: with the IF NOT EXISTS guards in
+  # place there is no error this Job should survive, so a handful of retries
+  # is for the connection race above, not for the DDL itself.
+  backoffLimit: 6
+  # Completed Jobs otherwise accumulate forever - this one reruns on every
+  # reconciliation of an unchanged tree only if its spec changes (Jobs are
+  # immutable once created), but a stale one still shouldn't linger.
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: quartz-ddl
+          # Same tag as ../cluster/cluster.yaml's imageName, so this Job's psql is the
+          # exact version of the server it's talking to.
+          image: ghcr.io/cloudnative-pg/postgresql:18.4
+          command:
+            - psql
+            - -v
+            - ON_ERROR_STOP=1
+            - -f
+            - /ddl/quartz-ddl.sql
+          env:
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef:
+                  name: aerie-pg-app
+                  key: host
+            - name: PGPORT
+              valueFrom:
+                secretKeyRef:
+                  name: aerie-pg-app
+                  key: port
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: aerie-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aerie-pg-app
+                  key: password
+            # Not the Secret's own `dbname` key (that's `aerie`, the initdb
+            # bootstrap database) - the quartz Database ./quartz-database.yaml
+            # declares, which the `aerie` role owns and can connect to.
+            - name: PGDATABASE
+              value: quartz
+          volumeMounts:
+            - name: quartz-ddl
+              mountPath: /ddl
+              readOnly: true
+      volumes:
+        - name: quartz-ddl
+          configMap:
+            name: quartz-ddl

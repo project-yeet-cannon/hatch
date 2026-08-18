@@ -1,19 +1,25 @@
-CREATE DATABASE aerie;
-CREATE DATABASE quartz;
-
--- Scope to quartz db for init commands
-\c quartz
+-- The cluster plan Phase 4b.8 - the Quartz DDL alone, lifted out of
+-- containers/aerie-db/pginit.sql (Finding 3, docs/plans/swarm/design.md).
+-- pginit.sql is two CREATE DATABASE statements, a `\c quartz` psql
+-- meta-command, and this. CNPG's restore/DDL Jobs execute SQL, not psql
+-- scripts, so the meta-command and the CREATE DATABASE statements (the
+-- Database CRD in ./quartz-database.yaml replaces the second one; the first
+-- is CNPG's own initdb bootstrap) cannot travel with it - only the DDL does.
+--
+-- Loaded into the cluster as a ConfigMap by ./kustomization.yaml's
+-- configMapGenerator and run by ./quartz-ddl-job.yaml. pginit.sql keeps its
+-- own copy for the old host, which still serves from it until Phase 7 -
+-- keep both copies in sync until then.
+--
+-- Every CREATE TABLE/INDEX below carries IF NOT EXISTS, which is what makes
+-- this Job a safe no-op both on a fresh install and after ./restore-job.yaml
+-- (4b.9) has already brought the tables in from a restored dump - one
+-- ordering serves both paths.
 
 -- Initialize Quartz DB
 -- https://github.com/quartznet/quartznet/blob/main/database/tables/tables_postgres.sql
 
 -- This script is for PostgreSQL
-
--- CREATE TABLE/INDEX below carry IF NOT EXISTS (the cluster plan Phase 4b.8,
--- Finding 3) so a rebuild of this host during the Phase 4-7 transition is
--- idempotent, matching deploy/cluster/data/quartz-ddl.sql - the DDL lifted out
--- for CNPG's restore Job to run there instead. Keep both copies in sync until
--- this file is retired with compose.prod.yml in Phase 7.
 
 -- This initializes the database to pristine for Quartz, by first removing any existing Quartz tables
 -- and then recreating them from scratch.

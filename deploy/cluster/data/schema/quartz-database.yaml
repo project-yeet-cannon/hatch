@@ -1,0 +1,20 @@
+# The cluster plan Phase 4b.8 - the quartz database, declared rather than
+# created imperatively. CNPG's Database CRD reconciles this like any other
+# object: apply once, and the operator issues the CREATE DATABASE (or leaves
+# an existing one alone) and keeps it that way.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: aerie-pg-quartz
+  namespace: aerie
+spec:
+  cluster:
+    name: aerie-pg
+  name: quartz
+  owner: aerie
+  ensure: present
+  # The default, written out: delete would let a mistaken commit (or `prune:
+  # true` on this Kustomization) drop the Quartz store along with the object
+  # that declares it. spec.cluster is immutable, so getting the cluster name
+  # wrong means deleting and recreating this object rather than editing it.
+  databaseReclaimPolicy: retain

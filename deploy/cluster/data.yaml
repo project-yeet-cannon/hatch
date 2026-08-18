@@ -1,0 +1,84 @@
+# The cluster plan Phase 4 - the two-layer split described at the bottom of
+# docs/plans/swarm/phase-4-data-tier.md ("Where these files live"), the data
+# equivalent of ./infrastructure.yaml's infra-controllers/infra-config split.
+#
+# data-cluster: the database and its WAL destination (data/cluster/) -
+# nothing that assumes the database already answers queries.
+# data-schema: everything that does (data/schema/) - the quartz Database, the
+# DDL Job, the restore Job and the ScheduledBackup.
+#
+# The two are separate paths, not one directory with internal ordering,
+# because ordering inside a single Kustomization's apply pass isn't a thing
+# Flux offers - only `dependsOn` + `wait` *between* Kustomizations blocks one
+# stage on the other's health. A DDL Job applied in the same pass as the
+# Cluster it targets would start against a database that isn't up yet and
+# spend its backoffLimit failing to connect before the primary even exists.
+#
+# Both need postBuild.substituteFrom the aerie-cluster-config ConfigMap -
+# ${POSTGRES_INSTANCES} and ${WAL_BUCKET} (4b.7) resolve nowhere else - and
+# `optional` stays at its default of false for the same reason
+# ./infrastructure.yaml gives: a missing ConfigMap should fail reconciliation
+# loudly rather than substitute empty strings into a database spec.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: data-cluster
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  # Longer than infra-config's 5m: this brings up a Postgres primary (and,
+  # once instances > 1, a streaming standby) from a cold PVC, which is
+  # slower than any single object in Phase 3's layers.
+  timeout: 10m
+  dependsOn:
+    - name: infra-config
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./deploy/cluster/data/cluster
+  prune: true
+  # The boundary data-schema's dependsOn relies on: without wait: true this
+  # Kustomization is Ready as soon as the Cluster object is *applied*, not
+  # once CNPG reports it healthy - see ./infrastructure.yaml's own note on
+  # why `wait` is what makes a dependsOn boundary real rather than decorative.
+  #
+  # One thing to confirm on the first reconciliation rather than assume:
+  # Flux's wait uses kstatus, which reads status.conditions for a Ready
+  # condition. CNPG's Cluster publishes one, so this should work - but if
+  # data-cluster goes Ready before the instances actually do, fall back to an
+  # explicit healthChecks entry naming the Cluster.
+  wait: true
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: aerie-cluster-config
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: data-schema
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 5m
+  # The boundary. Everything under data/schema/ assumes aerie-pg answers.
+  dependsOn:
+    - name: data-cluster
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./deploy/cluster/data/schema
+  prune: true
+  # Also true here, and it is part of the phase gate: the quartz Database and
+  # the DDL Job's completion should surface as this Kustomization's Ready
+  # condition rather than as a green reconciliation over an object that never
+  # converged. The restore Job is suspended (4b.9) so it never blocks this -
+  # a suspended Job keeps whatever condition it last had, which kstatus does
+  # not treat as failing health.
+  wait: true
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: aerie-cluster-config
