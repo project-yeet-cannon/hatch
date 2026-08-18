@@ -306,7 +306,7 @@ changes, the SMB driver, the config keys and the site repo source. 5–10 build 
 a time, and only 10 makes it reconcile. 11–13 are the properties the design
 demands of any workload, plus the automation. 14 is the gate.
 
-- [ ] **1. The registry pull secret, through ESO** —
+- [x] **1. The registry pull secret, through ESO** —
       [`parameters.json`](../../../scripts/secrets/parameters.json),
       [`New-ExternalSecrets.ps1`](../../../scripts/secrets/New-ExternalSecrets.ps1),
       [`provision-2-seed-secrets.yml`](../../../.github/workflows/provision-2-seed-secrets.yml).

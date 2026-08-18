@@ -218,11 +218,13 @@
   justify-content: center;
   border-radius: 6px;
   border: 1px solid transparent;
+  color: var(--ink);
   cursor: pointer;
 }
 
 .icon-picker-option:hover {
   border-color: var(--line);
+  color: var(--primary);
 }
 
 mark.search-match {
