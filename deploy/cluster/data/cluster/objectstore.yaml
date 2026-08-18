@@ -42,11 +42,14 @@ spec:
       compression: gzip
     data:
       compression: gzip
-    # barman's own pruning, and the only thing that deletes from this bucket -
-    # 4a.2's bucket-side lifecycle rule only cleans up noncurrent versions from
-    # S3 versioning, never current objects. A bucket policy that also deletes
-    # current objects produces a WAL gap that only shows up during a restore.
-    retentionPolicy: "30d"
+  # barman's own pruning, and the only thing that deletes from this bucket -
+  # 4a.2's bucket-side lifecycle rule only cleans up noncurrent versions from
+  # S3 versioning, never current objects. A bucket policy that also deletes
+  # current objects produces a WAL gap that only shows up during a restore.
+  # A sibling of `configuration`, not nested inside it - confirmed against
+  # the live CRD (`kubectl explain objectstore.spec`) after the plugin's
+  # actual API put it there rather than where the phase-4 draft assumed.
+  retentionPolicy: "30d"
   # Goal 2 does not work without requests on every workload the scheduler
   # places, and the plugin's sidecar - injected into every instance pod
   # ./cluster.yaml's `plugins:` block names - is one the Cluster spec itself
