@@ -1,0 +1,101 @@
+# The cluster plan Phase 5b.9 - the four public hostnames, replacing Caddy's
+# reverse-proxy blocks. ingressClassName: traefik is k3s's own bundled
+# IngressClass (3b.9's HelmChartConfig only patches the Traefik it installs,
+# it doesn't add a competing one), and every host below carries no `tls:`
+# block on purpose: TLS is terminated at the entrypoint
+# (traefik-helmchartconfig.yaml's ports.websecure.http.tls.enabled), and the
+# certificate served to any router naming no Secret of its own is 3b.10d's
+# wildcard TLSStore default - that default is the entire argument for having
+# bought a wildcard cert in the first place.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: home
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+    app.kubernetes.io/component: home
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: "home.{{ .Values.domain }}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kiosk
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+    app.kubernetes.io/component: kiosk
+  annotations:
+    # <namespace>-<name>@kubernetescrd is required and unforgiving - a bare
+    # name is silently not found and the route serves unrewritten, which
+    # presents as the kiosk showing the API landing page rather than an
+    # error anywhere. .Release.Namespace rather than a hardcoded "aerie" for
+    # the same reason share-volumes.yaml's nodeStageSecretRef does it that
+    # way - this is the one place the middleware's own namespace matters.
+    traefik.ingress.kubernetes.io/router.middlewares: "{{ .Release.Namespace }}-kiosk-root-rewrite@kubernetescrd"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: "kiosk.{{ .Values.domain }}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: files
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+    app.kubernetes.io/component: files
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: "files.{{ .Values.domain }}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: files
+                port:
+                  number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: share
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+    app.kubernetes.io/component: share
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: "share.{{ .Values.domain }}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: share
+                port:
+                  # dufs's default listen port, matching share-service.yaml.
+                  number: 5000

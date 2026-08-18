@@ -11,7 +11,7 @@ type: application
 # Bumped when a template changes; independent of the app itself; 5b.10 pins
 # this alongside its own values so a chart change and an image change are
 # each their own diff.
-version: 0.1.2
+version: 0.1.3
 # Left alone, on purpose. The thing this field would normally track - "what
 # version of the app does this chart deploy" - is answered per-container by
 # image.*.tag instead (image-automation, 5b.12, writes those independently of

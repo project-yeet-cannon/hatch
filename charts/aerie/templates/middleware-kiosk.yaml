@@ -1,0 +1,17 @@
+# The cluster plan Phase 5b.9 - replaces Caddy's caddy_1.@root.path /
+# caddy_1.rewrite pair for the kiosk tablet's pinned URL.
+#
+# replacePathRegex, not redirectRegex: Caddy rewrote internally, server-side,
+# and a redirect would change the tablet's address bar - breaking the pinned
+# URL the kiosk shell is configured to load on boot.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: kiosk-root-rewrite
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+    app.kubernetes.io/component: kiosk
+spec:
+  replacePathRegex:
+    regex: "^/$"
+    replacement: "/apps/dashboard/"

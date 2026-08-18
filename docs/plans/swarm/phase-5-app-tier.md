@@ -680,7 +680,7 @@ demands of any workload, plus the automation. 14 is the gate.
       **only when the subpath is non-empty**, per 5b.4.
       *Exit:* nothing yet; 5b.10 reconciles.
 
-- [ ] **9. Ingress and the kiosk rewrite** — `charts/aerie/templates/ingress.yaml`,
+- [x] **9. Ingress and the kiosk rewrite** — `charts/aerie/templates/ingress.yaml`,
       `middleware-kiosk.yaml`.
 
       Four `Ingress` resources, `ingressClassName: traefik`, **no `tls:` block

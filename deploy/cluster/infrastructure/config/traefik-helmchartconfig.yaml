@@ -121,6 +121,19 @@ spec:
       annotations:
         kube-vip.io/loadbalancerIPs: "${INGRESS_VIP}"
     ports:
+      # The cluster plan Phase 5b.9 - HTTP to HTTPS, permanent. Caddy did this
+      # implicitly (its whole reason for existing); Traefik does not
+      # redirect on its own, so every one of 5b.9's four Ingresses would
+      # otherwise serve plaintext on 80 side-by-side with 443 rather than
+      # bouncing to it. entryPoint.to: websecure names the entrypoint key
+      # above, not a Service or a host - this fires before any router match,
+      # for every host this cluster answers for.
+      web:
+        redirections:
+          entryPoint:
+            to: websecure
+            scheme: https
+            permanent: true
       websecure:
         http:
           tls:
