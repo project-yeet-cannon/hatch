@@ -4,14 +4,26 @@
  * SolarCalculator.EventsForDay server-side), decides which phase of the
  * circadian cycle we're in and blends CSS custom-property values across it.
  *
- * Phases: full light (sunrise-sunset), an evening transition (sunset-dusk),
- * full dark (dusk-dawn), and a morning transition (dawn-sunrise) that mirrors
- * the evening one. Each transition blends through a warm "amber" keyframe at
- * its midpoint rather than going straight from light to dark, so the palette
- * shifts from high-energy blue tones toward low-energy orange ones as the sun
- * goes down (and back, in reverse, as it comes up) instead of just dimming.
+ * Phases: full light (sunrise until the evening transition begins), an
+ * evening transition (a long, slow fade starting EVENING_TRANSITION_LEAD_MINUTES
+ * before actual sunset and running EVENING_TRANSITION_DURATION_HOURS deep into
+ * dusk/night, so the display visibly settles rather than snapping at civil
+ * twilight), full dark (rest of the night, until dawn), and a morning
+ * transition (dawn-sunrise) that mirrors the old, shorter-style evening one.
+ * Each transition blends through a warm "amber" keyframe at its midpoint
+ * rather than going straight from light to dark, so the palette shifts from
+ * high-energy blue tones toward low-energy orange ones as the sun goes down
+ * (and back, in reverse, as it comes up) instead of just dimming.
  */
 import type { SunEvents } from '../types';
+
+/** How long before actual sunset the evening transition begins. */
+const EVENING_TRANSITION_LEAD_MINUTES = 35;
+/** How long the evening transition takes, start to full night. */
+const EVENING_TRANSITION_DURATION_HOURS = 2;
+
+const MINUTE_MS = 60_000;
+const HOUR_MS = 3_600_000;
 
 export type CircadianPhase =
   | { kind: 'day' }
@@ -56,12 +68,14 @@ export function getCircadianPhase(now: Date, events: SunEvents): CircadianPhase 
   const dawn = Date.parse(events.dawn);
   const sunrise = Date.parse(events.sunrise);
   const sunset = Date.parse(events.sunset);
-  const dusk = Date.parse(events.dusk);
+
+  const eveningStart = sunset - EVENING_TRANSITION_LEAD_MINUTES * MINUTE_MS;
+  const eveningEnd = eveningStart + EVENING_TRANSITION_DURATION_HOURS * HOUR_MS;
 
   if (t < dawn) return { kind: 'night' };
   if (t < sunrise) return { kind: 'morningTransition', progress: progressBetween(t, dawn, sunrise) };
-  if (t < sunset) return { kind: 'day' };
-  if (t < dusk) return { kind: 'eveningTransition', progress: progressBetween(t, sunset, dusk) };
+  if (t < eveningStart) return { kind: 'day' };
+  if (t < eveningEnd) return { kind: 'eveningTransition', progress: progressBetween(t, eveningStart, eveningEnd) };
   return { kind: 'night' };
 }
 

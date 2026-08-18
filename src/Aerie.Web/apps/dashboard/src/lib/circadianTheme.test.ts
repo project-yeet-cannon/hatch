@@ -15,13 +15,17 @@ describe('getCircadianPhase', () => {
     expect(getCircadianPhase(new Date('2026-06-21T09:00:00.000Z'), EVENTS)).toEqual({ kind: 'night' });
   });
 
-  it('is night at/after dusk', () => {
-    expect(getCircadianPhase(new Date('2026-06-22T00:30:00.000Z'), EVENTS)).toEqual({ kind: 'night' });
+  it('is night at/after the evening transition ends', () => {
+    // Evening transition ends 2h after it starts, 35min before sunset (00:00) -
+    // i.e. starts 23:25 the prior day, ends 01:25.
+    expect(getCircadianPhase(new Date('2026-06-22T01:25:00.000Z'), EVENTS)).toEqual({ kind: 'night' });
     expect(getCircadianPhase(new Date('2026-06-22T05:00:00.000Z'), EVENTS)).toEqual({ kind: 'night' });
   });
 
-  it('is day between sunrise and sunset', () => {
+  it('is day between sunrise and the start of the evening transition', () => {
     expect(getCircadianPhase(new Date('2026-06-21T15:00:00.000Z'), EVENTS)).toEqual({ kind: 'day' });
+    // Just before the transition starts (23:25, i.e. 35min before sunset).
+    expect(getCircadianPhase(new Date('2026-06-21T23:24:59.000Z'), EVENTS)).toEqual({ kind: 'day' });
   });
 
   it('computes morning transition progress between dawn and sunrise', () => {
@@ -31,9 +35,15 @@ describe('getCircadianPhase', () => {
     expect(phase.kind === 'morningTransition' && phase.progress).toBeCloseTo(0.5, 5);
   });
 
-  it('computes evening transition progress between sunset and dusk', () => {
-    // A quarter of the way between 00:00 and 00:30.
-    const phase = getCircadianPhase(new Date('2026-06-22T00:07:30.000Z'), EVENTS);
+  it('starts the evening transition 35 minutes before sunset', () => {
+    const phase = getCircadianPhase(new Date('2026-06-21T23:25:00.000Z'), EVENTS);
+    expect(phase.kind).toBe('eveningTransition');
+    expect(phase.kind === 'eveningTransition' && phase.progress).toBeCloseTo(0, 5);
+  });
+
+  it('computes evening transition progress across its 2-hour span', () => {
+    // A quarter of the way between 23:25 (35min before sunset) and 01:25 (2h later).
+    const phase = getCircadianPhase(new Date('2026-06-21T23:55:00.000Z'), EVENTS);
     expect(phase.kind).toBe('eveningTransition');
     expect(phase.kind === 'eveningTransition' && phase.progress).toBeCloseTo(0.25, 5);
   });
