@@ -150,7 +150,15 @@ jobs:
       - name: Portability - every substitution token is a declared key
         run: |
           set -euo pipefail
-          declared=$(jq -r '.keys[].key' scripts/k3s/cluster-config.json | sort -u)
+          # AERIE_API_IMAGE_TAG / KIOSK_FILES_IMAGE_TAG (5b.10, 5b.12) resolve
+          # from the site repo's aerie-image-tags ConfigMap (5a.3), not
+          # cluster-config.json - deliberately, since which build one
+          # installation runs is exactly the kind of fact docs/ethos.md keeps
+          # out of this repository. They are declared here by hand instead,
+          # the same reason Test-ClusterPlatform.ps1 hand-excludes its own
+          # non-cluster-config tokens.
+          declared=$(cat <(jq -r '.keys[].key' scripts/k3s/cluster-config.json) \
+            <(printf '%s\n' AERIE_API_IMAGE_TAG KIOSK_FILES_IMAGE_TAG) | sort -u)
           used=$(find deploy -name kustomization.yaml -exec dirname {} \; | sort \
             | while IFS= read -r dir; do kubectl kustomize "$dir"; done \
             | grep -oP '(?<!\$)\$\{[A-Za-z_][A-Za-z0-9_]*\}' \

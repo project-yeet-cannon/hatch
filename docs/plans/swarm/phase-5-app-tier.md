@@ -737,7 +737,7 @@ demands of any workload, plus the automation. 14 is the gate.
 
       *Exit:* checked in 5b.10, since none of this routes to anything yet.
 
-- [ ] **10. The `HelmRelease`, and the `apps` layer** —
+- [x] **10. The `HelmRelease`, and the `apps` layer** —
       `deploy/cluster/apps/helmrelease.yaml`,
       `deploy/cluster/apps/kustomization.yaml`, `deploy/cluster/apps.yaml`, and one
       line in [`kustomization.yaml`](../../../deploy/cluster/kustomization.yaml).

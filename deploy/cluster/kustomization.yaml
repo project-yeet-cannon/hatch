@@ -27,3 +27,6 @@ resources:
   # private per-installation site repo that 5b.10's apps layer and 5b.12's
   # image automation both depend on.
   - site.yaml
+  # The cluster plan Phase 5b.10: the app tier itself - the HelmRelease
+  # installing charts/aerie, depending on data-schema and site-config above.
+  - apps.yaml

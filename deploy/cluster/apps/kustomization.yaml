@@ -1,0 +1,7 @@
+# Layer for the apps Flux Kustomization (../apps.yaml). One object - the
+# HelmRelease that installs charts/aerie - the same one-file shape
+# ../site/kustomization.yaml uses for site-source.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - helmrelease.yaml
