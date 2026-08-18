@@ -356,7 +356,26 @@ closes; 11 is the gate.
         ignore alarms.
       - `resources.requests` **and** `limits`, on both the instances and — via
         the plugin's `instanceSidecarConfiguration` on the ObjectStore — the
-        sidecar. [Goal 2 does not work without requests](design.md#how-goal-2-actually-works):
+        sidecar. [5a.6](phase-5-app-tier.md) measured the old host's
+        Postgres at 52–70 MiB across idle and load; do **not** transplant that
+        number. It is a nearly-idle database whose whole working set fits in
+        cgroup page cache, and CNPG derives `shared_buffers` from the memory
+        limit — so the limit is a tuning input here, not only a kill threshold.
+        Live values are `512Mi`/`1Gi` per instance
+        ([cluster.yaml](../../../deploy/cluster/data/cluster/cluster.yaml#L78-L84))
+        and `128Mi`/`512Mi` for the sidecar
+        ([objectstore.yaml](../../../deploy/cluster/data/cluster/objectstore.yaml#L65-L72)),
+        the latter raised from 128Mi after `barman-cloud-backup` was OOMKilled
+        mid-upload on the first real base backup — the sidecar buffers a
+        multipart upload in memory, so it is sized by backup size and not by
+        WAL segment size.
+
+        **The instances carry a `cpu: "2"` limit, which 5a.6's rule says they
+        should not.** A CPU limit throttles at the CFS quota period, and the
+        workload most likely to hit it is the base backup that already proved
+        it can exhaust its budget. Left as-is for now because it has not been
+        observed throttling; revisit it with the same reading Phase 6 gives
+        every other workload, and delete it rather than raise it. [Goal 2 does not work without requests](design.md#how-goal-2-actually-works):
         the scheduler cannot place or rebalance what it cannot size. Phase 5's
         "requests and limits on every workload" bullet does not cover this
         workload, because this workload is created here.
@@ -551,7 +570,7 @@ closes; 11 is the gate.
       bucket holds `base/` and `wals/` prefixes, and a PITR clone came up at a
       target time and was verified to be missing the marker.
 
-- [ ] **11. Phase gate as a command** — `scripts/k3s/Test-DataTier.ps1`,
+- [x] **11. Phase gate as a command** — `scripts/k3s/Test-DataTier.ps1`,
       wrapped by `.github/workflows/verify-data-tier.yml`, in the exact shape
       3b.13 established: read-only, **not** numbered into the Provision
       sequence, does not stop at the first failure, and a check it cannot

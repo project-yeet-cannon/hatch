@@ -58,4 +58,26 @@ public class DiscoveryServiceTests
         Assert.Equal(DeviceChannelMetric.CameraFeed, channel.Metric);
         Assert.Equal("camera.front_door", channel.HaEntityId);
     }
+
+    [Fact]
+    public void SwitchChannelBuilder_WithLightSibling_EmitsPowerStateForBoth()
+    {
+        var channels = SwitchChannelBuilder.Build(
+            "switch.garage_motion_detection",
+            ["switch.garage_motion_detection", "light.garage_light", "siren.garage_siren"]);
+
+        Assert.Collection(channels,
+            c => Assert.Equal((DeviceChannelMetric.PowerState, "switch.garage_motion_detection", (string?)null), (c.Metric, c.HaEntityId, c.HaAttribute)),
+            c => Assert.Equal((DeviceChannelMetric.PowerState, "light.garage_light", (string?)null), (c.Metric, c.HaEntityId, c.HaAttribute)));
+    }
+
+    [Fact]
+    public void SwitchChannelBuilder_WithoutLightSibling_EmitsOnlySwitchChannel()
+    {
+        var channels = SwitchChannelBuilder.Build("switch.living_room_fan", ["switch.living_room_fan"]);
+
+        var channel = Assert.Single(channels);
+        Assert.Equal(DeviceChannelMetric.PowerState, channel.Metric);
+        Assert.Equal("switch.living_room_fan", channel.HaEntityId);
+    }
 }

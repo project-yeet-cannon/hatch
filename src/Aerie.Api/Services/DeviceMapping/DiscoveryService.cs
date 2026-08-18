@@ -68,7 +68,7 @@ public class DiscoveryService(TemplateClient template, AerieContext db, IHomeAss
                 DeviceKind.Thermostat => ThermostatChannelBuilder.Build(
                     match.AnchorEntityId, entityIds, await stateReader.TryGetStateAsync(match.AnchorEntityId, ct)),
                 DeviceKind.Speaker => SpeakerChannels(match.AnchorEntityId),
-                DeviceKind.SmartSwitch => SwitchChannels(match.AnchorEntityId),
+                DeviceKind.SmartSwitch => SwitchChannelBuilder.Build(match.AnchorEntityId, entityIds),
                 DeviceKind.Light => LightChannelBuilder.Build(match.AnchorEntityId, entityIds),
                 DeviceKind.Camera => CameraChannelBuilder.Build(match.AnchorEntityId, entityIds),
                 _ => throw new InvalidOperationException($"InferKind returned unhandled kind {match.Kind}"),
@@ -113,12 +113,6 @@ public class DiscoveryService(TemplateClient template, AerieContext db, IHomeAss
 
     /// <summary>Result of InferKind: the inferred DeviceKind and the specific entity id its channel builder should be built around.</summary>
     public readonly record struct KindMatch(DeviceKind Kind, string AnchorEntityId);
-
-    /// <summary>A plain HA switch.* entity: bare entity state ("on"/"off"), no sub-attribute, read-write.</summary>
-    private static IReadOnlyList<DeviceChannelWriteRequest> SwitchChannels(string entityId) =>
-    [
-        new(DeviceChannelMetric.PowerState, entityId, null, ChannelDirection.ReadWrite),
-    ];
 
     /// <summary>A media_player.* entity: bare entity state ("playing"/"paused"/"idle"), no sub-attribute, read-write (DevicesController.PlayMedia). The speaker's switch.*/number.* tuning siblings (loudness, bass, balance...) are deliberately left unmapped - they're setup knobs, not things Aerie drives.</summary>
     private static IReadOnlyList<DeviceChannelWriteRequest> SpeakerChannels(string entityId) =>

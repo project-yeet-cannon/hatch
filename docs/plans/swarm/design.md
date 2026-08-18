@@ -52,7 +52,7 @@ docs — [`delivery-architecture.md`](../../delivery-architecture.md),
 | Node OS | One Hyper-V **Linux VM per Windows host**; Windows stays as hypervisor |
 | Orchestrator | **k3s** — 3 servers, embedded etcd |
 | Ingress / TLS | **Traefik** (k3s-bundled) + **cert-manager**, Route53 DNS-01. Caddy deleted |
-| Deploy model | **Flux** GitOps, reconciling from this repo |
+| Deploy model | **Flux** GitOps, reconciling from this repo. The cluster never writes back to it — see [The site repo](#the-site-repo--what-the-cluster-writes) |
 | Postgres | **CloudNativePG** — 3 instances, synchronous replication |
 | Volumes | **Longhorn**, except Postgres (see [Storage split](#storage-split)) |
 | Ingress IP | **kube-vip** ARP-mode floating VIP |
@@ -118,6 +118,31 @@ printed / offline copy
             └→ ESO ClusterSecretStore
                  └→ every other secret in the cluster
 ```
+
+### The site repo — what the cluster writes
+
+Reconciliation is one-way by design: Flux reads this repo and nothing in the
+cluster writes to it. Phase 5's image automation is the first thing that wants
+to, and the usual answer — a `contents:write` token in the `flux-system`
+Secret — is rejected twice over. It is a credential *held by the cluster over
+the repository that governs the cluster*, so a compromised workload no longer
+stops at the cluster boundary; and the value it would commit, a resolved image
+tag, is an operator value in the shared artifact, which is the one thing
+[`docs/ethos.md`](../../ethos.md) rules out.
+
+The replacement is a **private per-installation site repo**. Aerie is the
+template; the site repo holds what is true of exactly one installation and what
+the cluster produces about itself. Phase 5 gives it a single ConfigMap of image
+tags, reached by a second `GitRepository` and consumed through the same
+`postBuild.substituteFrom` every other operator value already uses, with a
+write token scoped to that repo alone.
+
+The narrow version is deliberate. The general version — the HelmRelease and its
+values living there, so an operator can express per-installation *structure*
+rather than only per-installation strings, without forking — is
+[Phase 9](phase-5-app-tier.md#additions-this-phase-makes-to-other-phases), and
+it is also where the SOPS question reopens: a private per-installation repo is
+not a shared artifact, so the product-vision objection above does not reach it.
 
 ---
 
