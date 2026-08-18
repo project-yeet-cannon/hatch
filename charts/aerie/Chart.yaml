@@ -1,0 +1,19 @@
+# The cluster plan Phase 5b.5 - the chart skeleton. One release
+# (deploy/cluster/apps/helmrelease.yaml, 5b.10) renders every template under
+# templates/ into the `aerie` namespace; this file only names the package.
+apiVersion: v2
+name: aerie
+description: >-
+  Aerie's application tier - the api workload, the migration hook that gates
+  it, the files/share workloads, and the properties Goal 2 needs of all of
+  them (the cluster plan Phase 5b).
+type: application
+# Bumped when a template changes; independent of the app itself; 5b.10 pins
+# this alongside its own values so a chart change and an image change are
+# each their own diff.
+version: 0.1.0
+# Left alone, on purpose. The thing this field would normally track - "what
+# version of the app does this chart deploy" - is answered per-container by
+# image.*.tag instead (image-automation, 5b.12, writes those independently of
+# any chart change), so appVersion has nothing left to mean here.
+appVersion: "1.0.0"

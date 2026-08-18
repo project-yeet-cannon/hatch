@@ -1,0 +1,48 @@
+# Defaults only. Every value with an empty/placeholder default below is set
+# for real by deploy/cluster/apps/helmrelease.yaml (5b.10), which fills them
+# in with ${...} tokens that Flux's postBuild resolves before helm-controller
+# ever sees this file - so nothing here is read at the cluster. It exists so
+# `helm template`/`helm lint` (this step's exit criterion) has something to
+# render against, and so a local `helm install` finds sane shapes even where
+# the values are wrong.
+#
+# requests/limits are deliberately absent from every workload below - 5b.11
+# adds them here, sized from a real reading (5a.6), rather than as a guess
+# this step would have to redo.
+
+replicaCount: 3
+
+image:
+  # Host plus namespace, no image name, no tag - ${IMAGE_REGISTRY}. The
+  # template appends /aerie-api and image.api.tag.
+  registry: ""
+  # ghcr-pull, 5b.1's dockerconfigjson Secret.
+  pullSecret: ghcr-pull
+  api:
+    tag: latest
+
+# ${DOMAIN}. Ingress hosts (5b.9) and Apps__PublicBaseUrl both key off this.
+domain: ""
+
+# ${TZ}, an IANA zone id.
+tz: ""
+
+# ${HA_HOST} / ${HA_PORT}, both optional - only read by the api container's
+# one-time SiteSettings import on a fresh install. Empty means unset, not "".
+haHost: ""
+haPort: ""
+
+# ${MEDIA_LIBRARY_SUBPATH}, optional. Empty turns media serving off entirely
+# (compose.share.yml's own reasoning, carried across unchanged) rather than
+# collapsing to the share root - see api-deployment.yaml's MediaLibrary block.
+# The /share-ro mount this path is served from is 5b.8's, not this step's.
+mediaLibrarySubpath: ""
+
+postgres:
+  # <cluster-name>-rw, CNPG's own naming for the primary Service -
+  # deploy/cluster/data/cluster/cluster.yaml names the Cluster aerie-pg.
+  host: aerie-pg-rw
+  port: 5432
+  # aerie-pg-app, the Secret CNPG publishes for the aerie owner role
+  # (cluster.yaml's bootstrap.initdb) - username and password keys.
+  secretName: aerie-pg-app

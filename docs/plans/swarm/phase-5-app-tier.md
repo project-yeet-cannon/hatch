@@ -534,7 +534,7 @@ demands of any workload, plus the automation. 14 is the gate.
       keys 5a.3 seeded, which is the site repo proving it reconciles before
       anything depends on it.
 
-- [ ] **5. The chart skeleton and the `api` workload** — `charts/aerie/`.
+- [x] **5. The chart skeleton and the `api` workload** — `charts/aerie/`.
 
       `Chart.yaml` (`apiVersion: v2`, `type: application`, a `version` that is
       bumped when templates change, `appVersion` left alone), `values.yaml`
