@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import type { Device, DeviceChannel, DeviceChannelMetric, Routine, RoutineActionKind, RoutineWriteRequest } from '../types';
-import { createRoutine, deleteRoutine, getDevices, getRoutines, triggerRoutine, updateRoutine } from '../api/client';
+import { createRoutine, deleteRoutine, getDevices, getRoutines, triggerRoutine, turnOffRoutine, updateRoutine } from '../api/client';
 import { IconPicker } from '../components/IconPicker';
 import { iconFor } from '../lib/icons';
 
@@ -51,6 +51,7 @@ interface RoutineFormState {
   color: string;
   sortOrder: string;
   included: boolean;
+  isToggle: boolean;
   actions: ActionFormRow[];
 }
 
@@ -63,6 +64,7 @@ const emptyForm = (nextSortOrder: number): RoutineFormState => ({
   color: DEFAULT_ROUTINE_COLOR,
   sortOrder: String(nextSortOrder),
   included: true,
+  isToggle: false,
   actions: [],
 });
 
@@ -73,6 +75,7 @@ const toFormState = (routine: Routine): RoutineFormState => ({
   color: routine.color ?? DEFAULT_ROUTINE_COLOR,
   sortOrder: String(routine.sortOrder),
   included: routine.included,
+  isToggle: routine.isToggle,
   actions: [...routine.actions].sort((a, b) => a.sortOrder - b.sortOrder).map((a) => ({ channelId: a.channelId, value: a.value ?? '' })),
 });
 
@@ -95,6 +98,7 @@ function toRequest(form: RoutineFormState, channelOptions: ChannelOption[]): Rou
     color: form.color,
     sortOrder: Number(form.sortOrder) || 0,
     included: form.included,
+    isToggle: form.isToggle,
     actions,
   };
 }
@@ -208,7 +212,20 @@ export function RoutinesPage() {
     setTriggerStatus(null);
     try {
       await triggerRoutine(routine.id);
-      setTriggerStatus({ id: routine.id, message: 'Triggered.', isError: false });
+      setTriggerStatus({ id: routine.id, message: routine.isToggle ? 'Turned on.' : 'Triggered.', isError: false });
+    } catch (err) {
+      setTriggerStatus({ id: routine.id, isError: true, message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setTriggeringId(null);
+    }
+  }
+
+  async function handleTurnOff(routine: Routine) {
+    setTriggeringId(routine.id);
+    setTriggerStatus(null);
+    try {
+      await turnOffRoutine(routine.id);
+      setTriggerStatus({ id: routine.id, message: 'Turned off.', isError: false });
     } catch (err) {
       setTriggerStatus({ id: routine.id, isError: true, message: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -278,6 +295,7 @@ export function RoutinesPage() {
                   <span className={`badge ${routine.included ? 'badge-success' : 'badge-muted'}`}>
                     {routine.included ? 'On kiosk' : 'Hidden'}
                   </span>
+                  {routine.isToggle && <span className="badge badge-muted">Toggle</span>}
                 </div>
                 {routine.description && <p className="text-muted">{routine.description}</p>}
                 <p className="text-muted">
@@ -295,8 +313,13 @@ export function RoutinesPage() {
                   ↓
                 </button>
                 <button className="btn-secondary" disabled={triggeringId === routine.id} onClick={() => handleTrigger(routine)}>
-                  {triggeringId === routine.id ? 'Triggering…' : 'Trigger now'}
+                  {triggeringId === routine.id ? 'Working…' : routine.isToggle ? 'Turn on' : 'Trigger now'}
                 </button>
+                {routine.isToggle && (
+                  <button className="btn-secondary" disabled={triggeringId === routine.id} onClick={() => handleTurnOff(routine)}>
+                    {triggeringId === routine.id ? 'Working…' : 'Turn off'}
+                  </button>
+                )}
                 <button className="btn-secondary" onClick={() => startEdit(routine)}>
                   Edit
                 </button>
@@ -337,6 +360,19 @@ function RoutineForm({
     onChange({ ...form, actions });
   }
 
+  function setIsToggle(isToggle: boolean) {
+    // A toggle routine's "off" is the inverse SetPower dispatch computed
+    // server-side (RoutineCommandMapper.ToOffCommandRequests) - there's no
+    // well-defined inverse for a temperature/mode/scene/media action, so
+    // switching a routine to toggle drops anything that isn't SetPower.
+    const actions = isToggle
+      ? form.actions.filter((row) => channelOptions.find((o) => o.channelId === row.channelId)?.kind === 'SetPower')
+      : form.actions;
+    onChange({ ...form, isToggle, actions });
+  }
+
+  const availableChannelOptions = form.isToggle ? channelOptions.filter((o) => o.kind === 'SetPower') : channelOptions;
+
   return (
     <div>
       <div className="grid cols-3">
@@ -360,6 +396,13 @@ function RoutineForm({
           </label>
         </div>
         <div className="field">
+          <label className="field-label">Behavior</label>
+          <label className="flex gap-1" style={{ alignItems: 'center' }}>
+            <input type="checkbox" checked={form.isToggle} onChange={(e) => setIsToggle(e.target.checked)} />
+            Toggle (on/off switch)
+          </label>
+        </div>
+        <div className="field">
           <label className="field-label">Icon</label>
           <IconPicker value={form.icon} onChange={(icon) => onChange({ ...form, icon })} />
         </div>
@@ -370,6 +413,12 @@ function RoutineForm({
       </div>
 
       <h4 className="mt-2 mb-1">Actions</h4>
+      {form.isToggle && (
+        <p className="text-muted mb-1">
+          Toggle routines only support power (on/off) actions. The kiosk button shows active while every channel below is on; tapping it
+          again turns them all off.
+        </p>
+      )}
       {form.actions.length === 0 && <p className="text-muted">No actions yet — add at least one below.</p>}
       {form.actions.map((row, index) => {
         const option = channelOptions.find((o) => o.channelId === row.channelId) ?? null;
@@ -377,7 +426,7 @@ function RoutineForm({
           <div className="flex gap-1 mb-1" key={index} style={{ alignItems: 'center' }}>
             <ChannelSelect
               value={row.channelId}
-              options={channelOptions}
+              options={availableChannelOptions}
               onSelect={(channelId) => updateAction(index, { channelId, value: '' })}
             />
             {option && <ActionValueInput option={option} value={row.value} onChange={(value) => updateAction(index, { ...row, value })} />}

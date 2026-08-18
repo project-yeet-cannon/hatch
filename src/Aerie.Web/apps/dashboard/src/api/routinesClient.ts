@@ -10,3 +10,11 @@ export async function triggerRoutine(id: string): Promise<void> {
     throw new Error(`Trigger routine failed: ${res.status} ${res.statusText}`);
   }
 }
+
+/** The "off" half of a toggle routine - see RoutineSummary.isToggle. */
+export async function turnOffRoutine(id: string): Promise<void> {
+  const res = await fetch(`/api/routines/${id}/turn-off`, { method: 'POST' });
+  if (!res.ok) {
+    throw new Error(`Turn off routine failed: ${res.status} ${res.statusText}`);
+  }
+}

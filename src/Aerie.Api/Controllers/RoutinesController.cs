@@ -47,6 +47,7 @@ public class RoutinesController(AerieContext db, IClimateCommandService commands
             Color = request.Color,
             SortOrder = request.SortOrder,
             Included = request.Included,
+            IsToggle = request.IsToggle,
             Actions = request.Actions.Select(ToAction).ToList(),
         };
         db.Routines.Add(routine);
@@ -66,6 +67,7 @@ public class RoutinesController(AerieContext db, IClimateCommandService commands
         routine.Color = request.Color;
         routine.SortOrder = request.SortOrder;
         routine.Included = request.Included;
+        routine.IsToggle = request.IsToggle;
 
         db.RoutineActions.RemoveRange(routine.Actions);
         routine.Actions = request.Actions.Select(ToAction).ToList();
@@ -113,6 +115,31 @@ public class RoutinesController(AerieContext db, IClimateCommandService commands
         return NoContent();
     }
 
+    /// <summary>
+    /// The inverse of Trigger for a toggle routine (see EfRoutine.IsToggle):
+    /// dispatches SetPower "false" to every SetPower action's channel, rather
+    /// than re-running Actions. Used by the kiosk when a toggle routine's
+    /// button reads active and gets tapped again.
+    /// </summary>
+    [HttpPost("{id:guid}/turn-off")]
+    public async Task<IActionResult> TurnOff(Guid id, CancellationToken ct)
+    {
+        var routine = await db.Routines.AsNoTracking()
+            .Include(r => r.Actions)
+            .FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (routine is null) return NotFound();
+        if (!routine.IsToggle) return BadRequest("Routine is not a toggle routine.");
+
+        var requests = RoutineCommandMapper.ToOffCommandRequests(routine.Actions, $"Routine '{routine.Name}' (off)");
+        var results = await commands.DispatchManyAsync(requests, ct);
+
+        var failure = results.FirstOrDefault(r => !r.Succeeded);
+        if (failure.Outcome == CommandOutcome.Rejected) return BadRequest(failure.Error);
+        if (failure.Outcome == CommandOutcome.Failed) return StatusCode(StatusCodes.Status502BadGateway, failure.Error);
+
+        return NoContent();
+    }
+
     private static EfRoutineAction ToAction(RoutineActionWriteRequest request) => new()
     {
         ChannelId = request.ChannelId,
@@ -122,7 +149,7 @@ public class RoutinesController(AerieContext db, IClimateCommandService commands
     };
 
     private static RoutineDto ToDto(EfRoutine routine) => new(
-        routine.Id, routine.Name, routine.Description, routine.Icon, routine.Color, routine.SortOrder, routine.Included,
+        routine.Id, routine.Name, routine.Description, routine.Icon, routine.Color, routine.SortOrder, routine.Included, routine.IsToggle,
         routine.Actions
             .OrderBy(a => a.SortOrder)
             .Select(a => new RoutineActionDto(a.Id, a.ChannelId, a.Kind, a.Value, a.SortOrder))

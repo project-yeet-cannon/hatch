@@ -47,4 +47,44 @@ public class RoutineCommandMapperTests
     [InlineData(RoutineActionKind.PlayMedia, CommandKind.PlayMedia)]
     public void ToCommandKind_MapsEveryRoutineActionKind(RoutineActionKind kind, CommandKind expected) =>
         Assert.Equal(expected, RoutineCommandMapper.ToCommandKind(kind));
+
+    [Fact]
+    public void ToOffCommandRequests_ForcesValueFalse_RegardlessOfStoredValue()
+    {
+        var requests = RoutineCommandMapper.ToOffCommandRequests(
+            [Action(RoutineActionKind.SetPower, "true", 0)], "Routine 'Outdoor floodlights' (off)");
+
+        var request = Assert.Single(requests);
+        Assert.Equal(CommandKind.SetPower, request.Kind);
+        Assert.Equal("false", request.Value);
+        Assert.Equal(CommandSource.Routine, request.Source);
+    }
+
+    [Fact]
+    public void ToOffCommandRequests_ExcludesNonSetPowerActions()
+    {
+        var requests = RoutineCommandMapper.ToOffCommandRequests(
+        [
+            Action(RoutineActionKind.SetPower, "true", 0),
+            Action(RoutineActionKind.SetTemperature, "68", 1),
+        ], "Routine 'Night mode' (off)");
+
+        var request = Assert.Single(requests);
+        Assert.Equal(CommandKind.SetPower, request.Kind);
+    }
+
+    [Fact]
+    public void ToOffCommandRequests_OrdersBySortOrder_NotDeclarationOrder()
+    {
+        var second = Guid.NewGuid();
+        var first = Guid.NewGuid();
+
+        var requests = RoutineCommandMapper.ToOffCommandRequests(
+        [
+            Action(RoutineActionKind.SetPower, "true", 1, second),
+            Action(RoutineActionKind.SetPower, "true", 0, first),
+        ], "Routine 'Outdoor floodlights' (off)");
+
+        Assert.Equal([first, second], requests.Select(r => r.ChannelId));
+    }
 }

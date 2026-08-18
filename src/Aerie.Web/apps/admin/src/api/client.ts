@@ -99,6 +99,7 @@ export const updateRoutine = (id: string, request: RoutineWriteRequest) =>
   fetchJson<Routine>(`/api/routines/${id}`, { method: 'PUT', ...asJson(request) });
 export const deleteRoutine = (id: string) => fetchJson<void>(`/api/routines/${id}`, { method: 'DELETE' });
 export const triggerRoutine = (id: string) => fetchJson<void>(`/api/routines/${id}/trigger`, { method: 'POST' });
+export const turnOffRoutine = (id: string) => fetchJson<void>(`/api/routines/${id}/turn-off`, { method: 'POST' });
 
 // ---- Settings ----
 

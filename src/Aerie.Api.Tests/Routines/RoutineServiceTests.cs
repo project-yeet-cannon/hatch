@@ -61,6 +61,110 @@ public class RoutineServiceTests
         Assert.Equal("Dims the house", result[0].Description);
     }
 
+    [Fact]
+    public async Task GetRoutinesAsync_NonToggleRoutine_HasNullIsActive()
+    {
+        var factory = NewFactory();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.Routines.Add(new EfRoutine { Id = Guid.NewGuid(), Name = "Night mode", SortOrder = 0, Included = true, IsToggle = false });
+            await db.SaveChangesAsync();
+        }
+
+        var result = await new RoutineService(factory).GetRoutinesAsync(CancellationToken.None);
+
+        Assert.False(result[0].IsToggle);
+        Assert.Null(result[0].IsActive);
+    }
+
+    [Fact]
+    public async Task GetRoutinesAsync_ToggleRoutine_IsActiveWhenEveryPowerChannelIsOn()
+    {
+        var factory = NewFactory();
+        var lightA = Guid.NewGuid();
+        var lightB = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.Routines.Add(new EfRoutine
+            {
+                Id = Guid.NewGuid(),
+                Name = "Outdoor floodlights",
+                SortOrder = 0,
+                Included = true,
+                IsToggle = true,
+                Actions =
+                [
+                    new EfRoutineAction { Id = Guid.NewGuid(), ChannelId = lightA, Kind = RoutineActionKind.SetPower, Value = "true", SortOrder = 0 },
+                    new EfRoutineAction { Id = Guid.NewGuid(), ChannelId = lightB, Kind = RoutineActionKind.SetPower, Value = "true", SortOrder = 1 },
+                ],
+            });
+            db.StateChanges.AddRange(
+                new EfStateChange { Id = Guid.NewGuid(), ChannelId = lightA, State = "on", Timestamp = DateTimeOffset.UtcNow },
+                new EfStateChange { Id = Guid.NewGuid(), ChannelId = lightB, State = "on", Timestamp = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync();
+        }
+
+        var result = await new RoutineService(factory).GetRoutinesAsync(CancellationToken.None);
+
+        Assert.True(result[0].IsToggle);
+        Assert.True(result[0].IsActive);
+    }
+
+    [Fact]
+    public async Task GetRoutinesAsync_ToggleRoutine_IsInactiveWhenAnyPowerChannelIsOff()
+    {
+        var factory = NewFactory();
+        var lightA = Guid.NewGuid();
+        var lightB = Guid.NewGuid();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.Routines.Add(new EfRoutine
+            {
+                Id = Guid.NewGuid(),
+                Name = "Outdoor floodlights",
+                SortOrder = 0,
+                Included = true,
+                IsToggle = true,
+                Actions =
+                [
+                    new EfRoutineAction { Id = Guid.NewGuid(), ChannelId = lightA, Kind = RoutineActionKind.SetPower, Value = "true", SortOrder = 0 },
+                    new EfRoutineAction { Id = Guid.NewGuid(), ChannelId = lightB, Kind = RoutineActionKind.SetPower, Value = "true", SortOrder = 1 },
+                ],
+            });
+            db.StateChanges.AddRange(
+                new EfStateChange { Id = Guid.NewGuid(), ChannelId = lightA, State = "on", Timestamp = DateTimeOffset.UtcNow },
+                new EfStateChange { Id = Guid.NewGuid(), ChannelId = lightB, State = "off", Timestamp = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync();
+        }
+
+        var result = await new RoutineService(factory).GetRoutinesAsync(CancellationToken.None);
+
+        Assert.False(result[0].IsActive);
+    }
+
+    [Fact]
+    public async Task GetRoutinesAsync_ToggleRoutine_IsInactiveWhenNoSamplesYet()
+    {
+        var factory = NewFactory();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.Routines.Add(new EfRoutine
+            {
+                Id = Guid.NewGuid(),
+                Name = "Outdoor floodlights",
+                SortOrder = 0,
+                Included = true,
+                IsToggle = true,
+                Actions = [new EfRoutineAction { Id = Guid.NewGuid(), ChannelId = Guid.NewGuid(), Kind = RoutineActionKind.SetPower, Value = "true", SortOrder = 0 }],
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var result = await new RoutineService(factory).GetRoutinesAsync(CancellationToken.None);
+
+        Assert.False(result[0].IsActive);
+    }
+
     private sealed class TestDbContextFactory(DbContextOptions<AerieContext> options) : IDbContextFactory<AerieContext>
     {
         public AerieContext CreateDbContext() => new(options);

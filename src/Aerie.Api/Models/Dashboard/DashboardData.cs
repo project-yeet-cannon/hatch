@@ -50,8 +50,14 @@ public record OutsideClimate(
 /// </summary>
 public record SunEvents(DateTimeOffset Dawn, DateTimeOffset Sunrise, DateTimeOffset Sunset, DateTimeOffset Dusk);
 
-/// <summary>A Routine as shown on the kiosk - just enough to render a tap-to-trigger button; see RoutinesController for the full admin-editable shape.</summary>
-public record RoutineSummary(Guid Id, string Name, string? Description, string? Icon, string? Color);
+/// <summary>
+/// A Routine as shown on the kiosk - just enough to render a tap-to-trigger
+/// button; see RoutinesController for the full admin-editable shape.
+/// IsActive is null for a momentary (non-toggle) routine, and for a toggle
+/// routine reflects whether every SetPower action's channel currently reads
+/// "on" - see RoutineService.
+/// </summary>
+public record RoutineSummary(Guid Id, string Name, string? Description, string? Icon, string? Color, bool IsToggle, bool? IsActive);
 
 public record DashboardData(
     DateTimeOffset GeneratedAt,

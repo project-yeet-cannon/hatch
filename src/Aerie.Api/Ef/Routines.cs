@@ -30,6 +30,15 @@ public class EfRoutine
     /// <summary>When false, the routine is hidden from the kiosk dashboard but still triggerable/editable from admin.</summary>
     public bool Included { get; set; } = true;
 
+    /// <summary>
+    /// When true, the kiosk renders this routine as an on/off switch rather than
+    /// a momentary trigger: it shows active whenever every SetPower action's
+    /// channel currently reads "on" (see RoutineService), and tapping it while
+    /// active dispatches the inverse - SetPower "false" - to those same channels
+    /// (RoutineCommandMapper.ToOffCommandRequests) instead of re-running Actions.
+    /// </summary>
+    public bool IsToggle { get; set; }
+
     public List<EfRoutineAction> Actions { get; set; } = [];
 }
 

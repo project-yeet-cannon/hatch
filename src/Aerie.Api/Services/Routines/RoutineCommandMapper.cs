@@ -24,6 +24,20 @@ public static class RoutineCommandMapper
             .Select(a => new CommandRequest(a.ChannelId, ToCommandKind(a.Kind), a.Value, CommandSource.Routine, reason))
             .ToList();
 
+    /// <summary>
+    /// The "off" half of a toggle routine (EfRoutine.IsToggle): forces SetPower
+    /// "false" onto every SetPower action's channel, ignoring the action's
+    /// stored (on) Value. Other action kinds aren't included - a toggle routine
+    /// only has a well-defined inverse for power, so the admin UI restricts
+    /// toggle routines to SetPower actions in the first place.
+    /// </summary>
+    public static IReadOnlyList<CommandRequest> ToOffCommandRequests(IReadOnlyList<EfRoutineAction> actions, string reason) =>
+        actions
+            .Where(a => a.Kind == RoutineActionKind.SetPower)
+            .OrderBy(a => a.SortOrder)
+            .Select(a => new CommandRequest(a.ChannelId, CommandKind.SetPower, "false", CommandSource.Routine, reason))
+            .ToList();
+
     public static CommandKind ToCommandKind(RoutineActionKind kind) => kind switch
     {
         RoutineActionKind.SetPower => CommandKind.SetPower,

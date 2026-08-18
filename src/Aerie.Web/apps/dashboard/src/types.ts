@@ -80,13 +80,20 @@ export interface SunEvents {
   dusk: string;
 }
 
-/** A Routine as shown on the kiosk - just enough to render a tap-to-trigger tile. */
+/**
+ * A Routine as shown on the kiosk - just enough to render a tap-to-trigger
+ * tile. isActive is null for a momentary routine, and for a toggle routine
+ * (isToggle) reflects whether every SetPower action's channel currently
+ * reads "on".
+ */
 export interface RoutineSummary {
   id: string;
   name: string;
   description: string | null;
   icon: string | null;
   color: string | null;
+  isToggle: boolean;
+  isActive: boolean | null;
 }
 
 export interface DashboardData {

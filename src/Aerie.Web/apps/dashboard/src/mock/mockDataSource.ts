@@ -33,8 +33,33 @@ const INDOOR_COMFORT_RANGE: ComfortRange = { lowF: 68, highF: 71 };
 const OUTSIDE_CURVE: DiurnalCurve = { meanF: 58, amplitudeF: 9, peakHour: 14 };
 
 const ROUTINES: RoutineSummary[] = [
-  { id: 'night-mode', name: 'Night mode', description: 'Basement night lights + bedroom white noise', icon: 'moon', color: '#5c6ac4' },
-  { id: 'max-ac', name: 'Max AC', description: 'Radiators off, AC down, fans on', icon: 'snowflake', color: '#3ba3d6' },
+  {
+    id: 'night-mode',
+    name: 'Night mode',
+    description: 'Basement night lights + bedroom white noise',
+    icon: 'moon',
+    color: '#5c6ac4',
+    isToggle: false,
+    isActive: null,
+  },
+  {
+    id: 'max-ac',
+    name: 'Max AC',
+    description: 'Radiators off, AC down, fans on',
+    icon: 'snowflake',
+    color: '#3ba3d6',
+    isToggle: false,
+    isActive: null,
+  },
+  {
+    id: 'outdoor-floodlights',
+    name: 'Outdoor floodlights',
+    description: 'Front + back floodlights',
+    icon: 'lightbulb',
+    color: '#f0b429',
+    isToggle: true,
+    isActive: false,
+  },
 ];
 
 function buildSeries(now: Date, curve: DiurnalCurve): { history: TempPoint[]; forecast: TempPoint[] } {

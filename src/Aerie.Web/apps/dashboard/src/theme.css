@@ -309,6 +309,9 @@ body {
 .hf-routine-btn:disabled {
   cursor: default;
 }
+.hf-routine-btn.active {
+  border-color: color-mix(in srgb, var(--ink) 22%, var(--line));
+}
 .hf-routine-circle {
   width: 66%;
   height: 66%;
@@ -332,6 +335,18 @@ body {
   text-align: center;
   line-height: 1.2;
   padding: 0 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.hf-routine-onoff {
+  font-family: var(--ui);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 .hf-routine-status {
   font: 600 12px/1.2 var(--ui);

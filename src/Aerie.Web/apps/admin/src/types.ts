@@ -165,6 +165,8 @@ export interface Routine {
   color: string | null;
   sortOrder: number;
   included: boolean;
+  /** Renders on the kiosk as an on/off switch instead of a momentary trigger - see RoutineWriteRequest.isToggle. */
+  isToggle: boolean;
   actions: RoutineAction[];
 }
 
@@ -175,6 +177,8 @@ export interface RoutineWriteRequest {
   color: string | null;
   sortOrder: number;
   included: boolean;
+  /** When true, only SetPower actions are meaningful: the kiosk shows active while every action's channel reads "on", and tapping while active turns those channels off instead of re-running Actions. */
+  isToggle: boolean;
   actions: RoutineActionWriteRequest[];
 }
 

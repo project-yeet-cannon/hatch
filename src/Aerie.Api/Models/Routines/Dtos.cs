@@ -11,7 +11,7 @@ public record RoutineActionDto(Guid Id, Guid ChannelId, RoutineActionKind Kind, 
 public record RoutineActionWriteRequest(Guid ChannelId, RoutineActionKind Kind, string? Value, int SortOrder);
 
 public record RoutineDto(
-    Guid Id, string Name, string? Description, string? Icon, string? Color, int SortOrder, bool Included,
+    Guid Id, string Name, string? Description, string? Icon, string? Color, int SortOrder, bool Included, bool IsToggle,
     IReadOnlyList<RoutineActionDto> Actions);
 
 /// <summary>
@@ -20,5 +20,5 @@ public record RoutineDto(
 /// *is* the routine, so the admin app edits it as one atomic form/request.
 /// </summary>
 public record RoutineWriteRequest(
-    string Name, string? Description, string? Icon, string? Color, int SortOrder, bool Included,
+    string Name, string? Description, string? Icon, string? Color, int SortOrder, bool Included, bool IsToggle,
     IReadOnlyList<RoutineActionWriteRequest> Actions);
