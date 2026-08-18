@@ -38,6 +38,14 @@ haPort: ""
 # The /share-ro mount this path is served from is 5b.8's, not this step's.
 mediaLibrarySubpath: ""
 
+share:
+  # ${SHARE_HOST} / ${SHARE_NAME} - split in cluster-config.json because
+  # share-volumes.yaml's volumeAttributes.source wants "//host/name" while
+  # nothing else needs the host on its own; kept as two values here rather
+  # than pre-joined so the template is the one place that assembles it.
+  host: ""
+  name: ""
+
 postgres:
   # <cluster-name>-rw, CNPG's own naming for the primary Service -
   # deploy/cluster/data/cluster/cluster.yaml names the Cluster aerie-pg.

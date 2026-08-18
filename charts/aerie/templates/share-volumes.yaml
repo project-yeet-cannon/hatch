@@ -1,0 +1,125 @@
+# The cluster plan Phase 5b.7 - the two PersistentVolume/PersistentVolumeClaim
+# pairs over the house SMB share, replacing compose.share.yml's `share` and
+# `share_ro` named volumes. One device, two mount modes, because a volume
+# carries exactly one mount mode - the same constraint that made the old host
+# declare two Docker volumes, arriving for the same reason under
+# csi-driver-smb (5b.3, which registers smb.csi.k8s.io - these PVs are
+# instances of it and 5b.3 has to be Ready before either can bind).
+#
+# Both static-provisioned (storageClassName: "", no StorageClass involved) and
+# bound to each other by name via claimRef/volumeName rather than by a
+# matching label or size alone - an explicit pairing so a PVC from anywhere
+# else in the cluster can't win the race for one of these PVs. Both Retain on
+# reclaim: deleting the PVC must not delete anything on the actual share.
+#
+# capacity.storage is required by the PV/PVC API and meaningless for an SMB
+# mount - nothing here enforces it - so it's set to something honest-looking
+# for a house media share rather than derived from a real measurement.
+{{- $source := printf "//%s/%s" .Values.share.host .Values.share.name }}
+# Read-write, for the dufs GUI (5b.8) - uploading is the whole point.
+# Credentials come from 5b.3's `smb-share` Secret via nodeStageSecretRef, not
+# a `guest` mount option the way compose.share.yml did it - SMB_PASSWORD is an
+# empty string for the guest path (5a.4), which the driver treats the same
+# way the kernel CIFS client's guest mount does. uid/gid and the mode bits are
+# pinned for the same reason compose.share.yml pinned them: a guest CIFS mount
+# otherwise presents everything as owned by an unmapped id, which the
+# client-side permission check can fail before the request ever reaches the
+# server.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: aerie-share-rw
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - dir_mode=0775
+    - file_mode=0664
+    - uid=0
+    - gid=0
+    - vers=3.0
+  csi:
+    driver: smb.csi.k8s.io
+    # volumeHandle is the driver's identity for the volume, not a label - two
+    # PVs sharing one handle are one volume as far as the CSI layer is
+    # concerned, and the second mount silently gets the first one's options.
+    volumeHandle: aerie-share-rw
+    readOnly: false
+    volumeAttributes:
+      source: {{ $source | quote }}
+    nodeStageSecretRef:
+      name: smb-share
+      namespace: {{ .Release.Namespace }}
+  claimRef:
+    namespace: {{ .Release.Namespace }}
+    name: aerie-share-rw
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: aerie-share-rw
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""
+  volumeName: aerie-share-rw
+  resources:
+    requests:
+      storage: 1Ti
+---
+# Read-only, for the api container's media serving (5b.8). Nothing in Aerie
+# writes to the share, so this PV's view stays read-only regardless of what
+# the GUI does to the rw one above - enforced twice, once by the `ro` mount
+# option and once by csi.readOnly, rather than trusted to either alone.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: aerie-share-ro
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - ro
+    - vers=3.0
+  csi:
+    driver: smb.csi.k8s.io
+    # Must differ from the rw PV's handle above - see its comment.
+    volumeHandle: aerie-share-ro
+    readOnly: true
+    volumeAttributes:
+      source: {{ $source | quote }}
+    nodeStageSecretRef:
+      name: smb-share
+      namespace: {{ .Release.Namespace }}
+  claimRef:
+    namespace: {{ .Release.Namespace }}
+    name: aerie-share-ro
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: aerie-share-ro
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: ""
+  volumeName: aerie-share-ro
+  resources:
+    requests:
+      storage: 1Ti

@@ -624,7 +624,7 @@ demands of any workload, plus the automation. 14 is the gate.
       pruned by `prune: true`, because Helm owns it and Flux does not; deleting
       the HelmRelease leaves it behind.*
 
-- [ ] **7. The SMB volumes** — `charts/aerie/templates/share-volumes.yaml`.
+- [x] **7. The SMB volumes** — `charts/aerie/templates/share-volumes.yaml`.
 
       Two `PersistentVolume`/`PersistentVolumeClaim` pairs over one share,
       because a volume carries exactly one mount mode — the same constraint that
