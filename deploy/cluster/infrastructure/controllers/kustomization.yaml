@@ -15,7 +15,7 @@
 #
 # Filled in by the cluster plan 3b.4 (external-secrets), 3b.7 (cert-manager),
 # 3b.8 (kube-vip and kube-vip-cloud-provider), 3b.11 (longhorn),
-# 3b.12 (cloudnative-pg) and 4b.4 (plugin-barman-cloud).
+# 3b.12 (cloudnative-pg), 4b.4 (plugin-barman-cloud) and 5b.3 (csi-driver-smb).
 #
 # The order of this list is not an ordering. Nothing in this layer depends on
 # anything else in it - that was the original plan's mistake, corrected in
@@ -31,3 +31,4 @@ resources:
   - longhorn.yaml
   - cloudnative-pg.yaml
   - plugin-barman-cloud.yaml
+  - csi-driver-smb.yaml

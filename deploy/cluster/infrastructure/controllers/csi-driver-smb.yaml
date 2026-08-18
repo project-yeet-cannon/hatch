@@ -1,0 +1,85 @@
+# The cluster plan Phase 5b.3 - csi-driver-smb, registering the CSI driver
+# 5b.7's two PersistentVolumes are instances of.
+#
+# Layer 1, for the same reason every other component in this directory sits
+# here: it registers a CSIDriver object and the controller/node Deployment and
+# DaemonSet that implement it, and 5b.7's PVs need `smb.csi.k8s.io` to already
+# exist as a driver the API server recognises. Unlike ../../config's other
+# consumers, there is no separate CRD here to wait on - CSIDriver is a
+# built-in type - but the ordering argument is identical: type before
+# instance, this layer before the next.
+#
+# A **new** HelmRepository, unlike ./plugin-barman-cloud.yaml: nothing already
+# in this directory serves this chart, so it gets its own index rather than
+# riding an existing sourceRef. Like Longhorn's and CloudNativePG's, the index
+# points its download URLs at github.com raw content rather than at a pages
+# host serving it.
+#
+# kube-system, matching ./kube-vip.yaml's reasoning rather than
+# ./cloudnative-pg.yaml's: this is the chart's own convention (its DaemonSet
+# is called csi-smb-node with no namespace override documented), it is
+# cluster infrastructure rather than an app-owned component, and no Namespace
+# object is created here for the same reason none is in kube-vip.yaml - it
+# already exists as a k3s-builtin namespace, and k3s sets no cluster-wide
+# PodSecurity policy, so the node plugin's privileged securityContext admits
+# without a label (../longhorn.yaml's footnote explains the same gap for
+# longhorn-system, which does bother to close it because that namespace is
+# this repository's to create).
+#
+# The credential the node plugin mounts - `smb-share`, in `aerie` rather than
+# here - is scripts/secrets/parameters.json's `smb/username`/`smb/password`,
+# deferred until Provision 2 forwards SMB_USERNAME/SMB_PASSWORD (5a.4) and
+# seeds them; see that file and phase-5-app-tier.md 5b.3 for the same
+# four-part ordering 5b.1 used.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: csi-driver-smb
+  namespace: kube-system
+spec:
+  interval: 1h
+  url: https://raw.githubusercontent.com/kubernetes-csi/csi-driver-smb/master/charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: csi-driver-smb
+  namespace: kube-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: csi-driver-smb
+      # Newest published at the time this file was written (checked against
+      # the chart repo's own index.yaml), pinned the same explicit way every
+      # release in this directory is. appVersion 1.20.3 - the driver image tag
+      # below is left at that default rather than overridden.
+      version: 1.20.3
+      sourceRef:
+        kind: HelmRepository
+        name: csi-driver-smb
+  # Against the layer's 10m budget: one controller Deployment, one node
+  # DaemonSet, no CRDs and no hooks - the same arithmetic as
+  # ./kube-vip.yaml's two releases, not Longhorn's many components.
+  timeout: 3m
+  install:
+    remediation:
+      retries: 1
+  upgrade:
+    remediation:
+      retries: 1
+    cleanupOnFail: true
+  values:
+    # Every node this cluster ever runs is a Linux VM (the cluster plan
+    # Phase 1) - Hyper-V hosts the VMs, it does not join the cluster as a
+    # node. The chart enables a second, Windows-only DaemonSet by default;
+    # left on, it schedules onto nothing and sits at 0/0 forever, which is a
+    # harmless outcome that still leaves a component in `flux get` with
+    # nothing to report against. Turning it off says why zero is expected.
+    windows:
+      enabled: false
+    # requests/limits ship set on every container at the chart's own
+    # defaults (10m/20Mi per sidecar, per the values.yaml checked against
+    # this pin) - the one release in this directory 5b.11's sweep does not
+    # need to touch, unlike Longhorn's many components.
