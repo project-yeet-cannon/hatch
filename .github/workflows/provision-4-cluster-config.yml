@@ -136,8 +136,18 @@ jobs:
           SHARE_NAME: ${{ vars.SHARE_NAME }}
           MEDIA_LIBRARY_SUBPATH: ${{ vars.MEDIA_LIBRARY_SUBPATH }}
           TZ: ${{ vars.TZ }}
+          # Required from Phase 6 on - 6b.13's kuma-provision CronJob reads
+          # both on every reconcile, not just on a fresh install.
           HA_HOST: ${{ vars.HA_HOST }}
           HA_PORT: ${{ vars.HA_PORT }}
+
+          # Phase 6b.2/6b.3. The three Windows hosts' LAN addresses (reserved
+          # in 6a.2) and the Home Assistant webhook id (created in 6a.3) - set
+          # both and dispatch this workflow before the 6b.6 ScrapeConfig and
+          # 6b.8 Alertmanager commits reach the cluster, for the same reason
+          # SITE_REPO_URL above has to land first.
+          WINDOWS_EXPORTER_TARGETS: ${{ vars.WINDOWS_EXPORTER_TARGETS }}
+          HA_ALERT_WEBHOOK_ID: ${{ vars.HA_ALERT_WEBHOOK_ID }}
 
           # Same keypair provision-0/1/2/3 used.
           NODE_SSH_PRIVATE_KEY: ${{ secrets.NODE_SSH_PRIVATE_KEY }}

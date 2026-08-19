@@ -1,0 +1,13 @@
+# Layer 2 of the split described in ../../observability.yaml: instances of
+# the CRDs ../controllers registers - ScrapeConfigs, ServiceMonitors,
+# PodMonitors, PrometheusRules - plus the Ingresses, Grafana dashboards and
+# provisioning CronJobs.
+#
+# Empty as of 6b.4: nothing here yet, because nothing in ../controllers has
+# registered a CRD to be an instance of. Filled in by the cluster plan 6b.6
+# (scrape/), 6b.7 (dashboards/), 6b.8 (alerts/), 6b.9 (ingress-logs.yaml),
+# 6b.11 (provisioning/) and 6b.12 (static-monitors-configmap.yaml,
+# ingress-status.yaml).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []

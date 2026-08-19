@@ -28,3 +28,5 @@ resources:
   - cert-manager-route53-credentials.yaml
   - flux-system-aerie-site-git.yaml
   - flux-system-ghcr-pull.yaml
+  - observability-ghcr-pull.yaml
+  - observability-home-assistant.yaml

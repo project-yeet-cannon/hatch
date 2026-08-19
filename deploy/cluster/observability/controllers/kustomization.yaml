@@ -1,0 +1,19 @@
+# Layer 1 of the split described in ../../observability.yaml: the Namespace,
+# the two default-login Secrets (6b.4), and - from 6b.5 on - the operators and
+# the CRDs everything in ../config depends on.
+#
+# Reconciled with wait: true, so anything added here has to become healthy
+# before ../config is applied at all - the boundary the re-scope preamble
+# (docs/plans/swarm/phase-6-observability.md) names as the reason every
+# scrape and alert object in this phase is hand-written rather than a chart
+# flag: a chart flag that renders a monitoring.coreos.com object is never
+# turned on here, only in ../config, once this layer has registered the CRD.
+#
+# Filled in by the cluster plan 6b.4 (namespace, admin-secrets), 6b.5
+# (kube-prometheus-stack), 6b.9 (opensearch), 6b.10 (fluent-bit) and 6b.12
+# (uptime-kuma, autokuma).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - admin-secrets.yaml

@@ -231,24 +231,48 @@
       "env": "HA_HOST",
       "githubSource": "HA_HOST",
       "githubKind": "variable",
-      "required": false,
+      "required": true,
       "pattern": "^(((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])|[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*)$",
       "hint": "A hostname or a bare IPv4 address for the Home Assistant instance.",
       "example": "10.0.0.50",
-      "consumedBy": "5b.5 api env",
-      "description": "Optional. Only read on a fresh install, by the one-time SiteSettings import - after a restore the values are already in the database."
+      "consumedBy": "5b.5 api env, once, on a fresh install's SiteSettings import; 6b.13 kuma-provision CronJob, every reconcile, forever",
+      "description": "Home Assistant host. Used to read only on a fresh install - a restore already has it in the database - but Phase 6's kuma-provision CronJob reads it on every run, which is why it is required from Phase 6 on rather than staying optional."
     },
     {
       "key": "HA_PORT",
       "env": "HA_PORT",
       "githubSource": "HA_PORT",
       "githubKind": "variable",
-      "required": false,
+      "required": true,
       "pattern": "^([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$",
       "hint": "A TCP port, 1-65535.",
       "example": "8123",
-      "consumedBy": "5b.5 api env",
-      "description": "Optional, same fresh-install-only caveat as HA_HOST."
+      "consumedBy": "5b.5 api env, once, on a fresh install's SiteSettings import; 6b.13 kuma-provision CronJob, every reconcile, forever",
+      "description": "Home Assistant port, same used-to-be-fresh-install-only caveat as HA_HOST - required from Phase 6 on because kuma-provision reads it every run."
+    },
+    {
+      "key": "WINDOWS_EXPORTER_TARGETS",
+      "env": "WINDOWS_EXPORTER_TARGETS",
+      "githubSource": "WINDOWS_EXPORTER_TARGETS",
+      "githubKind": "variable",
+      "required": true,
+      "pattern": "^\\[\"(?:(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])|[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*):(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])\"(?:,\"(?:(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])|[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*):(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])\")*\\]$",
+      "hint": "A bracketed, comma-separated list of double-quoted host:port strings, and nothing else - no spaces, no trailing comma, no bare (unquoted) entries. The three Windows hosts' LAN addresses reserved in 6a.2, each with windows_exporter's port.",
+      "example": "[\"10.0.0.11:9182\",\"10.0.0.12:9182\",\"10.0.0.13:9182\"]",
+      "consumedBy": "6b.6 ScrapeConfig staticConfigs.targets",
+      "description": "The three physical Windows hosts' LAN addresses and windows_exporter's port, as one Prometheus-shaped list. Reserved as fixed addresses in 6a.2 - a lease change here is a firing up == 0, not a rediscovered host."
+    },
+    {
+      "key": "HA_ALERT_WEBHOOK_ID",
+      "env": "HA_ALERT_WEBHOOK_ID",
+      "githubSource": "HA_ALERT_WEBHOOK_ID",
+      "githubKind": "variable",
+      "required": true,
+      "pattern": "^[A-Za-z0-9_-]{1,255}$",
+      "hint": "The webhook id alone - the trailing segment of the /api/webhook/<id> URL Home Assistant gave you when the automation was created in 6a.3. No slashes, and no leading /api/webhook/.",
+      "example": "aerie-alerts",
+      "consumedBy": "6b.8 Alertmanager receiver",
+      "description": "Webhook id for the Home Assistant automation 6a.3 creates. Alertmanager posts to http://${HA_HOST}:${HA_PORT}/api/webhook/${HA_ALERT_WEBHOOK_ID}. An opaque per-installation string, and a repository variable rather than a secret: see 6a.3 for why."
     }
   ]
 }

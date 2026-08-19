@@ -30,3 +30,7 @@ resources:
   # The cluster plan Phase 5b.10: the app tier itself - the HelmRelease
   # installing charts/aerie, depending on data-schema and site-config above.
   - apps.yaml
+  # The cluster plan Phase 6b.4: observability-controllers -> observability-
+  # config, depending on infra-config the same way data.yaml does - and
+  # deliberately not on apps.yaml in either direction, per that step's note.
+  - observability.yaml

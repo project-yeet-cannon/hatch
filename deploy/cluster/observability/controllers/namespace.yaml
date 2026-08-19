@@ -1,0 +1,32 @@
+# The cluster plan Phase 6b.4 - the observability namespace.
+#
+# Unlike aerie (../../infrastructure/config/namespaces.yaml), nothing needed
+# this namespace before this phase existed, so it lands in this phase's own
+# layer rather than in layer 2's namespaces.yaml the way 3b.6 had to put
+# aerie's. The one thing that looks like the same exception is 6b.2's
+# ExternalSecrets (home-assistant, ghcr-pull) targeting this namespace -
+# which is precisely why those manifests were written in 6b.2 but merged no
+# earlier than this commit, rather than the other way around. An
+# ExternalSecret in a namespace that does not exist is an apply failure for
+# the whole Kustomization it lands in.
+#
+# Consequences worth stating, since observability-controllers reconciles with
+# prune: true:
+#
+#   - Deleting this file deletes the namespace, and with it every PVC in it -
+#     Prometheus's, Alertmanager's, Grafana's, OpenSearch's, Uptime Kuma's.
+#   - Longhorn's r2 and r3 StorageClasses
+#     (../../infrastructure/config/longhorn-storageclasses.yaml) both set
+#     reclaimPolicy: Retain, so the underlying volumes survive as Released
+#     rather than being deleted with the PVC - the data is not gone, but
+#     nothing in the cluster references it until an operator reattaches it
+#     by hand.
+#   - Order inside the layer is not a concern, for the same reason
+#     namespaces.yaml gives: kustomize-controller applies Namespaces before
+#     anything else in the same Kustomization and waits for them, so this and
+#     admin-secrets.yaml (and, from 6b.5 on, the HelmReleases) can sit in one
+#     Kustomization without a dependsOn between them.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability

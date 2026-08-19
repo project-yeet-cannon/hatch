@@ -307,7 +307,7 @@ time, and only 5 makes anything reconcile. 9–11 are logs, 12–13 are the stat
 page. 14 is the property the design demands of a non-HA tier, and 15 is the
 gate.
 
-- [ ] **1. Two node-level settings, and a k3s reconfigure** —
+- [x] **1. Two node-level settings, and a k3s reconfigure** —
       [`Install-K3sNode.ps1`](../../../scripts/k3s/Install-K3sNode.ps1),
       [`provision-1-install-k3s.yml`](../../../.github/workflows/provision-1-install-k3s.yml).
       First because both are node state, both need k3s or the kernel restarted
@@ -353,7 +353,7 @@ gate.
       nodes` shows every node Ready and `kubectl -n kube-system get pods` shows
       nothing restarted that should not have.
 
-- [ ] **2. Two secrets changes, through the machinery 5b.1 built** —
+- [x] **2. Two secrets changes, through the machinery 5b.1 built** —
       [`parameters.json`](../../../scripts/secrets/parameters.json),
       [`New-ExternalSecrets.ps1`](../../../scripts/secrets/New-ExternalSecrets.ps1),
       [`provision-2-seed-secrets.yml`](../../../.github/workflows/provision-2-seed-secrets.yml).
