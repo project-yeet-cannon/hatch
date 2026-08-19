@@ -37,16 +37,21 @@
 >   alarm noise [3b.11](phase-3-platform-services.md) already named as the thing
 >   that trains an operator to ignore real alerts. This is a **node** change and
 >   it has to happen before the chart, not because of it (6b.1).
-> - **`compose.observability.yml` commits a credential.** `AUTOKUMA__KUMA__PASSWORD`
->   and `KUMA_PASSWORD` are the literal `aerie-kuma-admin!23`, in git, three
->   times ([compose.observability.yml:41](../../../compose.observability.yml#L41),
->   [:62](../../../compose.observability.yml#L62)). The comment above it argues
->   the account guards nothing, which is true today and is not the test
->   [`docs/ethos.md`](../../ethos.md) applies — a redeployable product ships one
->   installation's password to every other operator, who then all share it. It
->   goes through ESO like everything else, and Grafana's unset admin password
->   (`admin`/`admin`, on a host that never published its port and now serves at
->   `metrics.${DOMAIN}`) goes with it (6b.2).
+> - **`compose.observability.yml` commits a credential that reads as a secret.**
+>   `AUTOKUMA__KUMA__PASSWORD` and `KUMA_PASSWORD` are the literal
+>   `aerie-kuma-admin!23`, in git, three times
+>   ([compose.observability.yml:41](../../../compose.observability.yml#L41),
+>   [:62](../../../compose.observability.yml#L62)). What
+>   [`docs/ethos.md`](../../ethos.md) rules out is shipping *one installation's*
+>   password to every other operator: a string that looks bespoke, that nobody is
+>   prompted to change, and that therefore silently becomes shared. The fix taken
+>   here is not to route it through ESO — that buys secrecy at the price of two
+>   more required repository secrets on an account nobody has logged into yet.
+>   Both admin accounts instead ship a **known default**, `admin` / `password`,
+>   committed as a plain Secret and changed by each operator from the UI when they
+>   choose (6a.4, 6b.4). Grafana's unset admin password (`admin`/`admin`, on a host
+>   that never published its port and now serves at `metrics.${DOMAIN}`) becomes
+>   the same shape rather than a second special case.
 > - **fluent-bit is about to ship ten times the log volume into a single-node
 >   OpenSearch.** Today it tails one compose project. Under k3s
 >   `/var/log/containers/*.log` is every pod on the node — k3s system pods,
@@ -173,7 +178,7 @@ green run. Two things in that output this phase builds directly on:
   a third namespace to the same parameter pair, and the multi-namespace support
   it relies on is 5b.1's.
 
-**[ ] 2. Collect the three Windows hosts' LAN addresses, and prove
+**[x] 2. Collect the three Windows hosts' LAN addresses, and prove
 windows_exporter answers from a pod.** The exporter is installed by
 [`provision-0-new-node.yml:161-182`](../../../.github/workflows/provision-0-new-node.yml#L161-L182),
 not by anything in this phase — what this phase does is scrape it from *inside*
@@ -220,7 +225,7 @@ what 6b.3's ConfigMap key holds verbatim:
 ["10.0.0.11:9182","10.0.0.12:9182","10.0.0.13:9182"]
 ```
 
-**[ ] 3. Create the Home Assistant webhook that alerts land on.** Alertmanager
+**[x] 3. Create the Home Assistant webhook that alerts land on.** Alertmanager
 needs somewhere to send. Kuma's existing Home Assistant notification is a Kuma
 feature, not a reusable endpoint, so this is a second, separate integration —
 see the re-scope preamble for why that cost is accepted.
@@ -240,33 +245,49 @@ than becoming the one operator value that needs a different mechanism. If that
 trade is unwanted, say so before 6b.3 and it becomes an SSM parameter instead;
 the change is one entry moving between two files.
 
-**[ ] 4. Generate the two admin passwords.** Kuma and Grafana each need one, and
-neither has an issuer to fetch it from — same class as the vm-log-shipper token,
-so the same tool:
+**[x] 4. Nothing to generate — know the two default logins.** Kuma and Grafana
+both come up as **`admin` / `password`**, from plain Secret manifests committed
+in 6b.4. There are no repository secrets to add, no SSM parameters behind them,
+and no generator run. Change either from its own UI whenever you get to it.
 
-```sh
-./scripts/secrets/new-shared-secret.sh
-```
+This is the deliberate answer to the re-scope preamble's third bullet, and it is
+a different answer than "route it through ESO". Two new admin accounts on
+systems nobody has logged into yet do not justify two more required repository
+secrets at install time; a default that is *universally known and expected to be
+changed* is the router-login model, not the shipped-shared-secret one the ethos
+rule is aimed at. The security implication is accepted knowingly: **anyone who
+can reach `status.${DOMAIN}` or `metrics.${DOMAIN}` before you change these can
+log in as admin.** Both are LAN-only hostnames on the internal VIP; if either is
+ever published beyond the LAN, changing both is a prerequisite of publishing,
+not a follow-up.
 
-Add `KUMA_ADMIN_PASSWORD` and `GRAFANA_ADMIN_PASSWORD` as repository
-**secrets** (the Secrets tab, not Variables — getting it backwards resolves to
-an empty string rather than erroring, and surfaces as Kuma refusing a login it
-appears to have just set).
+**Grafana's is safe to change in the UI and forget.** The chart seeds the admin
+user only when the database is first created, so a password changed later
+persists across restarts and across Flux re-applying the committed Secret with
+the old value in it. The Secret goes stale and nothing reads it.
 
-The Kuma one is the value replacing `aerie-kuma-admin!23`. **The old host keeps
-using the committed literal until Phase 7 deletes the compose files** — do not
-edit `compose.observability.yml` to match. Rotating a live Kuma's admin password
-means its SQLite database disagrees with the compose file, and there is no
-reason to touch a system that is being deleted.
+**Kuma's is not** — this is the one thing to know before changing it. AutoKuma
+(6b.12) and the `kuma-provision` CronJob (6b.13) both log in with that password
+on every reconcile, reading it from the same committed Secret. Change it in
+Kuma's UI alone and AutoKuma stops converging monitors while the CronJob starts
+exiting non-zero — an authentication failure that presents as monitors quietly
+not appearing. So for Kuma, changing the password is two edits: the UI, and the
+Secret in git. Both are yours to do at leisure; doing only the first is the
+failure mode worth naming here rather than discovering in 6b.12's logs.
 
-**[ ] 5. Read the sizing section above and accept the budget.** Specifically the
+**The old host keeps using `aerie-kuma-admin!23` until Phase 7 deletes the
+compose files** — do not edit `compose.observability.yml` to match. Rotating a
+live Kuma's admin password means its SQLite database disagrees with the compose
+file, and there is no reason to touch a system that is being deleted.
+
+**[x] 5. Read the sizing section above and accept the budget.** Specifically the
 "3.2 GiB on one node" figure. This is the phase where the cluster stops fitting
 comfortably, and 6b.14's PriorityClass is a decision about what to lose, not a
 safety net that makes the number go away. If it is not acceptable, the lever
 with the best ratio is OpenSearch's retention and heap — everything else here is
 already at its floor.
 
-**[ ] 6. Know how you will test.** DNS still points at the old host until Phase
+**[x] 6. Know how you will test.** DNS still points at the old host until Phase
 7, so this phase's three hostnames are reachable only by asking the VIP:
 
 ```sh
@@ -332,28 +353,15 @@ gate.
       nodes` shows every node Ready and `kubectl -n kube-system get pods` shows
       nothing restarted that should not have.
 
-- [ ] **2. Four secrets changes, through the machinery 5b.1 built** —
+- [ ] **2. Two secrets changes, through the machinery 5b.1 built** —
       [`parameters.json`](../../../scripts/secrets/parameters.json),
       [`New-ExternalSecrets.ps1`](../../../scripts/secrets/New-ExternalSecrets.ps1),
       [`provision-2-seed-secrets.yml`](../../../.github/workflows/provision-2-seed-secrets.yml).
-      Two new parameters and two existing ones gaining a namespace. No generator
-      changes this time — 5b.1 added everything needed, and this step is the
-      first evidence that the multi-namespace support was worth building rather
-      than worked around.
-
-      New, both `required: true`, `phase: 6`, `githubKind: secret`:
-
-      | Path | `env` | Target |
-      |---|---|---|
-      | `kuma/admin-password` | `KUMA_ADMIN_PASSWORD` | `observability`, secretName `kuma-admin`, key `password` |
-      | `grafana/admin-password` | `GRAFANA_ADMIN_PASSWORD` | `observability`, secretName `grafana-admin`, keys `admin-user` and `admin-password` |
-
-      Grafana's is two keys from one parameter plus a literal — the chart's
-      `admin.existingSecret` reads a user and a password out of one Secret, and
-      the user is `admin`. If the generator cannot emit a constant alongside a
-      remote value, the honest fix is a `grafana/admin-username` parameter
-      carrying the string `admin`, not a `template` block that only this one
-      entry uses.
+      **No new parameters** — the two admin passwords 6a.4 would have added are
+      committed defaults in 6b.4 instead, and this step is only existing
+      parameters gaining a namespace. No generator changes either: 5b.1 added
+      everything needed, and this step is the first evidence that the
+      multi-namespace support was worth building rather than worked around.
 
       Existing, each gaining one more `kubernetes` block:
 
@@ -369,13 +377,14 @@ gate.
         in a private repository, so the namespace needs its own pull secret; a
         Secret is namespaced and there is no cross-namespace `imagePullSecrets`.
 
-      Then the four-part ordering 4b.3 established and 5b.1 repeated, because
-      the generator refuses a `kubernetes` block on an unseeded parameter and an
-      `ExternalSecret` over one poisons its Kustomization: add the parameters
-      with `kubernetesDeferred`, add the lines to Provision 2, **dispatch
-      Provision 2 and confirm both new parameters seed**, then replace
-      `kubernetesDeferred` with the real blocks and run
-      `pwsh ./scripts/secrets/New-ExternalSecrets.ps1`.
+      The four-part `kubernetesDeferred` ordering 4b.3 established and 5b.1
+      repeated does **not** apply here, and knowing why is the point: it exists
+      because the generator refuses a `kubernetes` block on an unseeded
+      parameter. All three of these were seeded in earlier phases, so a new block
+      on each is a `parameters.json` edit plus
+      `pwsh ./scripts/secrets/New-ExternalSecrets.ps1`, with no Provision 2
+      re-dispatch and no intermediate commit. Dropping the two new parameters is
+      what removed the only reason this phase needed the dance.
 
       One ordering wrinkle this phase introduces that the earlier ones did not:
       **the `observability` namespace does not exist yet** (6b.4 creates it), and
@@ -386,8 +395,10 @@ gate.
       are *merged* no earlier than 6b.4.
       *Exit:* `New-ExternalSecrets.ps1 -Check` exits 0, and after 6b.4,
       `kubectl -n observability get externalsecret` reports `SecretSynced` for
-      `kuma-admin`, `grafana-admin`, `home-assistant` and `ghcr-pull`, with
-      `ghcr-pull` typed `kubernetes.io/dockerconfigjson`.
+      `home-assistant` and `ghcr-pull`, with `ghcr-pull` typed
+      `kubernetes.io/dockerconfigjson`. `kuma-admin` and `grafana-admin` are in
+      the same namespace but are **not** ExternalSecrets and will not appear in
+      that list — `kubectl -n observability get secret` is where they show.
 
 - [ ] **3. Two new `cluster-config.json` keys, two promoted to required, and a
       Provision 4 re-dispatch** —
@@ -426,10 +437,11 @@ gate.
       jsonpath='{.data.WINDOWS_EXPORTER_TARGETS}'` prints the bracketed list
       intact, brackets and quotes included.
 
-- [ ] **4. The observability layer, empty** — `deploy/cluster/observability.yaml`,
-      `deploy/cluster/observability/`, and one line in
-      [`kustomization.yaml`](../../../deploy/cluster/kustomization.yaml). The commit
-      that creates somewhere for the next ten steps to land, and nothing else.
+- [ ] **4. The observability layer, empty but for two default logins** —
+      `deploy/cluster/observability.yaml`, `deploy/cluster/observability/`, and one
+      line in [`kustomization.yaml`](../../../deploy/cluster/kustomization.yaml). The
+      commit that creates somewhere for the next ten steps to land, plus the only
+      workload credential in the phase that is not an ExternalSecret.
 
       Two Flux Kustomizations, in the shape
       [`data.yaml`](../../../deploy/cluster/data.yaml) established:
@@ -466,8 +478,27 @@ gate.
       3b.6's does: `observability-controllers` prunes, so deleting the layer
       deletes the namespace, its PVCs and — with `Retain` on both Longhorn
       classes — leaves the volumes behind as `Released`, holding the data.
-      *Exit:* `flux get kustomizations` shows both new Kustomizations Ready, and
-      `kubectl get ns observability` exists. Nothing runs in it yet.
+
+      **`admin-secrets.yaml`, next to the Namespace**: two `Opaque` Secrets
+      carrying 6a.4's defaults, in `stringData` so they are readable as written
+      rather than base64 that has to be decoded to be reviewed.
+
+      - `kuma-admin` — key `password`, value `password`. Read by AutoKuma
+        (6b.12) and `kuma-provision` (6b.13).
+      - `grafana-admin` — keys `admin-user` (`admin`) and `admin-password`
+        (`password`), the pair `admin.existingSecret` expects in 6b.5.
+
+      These are in `controllers/` and not `config/` because the HelmRelease that
+      consumes one is, and a Secret that lands after the chart that mounts it is
+      a pod stuck in `CreateContainerConfigError`. Put 6a.4's whole reasoning in
+      a comment at the top of the file — that this is a known default, that it is
+      expected to be changed from each UI, and that changing Kuma's means editing
+      this file too. The file is where someone will be standing when they ask why
+      a password is sitting in git, and the answer should be there rather than in
+      a plan document they may never have read.
+      *Exit:* `flux get kustomizations` shows both new Kustomizations Ready,
+      `kubectl get ns observability` exists, and `kubectl -n observability get
+      secret kuma-admin grafana-admin` returns both. Nothing runs in it yet.
 
 - [ ] **5. `kube-prometheus-stack`** —
       `deploy/cluster/observability/controllers/kube-prometheus-stack.yaml`. One
@@ -525,7 +556,10 @@ gate.
       bulk, because what it holds is silences, and losing those during a
       reschedule means every alert someone deliberately quieted re-fires at once.
 
-      **Grafana**: `admin.existingSecret: grafana-admin` from 6b.2,
+      **Grafana**: `admin.existingSecret: grafana-admin` from 6b.4 —
+      `admin`/`password` until you change it, and the chart seeds it only on a
+      fresh database, so a later UI change is not undone by this value staying
+      here —
       `persistence.enabled: true` on `longhorn-r3` at 2Gi, `grafana.ini`'s
       `server.root_url` set to `https://metrics.${DOMAIN}` (Grafana builds
       absolute URLs for redirects and share links from it; wrong, and OAuth-less
@@ -912,10 +946,13 @@ gate.
         until a human picks a database in a browser, and the Socket.IO API
         6b.13's provisioner talks to never starts.
 
-      AutoKuma reads the admin password from 6b.2's `kuma-admin` Secret — the
-      committed literal does not move across — and its static monitors come from
-      a ConfigMap rather than a bind mount. **Every one of the four monitors
-      changes:**
+      AutoKuma reads the admin password from 6b.4's `kuma-admin` Secret —
+      `aerie-kuma-admin!23` does not move across; the cluster's default is
+      `password` — and its static monitors come from a ConfigMap rather than a
+      bind mount. This is the client 6a.4 warns about: if the Kuma password has
+      been changed in the UI and the Secret has not, this Deployment is where it
+      shows up, as authentication failures in AutoKuma's log and monitors that
+      never converge. **Every one of the four monitors changes:**
 
       | Today | Becomes |
       |---|---|
@@ -970,8 +1007,8 @@ gate.
       AutoKuma creates monitors continuously. A one-shot run at install time
       attaches the notification to whatever existed in that instant and nothing
       after; hourly convergence means a monitor added next month gets alerting
-      without anyone remembering this step exists. Env from 6b.2's Secrets
-      (`kuma-admin` for the password, `home-assistant` for the token) and 6b.3's
+      without anyone remembering this step exists. Env from 6b.4's `kuma-admin`
+      for the password, 6b.2's `home-assistant` for the token, and 6b.3's
       ConfigMap (`HA_HOST`, `HA_PORT`), with the `ghcr-pull` secret in
       `imagePullSecrets` — 6b.2's third namespace, and the only reason it was
       needed.
@@ -1033,7 +1070,9 @@ gate.
       - every `ExternalSecret` in `observability` is `SecretSynced` (6b.2)
       - `WINDOWS_EXPORTER_TARGETS` parses as a list and every host in it answers
         from inside a pod (6b.3, 6a.2)
-      - both Kustomizations Ready (6b.4)
+      - both Kustomizations Ready, and `kuma-admin` and `grafana-admin` present
+        in the namespace — **existence only, never the value** (6b.4). An
+        operator who has changed either password must not fail this gate.
       - **Prometheus reports zero down targets** — the single most informative
         assertion in the script, covering 6b.1, 6b.5 and 6b.6 at once
       - the six scrape jobs each return a non-zero series count (6b.6)
@@ -1065,6 +1104,7 @@ deploy/cluster/
   observability/
     controllers/
       namespace.yaml              # 6b.4
+      admin-secrets.yaml          # 6b.4, kuma-admin + grafana-admin defaults
       kube-prometheus-stack.yaml  # 6b.5, the largest object in the phase
       opensearch.yaml             # 6b.9, two HelmReleases + HelmRepository
       fluent-bit.yaml             # 6b.10, DaemonSet via chart
@@ -1124,9 +1164,16 @@ and `wait: true` on the first is what makes the second's assumption true.
   disappears, and it does — in Phase 7, with the compose file it reloads. The
   old host's [prometheus.yml](../../../containers/prometheus/prometheus.yml) is
   untouched by this phase.
-- **It does not rotate the old host's Kuma admin password.** 6a.4 generates a
-  new one for the cluster; the committed literal keeps working on a system being
+- **It does not rotate the old host's Kuma admin password.** The cluster gets
+  its own default (6a.4); `aerie-kuma-admin!23` keeps working on a system being
   deleted. Changing it means a live SQLite database that disagrees with git.
+- **It does not put the two admin passwords behind ESO, and does not change them
+  for you.** 6a.4 ships `admin`/`password` on Kuma and Grafana as a known
+  default, committed, with the security implication accepted deliberately. The
+  first operator to log into either is expected to change it; nothing in this
+  phase enforces that, checks for it, or expires the default — 6b.15's verify
+  does not assert on it, precisely so that changing it does not turn the
+  verification red.
 - **It does not turn on the security plugin in OpenSearch.** A `NetworkPolicy`
   and a written-down exposure, per 6b.9 — the certificate lifecycle that plugin
   brings is not this phase's to own.
