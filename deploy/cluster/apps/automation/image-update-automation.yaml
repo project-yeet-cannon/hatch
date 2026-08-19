@@ -30,11 +30,17 @@ spec:
       author:
         name: fluxcdbot
         email: fluxcdbot@users.noreply.github.com
+      # .Updated was removed from this API (Stalled the object with
+      # "template uses removed '.Updated' field" - confirmed live,
+      # 2026-08-19); .Changed.Changes is its replacement, one entry per
+      # setter that actually moved, each with the old/new value and which
+      # marker fired - so this still names the image that moved without
+      # assuming there are exactly two of them.
       messageTemplate: |
-        Bump image tag{{ if gt (len .Updated.Images) 1 }}s{{ end }}
+        Bump image tag{{ if gt (len .Changed.Changes) 1 }}s{{ end }}
 
-        {{ range .Updated.Images -}}
-        {{ println . }}
+        {{ range .Changed.Changes -}}
+        {{ .Setter }}: {{ .OldValue }} -> {{ .NewValue }}
         {{ end -}}
     push:
       branch: main
