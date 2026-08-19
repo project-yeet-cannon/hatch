@@ -8,7 +8,7 @@
 # flux-system copy of it, which is what that step's second namespace
 # (aerie for the kubelet, flux-system for this controller) was for. Scanning
 # a private repository needs the same credential a pod needs to pull from it.
-apiVersion: image.toolkit.fluxcd.io/v1beta2
+apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageRepository
 metadata:
   name: aerie-api
@@ -19,7 +19,7 @@ spec:
   secretRef:
     name: ghcr-pull
 ---
-apiVersion: image.toolkit.fluxcd.io/v1beta2
+apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageRepository
 metadata:
   name: kiosk-files

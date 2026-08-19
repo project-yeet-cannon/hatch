@@ -12,7 +12,7 @@
 # strategy: Setters is what makes update.path relevant at all - the
 # alternative, ImageUpdateAutomation's now-removed FluxV1 markers, is gone in
 # v1beta2.
-apiVersion: image.toolkit.fluxcd.io/v1beta2
+apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageUpdateAutomation
 metadata:
   name: aerie

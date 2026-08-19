@@ -9,7 +9,7 @@
 # treats the extracted value numerically and picks the largest. The name
 # matched here (aerie-api / kiosk-files) is also what the site repo's
 # image-tags.yaml $imagepolicy markers reference, as `flux-system:<name>:tag`.
-apiVersion: image.toolkit.fluxcd.io/v1beta2
+apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImagePolicy
 metadata:
   name: aerie-api
@@ -24,7 +24,7 @@ spec:
     numerical:
       order: asc
 ---
-apiVersion: image.toolkit.fluxcd.io/v1beta2
+apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImagePolicy
 metadata:
   name: kiosk-files
