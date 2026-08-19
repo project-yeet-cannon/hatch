@@ -95,7 +95,9 @@ spec:
   # the CSI plugin and its five sidecars, which on a cold node is a couple of
   # gigabytes of images before anything reports Ready. infra-controllers waits
   # 10m for this whole directory in parallel, so 8m is "report yourself before
-  # the layer reports you" with two minutes to spare.
+  # the layer reports you" with two minutes to spare. Install has no
+  # post-upgrade hook to wait on (the name says why), so this default is
+  # install's real timeout; upgrade overrides it below.
   timeout: 8m
   install:
     # Zero, and it is the only release in this tree that gets zero. Every other
@@ -115,6 +117,15 @@ spec:
     remediation:
       retries: 0
   upgrade:
+    # Override, above the shared 8m: 5b.11's resource-request sweep (the
+    # commit immediately before this one) put the longhorn-post-upgrade Job
+    # under a 10m/32Mi request for the first time, and it now measures
+    # 8m10s wall clock to reach "Completed post-upgrade" - a shared 8m budget
+    # failed it by design margin, not by accident, twice in a row
+    # (Stalled/RetriesExceeded on 2026-08-19). 9m30s clears the observed
+    # figure with real margin and still reports before the layer's own 10m
+    # wait on ../../infrastructure.yaml's infra-controllers Kustomization.
+    timeout: 9m30s
     remediation:
       retries: 1
       # Already the default, and the single most important default in this file
