@@ -309,7 +309,7 @@ try {
             'echo ''--- version'''
             '(command -v k3s >/dev/null 2>&1 && k3s --version 2>/dev/null | head -n1) || echo ''k3s not installed'''
             'echo ''--- sysctl'''
-            'sysctl -n vm.max_map_count 2>/dev/null || echo 0'
+            'sudo sysctl -n vm.max_map_count 2>/dev/null || echo 0'
             'echo ''--- sysctl-file'''
             'test -f {0} && {{ base64 -w0 {0}; echo; }} || echo NONE'
             'echo ''--- k3s-config'''
@@ -492,7 +492,12 @@ try {
     # them instead of finding out at 6b.5/6b.9, several steps and possibly
     # days later.
     Write-Host 'Verifying Phase 6b.1 node settings ...'
-    $maxMapCheck = Invoke-NodeSsh @ssh -Command 'sysctl -n vm.max_map_count' -ConnectTimeoutSec 15
+    # sudo, not a bare 'sysctl': /usr/sbin (where Debian keeps the binary)
+    # isn't on the non-root $Username's non-interactive SSH PATH, so a bare
+    # call fails with 'command not found' and an empty StdOut - read as the
+    # setting being unset even when it's already 262144. sudo's secure_path
+    # includes /usr/sbin regardless of the invoking user's own PATH.
+    $maxMapCheck = Invoke-NodeSsh @ssh -Command 'sudo sysctl -n vm.max_map_count' -ConnectTimeoutSec 15
     if ($maxMapCheck.ExitCode -ne 0 -or $maxMapCheck.StdOut.Trim() -ne '262144') {
         throw "vm.max_map_count on $IPAddress reads '$($maxMapCheck.StdOut.Trim())', not 262144. OpenSearch (6b.9) will refuse to start until this is fixed."
     }
