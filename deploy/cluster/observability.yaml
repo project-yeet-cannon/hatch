@@ -1,9 +1,13 @@
 # The cluster plan Phase 6b.4 - the same controllers/config split
 # ./infrastructure.yaml and ./data.yaml already use, applied to observability.
 #
-# observability-controllers: the Namespace, the two default-login Secrets, and
-# - from 6b.5 on - the HelmReleases (kube-prometheus-stack, OpenSearch,
-# fluent-bit, Uptime Kuma, AutoKuma) and the CRDs those releases register.
+# observability-controllers: the two default-login Secrets, and - from 6b.5 on
+# - the HelmReleases (kube-prometheus-stack, OpenSearch, fluent-bit, Uptime
+# Kuma, AutoKuma) and the CRDs those releases register. The observability
+# Namespace is deliberately not here - see
+# ./observability/controllers/kustomization.yaml's comment for why living
+# downstream of infra-config (which 6b.2's ExternalSecrets need it ahead of)
+# is a deadlock, not just a re-ordering.
 #
 # observability-config: every instance of those CRDs - ScrapeConfigs,
 # ServiceMonitors, PodMonitors, PrometheusRules - plus the Ingresses, Grafana

@@ -1,6 +1,16 @@
-# Layer 1 of the split described in ../../observability.yaml: the Namespace,
-# the two default-login Secrets (6b.4), and - from 6b.5 on - the operators and
-# the CRDs everything in ../config depends on.
+# Layer 1 of the split described in ../../observability.yaml: the two
+# default-login Secrets (6b.4), and - from 6b.5 on - the operators and the
+# CRDs everything in ../config depends on.
+#
+# The observability Namespace is deliberately NOT here - it lives in
+# ../../infrastructure/config/namespaces.yaml instead, alongside aerie's, and
+# that file's own comment explains why at length: 6b.2's ExternalSecrets
+# target this namespace from infra-config, which is upstream of this
+# Kustomization (observability-controllers carries `dependsOn: infra-config`
+# below), so a Namespace living here instead is a deadlock - infra-config can
+# never go Ready without it, and this Kustomization is never attempted until
+# infra-config does. Found live, 2026-08-19, after the first version of this
+# file shipped exactly that arrangement.
 #
 # Reconciled with wait: true, so anything added here has to become healthy
 # before ../config is applied at all - the boundary the re-scope preamble
@@ -9,11 +19,10 @@
 # flag: a chart flag that renders a monitoring.coreos.com object is never
 # turned on here, only in ../config, once this layer has registered the CRD.
 #
-# Filled in by the cluster plan 6b.4 (namespace, admin-secrets), 6b.5
+# Filled in by the cluster plan 6b.4 (admin-secrets), 6b.5
 # (kube-prometheus-stack), 6b.9 (opensearch), 6b.10 (fluent-bit) and 6b.12
 # (uptime-kuma, autokuma).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - namespace.yaml
   - admin-secrets.yaml

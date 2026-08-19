@@ -387,13 +387,21 @@ gate.
       what removed the only reason this phase needed the dance.
 
       One ordering wrinkle this phase introduces that the earlier ones did not:
-      **the `observability` namespace does not exist yet** (6b.4 creates it), and
-      an `ExternalSecret` in a namespace that does not exist is an apply failure
-      for the whole `infra-config` Kustomization. So this step's generated
-      manifests land in the same commit as 6b.4's namespace, or after it. They
-      are written here because this is where the parameters are decided; they
-      are *merged* no earlier than 6b.4.
-      *Exit:* `New-ExternalSecrets.ps1 -Check` exits 0, and after 6b.4,
+      **the `observability` namespace does not exist yet**, and an
+      `ExternalSecret` in a namespace that does not exist is an apply failure
+      for the whole `infra-config` Kustomization these render into. 6b.4's
+      first pass got this wrong by creating the namespace in its own,
+      downstream layer instead - a deadlock, corrected there by putting it in
+      [`namespaces.yaml`](../../../deploy/cluster/infrastructure/config/namespaces.yaml)
+      alongside `aerie`, in `infra-config` itself, the same fix 3b.6 already
+      used for the identical shape one phase earlier. That correction is what
+      actually resolves this step's ordering wrinkle: the manifests here and
+      the Namespace live in the same Kustomization, applied in one pass, no
+      cross-Kustomization dependency involved. They are written in this step
+      because this is where the parameters are decided; the Namespace itself
+      is 6b.4's business, in `namespaces.yaml`, not in `observability/`.
+      *Exit:* `New-ExternalSecrets.ps1 -Check` exits 0, and once the Namespace
+      exists,
       `kubectl -n observability get externalsecret` reports `SecretSynced` for
       `home-assistant` and `ghcr-pull`, with `ghcr-pull` typed
       `kubernetes.io/dockerconfigjson`. `kuma-admin` and `grafana-admin` are in
@@ -448,9 +456,10 @@ gate.
 
       - **`observability-controllers`** — `dependsOn: infra-config`,
         `path: ./deploy/cluster/observability/controllers`, `prune: true`,
-        `wait: true`. Holds the Namespace and the HelmReleases. `wait: true` is
-        what makes the next Kustomization's CRD assumption true rather than
-        hopeful.
+        `wait: true`. Holds the two default-login Secrets and the
+        HelmReleases - **not** the Namespace; see below for why that turned
+        out to matter. `wait: true` is what makes the next Kustomization's CRD
+        assumption true rather than hopeful.
       - **`observability-config`** — `dependsOn: observability-controllers`,
         `path: ./deploy/cluster/observability/config`, `prune: true`,
         `wait: true`. Holds every instance of those CRDs — ScrapeConfigs,
@@ -469,19 +478,42 @@ gate.
       order to run. Adding an edge would serialize two independent layers and
       make a Phase 5 failure also a Phase 6 failure.
 
-      **The `observability` Namespace is in this layer, not in
-      [`namespaces.yaml`](../../../deploy/cluster/infrastructure/config/namespaces.yaml).**
-      That file's `aerie` namespace had to be in layer 2 because 3b.6 put Secrets
-      in it before Phase 5 existed. Nothing has that problem here — except 6b.2's
-      ExternalSecrets, which is precisely why that step's manifests merge no
-      earlier than this one. The consequence is worth stating in the file, as
-      3b.6's does: `observability-controllers` prunes, so deleting the layer
-      deletes the namespace, its PVCs and — with `Retain` on both Longhorn
-      classes — leaves the volumes behind as `Released`, holding the data.
+      **Correction, found live on 2026-08-19 and worth recording rather than
+      quietly editing away: the `observability` Namespace does NOT belong in
+      this layer.** The first version of this step put it here on the theory
+      that landing it in the same commit as 6b.2's ExternalSecrets was enough
+      to satisfy their dependency on it. It is not. `observability-controllers`
+      carries `dependsOn: infra-config` above, and 6b.2's ExternalSecrets live
+      in `infra-config` (they are a rendering of `parameters.json`, which
+      writes to `external-secrets/` in that layer, not this one). Landing both
+      in one git commit does not make two independent Flux Kustomizations wait
+      on each other: `infra-config` reconciles the ExternalSecrets regardless
+      of `observability-controllers`, fails because the namespace they target
+      does not exist, and never reports Ready - which means
+      `observability-controllers` is never even attempted, since it depends on
+      `infra-config` doing so. A deadlock, confirmed live as
+      `ExternalSecret/observability/home-assistant not found: namespaces
+      "observability" not found` sitting under `infra-config` indefinitely.
 
-      **`admin-secrets.yaml`, next to the Namespace**: two `Opaque` Secrets
-      carrying 6a.4's defaults, in `stringData` so they are readable as written
-      rather than base64 that has to be decoded to be reviewed.
+      The fix is the one
+      [`namespaces.yaml`](../../../deploy/cluster/infrastructure/config/namespaces.yaml)
+      already used for `aerie`, applied to `observability` too: put the
+      Namespace directly in that file, in the same Kustomization
+      (`infra-config`) as the ExternalSecrets that need it. kustomize-controller
+      applies Namespaces as a first stage within one Kustomization's apply
+      pass, ahead of everything else in it and with no `dependsOn` required -
+      which is exactly why `aerie` already works this way, and exactly the
+      reasoning this step's first pass failed to carry over. `namespaces.yaml`'s
+      own comment carries the full account now. The consequence for
+      `observability-controllers`'s own prune is correspondingly smaller than
+      first written: deleting this layer no longer deletes the namespace (that
+      is `infra-config`'s object now) - only what `observability-controllers`
+      itself put in it, which as of this step is nothing but the two
+      Secrets below.
+
+      **`admin-secrets.yaml`**: two `Opaque` Secrets carrying 6a.4's defaults,
+      in `stringData` so they are readable as written rather than base64 that
+      has to be decoded to be reviewed.
 
       - `kuma-admin` — key `password`, value `password`. Read by AutoKuma
         (6b.12) and `kuma-provision` (6b.13).
