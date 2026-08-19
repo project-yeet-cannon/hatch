@@ -11,6 +11,7 @@ import { OutsideCard } from './components/OutsideCard';
 import { RoutinesSection } from './components/RoutinesSection';
 import { DashboardSkeleton } from './components/DashboardSkeleton';
 import { clientLogger } from './lib/clientLogger';
+import { useKioskLifecycle } from './hooks/useKioskLifecycle';
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -18,6 +19,10 @@ export function App() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
+  // Bumps ~30s after the last touch; see hooks/useKioskLifecycle.ts. Also owns
+  // the reload-on-new-deploy side of the kiosk's lifecycle, which needs nothing
+  // from this component.
+  const resetToken = useKioskLifecycle();
 
   useEffect(() => {
     clientLogger.info('App mounted, starting dashboard data source');
@@ -84,13 +89,16 @@ export function App() {
         </div>
         {data ? (
           <>
-            <div className="hf-zones">
+            {/* Keyed on resetToken so an idle reset remounts the cards, which is
+                what puts each <details> back to defaultOpen - `open` is
+                uncontrolled DOM state that no re-render would otherwise undo. */}
+            <div className="hf-zones" key={resetToken}>
               <OutsideCard outside={data.outside} timeZone={data.timezone} />
               {data.zones.map((zone, i) => (
                 <ZoneCard key={zone.id} zone={zone} timeZone={data.timezone} defaultOpen={i === 0} />
               ))}
             </div>
-            {data.routines.length > 0 && <RoutinesSection routines={data.routines} />}
+            {data.routines.length > 0 && <RoutinesSection routines={data.routines} resetToken={resetToken} />}
           </>
         ) : error ? (
           <div className="hf-note" role="alert" style={{ margin: 0 }}>

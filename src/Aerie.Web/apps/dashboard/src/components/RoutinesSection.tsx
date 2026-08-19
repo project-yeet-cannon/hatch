@@ -18,8 +18,14 @@ import { iconFor } from '../lib/icons';
  * optimisticActive map reflects the tap immediately; it's cleared per-routine
  * once the server snapshot agrees, so an external change (e.g. the light
  * flipped from Home Assistant directly) still surfaces on the next poll.
+ *
+ * resetToken is the kiosk's idle reset (hooks/useKioskLifecycle.ts). Only the
+ * error message clears on it - a failure nobody is standing in front of any
+ * more shouldn't sit on the wall indefinitely. optimisticActive deliberately
+ * survives: it's reconciled against the server by the effect below, and
+ * dropping it here would visually revert a tap until the next 60s poll.
  */
-export function RoutinesSection({ routines }: { routines: RoutineSummary[] }) {
+export function RoutinesSection({ routines, resetToken }: { routines: RoutineSummary[]; resetToken?: number }) {
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [status, setStatus] = useState<{ id: string; error: string } | null>(null);
   const [optimisticActive, setOptimisticActive] = useState<Record<string, boolean>>({});
@@ -37,6 +43,10 @@ export function RoutinesSection({ routines }: { routines: RoutineSummary[] }) {
       return changed ? next : prev;
     });
   }, [routines]);
+
+  useEffect(() => {
+    setStatus(null);
+  }, [resetToken]);
 
   async function handleTap(routine: RoutineSummary, isActive: boolean) {
     if (pendingId) return;

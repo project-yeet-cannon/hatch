@@ -2,6 +2,12 @@ html,
 body {
   margin: 0;
   min-height: 100%;
+  /* Belt and braces with index.html's user-scalable=no: the meta tag stops
+     zoom being applied, this stops the gesture being recognised at all, so a
+     pinch doesn't first get interpreted as a swallowed interaction. pan-y (not
+     manipulation) because nothing in this layout scrolls horizontally - see
+     .hf-zone, the only overflow rule in this file. */
+  touch-action: pan-y;
 }
 
 :root {

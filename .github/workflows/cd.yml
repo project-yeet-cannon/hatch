@@ -206,8 +206,43 @@ jobs:
       # Compose only recreates a container when its own service definition
       # changes, not when a bind-mounted file's contents change — so a
       # prometheus.yml-only edit needs an explicit reload to take effect.
-      # Port 9090 is loopback-only (see compose.metrics.yml), reachable
-      # here since this runner lives on the same host as the Docker daemon.
+      #
+      # The POST is made from inside the container over the Docker API, not to
+      # the published 127.0.0.1:9090 that this step used until run 32256191091
+      # failed on it with "The underlying connection was closed: The connection
+      # was closed unexpectedly." That published port (compose.metrics.yml) is
+      # the wrong end of the chain to knock on from here: Docker Desktop's
+      # Windows-side forwarder accepts the TCP connection whether or not it has
+      # anything to relay it to, so a host restart that leaves the forward
+      # pointing at nothing fails identically to Prometheus being down, and
+      # neither is distinguishable from a prometheus.yml Prometheus rejected.
+      # `exec` instead reaches the container the way the restic step above
+      # does, over a daemon connection every other step in this job has already
+      # proven, and its failures name what actually broke.
+      #
+      # promtool runs first because Prometheus answers a rejected reload with
+      # the parse error in the response *body*, which busybox wget (this image
+      # is busybox-based) discards along with any non-2xx response; promtool
+      # reports the same failure on stdout. `--post-data=` is what makes wget
+      # POST at all - the endpoint refuses GET - and the `=` form is deliberate:
+      # `--post-data ''` as two tokens is at the mercy of Windows PowerShell's
+      # habit of dropping empty arguments to native commands.
       - name: Reload Prometheus config
+        working-directory: .
         shell: powershell
-        run: Invoke-WebRequest -Method Post -Uri http://localhost:9090/-/reload -UseBasicParsing | Out-Null
+        run: |
+          $compose = @(
+            "-f", "compose.prod.yml",
+            "-f", "compose.observability.yml",
+            "-f", "compose.metrics.yml",
+            "-f", "compose.backup.yml"
+          )
+
+          docker compose @compose exec -T prometheus promtool check config /etc/prometheus/prometheus.yml
+          if ($LASTEXITCODE -ne 0) { throw "prometheus.yml failed promtool validation with exit code $LASTEXITCODE; the running config was left alone" }
+
+          docker compose @compose exec -T prometheus wget -q -O - --post-data= http://127.0.0.1:9090/-/reload
+          if ($LASTEXITCODE -ne 0) {
+            docker compose @compose logs --tail=40 prometheus
+            throw "POST /-/reload failed with exit code $LASTEXITCODE (prometheus logs above)"
+          }

@@ -117,6 +117,9 @@ void AddHaClient<TClient>() where TClient : BaseClient =>
 // Services
 builder.Services.AddTransient<IEnvironmentService, EnvironmentService>();
 builder.Services.AddSingleton<IDocsService, DocsService>();
+// Singleton so the parsed index.html is read once per replica rather than once
+// per poll - every kiosk tablet hits this on a timer for as long as it's up.
+builder.Services.AddSingleton<IAppVersionService, AppVersionService>();
 
 // Dashboard data services
 builder.Services.AddSingleton<IForecastService, ForecastService>();
@@ -273,7 +276,27 @@ if (Directory.Exists(appsPath))
     app.UseStaticFiles(new StaticFileOptions
     {
         FileProvider = appsFiles,
-        RequestPath = "/apps"
+        RequestPath = "/apps",
+        // Without an explicit Cache-Control, StaticFileMiddleware sends only
+        // ETag/Last-Modified, which leaves a browser free to apply *heuristic*
+        // freshness and serve index.html from cache without revalidating. On
+        // the kiosk tablets that turned a deploy into a no-op even across a
+        // reload, because the stale index.html kept naming the stale bundle.
+        //
+        // Vite content-hashes everything under assets/ (index-BGJobmXl.js), so
+        // those URLs are immutable by construction and can be cached hard. The
+        // documents that *reference* them - index.html above all - must be
+        // revalidated every time, which is what no-cache means (revalidate
+        // before reuse), as opposed to no-store (never keep a copy at all): a
+        // 304 on an unchanged index.html still costs nothing.
+        OnPrepareResponse = ctx =>
+        {
+            var path = ctx.Context.Request.Path.Value ?? string.Empty;
+            ctx.Context.Response.Headers.CacheControl =
+                path.Contains("/assets/", StringComparison.Ordinal)
+                    ? "public, max-age=31536000, immutable"
+                    : "no-cache";
+        },
     });
 }
 

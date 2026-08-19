@@ -112,6 +112,21 @@ jobs:
           fi
           echo "$found kustomization(s) built."
 
+      # The cluster plan Phase 5b.14 - nothing else here builds charts/aerie
+      # before the cluster does. `kubectl kustomize` above never touches it:
+      # deploy/cluster/apps/helmrelease.yaml is an ordinary manifest pointing
+      # at the chart, not a render of it, so a template that doesn't parse or
+      # a values.yaml that doesn't match its own defaults would otherwise
+      # reach helm-controller undetected. Unpinned, same reasoning as
+      # `kubectl kustomize`'s own comment above: this is a lint whose worst
+      # failure is a false red, not provisioning tooling whose version
+      # changes what a node becomes.
+      - name: Lint and render the aerie chart
+        run: |
+          set -euo pipefail
+          helm lint charts/aerie
+          helm template charts/aerie > /dev/null
+
       # The half of the cluster plan 3b.13's portability check that can be made
       # without knowing this installation's values: no address literal reaches
       # deploy/ at all. The other half - that the base domain and the VIP appear

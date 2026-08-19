@@ -55,7 +55,10 @@ services:
     # after every deploy. Compose recreates a service only when the service
     # definition itself changes, not when a bind-mounted file's contents
     # change — a prometheus.yml-only edit would otherwise leave this
-    # container running its old, already-loaded config indefinitely.
+    # container running its old, already-loaded config indefinitely. That
+    # call comes from inside the container (`docker compose exec`), not
+    # through the published port below, so the flag is still required even
+    # though nothing on the deploy path depends on the port mapping.
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
