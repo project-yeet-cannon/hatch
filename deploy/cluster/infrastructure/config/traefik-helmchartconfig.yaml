@@ -163,6 +163,41 @@ spec:
             # is load-bearing on its own; there is no install-time failure
             # underneath it to catch a mistake.
             enabled: true
+    metrics:
+      prometheus:
+        service:
+          # The cluster plan Phase 6b.6 - the half of Traefik's metrics scrape
+          # that belongs to this layer rather than to
+          # ../../observability/config/scrape/traefik.yaml. Prometheus
+          # support is already on by default in this chart (values.yaml:
+          # "Prometheus is enabled by default. It can be disabled by setting
+          # 'prometheus: null'"), so the traefik container is already serving
+          # /metrics on its own `metrics` entryPoint (port 9100) with no
+          # change here - what is missing is a Service to reach it through,
+          # since metrics.prometheus.service.enabled defaults to false.
+          #
+          # Allowed in this layer under
+          # ../../observability/config/scrape/kustomization.yaml's own rule:
+          # templates/service-metrics.yaml renders a plain v1 Service, a type
+          # every cluster understands from its first boot, not a
+          # monitoring.coreos.com object - unlike
+          # metrics.prometheus.serviceMonitor.enabled, which stays at the
+          # chart's default (false) precisely because it would render a
+          # ServiceMonitor from inside k3s's own bundled helm-controller, long
+          # before observability-controllers has registered that CRD. The
+          # ServiceMonitor that actually scrapes this Service is the
+          # hand-written object in ../../observability/config/scrape/
+          # traefik.yaml, in the phase 6 layer where every instance of that
+          # CRD in this repository lives.
+          #
+          # Verified against templates/service-metrics.yaml and
+          # templates/_service-metrics.tpl at the pinned
+          # traefik-40.1.4+up40.1.0 (upstream v40.1.0): the rendered Service
+          # is named via the chart's service-name helper, selects the same
+          # pods the main `traefik` Service does, and exposes a port literally
+          # named `metrics` - the port name traefik.yaml's ServiceMonitor
+          # scrapes.
+          enabled: true
     providers:
       kubernetesIngress:
         publishedService:

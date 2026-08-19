@@ -149,19 +149,35 @@ spec:
       clusterWide: true
 
     # ---------------------------------------------------------------------
-    # Monitoring - off until Phase 6 exists to receive it
+    # Monitoring - answered "no", not "yes", now that Phase 6 exists
     # ---------------------------------------------------------------------
     monitoring:
       # Already the default, and written out because of what the alternative
-      # costs *today*: the template renders a monitoring.coreos.com/v1
-      # PodMonitor, and nothing has registered that type until Phase 6 installs
-      # the Prometheus operator. An unknown kind is a failed Helm install, and
+      # costs *today* (this note's original concern, from before Phase 6
+      # existed): the template renders a monitoring.coreos.com/v1 PodMonitor,
+      # and nothing had registered that type until Phase 6 installed the
+      # Prometheus operator. An unknown kind is a failed Helm install, and
       # this layer reconciles with wait: true, so it would not fail alone - it
       # would hold every other component in this directory, and infra-config
-      # behind them, on a metrics scrape config.
+      # behind them, on a metrics scrape config. That hazard is exactly what
+      # docs/plans/swarm/phase-6-observability.md's re-scope preamble names as
+      # the reason no chart flag in this repository that renders a
+      # monitoring.coreos.com object is ever turned on in a layer-1 controller
+      # file - this one included.
       #
-      # Phase 6 flips this to true once the CRD exists. The queries the scrape
-      # would collect are already installed either way - see note 3.
+      # Phase 6 has since landed, and this note is now answered: it stays
+      # false, permanently, not only until the CRD existed. This flag governs
+      # a PodMonitor for the *operator's own* controller-manager pod in
+      # cnpg-system, not for the Postgres instances this operator manages -
+      # and the operator's own reconcile-loop metrics were never the point.
+      # What 6b.6 actually needed was a PodMonitor over the instance pods
+      # themselves, in `aerie`, which it added by hand at
+      # ../../observability/config/scrape/cloudnative-pg.yaml rather than by
+      # flipping this value - see that file's own comment for why a
+      # hand-written object was the answer even after the CRD this flag needs
+      # was no longer missing. The ~480 lines of exporter queries below (note
+      # 3) are scraped through that object regardless of what this flag is
+      # set to.
       podMonitorEnabled: false
 
     # ---------------------------------------------------------------------

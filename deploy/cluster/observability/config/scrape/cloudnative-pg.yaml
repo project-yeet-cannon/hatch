@@ -1,0 +1,44 @@
+# The cluster plan Phase 6b.6, target 3 of 5 - CNPG's Postgres instances.
+#
+# ../../../infrastructure/controllers/cloudnative-pg.yaml (3b.12) left
+# `monitoring.podMonitorEnabled: false` with a note pointing here - see that
+# file's own comment for why the answer stayed "no" rather than becoming
+# "yes" once this layer's CRDs existed. That chart value is the *operator's*
+# own PodMonitor (its controller-manager pod, in cnpg-system); it has no
+# bearing on this object, which targets the Postgres instance pods
+# themselves, in `aerie`. The exporter this scrapes runs inside every
+# instance's own instance-manager process on port 9187 regardless of that
+# flag - what was missing was only ever an object to scrape it with, per
+# CloudNativePG's own current guidance (the Cluster-level
+# spec.monitoring.enablePodMonitor toggle is deprecated upstream in favor of
+# a hand-written PodMonitor of exactly this shape:
+# https://cloudnative-pg.io/documentation/current/monitoring/). ../../../data/
+# cluster/cluster.yaml's own `monitoring.enablePodMonitor: false` stays as it
+# is for the same reason - this object supersedes it rather than complementing
+# it.
+#
+# `cnpg.io/cluster: aerie-pg` is the label CNPG's instance manager stamps on
+# every pod it creates for that Cluster (../../../data/cluster/cluster.yaml),
+# not a label this repository invents - selecting on it is what makes this
+# object track instance count automatically as Phase 7 raises
+# POSTGRES_INSTANCES from 2 to 3, with no edit here.
+#
+# The ~480 lines of queries these pods answer with - replication lag, the WAL
+# archiver, per-database size, xid age - are already installed by the chart's
+# cnpg-default-monitoring ConfigMap regardless of this object; this is the
+# only thing that was ever missing. 6b.8's replication-lag and instance-count
+# alerts read this job.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: cloudnative-pg
+  namespace: observability
+spec:
+  namespaceSelector:
+    matchNames:
+      - aerie
+  selector:
+    matchLabels:
+      cnpg.io/cluster: aerie-pg
+  podMetricsEndpoints:
+    - port: metrics

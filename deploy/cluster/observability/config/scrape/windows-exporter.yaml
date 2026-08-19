@@ -1,0 +1,32 @@
+# The cluster plan Phase 6b.6, target 1 of 5 - the three Windows hosts.
+#
+# A ScrapeConfig rather than prometheus.prometheusSpec.additionalScrapeConfigs
+# (../../controllers/kube-prometheus-stack.yaml): the latter is a blob inside
+# the HelmRelease's own values, so adding or moving a host means editing the
+# release and re-rolling every Prometheus container: this is one small object
+# in a layer that already holds objects, and a target list that changes
+# without touching the chart that installs Prometheus at all.
+#
+# targets below is 6b.2's WINDOWS_EXPORTER_TARGETS, substituted textually by
+# Flux's postBuild before this file is even parsed as YAML - see
+# scripts/k3s/cluster-config.json's own entry and 3b.3's ConfigMap key for the
+# full argument. The value already carries its own brackets and quotes
+# (`["10.0.0.11:9182","10.0.0.12:9182","10.0.0.13:9182"]`), so the substituted
+# result is a plain YAML flow sequence in this position - do not add brackets
+# here, the token supplies them.
+#
+# These are the physical machines, scraped from inside the cluster instead of
+# from a container on the same host (6a.2) - still worth it after everything
+# else moved into VMs, because a failing disk or a thermal problem is a
+# property of the host, and the cluster's view of it is a VM that got slow.
+# windows-exporter.json (../dashboards/, 6b.7) reads this job by its metric
+# names, not by this object's name, so nothing here has to match the old
+# compose job_name (`windows-exporter`) for the dashboard to keep working.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: windows-exporter
+  namespace: observability
+spec:
+  staticConfigs:
+    - targets: ${WINDOWS_EXPORTER_TARGETS}

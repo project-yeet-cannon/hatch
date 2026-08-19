@@ -616,7 +616,7 @@ gate.
       disables above; `kubectl get crd | grep monitoring.coreos.com` lists
       `servicemonitors`, `podmonitors`, `scrapeconfigs`, `prometheusrules`.
 
-- [ ] **6. Every scrape target, as an object in this layer** —
+- [x] **6. Every scrape target, as an object in this layer** —
       `deploy/cluster/observability/config/scrape/`. The step the re-scope
       preamble's first bullet exists for.
 
