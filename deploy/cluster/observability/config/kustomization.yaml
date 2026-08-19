@@ -6,11 +6,17 @@
 # Empty from 6b.4 to 6b.5: nothing here yet, because nothing in ../controllers
 # had registered a CRD to be an instance of. scrape/ (6b.6) is the first
 # tenant, now that ../controllers/kube-prometheus-stack.yaml (6b.5) has
-# registered ScrapeConfig, ServiceMonitor and PodMonitor. Still to come: 6b.7
-# (dashboards/), 6b.8 (alerts/), 6b.9 (ingress-logs.yaml), 6b.11
-# (provisioning/) and 6b.12 (static-monitors-configmap.yaml,
-# ingress-status.yaml).
+# registered ScrapeConfig, ServiceMonitor and PodMonitor. dashboards/ (6b.7)
+# needs no CRD - its ConfigMaps are plain v1 objects, found by the 6b.5
+# sidecar's label selector rather than by anything this layer's `wait: true`
+# boundary is about - but it lives here rather than in ../controllers because
+# the dashboards themselves are content, not plumbing, the same distinction
+# that puts ../controllers/admin-secrets.yaml's two Secrets there instead of
+# here for the opposite reason (a HelmRelease mounts them). Still to come:
+# 6b.8 (alerts/), 6b.9 (ingress-logs.yaml), 6b.11 (provisioning/) and 6b.12
+# (static-monitors-configmap.yaml, ingress-status.yaml).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - scrape/
+  - dashboards/

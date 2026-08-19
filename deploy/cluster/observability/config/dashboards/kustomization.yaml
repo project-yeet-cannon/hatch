@@ -1,0 +1,91 @@
+# The cluster plan Phase 6b.7 - every dashboard the 6b.5 sidecar loads, each
+# as its own labelled ConfigMap. ../kustomization.yaml's sidecar.dashboards
+# (grafana_dashboard: "1", searchNamespace: ALL) is what turns a ConfigMap
+# carrying that label into a dashboard Grafana shows, with no volume and no
+# restart - the four generators below exist only to attach that label
+# consistently, not to transform the JSON.
+#
+# disableNameSuffixHash: true, matching ../../../data/schema/kustomization.yaml's
+# own configMapGenerator use - a hashed name is the kustomize default so that
+# a ConfigMap edit forces every consumer to roll, which matters for a Job's
+# immutable pod template but buys nothing here: the sidecar polls and reloads
+# on an unchanged name, so a hash suffix would only mean the previous
+# revision's ConfigMap is orphaned in the cluster on every edit instead of
+# updated in place.
+#
+# Of the two dashboards containers/grafana/provisioning/dashboards/ has
+# carried since the compose era, only one is here. windows-exporter.json
+# moves across unchanged - same exporter, same metric names, same three
+# machines, already pinned to the fixed datasource uid `prometheus` that
+# ../../controllers/kube-prometheus-stack.yaml's sidecar.datasources
+# provisions under that exact uid. docker-cadvisor.json does not: it groups
+# by compose container name against a standalone cadvisor container that has
+# no equivalent under containerd, where the kubelet has exposed
+# /metrics/cadvisor all along and kube-prometheus-stack already scrapes it.
+# Both compose files stay where they are, untouched, for the same reason
+# 6a.4's admin-secrets note gives for compose.observability.yml itself: the
+# old host keeps using them until Phase 7 deletes the compose files, and nothing
+# here has any bearing on what that host's own Grafana loads.
+#
+# longhorn.json, cloudnative-pg.json and flux.json are what the old host could
+# never show - pinned by copying the upstream JSON into the repo rather than
+# by Grafana's gnetId fetch-at-runtime mechanism, which would make every
+# Grafana pod start an outbound dependency on grafana.com or GitHub. Each
+# already carries its own `datasource`/`DS_PROMETHEUS` template variable of
+# type "datasource" (Grafana's own dashboard-import convention, not this
+# repo's), which is a live query against installed datasources evaluated on
+# every render - unlike ../../controllers/kube-prometheus-stack.yaml's fixed
+# uid: prometheus, it resolves correctly with no rewrite because this cluster
+# only ever registers the one Prometheus datasource the sidecar provisions.
+# Sourced from:
+#   - longhorn.json: grafana.com/grafana/dashboards/16888 (Longhorn Monitoring
+#     & Backups) - volume health/robustness, backup coverage, per-node and
+#     per-disk capacity; the community dashboard the Longhorn project itself
+#     points operators at, by a wide margin over the alternatives.
+#   - cloudnative-pg.json: github.com/cloudnative-pg/grafana-dashboards,
+#     charts/cluster/grafana-dashboard.json - the project's own maintained
+#     dashboard, replication lag and instance count among its panels.
+#   - flux.json: github.com/fluxcd/flux2-monitoring-example,
+#     monitoring/configs/dashboards/cluster.json ("Flux Cluster Stats") - the
+#     project's own example, already cited by ../scrape/flux.yaml for the
+#     PodMonitor these panels read. Chosen over the same repo's
+#     control-plane.json (controller CPU/memory and throughput, not object
+#     health) because its "Failing Reconcilers" and "Suspended Objects" panels
+#     are the visual form of the exact metric - gotk_reconcile_condition -
+#     6b.8's FluxReconciliationFailing alert evaluates; logs.json needs Loki,
+#     which this phase does not run.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+configMapGenerator:
+  - name: dashboard-windows-exporter
+    namespace: observability
+    files:
+      - windows-exporter.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
+  - name: dashboard-longhorn
+    namespace: observability
+    files:
+      - longhorn.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
+  - name: dashboard-cloudnative-pg
+    namespace: observability
+    files:
+      - cloudnative-pg.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
+  - name: dashboard-flux
+    namespace: observability
+    files:
+      - flux.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
