@@ -31,7 +31,7 @@ spec:
         app.kubernetes.io/component: api
     spec:
       # 5b.1's dockerconfigjson Secret - without this every pod here is
-      # ImagePullBackOff, since ghcr.io/eouw0o83hf/aerie-api is private.
+      # ImagePullBackOff, since the api image lives in a private registry.
       imagePullSecrets:
         - name: {{ .Values.image.pullSecret }}
       # ScheduleAnyway, not DoNotSchedule: 3 replicas over the two-node build

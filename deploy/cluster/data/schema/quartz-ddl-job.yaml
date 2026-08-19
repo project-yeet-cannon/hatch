@@ -36,6 +36,17 @@ spec:
             - ON_ERROR_STOP=1
             - -f
             - /ddl/quartz-ddl.sql
+          # No 5a.6 measurement exists for a one-shot psql invocation; this is
+          # the same conservative floor the infra controllers use for the
+          # same reason (cert-manager.yaml, external-secrets.yaml) rather
+          # than a guess specific to this Job. Memory limit is 2x the
+          # request, matching every other limit in this repo.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
           env:
             - name: PGHOST
               valueFrom:
