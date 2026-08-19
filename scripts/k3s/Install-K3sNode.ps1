@@ -45,7 +45,12 @@
                      6b.1. Idempotent, and restarts k3s only when it is
                      already active and the config file actually changed -
                      a fresh install below picks the file up on its own
-                     first start.
+                     first start. Also symlinks /root/.kube/config to k3s's
+                     own kubeconfig, so kubectl and flux both work for root
+                     with no KUBECONFIG to remember while debugging from the
+                     node's own console - operator ergonomics, not a
+                     cluster plan step, and safe as a dangling link on a
+                     node that hasn't been installed yet.
       4. Install   - downloads and runs the pinned install script on the node
                      via sudo (the Phase 1 cloud-init user has
                      NOPASSWD:ALL sudo).
@@ -210,6 +215,17 @@ $desiredK3sConfig = @(
     ''
 ) -join "`n"
 
+# Operator ergonomics, not a cluster plan step: k3s writes its own kubeconfig
+# here on every server, but nothing points root at it, so a bare `kubectl` or
+# `flux` after `sudo -i` fails with a connection-refused rather than a
+# missing-config error - it just talks to the default localhost:8080 instead.
+# `k3s kubectl` (used everywhere else in scripts/) doesn't need this; plain
+# kubectl and flux both do, and 6b.4's debugging-while-building-the-stack is
+# exactly when an operator reaches for them on the node's own console.
+$kubeconfigLinkDir = '/root/.kube'
+$kubeconfigLinkPath = '/root/.kube/config'
+$k3sYamlPath = '/etc/rancher/k3s/k3s.yaml'
+
 $tempKeyFile = $null
 $knownHostsFile = $null
 $startedUtc = (Get-Date).ToUniversalTime()
@@ -314,8 +330,10 @@ try {
             'test -f {0} && {{ base64 -w0 {0}; echo; }} || echo NONE'
             'echo ''--- k3s-config'''
             'test -f {1} && {{ base64 -w0 {1}; echo; }} || echo NONE'
+            'echo ''--- kubeconfig-link'''
+            'sudo test -L {2} && sudo readlink {2} || echo NONE'
             'echo ''--- end'''
-        ) -join '; ') -f $sysctlDropInPath, $k3sConfigPath
+        ) -join '; ') -f $sysctlDropInPath, $k3sConfigPath, $kubeconfigLinkPath
 
     $probe = Invoke-NodeSsh @ssh -Command $probeScript -ConnectTimeoutSec 15
     if ($probe.ExitCode -ne 0) {
@@ -330,6 +348,7 @@ try {
     $liveMaxMapCount = (Get-ProbeSection -Output $probe.StdOut -Name 'sysctl').Trim()
     $currentSysctlFile = ConvertFrom-RemoteFileProbe -Encoded (Get-ProbeSection -Output $probe.StdOut -Name 'sysctl-file')
     $currentK3sConfig = ConvertFrom-RemoteFileProbe -Encoded (Get-ProbeSection -Output $probe.StdOut -Name 'k3s-config')
+    $currentKubeconfigLinkTarget = (Get-ProbeSection -Output $probe.StdOut -Name 'kubeconfig-link').Trim()
 
     Write-Host "k3s.service: $serviceState"
     Write-Host "k3s binary:  $installedVersion"
@@ -402,6 +421,26 @@ try {
         }
         $configActions.Add("wrote $k3sConfigPath")
         Write-Host "$k3sConfigPath written."
+    }
+
+    # Not a Phase 6b.1 setting - tracked in its own list so the phase-gate
+    # messaging below stays about what that step actually asserts.
+    $kubeconfigActions = New-Object Collections.Generic.List[string]
+    if ($currentKubeconfigLinkTarget -eq $k3sYamlPath) {
+        Write-Host "$kubeconfigLinkPath already links to $k3sYamlPath - not rewriting."
+    }
+    else {
+        # No target-exists check needed: a symlink to a file that doesn't
+        # exist yet is valid and simply resolves once Install below runs for
+        # the first time (or already has, on a re-run).
+        $linkKubeconfig = Invoke-NodeSsh @ssh -ConnectTimeoutSec 15 -Command (
+            'sudo mkdir -p {0} && sudo ln -sf {1} {2}' -f $kubeconfigLinkDir, $k3sYamlPath, $kubeconfigLinkPath
+        )
+        if ($linkKubeconfig.ExitCode -ne 0) {
+            throw "Linking $kubeconfigLinkPath to $k3sYamlPath failed on $IPAddress (exit $($linkKubeconfig.ExitCode)):`n$($linkKubeconfig.StdOut)$($linkKubeconfig.StdErr)"
+        }
+        $kubeconfigActions.Add("linked $kubeconfigLinkPath -> $k3sYamlPath")
+        Write-Host "$kubeconfigLinkPath -> $k3sYamlPath."
     }
 
     if ($alreadyActive -and $k3sConfigChanged) {
@@ -539,6 +578,12 @@ try {
         Write-Host 'Phase 6b.1 node settings changed:'
         foreach ($action in $configActions) { Write-Host "  - $action" }
     }
+    if ($kubeconfigActions.Count -eq 0) {
+        Write-Host "Root's kubeconfig: already linked ($kubeconfigLinkPath -> $k3sYamlPath)."
+    }
+    else {
+        Write-Host "Root's kubeconfig: $($kubeconfigActions -join '; ')."
+    }
 
     if (-not $wasAlreadyActive) {
         Write-Host ''
@@ -570,6 +615,8 @@ try {
             "| Elapsed | ${elapsed} min |"
             ''
             "**Phase 6b.1 node settings:** $(if ($configActions.Count -eq 0) { 'already matched - nothing changed' } else { ($configActions -join '; ') })"
+            ''
+            "**Root's kubeconfig:** $(if ($kubeconfigActions.Count -eq 0) { "already linked ($kubeconfigLinkPath -> $k3sYamlPath)" } else { ($kubeconfigActions -join '; ') })"
             ''
             '<details><summary>kubectl get nodes -o wide</summary>'
             ''
