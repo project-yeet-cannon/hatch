@@ -45,6 +45,7 @@ jobs:
           tags: |
             type=raw,value=latest
             type=raw,value=${{ github.sha }}
+            type=raw,value={{date 'YYYYMMDDHHmmss'}}-{{sha}}
 
       - name: Build Docker image
         uses: docker/build-push-action@v7
@@ -416,6 +417,7 @@ jobs:
           tags: |
             type=raw,value=latest
             type=raw,value=${{ github.sha }}
+            type=raw,value={{date 'YYYYMMDDHHmmss'}}-{{sha}}
 
       - name: Build Docker image
         uses: docker/build-push-action@v7

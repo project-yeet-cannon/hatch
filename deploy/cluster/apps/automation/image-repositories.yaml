@@ -1,0 +1,31 @@
+# The cluster plan Phase 5b.12, part 3 - one ImageRepository per image this
+# repository builds, telling image-reflector-controller what to scan.
+#
+# Namespace flux-system, not aerie: these are Flux control objects, the same
+# reasoning ../helmrelease.yaml's own header gives for living there.
+#
+# secretRef names ghcr-pull, 5b.1's dockerconfigjson Secret - specifically the
+# flux-system copy of it, which is what that step's second namespace
+# (aerie for the kubelet, flux-system for this controller) was for. Scanning
+# a private repository needs the same credential a pod needs to pull from it.
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: aerie-api
+  namespace: flux-system
+spec:
+  image: ${IMAGE_REGISTRY}/aerie-api
+  interval: 5m
+  secretRef:
+    name: ghcr-pull
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: kiosk-files
+  namespace: flux-system
+spec:
+  image: ${IMAGE_REGISTRY}/aerie-kiosk-files
+  interval: 5m
+  secretRef:
+    name: ghcr-pull

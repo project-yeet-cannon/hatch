@@ -340,10 +340,17 @@ try {
 
     # No --components: the default set is exactly what `flux bootstrap` would
     # have installed (source, kustomize, helm and notification controllers).
-    # Nothing here touches git, so this needs no credential of any kind.
+    # --components-extra adds two more on top of that default set rather than
+    # replacing it: image-reflector-controller (reads tags from the registry)
+    # and image-automation-controller (the cluster plan Phase 5b.12's write
+    # path). Neither touches this repository - image-automation-controller's
+    # only write credential is aerie-site-git, scoped to the private
+    # per-installation site repo (docs/plans/swarm/phase-5-app-tier.md 5a.3) -
+    # so this still needs no credential of any kind.
     $installArgs = @(
         'install'
         "--version=$FluxVersion"
+        '--components-extra=image-reflector-controller,image-automation-controller'
         "--timeout=${SyncTimeoutMinutes}m"
     )
 
