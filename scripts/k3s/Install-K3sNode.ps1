@@ -311,9 +311,9 @@ try {
             'echo ''--- sysctl'''
             'sysctl -n vm.max_map_count 2>/dev/null || echo 0'
             'echo ''--- sysctl-file'''
-            'test -f {0} && { base64 -w0 {0}; echo; } || echo NONE'
+            'test -f {0} && {{ base64 -w0 {0}; echo; }} || echo NONE'
             'echo ''--- k3s-config'''
-            'test -f {1} && { base64 -w0 {1}; echo; } || echo NONE'
+            'test -f {1} && {{ base64 -w0 {1}; echo; }} || echo NONE'
             'echo ''--- end'''
         ) -join '; ') -f $sysctlDropInPath, $k3sConfigPath
 
