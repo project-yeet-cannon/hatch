@@ -20,6 +20,14 @@
 # GitHub-hosted runner (which has no route to these LAN addresses anyway) and
 # never consume Actions minutes.
 #
+# Also the mechanism behind the cluster plan's Phase 6b.1: re-dispatching this
+# workflow against a node that already joined reconciles vm.max_map_count and
+# etcd-expose-metrics without a full reinstall (Install-K3sNode.ps1's "Node
+# configuration" stage), restarting k3s only if the config actually changed.
+# Dispatch it once per node, one at a time, waiting for `kubectl get nodes` to
+# show every node Ready before reconfiguring the next - see
+# docs/plans/swarm/phase-6-observability.md (6b.1) for why.
+#
 # Previous step: provision-0-new-node.yml, once the node answers SSH.
 # Next step: provision-2-seed-secrets.yml, then provision-3-bootstrap-flux.yml.
 name: 'Provision 1: Install k3s'

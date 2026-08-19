@@ -23,6 +23,13 @@
     for the first server (forms the single-node etcd cluster); use
     -JoinServer <node1-ip> for every server after that.
 
+    This is also how the cluster plan's Phase 6b.1 lands: re-dispatching
+    against a node that is already active reconciles vm.max_map_count and
+    etcd-expose-metrics without a full reinstall, restarting k3s only if the
+    config file actually changed. Dispatch one node at a time and wait for
+    every node to show Ready before reconfiguring the next - with two
+    servers, quorum is 2 of 2 until Phase 7.
+
     Stages:
       1. Preflight - SSH key resolves, the OpenSSH client is present, the
                      node answers port 22, and (for -JoinServer) the target
@@ -32,11 +39,19 @@
       2. Inspect   - checks whether k3s is already active on the node. If so,
                      the install is skipped (idempotent re-run) unless
                      -Reinstall forces a clean uninstall/reinstall.
-      3. Install   - downloads and runs the pinned install script on the node
+      3. Node configuration - writes the vm.max_map_count sysctl drop-in
+                     (applied live too) and /etc/rancher/k3s/config.yaml's
+                     etcd-expose-metrics, both from the cluster plan Phase
+                     6b.1. Idempotent, and restarts k3s only when it is
+                     already active and the config file actually changed -
+                     a fresh install below picks the file up on its own
+                     first start.
+      4. Install   - downloads and runs the pinned install script on the node
                      via sudo (the Phase 1 cloud-init user has
                      NOPASSWD:ALL sudo).
-      4. Verify    - polls until the k3s.service is active and this node's
-                     own name shows Ready in `k3s kubectl get nodes`, then
+      5. Verify    - polls until the k3s.service is active and this node's
+                     own name shows Ready in `k3s kubectl get nodes`, checks
+                     vm.max_map_count and etcd's :2381 metrics endpoint, then
                      prints the full node list.
 
 .PARAMETER K3sVersion
@@ -140,6 +155,61 @@ function Write-Stage {
     Write-Host "=== [$script:StageNumber] $Message ===" -ForegroundColor Cyan
 }
 
+function Get-ProbeSection {
+    <#
+    .SYNOPSIS
+        Pulls one '--- name' section out of combined probe output - the same
+        marker shape Initialize-NodeStorage.ps1 uses, for the same reason: one
+        SSH round trip for everything a stage reasons about, rather than one
+        per fact.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Output,
+        [Parameter(Mandatory)][string]$Name
+    )
+    $lines = @($Output -split "`r?`n")
+    $collected = New-Object Collections.Generic.List[string]
+    $inSection = $false
+    foreach ($line in $lines) {
+        if ($line.TrimEnd() -eq "--- $Name") { $inSection = $true; continue }
+        if ($line -match '^--- \S+$') { if ($inSection) { break }; continue }
+        if ($inSection) { $collected.Add($line) }
+    }
+    return ($collected -join "`n").Trim()
+}
+
+function ConvertFrom-RemoteFileProbe {
+    <#
+    .SYNOPSIS
+        Decodes a probed file's base64, or returns $null for the 'NONE'
+        sentinel the probe emits when the file does not exist yet.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Encoded)
+    if ([string]::IsNullOrWhiteSpace($Encoded) -or $Encoded -eq 'NONE') { return $null }
+    return [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Encoded))
+}
+
+# Phase 6b.1's two node-level settings. Fixed, not parameters: both values are
+# structural - OpenSearch's bootstrap check and k3s's own default are what set
+# them, not this installation's preference - so a knob here would just be a
+# second place either could drift from the plan.
+$sysctlDropInPath = '/etc/sysctl.d/60-aerie-opensearch.conf'
+$desiredSysctlFile = @(
+    '# Managed by Aerie: scripts/k3s/Install-K3sNode.ps1 (the cluster plan Phase 6b.1).'
+    '# OpenSearch (6b.9) refuses to start below this - the Linux default is 65530.'
+    'vm.max_map_count=262144'
+    ''
+) -join "`n"
+
+$k3sConfigPath = '/etc/rancher/k3s/config.yaml'
+$desiredK3sConfig = @(
+    '# Managed by Aerie: scripts/k3s/Install-K3sNode.ps1 (the cluster plan Phase 6b.1).'
+    '# k3s defaults this to false, leaving etcd metrics on :2381 unreachable - the'
+    '# quorum alert in 6b.8 has nothing to evaluate without it.'
+    'etcd-expose-metrics: true'
+    ''
+) -join "`n"
+
 $tempKeyFile = $null
 $knownHostsFile = $null
 $startedUtc = (Get-Date).ToUniversalTime()
@@ -233,18 +303,43 @@ try {
     Write-Stage 'Inspect existing state'
     # ---------------------------------------------------------------- #
 
-    $probe = Invoke-NodeSsh @ssh -Command "(systemctl is-active k3s 2>/dev/null || echo inactive); (command -v k3s >/dev/null 2>&1 && k3s --version 2>/dev/null | head -n1) || echo 'k3s not installed'; true" -ConnectTimeoutSec 15
+    $probeScript = (@(
+            'echo ''--- service'''
+            'systemctl is-active k3s 2>/dev/null || echo inactive'
+            'echo ''--- version'''
+            '(command -v k3s >/dev/null 2>&1 && k3s --version 2>/dev/null | head -n1) || echo ''k3s not installed'''
+            'echo ''--- sysctl'''
+            'sysctl -n vm.max_map_count 2>/dev/null || echo 0'
+            'echo ''--- sysctl-file'''
+            'test -f {0} && base64 -w0 {0} || echo NONE'
+            'echo ''--- k3s-config'''
+            'test -f {1} && base64 -w0 {1} || echo NONE'
+            'echo ''--- end'''
+        ) -join '; ') -f $sysctlDropInPath, $k3sConfigPath
+
+    $probe = Invoke-NodeSsh @ssh -Command $probeScript -ConnectTimeoutSec 15
     if ($probe.ExitCode -ne 0) {
         $permanentReason = Get-SshPermanentFailureReason -StdErr $probe.StdErr
         throw "SSH to $IPAddress as '$Username' failed$(if ($permanentReason) { ": $permanentReason" }):`n$($probe.StdErr)"
     }
-    $probeLines = @(($probe.StdOut -split "`r?`n") | Where-Object { $_.Trim() })
-    $serviceState = if ($probeLines.Count -ge 1) { $probeLines[0].Trim() } else { 'unknown' }
-    $installedVersion = if ($probeLines.Count -ge 2) { $probeLines[1].Trim() } else { 'unknown' }
+
+    $serviceState = (Get-ProbeSection -Output $probe.StdOut -Name 'service').Trim()
+    if (-not $serviceState) { $serviceState = 'unknown' }
+    $installedVersion = (Get-ProbeSection -Output $probe.StdOut -Name 'version').Trim()
+    if (-not $installedVersion) { $installedVersion = 'unknown' }
+    $liveMaxMapCount = (Get-ProbeSection -Output $probe.StdOut -Name 'sysctl').Trim()
+    $currentSysctlFile = ConvertFrom-RemoteFileProbe -Encoded (Get-ProbeSection -Output $probe.StdOut -Name 'sysctl-file')
+    $currentK3sConfig = ConvertFrom-RemoteFileProbe -Encoded (Get-ProbeSection -Output $probe.StdOut -Name 'k3s-config')
+
     Write-Host "k3s.service: $serviceState"
     Write-Host "k3s binary:  $installedVersion"
 
     $alreadyActive = $serviceState -eq 'active'
+    # Captured before -Reinstall can flip $alreadyActive below - it gates the
+    # Phase 2 checklist at the very end, which makes no sense to print for a
+    # run that only reconciled Phase 6b.1's node settings on an already-active
+    # node and never touched the install pipeline at all.
+    $wasAlreadyActive = $alreadyActive
     if ($alreadyActive -and $Reinstall) {
         Write-Warning "-Reinstall: k3s is active on '$VMName' - running its uninstall script before reinstalling with today's inputs. If this is a server node and other servers are still up, it will not have removed itself from the etcd member list first."
         $uninstall = Invoke-NodeSsh @ssh -Command "test -x /usr/local/bin/k3s-uninstall.sh && sudo /usr/local/bin/k3s-uninstall.sh || echo 'no k3s-uninstall.sh found'" -ConnectTimeoutSec 60
@@ -253,6 +348,79 @@ try {
         }
         Write-Host '  uninstalled.'
         $alreadyActive = $false
+    }
+
+    # ---------------------------------------------------------------- #
+    Write-Stage 'Node configuration'
+    # ---------------------------------------------------------------- #
+    #
+    # The cluster plan Phase 6b.1's two node-level settings, applied here so
+    # they exist before k3s ever starts on a fresh node - see the doc for why
+    # neither can be a chart-side or in-cluster fix. Idempotent: a re-run
+    # against a node that already has both settings reports nothing changed.
+
+    $configActions = New-Object Collections.Generic.List[string]
+
+    if ($currentSysctlFile -eq $desiredSysctlFile) {
+        Write-Host "$sysctlDropInPath already matches - not rewriting."
+    }
+    else {
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($desiredSysctlFile))
+        $writeSysctlFile = Invoke-NodeSsh @ssh -ConnectTimeoutSec 30 -Command (
+            'sudo mkdir -p /etc/sysctl.d && echo {0} | base64 -d | sudo tee {1} >/dev/null' -f $encoded, $sysctlDropInPath
+        )
+        if ($writeSysctlFile.ExitCode -ne 0) {
+            throw "Writing $sysctlDropInPath on $IPAddress failed (exit $($writeSysctlFile.ExitCode)):`n$($writeSysctlFile.StdOut)$($writeSysctlFile.StdErr)"
+        }
+        $configActions.Add("wrote $sysctlDropInPath")
+        Write-Host "$sysctlDropInPath written."
+    }
+
+    if ($liveMaxMapCount -eq '262144') {
+        Write-Host 'vm.max_map_count: already 262144 live.'
+    }
+    else {
+        $applySysctl = Invoke-NodeSsh @ssh -Command 'sudo sysctl -w vm.max_map_count=262144' -ConnectTimeoutSec 15
+        if ($applySysctl.ExitCode -ne 0) {
+            throw "sudo sysctl -w vm.max_map_count=262144 failed on $IPAddress (exit $($applySysctl.ExitCode)):`n$($applySysctl.StdOut)$($applySysctl.StdErr)"
+        }
+        $configActions.Add("applied vm.max_map_count=262144 live (was $liveMaxMapCount)")
+        Write-Host "vm.max_map_count: applied live (was $liveMaxMapCount)."
+    }
+
+    $k3sConfigChanged = $currentK3sConfig -ne $desiredK3sConfig
+    if (-not $k3sConfigChanged) {
+        Write-Host "$k3sConfigPath already matches - not rewriting."
+    }
+    else {
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($desiredK3sConfig))
+        $writeK3sConfig = Invoke-NodeSsh @ssh -ConnectTimeoutSec 30 -Command (
+            'sudo mkdir -p /etc/rancher/k3s && echo {0} | base64 -d | sudo tee {1} >/dev/null' -f $encoded, $k3sConfigPath
+        )
+        if ($writeK3sConfig.ExitCode -ne 0) {
+            throw "Writing $k3sConfigPath on $IPAddress failed (exit $($writeK3sConfig.ExitCode)):`n$($writeK3sConfig.StdOut)$($writeK3sConfig.StdErr)"
+        }
+        $configActions.Add("wrote $k3sConfigPath")
+        Write-Host "$k3sConfigPath written."
+    }
+
+    if ($alreadyActive -and $k3sConfigChanged) {
+        # k3s only reads config.yaml at start, so a value change on a node
+        # that is already running does nothing until the service comes back -
+        # a restart, not the heavier -Reinstall (which also churns etcd
+        # membership, per its own notes above). A fresh install below picks
+        # the file up on its own first start, so this only fires when
+        # reconfiguring a node that joined in an earlier phase.
+        Write-Warning "Restarting k3s on '$VMName' to apply etcd-expose-metrics. With two servers, quorum is 2 of 2 until Phase 7 - wait for every node to show Ready (kubectl get nodes) before reconfiguring the next one."
+        $restart = Invoke-NodeSsh @ssh -Command 'sudo systemctl restart k3s' -ConnectTimeoutSec 30
+        if ($restart.ExitCode -ne 0) {
+            throw "systemctl restart k3s failed on $IPAddress (exit $($restart.ExitCode)):`n$($restart.StdOut)$($restart.StdErr)"
+        }
+        $configActions.Add('restarted k3s to apply etcd-expose-metrics')
+    }
+
+    if ($configActions.Count -eq 0) {
+        Write-Host 'Node configuration already matched Phase 6b.1 - nothing changed.'
     }
 
     if ($alreadyActive) {
@@ -319,6 +487,23 @@ try {
     }
     Write-Host '  node Ready.'
 
+    # Phase 6b.1's own exit criteria - checked here rather than left to the
+    # Phase 6 gate script, so a run that reports success actually satisfies
+    # them instead of finding out at 6b.5/6b.9, several steps and possibly
+    # days later.
+    Write-Host 'Verifying Phase 6b.1 node settings ...'
+    $maxMapCheck = Invoke-NodeSsh @ssh -Command 'sysctl -n vm.max_map_count' -ConnectTimeoutSec 15
+    if ($maxMapCheck.ExitCode -ne 0 -or $maxMapCheck.StdOut.Trim() -ne '262144') {
+        throw "vm.max_map_count on $IPAddress reads '$($maxMapCheck.StdOut.Trim())', not 262144. OpenSearch (6b.9) will refuse to start until this is fixed."
+    }
+    Write-Host '  vm.max_map_count: 262144.'
+
+    $etcdMetricsCheck = Invoke-NodeSsh @ssh -Command 'curl -s --max-time 5 http://127.0.0.1:2381/metrics | head -1' -ConnectTimeoutSec 15
+    if ($etcdMetricsCheck.ExitCode -ne 0 -or -not $etcdMetricsCheck.StdOut.Trim()) {
+        throw "etcd's metrics endpoint (127.0.0.1:2381) is not answering on $IPAddress. Confirm $k3sConfigPath has etcd-expose-metrics: true and that k3s restarted cleanly: ssh $Username@$IPAddress sudo journalctl -u k3s -n 100"
+    }
+    Write-Host '  etcd metrics endpoint (:2381): answering.'
+
     $nodeList = Invoke-NodeSsh @ssh -Command 'sudo k3s kubectl get nodes -o wide' -ConnectTimeoutSec 15
     Write-Host ''
     Write-Host $nodeList.StdOut.TrimEnd()
@@ -332,13 +517,23 @@ try {
     if (-not $ClusterInit) {
         Write-Warning 'Two-node embedded etcd has worse availability than one node (tolerates zero losses, not one) - the cluster plan flags this build window as non-production until the third server rejoins in Phase 7.'
     }
-    Write-Host ''
-    Write-Host 'Phase 2 checklist - confirm and tick off in docs/plans/swarm/phase-2-k3s-flux-secrets.md:'
-    Write-Host "  - this node installed and Ready                 (verified above)"
-    Write-Host '  - cluster token generated once, stored like the SSH keys, never in git'
-    Write-Host '  - node-to-node TCP ports open (6443/2379-2380/10250)   (verified above for -JoinServer runs; UDP 8472/flannel is not checked)'
-    Write-Host '  - Provision 2: seed secrets  (scripts/secrets/, once both nodes are up)'
-    Write-Host '  - Provision 3: bootstrap Flux (scripts/flux/)'
+    if ($configActions.Count -eq 0) {
+        Write-Host 'Phase 6b.1 node settings: already matched - nothing changed.'
+    }
+    else {
+        Write-Host 'Phase 6b.1 node settings changed:'
+        foreach ($action in $configActions) { Write-Host "  - $action" }
+    }
+
+    if (-not $wasAlreadyActive) {
+        Write-Host ''
+        Write-Host 'Phase 2 checklist - confirm and tick off in docs/plans/swarm/phase-2-k3s-flux-secrets.md:'
+        Write-Host "  - this node installed and Ready                 (verified above)"
+        Write-Host '  - cluster token generated once, stored like the SSH keys, never in git'
+        Write-Host '  - node-to-node TCP ports open (6443/2379-2380/10250)   (verified above for -JoinServer runs; UDP 8472/flannel is not checked)'
+        Write-Host '  - Provision 2: seed secrets  (scripts/secrets/, once both nodes are up)'
+        Write-Host '  - Provision 3: bootstrap Flux (scripts/flux/)'
+    }
 
     # A no-op outside Actions, which is the point: manual invocation is a
     # last resort here (see scripts/hyperv/README.md) and provision-1-install
@@ -358,6 +553,8 @@ try {
             "| k3s version | $tick$K3sVersion$tick ($script:K3sVersionSource) |"
             "| Reinstalled | $Reinstall |"
             "| Elapsed | ${elapsed} min |"
+            ''
+            "**Phase 6b.1 node settings:** $(if ($configActions.Count -eq 0) { 'already matched - nothing changed' } else { ($configActions -join '; ') })"
             ''
             '<details><summary>kubectl get nodes -o wide</summary>'
             ''
