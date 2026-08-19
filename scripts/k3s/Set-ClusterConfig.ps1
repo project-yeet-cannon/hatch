@@ -335,7 +335,27 @@ try {
                 $prefix = [int]$match.Groups[2].Value
                 $described.Add("$nodeAddress/$prefix")
                 if ($nodeAddress -eq $vip) {
-                    throw "INGRESS_VIP $vip is already $iface's own address on $IPAddress. The VIP is a second, floating address that moves between nodes - it can never be a node's real one, and giving kube-vip a node address to advertise takes that node off the network when the VIP moves."
+                    if ($prefix -eq 32) {
+                        # kube-vip's own ARP-mode advertisement, not a real
+                        # address of this node - see
+                        # deploy/cluster/infrastructure/controllers/kube-vip.yaml's
+                        # GlobalLeader footnote. Once a node is elected, it adds
+                        # the VIP to its own interface as a /32 host route,
+                        # which is indistinguishable from a real conflict by
+                        # address alone. Confirmed live, 2026-08-19: the leader
+                        # reports its real address at the LAN's actual prefix
+                        # and the VIP separately at /32, `scope global
+                        # deprecated`. A genuine operator error - INGRESS_VIP
+                        # typo'd to the node's own static or DHCP-leased
+                        # address - carries that real prefix instead, which the
+                        # branch below still catches. Without this carve-out,
+                        # Provision 4 could never be re-dispatched against a
+                        # cluster kube-vip is already serving from, which is
+                        # exactly what a post-3b.8 run - 6b.3's - needs to do.
+                        $onSubnet = $true
+                        continue
+                    }
+                    throw "INGRESS_VIP $vip is already $iface's own address on $IPAddress, as a /$prefix - not kube-vip's /32 VIP advertisement. The VIP is a second, floating address that moves between nodes - it can never be a node's real one, and giving kube-vip a node address to advertise takes that node off the network when the VIP moves."
                 }
                 if (Test-IpInSubnet -Address $vip -NetworkAddress $nodeAddress -PrefixLength $prefix) { $onSubnet = $true }
             }
