@@ -427,7 +427,10 @@ function RoutineForm({
             <ChannelSelect
               value={row.channelId}
               options={availableChannelOptions}
-              onSelect={(channelId) => updateAction(index, { channelId, value: '' })}
+              onSelect={(channelId) => {
+                const kind = channelOptions.find((o) => o.channelId === channelId)?.kind;
+                updateAction(index, { channelId, value: kind === 'SetPower' ? 'true' : '' });
+              }}
             />
             {option && <ActionValueInput option={option} value={row.value} onChange={(value) => updateAction(index, { ...row, value })} />}
             <button className="btn-secondary" disabled={index === 0} onClick={() => moveAction(index, -1)}>
@@ -454,7 +457,7 @@ function ActionValueInput({ option, value, onChange }: { option: ChannelOption; 
   switch (option.kind) {
     case 'SetPower':
       return (
-        <select value={value || 'true'} onChange={(e) => onChange(e.target.value)}>
+        <select value={value} onChange={(e) => onChange(e.target.value)}>
           <option value="true">Turn on</option>
           <option value="false">Turn off</option>
         </select>
