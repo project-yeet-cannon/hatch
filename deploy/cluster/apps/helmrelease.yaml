@@ -74,16 +74,22 @@ spec:
         tag: ${KIOSK_FILES_IMAGE_TAG}
     domain: ${DOMAIN}
     tz: ${TZ}
-    # Both optional (scripts/k3s/cluster-config.json) - an unset key expands
-    # to an empty string, which is exactly what charts/aerie/values.yaml's own
-    # haHost/haPort default to, so the chart's `{{- if .Values.haHost }}`
-    # guards render nothing rather than an empty HA_HOST.
-    haHost: ${HA_HOST}
-    haPort: ${HA_PORT}
-    # Also optional, same empty-means-unset behaviour - api-deployment.yaml's
-    # MediaLibrary__RootPath guard depends on this staying genuinely empty
-    # rather than collapsing to the share root.
-    mediaLibrarySubpath: ${MEDIA_LIBRARY_SUBPATH}
+    # Both optional (scripts/k3s/cluster-config.json) - when unset, the key is
+    # genuinely absent from the ConfigMap, not present with an empty value.
+    # kustomize-controller substitutes in strict mode (confirmed live: an
+    # absent key with no default fails the whole Kustomization - "variable
+    # not set (strict mode)" - it does not fall back to an empty string the
+    # way infrastructure.yaml's own comment assumes for the general case).
+    # The `:=` form is Flux's documented escape hatch: substitute the default
+    # when the variable is unset. Empty is exactly what
+    # charts/aerie/values.yaml's haHost/haPort already default to, so the
+    # chart's `{{- if .Values.haHost }}` guards still render nothing.
+    haHost: ${HA_HOST:=}
+    haPort: ${HA_PORT:=}
+    # Also optional, same absent-key-under-strict-mode reasoning -
+    # api-deployment.yaml's MediaLibrary__RootPath guard depends on this
+    # staying genuinely empty rather than collapsing to the share root.
+    mediaLibrarySubpath: ${MEDIA_LIBRARY_SUBPATH:=}
     share:
       host: ${SHARE_HOST}
       name: ${SHARE_NAME}

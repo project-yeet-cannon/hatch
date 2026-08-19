@@ -57,6 +57,29 @@ services:
       caddy_1.reverse_proxy: "{{upstreams 8080}}"
     logging: *container-log-tag
 
+  # One-off migration run, mirroring the k3s chart's pre-install/pre-upgrade
+  # Job (charts/aerie/templates/migrate-job.yaml): same image as `api`, in
+  # AERIE_MIGRATE=1 mode, run to completion ahead of `api` serving traffic
+  # (see cd.yml). A separate service rather than `docker compose run api`,
+  # specifically so it never carries `api`'s caddy labels - a container with
+  # those labels joins Caddy's upstream pool for home.${DOMAIN} the moment it
+  # exists, and this container never listens on 8080 (Program.cs returns
+  # before app.Run() in migrate mode). `profiles: [migrate]` keeps it out of
+  # plain `up`/`pull`, so it only ever runs when explicitly targeted.
+  api-migrate:
+    image: ghcr.io/eouw0o83hf/aerie-api:${IMAGE_TAG:-latest}
+    profiles:
+      - migrate
+    networks:
+      - local
+    environment:
+      - DOTNET_ENVIRONMENT=Docker
+      - AERIE_MIGRATE=1
+    depends_on:
+      db:
+        condition: service_healthy
+    logging: *container-log-tag
+
   files:
     image: ghcr.io/eouw0o83hf/aerie-kiosk-files:latest
     networks:

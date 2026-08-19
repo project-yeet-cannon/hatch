@@ -250,6 +250,20 @@ jobs:
           }
           docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml @shareArgs pull
           if ($LASTEXITCODE -ne 0) { throw "docker compose pull failed with exit code $LASTEXITCODE" }
+
+          # api-migrate (compose.prod.yml) runs the same api image in
+          # AERIE_MIGRATE=1 mode to completion before the stack serves
+          # traffic - the compose-side counterpart of the k3s chart's
+          # pre-install/pre-upgrade migrate Job. Since 6dc7a0c ("App changes
+          # for k3s app tier"), `api` no longer migrates on its own as a
+          # side effect of starting, on either stack - see api-migrate's
+          # comment in compose.prod.yml for why this isn't just
+          # `docker compose run api` instead. `run` also waits on
+          # api-migrate's `db` dependency per its `depends_on`, so db is
+          # already up for `up -d` below.
+          docker compose -f compose.prod.yml --profile migrate run --rm api-migrate
+          if ($LASTEXITCODE -ne 0) { throw "database migration failed with exit code $LASTEXITCODE" }
+
           docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml @shareArgs up -d
           if ($LASTEXITCODE -ne 0) { throw "docker compose up failed with exit code $LASTEXITCODE" }
 
