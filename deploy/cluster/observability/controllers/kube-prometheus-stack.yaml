@@ -1,0 +1,327 @@
+# The cluster plan Phase 6b.5 - Prometheus, its operator and CRDs, Alertmanager,
+# Grafana, node-exporter and kube-state-metrics, as one pinned HelmRelease. The
+# largest single object in this phase, and most of its length is turning things
+# off or pointing them at objects 6b.6-6b.8 have not been written yet.
+#
+# No Namespace here, unlike ../../infrastructure/controllers/longhorn.yaml and
+# cloudnative-pg.yaml: `observability` already exists, created by
+# ../../infrastructure/config/namespaces.yaml in infra-config - see this
+# directory's own kustomization.yaml for why it has to live there rather than
+# here. This chart does not create one of its own either; it installs into
+# whatever `.Release.Namespace` is, which the HelmRelease below sets.
+#
+# Two things read from ../../infrastructure/config/aerie-cluster-config, both
+# already required by the time this file lands: WINDOWS_EXPORTER_TARGETS is
+# 6b.6's, not this file's - kubeEtcd.endpoints below is the one substitution
+# this release itself makes. See scripts/k3s/cluster-config.json's
+# K3S_SERVER_ADDRESSES entry for why that value is a bare IP list with no port,
+# unlike WINDOWS_EXPORTER_TARGETS' host:port pairs.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: prometheus-community
+  namespace: observability
+spec:
+  # As everywhere else in this tree: the poll only discovers new versions, and
+  # the release below names one exactly, so nothing moves until a commit does.
+  interval: 1h
+  url: https://prometheus-community.github.io/helm-charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kube-prometheus-stack
+  namespace: observability
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: kube-prometheus-stack
+      # 88.3.0, appVersion v0.93.0 (the prometheus-operator release, which is
+      # what actually matters for CRD compatibility). Not the newest chart at
+      # the time this was pinned - 88.5.0 was one day old and 88.4.0 a few
+      # hours older than that - which is the same call
+      # ../../infrastructure/controllers/longhorn.yaml's own comment makes
+      # about a 1.12.1 that was a day old when its table was written: a chart
+      # this size (Prometheus, Alertmanager, Grafana, three subcharts and
+      # eleven CRDs in one release) is not where this repo spends its first
+      # week of soak on a line. kubeVersion is '>=1.25.0-0', comfortably under
+      # the v1.35.7+k3s1 pin in scripts/versions.json.
+      version: 88.3.0
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+  # Heavier than ../../infrastructure/controllers/cloudnative-pg.yaml's 4m -
+  # this pulls images for the operator, Prometheus, Alertmanager, Grafana, the
+  # config-reloader sidecar, kube-state-metrics and node-exporter, on top of
+  # eleven CRDs' worth of OpenAPI schema - but well short of
+  # ../../infrastructure/controllers/longhorn.yaml's 8m/12m, since nothing here
+  # is a privileged DaemonSet with instance-manager's image weight. 10m leaves
+  # 5m of margin inside observability-controllers' own 15m timeout.
+  timeout: 10m
+  install:
+    # 1, not ../../infrastructure/controllers/longhorn.yaml's 0. The CRDs live
+    # under this chart's crds/ subchart directory (charts/crds/crds/*.yaml),
+    # which is Helm's native CRD mechanism - installed once on `helm install`
+    # and never touched by `helm upgrade` or `helm uninstall`, with no
+    # resource-policy annotation needed because Helm does not delete from that
+    # directory at all. A remediated failed install therefore cannot take the
+    # CRDs, or the ServiceMonitors/PodMonitors/PrometheusRules 6b.6 and 6b.8
+    # write as instances of them, with it - the same low blast radius
+    # ../../infrastructure/controllers/cloudnative-pg.yaml's note 4 describes
+    # for its own (differently-delivered) CRDs, which is what makes retries:1
+    # the right default here rather than Longhorn's exception.
+    remediation:
+      retries: 1
+  upgrade:
+    remediation:
+      retries: 1
+    cleanupOnFail: true
+  values:
+    # -------------------------------------------------------------------
+    # CRDs - this step's exit criterion
+    # -------------------------------------------------------------------
+    crds:
+      # Already the chart default, written out for the reason
+      # ../../infrastructure/controllers/cloudnative-pg.yaml's crds.create
+      # comment gives for its own: a default flipped upstream would take
+      # every CRD instance in this phase in a version bump that reads as
+      # routine.
+      enabled: true
+
+    # -------------------------------------------------------------------
+    # The k3s control-plane scrapes - 6b.1's other half
+    # -------------------------------------------------------------------
+    # kube-scheduler, kube-controller-manager and kube-proxy all bind to
+    # loopback on k3s (they run inside the single k3s server process, not as
+    # separate pods with their own IPs), so the chart's default ServiceMonitors
+    # for them can never find a target. Left enabled that is three permanently
+    # down targets and their TargetDown alerts on day one - exactly the alarm
+    # noise the re-scope preamble (docs/plans/swarm/phase-6-observability.md)
+    # names as the thing that trains an operator to ignore real alerts. The
+    # node's own Ready condition already reports the one failure mode these
+    # three could add on top of etcd - see the preamble for why etcd is the
+    # exception rather than a fourth entry here.
+    kubeScheduler:
+      enabled: false
+    kubeControllerManager:
+      enabled: false
+    kubeProxy:
+      enabled: false
+
+    # etcd stays enabled, pointed at the two ports 6b.1's
+    # etcd-expose-metrics config.yaml change opened. Verified against this
+    # pinned chart version (not copied from a blog post, per the cluster
+    # plan's own instruction): kubeEtcd.endpoints still renders a literal
+    # `Endpoints` object from a bare IP list
+    # (templates/exporters/kube-etcd/endpoints.yaml), and there is no
+    # label-selector alternative to fall back to - k3s's embedded etcd is not
+    # a pod, so there is nothing with a label to select. That is what
+    # K3S_SERVER_ADDRESSES in scripts/k3s/cluster-config.json exists for.
+    # kubeEtcd.service.port (2381, the chart default) supplies the port this
+    # Endpoints object and its ServiceMonitor both use - K3S_SERVER_ADDRESSES
+    # carries no port of its own.
+    kubeEtcd:
+      enabled: true
+      endpoints: ${K3S_SERVER_ADDRESSES}
+
+    # -------------------------------------------------------------------
+    # The five selector settings, which are the ones everybody gets wrong
+    # -------------------------------------------------------------------
+    # Left at their chart default of true, Prometheus selects only objects
+    # carrying this release's own Helm labels - so every hand-written
+    # ServiceMonitor/PodMonitor/ScrapeConfig 6b.6 adds and every
+    # PrometheusRule 6b.8 adds is silently ignored: no error, no event, no
+    # target, just a metric or an alert that never appears. Since this
+    # phase's entire scrape and alerting design is hand-written objects (the
+    # re-scope preamble's first bullet), these five lines are load-bearing
+    # for all of it. Four are the ones the cluster plan names explicitly;
+    # ruleSelectorNilUsesHelmValues is a fifth of the identical shape,
+    # governing 6b.8's PrometheusRules the same way the other four govern
+    # 6b.6's scrape objects, and left off this list only by omission there.
+    prometheus:
+      prometheusSpec:
+        serviceMonitorSelectorNilUsesHelmValues: false
+        podMonitorSelectorNilUsesHelmValues: false
+        probeSelectorNilUsesHelmValues: false
+        scrapeConfigSelectorNilUsesHelmValues: false
+        ruleSelectorNilUsesHelmValues: false
+
+        # -----------------------------------------------------------------
+        # Storage - see the sizing section's "prometheus" row and its note
+        # -----------------------------------------------------------------
+        # A StatefulSet's volumeClaimTemplates is immutable: getting the
+        # class or the size wrong here is not an edit, it is deleting the
+        # StatefulSet with --cascade=orphan and letting the operator rebuild
+        # it. longhorn-r2 (bulk, 2 replicas, loss tolerable) per the storage
+        # split - metrics and logs age out by design, unlike Grafana's own
+        # dashboards below.
+        storageSpec:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: longhorn-r2
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 20Gi
+        retention: 30d
+        # ~80% of the 20Gi volume above. Retention by time alone on a fixed
+        # volume means the disk decides, and Prometheus's answer to a full
+        # disk is to stop ingesting - retentionSize is what makes 30d the
+        # thing that actually governs, rather than a number the disk
+        # overrides first.
+        retentionSize: 16GiB
+
+        # The sizing table's estimate, not this cluster's own measurement -
+        # kube-prometheus-stack additionally scrapes kube-state-metrics,
+        # kubelet cAdvisor, Longhorn and Flux at several times a compose
+        # project's cardinality. Re-measure once it has a week of retention
+        # behind it; this is the one workload in this phase whose request
+        # the sizing section names as one to revisit rather than set once.
+        resources:
+          requests:
+            cpu: 20m
+            memory: 512Mi
+          limits:
+            memory: 1.5Gi
+
+    # -------------------------------------------------------------------
+    # Alertmanager - storage and sizing only; 6b.8 supplies alertmanager.config
+    # -------------------------------------------------------------------
+    # Deliberately not configured here beyond storage and resources: the
+    # receiver, route and Watchdog wiring are 6b.8's, added to this same
+    # values block as alertmanager.config once the Home Assistant webhook and
+    # the Kuma push monitor it targets both exist. Until then this release
+    # runs with the chart's own no-op 'null' receiver, which is a live
+    # Alertmanager with nowhere to send - correct for this step, not the
+    # phase's final state.
+    alertmanager:
+      alertmanagerSpec:
+        # 1Gi on longhorn-r3 (critical, 3 replicas) rather than r2's bulk
+        # class: what this volume holds is silences, and losing those to a
+        # reschedule means every alert someone deliberately quieted re-fires
+        # at once.
+        storage:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: longhorn-r3
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 1Gi
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
+
+    # -------------------------------------------------------------------
+    # Grafana
+    # -------------------------------------------------------------------
+    grafana:
+      admin:
+        # admin/password until changed from Grafana's own UI - 6a.4 and
+        # 6b.4's admin-secrets.yaml carry the full reasoning. userKey and
+        # passwordKey are left at the chart's own defaults (admin-user,
+        # admin-password), which is exactly the pair grafana-admin holds.
+        existingSecret: grafana-admin
+      persistence:
+        enabled: true
+        storageClassName: longhorn-r3
+        size: 2Gi
+      "grafana.ini":
+        server:
+          # Grafana builds absolute URLs for redirects and share links from
+          # this. Wrong, and OAuth-less logins still work while half the UI
+          # links to localhost:3000 - the failure is silent enough to not be
+          # worth discovering by clicking around metrics.${DOMAIN} after the
+          # fact.
+          root_url: https://metrics.${DOMAIN}
+      ingress:
+        # No ingressClassName: k3s's bundled Traefik is the cluster's only
+        # IngressClass and is marked default, the same reliance
+        # ../../infrastructure/config/traefik-tlsstore.yaml's default
+        # certificate depends on. No tls: block, for the same reason 6b.9's
+        # ingress-logs.yaml gives in full: the wildcard Certificate's Secret
+        # lives in kube-system as Traefik's TLSStore default, and every
+        # Ingress in the cluster inherits it without naming it.
+        enabled: true
+        hosts:
+          - metrics.${DOMAIN}
+      sidecar:
+        dashboards:
+          # Already the chart's own default (an override of the raw grafana
+          # subchart's enabled: false), written out because 6b.7's ConfigMaps
+          # depend on it: searchNamespace: ALL is what lets a dashboard
+          # ConfigMap live in the observability namespace and still be found,
+          # since the sidecar otherwise only watches its own.
+          enabled: true
+          label: grafana_dashboard
+          labelValue: "1"
+          searchNamespace: ALL
+        # Shared across every sidecar container the chart enables - today
+        # that is only the dashboards watcher above, since the Prometheus
+        # datasource below is provisioned a different way (no sidecar).
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
+      # No datasource values here, deliberately: sidecar.datasources.enabled
+      # and its uid: prometheus are already the chart's own defaults, and
+      # uid: prometheus is exactly the fixed uid 6b.7's windows-exporter
+      # dashboard was pinned against - carried across unchanged rather than
+      # rewritten. Do not port
+      # containers/grafana/provisioning/datasources/prometheus.yml, which
+      # points at a compose service name and would install a second, broken
+      # datasource beside the working one.
+      resources:
+        requests:
+          cpu: 10m
+          memory: 256Mi
+        limits:
+          memory: 512Mi
+
+    # -------------------------------------------------------------------
+    # The rest of the sizing table - the workloads the chart hides
+    # -------------------------------------------------------------------
+    prometheusOperator:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 64Mi
+        limits:
+          memory: 192Mi
+      # The config-reloader sidecar the operator injects into every
+      # Prometheus and Alertmanager pod - one setting, shared by both, and
+      # easy to miss because it is not under prometheus.prometheusSpec or
+      # alertmanager.alertmanagerSpec where the main containers' requests
+      # live. Not in the sizing table (which only names the workloads that
+      # existed on the old host or are single objects the table could point
+      # at); the chart's own commented-out suggestion is the number used
+      # here, flagged the same way the sizing section flags its own
+      # estimates - for 6b.14's sweep to check against reality.
+      prometheusConfigReloader:
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 64Mi
+    kube-state-metrics:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 96Mi
+        limits:
+          memory: 256Mi
+    prometheus-node-exporter:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 64Mi

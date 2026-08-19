@@ -263,6 +263,18 @@
       "description": "The three physical Windows hosts' LAN addresses and windows_exporter's port, as one Prometheus-shaped list. Reserved as fixed addresses in 6a.2 - a lease change here is a firing up == 0, not a rediscovered host."
     },
     {
+      "key": "K3S_SERVER_ADDRESSES",
+      "env": "K3S_SERVER_ADDRESSES",
+      "githubSource": "K3S_SERVER_ADDRESSES",
+      "githubKind": "variable",
+      "required": true,
+      "pattern": "^\\[\"(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\"(?:,\"(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\")*\\]$",
+      "hint": "A bracketed, comma-separated list of double-quoted bare IPv4 addresses - no ports, no hostnames. kube-prometheus-stack's kubeEtcd.endpoints template emits one Endpoints subset address per entry and takes the port from kubeEtcd.service.port (2381) separately, so unlike WINDOWS_EXPORTER_TARGETS there is no :port suffix here.",
+      "example": "[\"10.0.0.11\",\"10.0.0.12\"]",
+      "consumedBy": "6b.5 kube-prometheus-stack kubeEtcd.endpoints",
+      "description": "LAN addresses of every k3s **server** node (every node running --cluster-init/--server, i.e. every etcd member) - the same nodes 6b.1's etcd-expose-metrics config.yaml change was rolled out to. k3s's embedded etcd is not a pod, so there is no label to select it by the way kube-state-metrics selects everything else here; the chart's kubeEtcd.endpoints wants literal IPs instead, the same shape WINDOWS_EXPORTER_TARGETS already established for a hand-fed static target list. 2 during the two-node build window; Phase 7 adds the third server's address by changing this variable and re-running Provision 4 - no commit, same shape as LONGHORN_REPLICA_COUNT."
+    },
+    {
       "key": "HA_ALERT_WEBHOOK_ID",
       "env": "HA_ALERT_WEBHOOK_ID",
       "githubSource": "HA_ALERT_WEBHOOK_ID",

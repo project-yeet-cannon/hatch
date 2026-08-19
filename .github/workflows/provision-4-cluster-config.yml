@@ -149,6 +149,13 @@ jobs:
           WINDOWS_EXPORTER_TARGETS: ${{ vars.WINDOWS_EXPORTER_TARGETS }}
           HA_ALERT_WEBHOOK_ID: ${{ vars.HA_ALERT_WEBHOOK_ID }}
 
+          # Phase 6b.5. Every k3s server's LAN address, bare (no port) - fed
+          # to kube-prometheus-stack's kubeEtcd.endpoints, which the chart
+          # renders into a hand-fed Endpoints object because k3s's embedded
+          # etcd is not a pod and has no label to select instead. Set and
+          # dispatch before the 6b.5 HelmRelease commit reaches the cluster.
+          K3S_SERVER_ADDRESSES: ${{ vars.K3S_SERVER_ADDRESSES }}
+
           # Same keypair provision-0/1/2/3 used.
           NODE_SSH_PRIVATE_KEY: ${{ secrets.NODE_SSH_PRIVATE_KEY }}
         run: |

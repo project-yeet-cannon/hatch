@@ -532,7 +532,7 @@ gate.
       `kubectl get ns observability` exists, and `kubectl -n observability get
       secret kuma-admin grafana-admin` returns both. Nothing runs in it yet.
 
-- [ ] **5. `kube-prometheus-stack`** —
+- [x] **5. `kube-prometheus-stack`** —
       `deploy/cluster/observability/controllers/kube-prometheus-stack.yaml`. One
       pinned `HelmRelease` bringing Prometheus, the operator and its CRDs,
       Alertmanager, Grafana, node-exporter and kube-state-metrics. The largest
