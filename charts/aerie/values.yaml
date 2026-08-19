@@ -6,11 +6,31 @@
 # render against, and so a local `helm install` finds sane shapes even where
 # the values are wrong.
 #
-# requests/limits are deliberately absent from every workload below - 5b.11
-# adds them here, sized from a real reading (5a.6), rather than as a guess
-# this step would have to redo.
+# resources below are 5b.11's, sized from 5a.6's real reading rather than a
+# guess this step would have to redo. No CPU limit anywhere - see 5a.6's
+# second bullet and 5b.11's own note for why the measurement cannot supply
+# one: a CPU limit throttles at the quota period and shows up as latency
+# nobody can explain, while the request is what the scheduler actually
+# places on. Memory limit is 2x the request everywhere it appears, because
+# .NET (api, the migrate hook) sets its GC hard limit to 75% of the cgroup
+# limit rather than growing forever, and nginx/dufs cost nothing to give the
+# same headroom.
 
 replicaCount: 3
+
+# 5a.6: api never reached a steady state over three samples (222 -> 267 ->
+# 308 MiB, monotonic), so 384Mi is above the last reading rather than equal
+# to it. requests.cpu is sized for startup - JIT, EF model build, Quartz
+# wiring, once per replica - and for the cpu.shares weighting that buys
+# under contention, not for the 0.20% idle figure 5a.6 measured; a request
+# derived from idle would let three replicas pack onto one node and starve
+# each other through a rolling upgrade.
+resources:
+  requests:
+    cpu: 100m
+    memory: 384Mi
+  limits:
+    memory: 768Mi
 
 image:
   # Host plus namespace, no image name, no tag - ${IMAGE_REGISTRY}. The
@@ -30,6 +50,14 @@ files:
   # accident: design.md lists kiosk `files` as HA-required, same as api - a
   # tablet that can't reach it can't self-update.
   replicaCount: 2
+  # 5a.6: nginx serving a static APK and two small JSON files - the
+  # measurement floor, not a rounded-up guess.
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
 
 # ${DOMAIN}. Ingress hosts (5b.9) and Apps__PublicBaseUrl both key off this.
 domain: ""
@@ -64,6 +92,26 @@ share:
   auth:
     username: admin
     password: password
+  # 5a.6: an estimate, not a measurement - dufs was not running on the old
+  # host when 5a.6 sampled. One replica, so being wrong costs one pod.
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
+
+# The migrate hook Job (migrate-job.yaml, 5b.6). Matches api on memory - same
+# image, same EF model - and asks for more CPU than api's idle-weighted
+# request because Helm blocks the whole release on this Job finishing; it
+# exits on its own, so an overstated request costs nothing after it does.
+migrate:
+  resources:
+    requests:
+      cpu: 200m
+      memory: 384Mi
+    limits:
+      memory: 768Mi
 
 postgres:
   # <cluster-name>-rw, CNPG's own naming for the primary Service -

@@ -153,6 +153,37 @@ spec:
     # symptom of getting it wrong is a ClusterIssuer stuck Ready=False on a
     # Secret that plainly exists.
     clusterResourceNamespace: cert-manager
+
+    # ---------------------------------------------------------------------
+    # Resources - 5b.11's sweep, not this step's
+    # ---------------------------------------------------------------------
+    # All four ship resources: {}; cpu: 10m / memory: 32Mi is the chart's own
+    # commented-out suggestion for every one of them, not a measurement of
+    # this install - there is no equivalent of 5a.6's docker stats for a
+    # controller that only runs in the cluster. No memory limit anywhere
+    # here: none of these four are in Postgres's or the app tier's data path,
+    # and a stray OOMKill on the webhook mid-issuance is a worse failure than
+    # the memory this chart's own maintainers judged sufficient. No CPU limit
+    # for the same reason 5b.11 gives its own workloads.
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+    webhook:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+    cainjector:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+    startupapicheck:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
 # ---------------------------------------------------------------------------
 # Four properties of this release that later steps depend on, recorded here
 # because none of them are visible from the manifest.

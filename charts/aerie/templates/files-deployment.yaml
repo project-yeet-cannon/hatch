@@ -41,6 +41,16 @@ spec:
       # 5b.1's dockerconfigjson Secret - same reason as api-deployment.yaml.
       imagePullSecrets:
         - name: {{ .Values.image.pullSecret }}
+      # Same ScheduleAnyway reasoning as api-deployment.yaml's - 2 replicas
+      # over the two-node build window, and files is on the same HA list.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "aerie.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: files
       securityContext:
         runAsNonRoot: true
         runAsUser: 101
@@ -64,6 +74,8 @@ spec:
           ports:
             - name: http
               containerPort: 80
+          resources:
+            {{- toYaml .Values.files.resources | nindent 12 }}
           readinessProbe:
             httpGet:
               path: /version.json

@@ -813,7 +813,7 @@ demands of any workload, plus the automation. 14 is the gate.
       returns the dashboard rather than the API landing page, and
       `files.${DOMAIN}/version.json` returns the JSON a tablet polls for.
 
-- [ ] **11. Requests, limits, and the properties goal 2 needs** — the chart's
+- [x] **11. Requests, limits, and the properties goal 2 needs** — the chart's
       templates plus a sweep of Phase 3's HelmReleases.
 
       [Autoprovisioning is not a feature you switch on](design.md#how-goal-2-actually-works):

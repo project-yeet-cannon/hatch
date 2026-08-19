@@ -163,6 +163,20 @@ spec:
       # Every other env key - vip_arp, svc_enable, cp_enable, svc_election,
       # vip_leaderelection - is left at the chart default. That default is not
       # a placeholder; see the footnote below for what it actually does.
+    # 5b.11's sweep, not this step's. This chart's own comment on the same key
+    # argues for leaving it unset ("we usually recommend not to specify
+    # default resources... to increase chances charts run on environments
+    # with little resources") - the opposite of every neighbour in this
+    # directory, and the reason this is a request with no limit rather than
+    # the cert-manager/external-secrets pair's borrowed 10m/32Mi: this
+    # DaemonSet is the thing that answers ARP for ${INGRESS_VIP} and moves it
+    # on node failure (see the footnote below), and an OOMKill on it is a
+    # brief loss of every Service behind the VIP, not a reschedule. No limit
+    # at all, not even memory, is the deliberate choice here.
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
 # ---------------------------------------------------------------------------
 # One property of the kube-vip release that is not visible from the values
 # above, and worth being certain about before trusting a floating IP to it:

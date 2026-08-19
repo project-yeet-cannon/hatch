@@ -124,6 +124,130 @@ spec:
       # good release and touches no data.
       strategy: rollback
     cleanupOnFail: true
+  # 5b.11's sweep, the other half of it. Four objects this chart renders have
+  # no values key for resources at all (see the comment on longhornManager
+  # below, checked against templates/ at the pinned version): the driver-
+  # deployer Deployment and its wait-longhorn-manager initContainer, the UI
+  # Deployment, the pre-pull-share-manager-image sidecar in the manager
+  # DaemonSet, and the three Helm hook Jobs (pre-upgrade, post-upgrade, the
+  # uninstall pre-delete hook described on the Namespace above). A
+  # postRenderers patch is the only mechanism that reaches a field the chart
+  # itself never templated - not a workaround for a value this file forgot to
+  # set. Verified against the rendered chart with `kubectl kustomize` before
+  # committing: each patch's target/name/container triple matches, and the
+  # strategic merge leaves every other field - image, command, the other
+  # container in the same pod - untouched.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: DaemonSet
+              name: longhorn-manager
+            patch: |
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: longhorn-manager
+              spec:
+                template:
+                  spec:
+                    containers:
+                      - name: pre-pull-share-manager-image
+                        resources:
+                          requests:
+                            cpu: 10m
+                            memory: 16Mi
+          - target:
+              kind: Deployment
+              name: longhorn-driver-deployer
+            patch: |
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: longhorn-driver-deployer
+              spec:
+                template:
+                  spec:
+                    initContainers:
+                      - name: wait-longhorn-manager
+                        resources:
+                          requests:
+                            cpu: 10m
+                            memory: 16Mi
+                    containers:
+                      - name: longhorn-driver-deployer
+                        resources:
+                          requests:
+                            cpu: 10m
+                            memory: 32Mi
+          - target:
+              kind: Deployment
+              name: longhorn-ui
+            patch: |
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: longhorn-ui
+              spec:
+                template:
+                  spec:
+                    containers:
+                      - name: longhorn-ui
+                        resources:
+                          requests:
+                            cpu: 10m
+                            memory: 64Mi
+          - target:
+              kind: Job
+              name: longhorn-pre-upgrade
+            patch: |
+              apiVersion: batch/v1
+              kind: Job
+              metadata:
+                name: longhorn-pre-upgrade
+              spec:
+                template:
+                  spec:
+                    containers:
+                      - name: longhorn-pre-upgrade
+                        resources:
+                          requests:
+                            cpu: 10m
+                            memory: 32Mi
+          - target:
+              kind: Job
+              name: longhorn-post-upgrade
+            patch: |
+              apiVersion: batch/v1
+              kind: Job
+              metadata:
+                name: longhorn-post-upgrade
+              spec:
+                template:
+                  spec:
+                    containers:
+                      - name: longhorn-post-upgrade
+                        resources:
+                          requests:
+                            cpu: 10m
+                            memory: 32Mi
+          - target:
+              kind: Job
+              name: longhorn-uninstall
+            patch: |
+              apiVersion: batch/v1
+              kind: Job
+              metadata:
+                name: longhorn-uninstall
+              spec:
+                template:
+                  spec:
+                    containers:
+                      - name: longhorn-uninstall
+                        resources:
+                          requests:
+                            cpu: 10m
+                            memory: 32Mi
   values:
     # ---------------------------------------------------------------------
     # Longhorn's own settings - the longhorn-default-setting ConfigMap
@@ -197,6 +321,26 @@ spec:
       # replica - and this cluster is two VMs that Phases 4 and 5 still have to
       # fit Postgres and the app tier into.
       replicas: 1
+
+    # ---------------------------------------------------------------------
+    # Resources - 5b.11's sweep. longhornManager only: it is the one
+    # component of this chart that exposes a resources key at all (checked
+    # against templates/daemonset-sa.yaml at the pinned version) - the
+    # driver-deployer, the UI, the pre-pull-share-manager-image sidecar and
+    # the three upgrade/uninstall hook Jobs have none, and get theirs from
+    # postRenderers below instead, not from a values key that does not exist.
+    # ---------------------------------------------------------------------
+    longhornManager:
+      # An estimate, not a measurement, the same caveat 5a.6 puts on `share` -
+      # there is no docker stats reading for a per-node storage manager that
+      # only exists in the cluster. Request only, no limit: this is the
+      # control loop behind every Longhorn volume, and an OOMKill here mid-
+      # rebuild is a worse failure than the memory this skips reserving. No
+      # CPU limit for the same reason 5b.11 gives its own workloads.
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
 # ---------------------------------------------------------------------------
 # Four properties of this release that later steps depend on, none of them
 # visible from the values above.

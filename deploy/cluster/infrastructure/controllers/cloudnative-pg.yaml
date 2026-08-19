@@ -163,6 +163,25 @@ spec:
       # Phase 6 flips this to true once the CRD exists. The queries the scrape
       # would collect are already installed either way - see note 3.
       podMonitorEnabled: false
+
+    # ---------------------------------------------------------------------
+    # Resources - 5b.11's sweep, not this chart's own default
+    # ---------------------------------------------------------------------
+    # The chart ships resources: {} - no request, no limit - and 5b.14's gate
+    # checks every container in every infrastructure namespace, not only
+    # aerie's. requests are the chart's own commented-out suggestion, the
+    # maintainer's number rather than a measurement of this install. No CPU
+    # limit, the same rule 5b.11 states for its own workloads: this operator
+    # drives failover and switchover, and throttling it at the quota period
+    # is a worse failure than letting it burst. The memory limit is kept,
+    # unlike the DaemonSets below, because this is a single-replica
+    # Deployment where an OOMKill costs one reschedule, not a stuck rollout.
+    resources:
+      requests:
+        cpu: 100m
+        memory: 100Mi
+      limits:
+        memory: 200Mi
 # ---------------------------------------------------------------------------
 # Five properties of this release that Phases 4 and 6 depend on, none of them
 # visible from the values above.

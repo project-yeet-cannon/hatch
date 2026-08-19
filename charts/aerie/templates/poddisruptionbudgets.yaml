@@ -1,0 +1,38 @@
+# The cluster plan Phase 5b.11 - one PodDisruptionBudget each for api and
+# files, not for share: design.md's HA list is what decides this, and share
+# is a single Recreate-strategy replica a PDB cannot protect anyway (a PDB
+# bounds how many of N are unavailable *at once*; at N=1 that is either "0
+# planned evictions ever" or a no-op, and share-deployment.yaml already chose
+# Recreate over losing nothing worth protecting).
+#
+# maxUnavailable: 1, not minAvailable. With two nodes and three api replicas,
+# minAvailable: 2 blocks a drain of the node holding two of them - a PDB that
+# turns a planned reboot into a stuck `kubectl drain` is worse than none,
+# because it fails during the Patch Tuesday window Phase 1 schedules.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "aerie.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: files
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+    app.kubernetes.io/component: files
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "aerie.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: files

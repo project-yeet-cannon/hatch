@@ -58,6 +58,8 @@ spec:
             - --allow-delete
             - --allow-search
             - --allow-archive
+          resources:
+            {{- toYaml .Values.share.resources | nindent 12 }}
           ports:
             # dufs's default listen port; nothing above overrides it.
             - name: http

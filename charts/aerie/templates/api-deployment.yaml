@@ -1,8 +1,8 @@
 # The cluster plan Phase 5b.5 - the api Deployment, replacing compose.prod.yml
 # and compose.share.yml's `api` service. Run a second way by the migrate hook
 # Job (5b.6, migrate-job.yaml), which shares ./_helpers.tpl's postgresEnv
-# rather than duplicating it. No resources block yet - 5b.11 sizes it from a
-# real reading (5a.6) rather than this step guessing.
+# rather than duplicating it. resources is 5b.11's, sized from a real reading
+# (5a.6); topologySpreadConstraints (below) is also 5b.11's.
 #
 # aerie-share-ro (5b.8) is mounted unconditionally, not gated behind
 # mediaLibrarySubpath the way the MediaLibrary__RootPath env var already is
@@ -34,6 +34,18 @@ spec:
       # ImagePullBackOff, since ghcr.io/eouw0o83hf/aerie-api is private.
       imagePullSecrets:
         - name: {{ .Values.image.pullSecret }}
+      # ScheduleAnyway, not DoNotSchedule: 3 replicas over the two-node build
+      # window cannot satisfy an even 1-1-1 spread, and DoNotSchedule would
+      # leave the third pod Pending forever. Revisit at Phase 7, when a third
+      # node makes DoNotSchedule free.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "aerie.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: api
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -51,9 +63,19 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
           env:
             - name: DOTNET_ENVIRONMENT
               value: Docker
+            # ASP.NET Core defaults to Server GC, one heap per visible core -
+            # four on these nodes, and nothing above sets a CPU limit to
+            # narrow that. 5a.6 measured this workload at 0.20% of one core:
+            # throughput was never the constraint, memory is, so workstation
+            # GC is what actually uses the requests/limits above instead of
+            # growing four server heaps toward the limit before collecting.
+            - name: DOTNET_gcServer
+              value: "0"
             {{- include "aerie.postgresEnv" . | nindent 12 }}
             - name: DOMAIN
               value: {{ .Values.domain | quote }}

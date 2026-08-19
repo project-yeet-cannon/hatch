@@ -88,6 +88,21 @@ spec:
       tag: v0.14.0
     sidecarImage:
       tag: v0.14.0
+
+    # ---------------------------------------------------------------------
+    # Resources - 5b.11's sweep, same reasoning as ./cloudnative-pg.yaml
+    # ---------------------------------------------------------------------
+    # Chart ships resources: {}; these are its own commented-out suggestion.
+    # No CPU limit, matching the app tier's own rule - this Deployment gRPCs
+    # every WAL segment through to object storage, and throttling that at the
+    # quota period is archiving latency with no explanation. Memory limit
+    # kept: single replica, so an OOMKill is one reschedule.
+    resources:
+      requests:
+        cpu: 100m
+        memory: 100Mi
+      limits:
+        memory: 200Mi
 # ---------------------------------------------------------------------------
 # Two traps, both hit while writing this file rather than left for whoever
 # reads it next.
