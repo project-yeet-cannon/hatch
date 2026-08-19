@@ -118,14 +118,23 @@ spec:
       retries: 0
   upgrade:
     # Override, above the shared 8m: 5b.11's resource-request sweep (the
-    # commit immediately before this one) put the longhorn-post-upgrade Job
-    # under a 10m/32Mi request for the first time, and it now measures
-    # 8m10s wall clock to reach "Completed post-upgrade" - a shared 8m budget
-    # failed it by design margin, not by accident, twice in a row
-    # (Stalled/RetriesExceeded on 2026-08-19). 9m30s clears the observed
-    # figure with real margin and still reports before the layer's own 10m
-    # wait on ../../infrastructure.yaml's infra-controllers Kustomization.
-    timeout: 9m30s
+    # commit immediately before this one) was this DaemonSet's pod template's
+    # first change since install, and its real bottleneck isn't the new pods
+    # starting - longhorn-manager's own post-upgrade hook
+    # (waitManagerUpgradeComplete, github.com/longhorn/longhorn-manager
+    # app/post_upgrade.go) compares each pod's *spec* image, which is set the
+    # instant a replacement pod is created, so a crashing new pod can't slow
+    # it down. What it actually waits on is the *old* pod leaving the list,
+    # i.e. graceful termination - exercised for the first time by this
+    # rollout. Longhorn's own authors clearly expect this can run long: the
+    # hook itself polls for up to 360*5s = 30m. Measured live on
+    # 2026-08-19: 8m10s, then 9m32s, then 9m35s across three attempts, so
+    # 9m30s failed one of them by two seconds. 12m is real margin over the
+    # worst of those, and ../../infrastructure.yaml's infra-controllers
+    # Kustomization timeout is raised to 15m alongside it, so the layer
+    # actually observes whichever way this resolves instead of timing out
+    # first itself.
+    timeout: 12m
     remediation:
       retries: 1
       # Already the default, and the single most important default in this file

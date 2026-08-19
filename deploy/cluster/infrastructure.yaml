@@ -68,8 +68,14 @@ spec:
   # Generous because `wait` is on and this layer installs Longhorn, whose
   # DaemonSets and engine images take minutes on a cold node. Too short here
   # reports a failure that is only slowness, and then infra-config is blocked
-  # behind a lie.
-  timeout: 10m
+  # behind a lie. 15m, not 10m: measured live on 2026-08-19, Longhorn's own
+  # upgrade (a DaemonSet pod template change, which graceful-terminates the
+  # old longhorn-manager rather than just starting the new one - see
+  # ./infrastructure/controllers/longhorn.yaml's upgrade.timeout comment)
+  # took up to 9m35s on its own. This layer's timeout has to clear that with
+  # room to spare or it reports its own timeout instead of Longhorn's real
+  # outcome, success or failure.
+  timeout: 15m
   sourceRef:
     kind: GitRepository
     name: flux-system
