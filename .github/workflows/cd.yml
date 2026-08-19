@@ -64,12 +64,6 @@ jobs:
       # share root off the API's unauthenticated /media endpoint. See
       # docs/media-library.md.
       MEDIA_LIBRARY_SUBPATH: ${{ vars.MEDIA_LIBRARY_SUBPATH }}
-      # Reusable, tagged (not ephemeral) auth key — an ephemeral key would
-      # de-register this node the moment the key's session ends, which is
-      # wrong for a permanent subnet router. TAILSCALE_ADVERTISE_ROUTES is
-      # the LAN CIDR pfSense hands out (e.g. 192.168.1.0/24), not a secret.
-      TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
-      TAILSCALE_ADVERTISE_ROUTES: ${{ vars.TAILSCALE_ADVERTISE_ROUTES }}
       # Dedicated to the `backup` service's aerie-restic IAM user — kept
       # separate from AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY above (which
       # are Route53 credentials for caddy) so a leak of one doesn't expose
@@ -134,97 +128,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Host-level metrics run natively on Windows (not in Docker Desktop —
-      # see docs/metrics-architecture.md's "Windows Server detour" note: a container's
-      # /proc, /sys, and root filesystem under the WSL2 backend are the VM's,
-      # not the real host's). Install-if-missing, then converge the service
-      # state on every deploy — same idempotency bar as kuma-provision. The
-      # Grafana dashboard's hostname template variables key off
-      # windows_os_hostname, which the `os` collector already emits as part
-      # of the built-in default set — no extra collectors needed.
-      - name: Ensure windows_exporter is installed and running
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          $version = "0.31.8"
-          if (-not (Get-Service -Name windows_exporter -ErrorAction SilentlyContinue)) {
-            $msiPath = Join-Path $env:TEMP "windows_exporter-$version-amd64.msi"
-            $logPath = Join-Path $env:TEMP "windows_exporter-install.log"
-            $msiUrl = "https://github.com/prometheus-community/windows_exporter/releases/download/v$version/windows_exporter-$version-amd64.msi"
-            Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath
-            $proc = Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /qn /L*V `"$logPath`"" -Wait -PassThru
-            if ($proc.ExitCode -ne 0) {
-              Get-Content $logPath -Tail 40 -ErrorAction SilentlyContinue | Write-Output
-              throw "windows_exporter install failed with exit code $($proc.ExitCode)"
-            }
-            Remove-Item $msiPath -ErrorAction SilentlyContinue
-            Remove-Item $logPath -ErrorAction SilentlyContinue
-          }
-
-          Set-Service -Name windows_exporter -StartupType Automatic
-          if ((Get-Service -Name windows_exporter).Status -ne 'Running') {
-            Start-Service -Name windows_exporter
-          }
-
-      # Native Windows install, not a container: Docker Desktop's WSL2 backend
-      # gives every container the WSL VM's own network namespace, not the real
-      # host's — a containerized Tailscale could join the tailnet but could
-      # only ever advertise the VM's private subnet, never the actual LAN.
-      # Same underlying constraint as the windows_exporter step above (see
-      # docs/metrics-architecture.md's "Windows Server detour"). This makes
-      # the host a Tailscale subnet router, so any tailnet device can reach
-      # the LAN (and therefore every *.${DOMAIN} host Caddy routes to) once
-      # the advertised route is approved in the admin console.
-      - name: Ensure Tailscale is installed and running
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          $tailscaleExe = "C:\Program Files\Tailscale\tailscale.exe"
-
-          if (-not (Get-Service -Name Tailscale -ErrorAction SilentlyContinue)) {
-            $version = "1.98.10"
-            $msiPath = Join-Path $env:TEMP "tailscale-setup-$version-amd64.msi"
-            $logPath = Join-Path $env:TEMP "tailscale-install.log"
-            $msiUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-$version-amd64.msi"
-            Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath
-            # TS_UNATTENDEDMODE keeps tailscaled running with nobody logged
-            # into the console — this host never has an interactive desktop
-            # session. TS_NOLAUNCH skips starting the GUI client post-install,
-            # which has nothing to attach to under the runner service account.
-            $proc = Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" TS_UNATTENDEDMODE=always TS_NOLAUNCH=1 /qn /L*V `"$logPath`"" -Wait -PassThru
-            if ($proc.ExitCode -ne 0) {
-              Get-Content $logPath -Tail 40 -ErrorAction SilentlyContinue | Write-Output
-              throw "Tailscale install failed with exit code $($proc.ExitCode)"
-            }
-            Remove-Item $msiPath -ErrorAction SilentlyContinue
-            Remove-Item $logPath -ErrorAction SilentlyContinue
-          }
-
-          Set-Service -Name Tailscale -StartupType Automatic
-          if ((Get-Service -Name Tailscale).Status -ne 'Running') {
-            Start-Service -Name Tailscale
-          }
-
-          # `tailscale up` flags aren't cumulative — every call must restate
-          # the full desired flag set, or an omitted flag resets to default.
-          # --unattended must be restated too: TS_UNATTENDEDMODE=always at
-          # install time makes it a persistent non-default setting, and
-          # `tailscale up` refuses to run if any non-default flag goes
-          # unmentioned.
-          # --authkey is included only on first auth: re-passing it on every
-          # deploy is tempting for idempotency, but tailscaled unconditionally
-          # attempts to register with a supplied key even when a valid
-          # authenticated state already exists on disk
-          # (tailscale/tailscale#19501) — so a since-expired reusable key
-          # would break every deploy after its expiry, not just the one that
-          # actually needed it.
-          $status = & $tailscaleExe status --json | ConvertFrom-Json
-          if ($status.BackendState -ne "Running") {
-            & $tailscaleExe up --authkey=$env:TAILSCALE_AUTH_KEY --advertise-routes=$env:TAILSCALE_ADVERTISE_ROUTES --accept-routes=false --hostname=aerie-prod --unattended
-          } else {
-            & $tailscaleExe up --advertise-routes=$env:TAILSCALE_ADVERTISE_ROUTES --accept-routes=false --hostname=aerie-prod --unattended
-          }
-          if ($LASTEXITCODE -ne 0) { throw "tailscale up failed with exit code $LASTEXITCODE" }
+      # windows_exporter and Tailscale used to be installed here, on every
+      # deploy — but neither has anything to do with deploying compose, and
+      # this is the only workflow that touches this host, which made it the
+      # only place either got converged. Both moved to
+      # provision-0-new-node.yml (Phase 5, 5b.13), which is what already owns
+      # "make a Windows host ready" and runs against all three Hyper-V hosts,
+      # not just this one. That step stays install-if-missing/converge-state
+      # too, so a deploy no longer re-verifying it costs nothing: the Windows
+      # service, once running, doesn't need a CI step to keep running.
 
       # The exit-code checks are load-bearing: this runs under PowerShell, where
       # a multi-line `run:` only surfaces the *last* command's exit code. Without

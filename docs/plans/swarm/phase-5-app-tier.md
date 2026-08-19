@@ -903,7 +903,7 @@ demands of any workload, plus the automation. 14 is the gate.
       container in the infrastructure namespaces reports non-empty
       `resources.requests`.
 
-- [ ] **12. Flux image automation, writing to the site repo** —
+- [x] **12. Flux image automation, writing to the site repo** —
       `deploy/cluster/apps/automation/`,
       [publish.yml](../../../.github/workflows/publish.yml),
       [`Bootstrap-Flux.ps1`](../../../scripts/flux/Bootstrap-Flux.ps1), and one Provision 3
@@ -992,7 +992,7 @@ demands of any workload, plus the automation. 14 is the gate.
       none — that one check replaces the paragraph of reasoning the write-back
       design needed here.*
 
-- [ ] **13. Empty out `cd.yml` of everything that is not a compose deploy** —
+- [x] **13. Empty out `cd.yml` of everything that is not a compose deploy** —
       [`provision-0-new-node.yml`](../../../.github/workflows/provision-0-new-node.yml)
       and [cd.yml](../../../.github/workflows/cd.yml).
 

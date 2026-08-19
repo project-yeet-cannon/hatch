@@ -33,6 +33,7 @@ full of active work, which is how a plan directory stops being read.
 | [`brain.md`](brain.md) | The climate brain — CFD-informed control |
 | [`cameras.md`](cameras.md) | Camera integration |
 | [`video.md`](video.md) | Video capture and streaming |
+| [`kiosk.md`](kiosk.md) | Kiosk upgrades — Google Calendar agenda and outdoor hazard alerts |
 
 ## Conventions
 

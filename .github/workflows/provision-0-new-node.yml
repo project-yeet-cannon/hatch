@@ -148,6 +148,110 @@ jobs:
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
           & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency OpenSshClient
 
+      # Host-level metrics run natively on Windows (not in Docker Desktop -
+      # see docs/metrics-architecture.md's "Windows Server detour" note: a
+      # container's /proc, /sys, and root filesystem under the WSL2 backend
+      # are the VM's, not the real host's). Install-if-missing, then converge
+      # the service state on every run. Moved here from cd.yml (Phase 5,
+      # 5b.13): this is what already owns "make a Windows host ready", and
+      # runs against all three Hyper-V hosts rather than just the one cd.yml
+      # could reach. The Grafana dashboard's hostname template variables key
+      # off windows_os_hostname, which the `os` collector already emits as
+      # part of the built-in default set - no extra collectors needed.
+      - name: Ensure windows_exporter is installed and running
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "0.31.8"
+          if (-not (Get-Service -Name windows_exporter -ErrorAction SilentlyContinue)) {
+            $msiPath = Join-Path $env:TEMP "windows_exporter-$version-amd64.msi"
+            $logPath = Join-Path $env:TEMP "windows_exporter-install.log"
+            $msiUrl = "https://github.com/prometheus-community/windows_exporter/releases/download/v$version/windows_exporter-$version-amd64.msi"
+            Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath
+            $proc = Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /qn /L*V `"$logPath`"" -Wait -PassThru
+            if ($proc.ExitCode -ne 0) {
+              Get-Content $logPath -Tail 40 -ErrorAction SilentlyContinue | Write-Output
+              throw "windows_exporter install failed with exit code $($proc.ExitCode)"
+            }
+            Remove-Item $msiPath -ErrorAction SilentlyContinue
+            Remove-Item $logPath -ErrorAction SilentlyContinue
+          }
+
+          Set-Service -Name windows_exporter -StartupType Automatic
+          if ((Get-Service -Name windows_exporter).Status -ne 'Running') {
+            Start-Service -Name windows_exporter
+          }
+
+      # Native Windows install, not a container: Docker Desktop's WSL2 backend
+      # gives every container the WSL VM's own network namespace, not the real
+      # host's - a containerized Tailscale could join the tailnet but could
+      # only ever advertise the VM's private subnet, never the actual LAN.
+      # Same underlying constraint as the windows_exporter step above. This
+      # makes the host a Tailscale subnet router, so any tailnet device can
+      # reach the LAN (and therefore every *.${DOMAIN} host Traefik routes to)
+      # once the advertised route is approved in the admin console. Moved
+      # here from cd.yml (Phase 5, 5b.13) and, unlike that single-host step,
+      # this one runs on all three Hyper-V hosts: a subnet router belongs on
+      # a machine with the LAN interface, and all three outlive the cutover
+      # (the design decision that keeps this workload off the cluster).
+      # Each host advertises the same route under its own Tailscale hostname,
+      # for redundancy - Tailscale supports more than one subnet router for
+      # a given CIDR.
+      - name: Ensure Tailscale is installed and running
+        shell: powershell
+        env:
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          TAILSCALE_ADVERTISE_ROUTES: ${{ vars.TAILSCALE_ADVERTISE_ROUTES }}
+          TAILSCALE_HOSTNAME: aerie-${{ inputs.host }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tailscaleExe = "C:\Program Files\Tailscale\tailscale.exe"
+
+          if (-not (Get-Service -Name Tailscale -ErrorAction SilentlyContinue)) {
+            $version = "1.98.10"
+            $msiPath = Join-Path $env:TEMP "tailscale-setup-$version-amd64.msi"
+            $logPath = Join-Path $env:TEMP "tailscale-install.log"
+            $msiUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-$version-amd64.msi"
+            Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath
+            # TS_UNATTENDEDMODE keeps tailscaled running with nobody logged
+            # into the console - this host never has an interactive desktop
+            # session. TS_NOLAUNCH skips starting the GUI client post-install,
+            # which has nothing to attach to under the runner service account.
+            $proc = Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" TS_UNATTENDEDMODE=always TS_NOLAUNCH=1 /qn /L*V `"$logPath`"" -Wait -PassThru
+            if ($proc.ExitCode -ne 0) {
+              Get-Content $logPath -Tail 40 -ErrorAction SilentlyContinue | Write-Output
+              throw "Tailscale install failed with exit code $($proc.ExitCode)"
+            }
+            Remove-Item $msiPath -ErrorAction SilentlyContinue
+            Remove-Item $logPath -ErrorAction SilentlyContinue
+          }
+
+          Set-Service -Name Tailscale -StartupType Automatic
+          if ((Get-Service -Name Tailscale).Status -ne 'Running') {
+            Start-Service -Name Tailscale
+          }
+
+          # `tailscale up` flags aren't cumulative - every call must restate
+          # the full desired flag set, or an omitted flag resets to default.
+          # --unattended must be restated too: TS_UNATTENDEDMODE=always at
+          # install time makes it a persistent non-default setting, and
+          # `tailscale up` refuses to run if any non-default flag goes
+          # unmentioned.
+          # --authkey is included only on first auth: re-passing it on every
+          # run is tempting for idempotency, but tailscaled unconditionally
+          # attempts to register with a supplied key even when a valid
+          # authenticated state already exists on disk
+          # (tailscale/tailscale#19501) - so a since-expired reusable key
+          # would break every run after its expiry, not just the one that
+          # actually needed it.
+          $status = & $tailscaleExe status --json | ConvertFrom-Json
+          if ($status.BackendState -ne "Running") {
+            & $tailscaleExe up --authkey=$env:TAILSCALE_AUTH_KEY --advertise-routes=$env:TAILSCALE_ADVERTISE_ROUTES --accept-routes=false --hostname=$env:TAILSCALE_HOSTNAME --unattended
+          } else {
+            & $tailscaleExe up --advertise-routes=$env:TAILSCALE_ADVERTISE_ROUTES --accept-routes=false --hostname=$env:TAILSCALE_HOSTNAME --unattended
+          }
+          if ($LASTEXITCODE -ne 0) { throw "tailscale up failed with exit code $LASTEXITCODE" }
+
       - name: Provision node
         shell: powershell
         env:
