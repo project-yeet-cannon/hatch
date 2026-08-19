@@ -1018,7 +1018,7 @@ demands of any workload, plus the automation. 14 is the gate.
       *Exit:* a Provision 0 run on an already-provisioned host converges both
       services with no change; a deploy still succeeds with those steps gone.
 
-- [ ] **14. Phase gate as a command** — `scripts/k3s/Test-AppTier.ps1`, wrapped by
+- [x] **14. Phase gate as a command** — `scripts/k3s/Test-AppTier.ps1`, wrapped by
       `.github/workflows/verify-app-tier.yml`, in the exact shape 3b.13 and
       4b.11 established: read-only, **not** numbered into the Provision
       sequence, does not stop at the first failure, and a check it cannot

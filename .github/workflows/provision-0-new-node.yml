@@ -182,6 +182,47 @@ jobs:
             Start-Service -Name windows_exporter
           }
 
+      # The MSI does not open the port. windows_exporter's firewall exception
+      # is an opt-in installer feature (`ADDLOCAL=FirewallException`, see the
+      # project README's installer property table), so the plain /qn install
+      # above leaves Windows Defender Firewall silently dropping inbound 9182:
+      # a scrape from off-host times out rather than being refused, which reads
+      # like a dead host instead of a closed port. It never showed up while
+      # Prometheus ran in a container on this same host and scraped
+      # host.docker.internal - that path never left the machine. Phase 6
+      # scrapes from a pod on another VM, which is a different network path
+      # with a different firewall answer.
+      #
+      # The rule is converged here rather than handed to `ADDLOCAL` because
+      # the install above is skipped when the service already exists, so an
+      # installer-owned rule would never reach a host provisioned before this
+      # step existed - and its scope would be frozen at install time.
+      #
+      # LocalSubnet, not Any: Phase 1 puts the node VMs on an external switch,
+      # so they are on the host's own LAN subnet by design. A topology that
+      # separates them needs this widened to that CIDR, not to Any.
+      - name: Ensure windows_exporter is reachable off-host
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ruleName = "aerie-windows-exporter"
+          $params = @{
+            Protocol      = "TCP"
+            LocalPort     = 9182
+            RemoteAddress = "LocalSubnet"
+            Profile       = "Any"
+            Action        = "Allow"
+            Enabled       = "True"
+          }
+          if (Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue) {
+            Set-NetFirewallRule -Name $ruleName @params
+          } else {
+            New-NetFirewallRule -Name $ruleName `
+              -DisplayName "windows_exporter (Aerie)" `
+              -Description "Prometheus scrapes of windows_exporter from the cluster nodes." `
+              -Direction Inbound @params | Out-Null
+          }
+
       # Native Windows install, not a container: Docker Desktop's WSL2 backend
       # gives every container the WSL VM's own network namespace, not the real
       # host's - a containerized Tailscale could join the tailnet but could
