@@ -41,12 +41,17 @@ spec:
       # 5b.1's dockerconfigjson Secret - same reason as api-deployment.yaml.
       imagePullSecrets:
         - name: {{ .Values.image.pullSecret }}
-      # Same ScheduleAnyway reasoning as api-deployment.yaml's - 2 replicas
-      # over the two-node build window, and files is on the same HA list.
+      # DoNotSchedule, unlike api-deployment.yaml's ScheduleAnyway: api's 3
+      # replicas over 2 nodes can never satisfy an even spread, so a hard
+      # constraint would strand the third pod Pending forever. files' 2
+      # replicas over 2 nodes can always satisfy maxSkew 1 exactly - a soft
+      # constraint here just lets node-1's control-plane/etcd/Postgres load
+      # keep outscoring the spread preference and pack both replicas onto
+      # node-2, which is the failure this hardens against.
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: ScheduleAnyway
+          whenUnsatisfiable: DoNotSchedule
           labelSelector:
             matchLabels:
               {{- include "aerie.selectorLabels" . | nindent 14 }}
