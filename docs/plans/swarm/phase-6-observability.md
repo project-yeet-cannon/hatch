@@ -445,7 +445,7 @@ gate.
       jsonpath='{.data.WINDOWS_EXPORTER_TARGETS}'` prints the bracketed list
       intact, brackets and quotes included.
 
-- [ ] **4. The observability layer, empty but for two default logins** —
+- [x] **4. The observability layer, empty but for two default logins** —
       `deploy/cluster/observability.yaml`, `deploy/cluster/observability/`, and one
       line in [`kustomization.yaml`](../../../deploy/cluster/kustomization.yaml). The
       commit that creates somewhere for the next ten steps to land, plus the only
