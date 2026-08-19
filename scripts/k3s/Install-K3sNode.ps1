@@ -498,9 +498,19 @@ try {
     }
     Write-Host '  vm.max_map_count: 262144.'
 
-    $etcdMetricsCheck = Invoke-NodeSsh @ssh -Command 'curl -s --max-time 5 http://127.0.0.1:2381/metrics | head -1' -ConnectTimeoutSec 15
-    if ($etcdMetricsCheck.ExitCode -ne 0 -or -not $etcdMetricsCheck.StdOut.Trim()) {
-        throw "etcd's metrics endpoint (127.0.0.1:2381) is not answering on $IPAddress. Confirm $k3sConfigPath has etcd-expose-metrics: true and that k3s restarted cleanly: ssh $Username@$IPAddress sudo journalctl -u k3s -n 100"
+    # etcd binds :2381 as part of the same k3s server process whose apiserver
+    # side just reported this node Ready - a short-lived race, not a
+    # misconfiguration, so this gets its own small retry window rather than
+    # failing on the first miss the instant k3s.service/Ready is achieved.
+    $etcdDeadline = (Get-Date).AddSeconds(60)
+    $etcdMetricsCheck = $null
+    while ($true) {
+        $etcdMetricsCheck = Invoke-NodeSsh @ssh -Command 'curl -s --max-time 5 http://127.0.0.1:2381/metrics | head -1' -ConnectTimeoutSec 15
+        if ($etcdMetricsCheck.ExitCode -eq 0 -and $etcdMetricsCheck.StdOut.Trim()) { break }
+        if ((Get-Date) -gt $etcdDeadline) {
+            throw "etcd's metrics endpoint (127.0.0.1:2381) is not answering on $IPAddress after 60s. Confirm $k3sConfigPath has etcd-expose-metrics: true and that k3s restarted cleanly: ssh $Username@$IPAddress sudo journalctl -u k3s -n 100"
+        }
+        Start-Sleep -Seconds 5
     }
     Write-Host '  etcd metrics endpoint (:2381): answering.'
 

@@ -353,10 +353,19 @@ $Command
         }
         $exitCode = $LASTEXITCODE
 
+        # "$(...)" rather than [string](...): when the command produced truly
+        # empty output, Get-Content -Raw returns nothing at all (zero objects,
+        # not one holding $null), and casting that empty pipeline with
+        # [string](...) yields $null rather than '' - a quirk in how the cast
+        # operator handles an expression with no output, distinct from how it
+        # handles a $null value. String interpolation coerces the same empty
+        # pipeline to '' correctly, which is what every caller here already
+        # assumes StdOut/StdErr can be chained on (.Trim(), string ops) without
+        # a null check.
         [pscustomobject]@{
             ExitCode = $exitCode
-            StdOut   = [string](Get-Content -Path $stdout -Raw -ErrorAction SilentlyContinue)
-            StdErr   = [string](Get-Content -Path $stderr -Raw -ErrorAction SilentlyContinue)
+            StdOut   = "$(Get-Content -Path $stdout -Raw -ErrorAction SilentlyContinue)"
+            StdErr   = "$(Get-Content -Path $stderr -Raw -ErrorAction SilentlyContinue)"
         }
     }
     finally {
