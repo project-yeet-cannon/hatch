@@ -400,7 +400,7 @@ gate.
       the same namespace but are **not** ExternalSecrets and will not appear in
       that list — `kubectl -n observability get secret` is where they show.
 
-- [ ] **3. Two new `cluster-config.json` keys, two promoted to required, and a
+- [x] **3. Two new `cluster-config.json` keys, two promoted to required, and a
       Provision 4 re-dispatch** —
       [`cluster-config.json`](../../../scripts/k3s/cluster-config.json),
       [`provision-4-cluster-config.yml`](../../../.github/workflows/provision-4-cluster-config.yml).
