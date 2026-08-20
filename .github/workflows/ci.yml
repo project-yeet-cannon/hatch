@@ -275,7 +275,15 @@ jobs:
           fi
           echo "$(echo "$used" | grep -c . || true) token(s) used, all declared."
 
+  # TEMPORARILY DISABLED while CI runs on the self-hosted builders: the kiosk
+  # jobs pull a ~700MB Android SDK and run a Gradle build, which is by far the
+  # most expensive thing on a single Windows builder. Nothing else in CI
+  # depends on these jobs, and the workflow conclusion (what publish.yml's
+  # wait-for-ci gates on) treats skipped jobs as neutral.
+  # To re-enable: drop the `if: false` here and on the `kiosk` job below, and
+  # restore that job's original condition noted there.
   detect-kiosk-changes:
+    if: false
     runs-on: [self-hosted, builder]
     outputs:
       kiosk-changed: ${{ steps.filter.outputs.kiosk }}
@@ -308,9 +316,11 @@ jobs:
             echo "kiosk=true" >> "$GITHUB_OUTPUT"
           fi
 
+  # TEMPORARILY DISABLED - see detect-kiosk-changes above.
+  # Original condition: if: needs.detect-kiosk-changes.outputs.kiosk-changed == 'true'
   kiosk:
     needs: detect-kiosk-changes
-    if: needs.detect-kiosk-changes.outputs.kiosk-changed == 'true'
+    if: false
     runs-on: [self-hosted, builder]
     steps:
       - name: Checkout repository

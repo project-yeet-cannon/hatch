@@ -518,7 +518,16 @@ jobs:
       - name: Push Docker image
         run: docker push --all-tags ghcr.io/eouw0o83hf/aerie-caddy
 
+  # TEMPORARILY DISABLED while we publish from the self-hosted builders: the
+  # kiosk image build pulls a ~700MB Android SDK and runs a signed Gradle
+  # release build, which is the longest job on a single Windows builder.
+  # Skipping it leaves the last-published ghcr.io/.../aerie-kiosk-files image
+  # in place - Flux image automation keeps pinning that tag, so the cluster is
+  # unaffected; kiosk APK changes just will not ship until this is re-enabled.
+  # To re-enable: drop the `if: false` here and on build-and-push-kiosk-image
+  # below, and restore that job's original condition noted there.
   detect-kiosk-changes:
+    if: false
     runs-on: [self-hosted, builder]
     permissions:
       contents: read
@@ -556,9 +565,11 @@ jobs:
           registry-username: ${{ github.actor }}
           registry-password: ${{ secrets.GITHUB_TOKEN }}
 
+  # TEMPORARILY DISABLED - see detect-kiosk-changes above.
+  # Original condition: if: needs.detect-kiosk-changes.outputs.kiosk-changed == 'true'
   build-and-push-kiosk-image:
     needs: [detect-kiosk-changes, wait-for-ci]
-    if: needs.detect-kiosk-changes.outputs.kiosk-changed == 'true'
+    if: false
     runs-on: [self-hosted, builder]
     timeout-minutes: 30
     permissions:
