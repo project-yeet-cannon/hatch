@@ -2,7 +2,25 @@
 # suspended so Flux reconciling this file can never itself trigger a data
 # load; a real run is always a deliberate human action:
 #
-#   kubectl -n aerie create job --from=job/aerie-pg-restore aerie-pg-restore-$(date +%Y%m%d)
+#   kubectl -n aerie get job aerie-pg-restore -o json \
+#     | jq 'del(.spec.selector, .spec.template.metadata.labels, .status,
+#              .metadata.uid, .metadata.resourceVersion, .metadata.generation,
+#              .metadata.creationTimestamp, .metadata.managedFields,
+#              .metadata.annotations, .metadata.labels)
+#           | .metadata.name = "aerie-pg-restore-run"
+#           | .spec.suspend = false' \
+#     | kubectl -n aerie create -f -
+#
+# Not `kubectl create job --from=job/aerie-pg-restore`, which is what this
+# comment said until a real run tried it: `--from` accepts a CronJob and
+# nothing else ("unknown object type *v1.Job"). Nor `kubectl patch ...
+# suspend=false` on the committed Job itself - that works exactly once, and
+# races Flux, whose next reconcile of this file sets suspend back to true and
+# would tear down the pods of a restore already in flight. Copying the spec
+# to a new name is the only shape that is both re-runnable and safe to leave
+# running. If this gets tiresome, the idiomatic fix is to make this a
+# CronJob with a schedule that never fires, which is what makes the original
+# `--from=` command legal.
 #
 # Before that command, two things this Job needs that nothing in Phase 4
 # generates automatically:
@@ -44,6 +62,17 @@ spec:
   template:
     spec:
       restartPolicy: Never
+      # ghcr.io/<owner>/aerie-backup is private, the same as every other image
+      # this repository publishes, so this pull needs the credential
+      # ../../infrastructure/config/external-secrets/aerie-ghcr-pull.yaml
+      # lands in this namespace - exactly what charts/aerie's own
+      # migrate-job.yaml does through `image.pullSecret`. Missing here until a
+      # real run hit it, and the failure gives no hint of the cause: kubelet
+      # falls back to an anonymous token and reports a bare
+      # `401 Unauthorized` from ghcr.io, which reads like the image is absent
+      # rather than like the pod never presented a credential.
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: restore
           # Already ships restic and postgres:18.4's psql/pg_restore - see
