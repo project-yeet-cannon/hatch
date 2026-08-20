@@ -28,3 +28,16 @@ resources:
   - admin-secrets.yaml
   - kube-prometheus-stack.yaml
   - opensearch.yaml
+  - fluent-bit.yaml
+
+# service_tag.lua as a ConfigMap ./fluent-bit.yaml's HelmRelease reads via
+# valuesFrom - disableNameSuffixHash: true because that reference names this
+# ConfigMap statically, the same reason ../config/dashboards/kustomization.yaml
+# disables it for the sidecar's ConfigMaps.
+configMapGenerator:
+  - name: fluent-bit-lua
+    namespace: observability
+    files:
+      - fluent-bit/service_tag.lua
+    options:
+      disableNameSuffixHash: true

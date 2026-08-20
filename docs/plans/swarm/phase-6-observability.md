@@ -872,7 +872,7 @@ gate.
       yellow — see above); `logs.${DOMAIN}` via `--resolve` serves the
       Dashboards UI over a valid certificate.
 
-- [ ] **10. The fluent-bit rewrite** —
+- [x] **10. The fluent-bit rewrite** —
       `deploy/cluster/observability/controllers/fluent-bit.yaml` and the config
       alongside it. Finding 4, and the only step in this phase that rewrites
       rather than re-hosts.
