@@ -1,0 +1,91 @@
+# The cluster plan Phase 6b.11 - the three OpenSearch provisioning scripts,
+# as a CronJob. Finding 6's first half; ../../controllers/opensearch.yaml's
+# sibling HelmReleases are what this runs against, and
+# ../../controllers/kuma-provision.yaml (6b.13, still to come) is Finding 6's
+# second half, the same shape one layer over.
+#
+# A CronJob, not a Job - the same tension
+# ../../../data/schema/restore-job.yaml resolved the other way, and the
+# difference is the reason: that Job is a one-shot with consequences, invoked
+# deliberately by a human (`kubectl create job --from=`). These three scripts
+# are not - the compose comments they came from say three times that they
+# converge on *every* deploy, and a Job's immutable pod template means Flux
+# re-applying an unchanged Job is a no-op that never runs again. Hourly
+# convergence also resolves the one genuine ordering question here:
+# ./create-index-pattern.sh cannot succeed until fluent-bit has shipped a log
+# and the "time" field is discoverable, so a single run at install time is a
+# coin flip. `concurrencyPolicy: Forbid` so a slow run is never doubled up
+# against the next tick, `successfulJobsHistoryLimit: 1` and
+# `ttlSecondsAfterFinished` so finished pods do not accumulate - the sizing
+# table's own note that this and 6b.13's CronJob are "transient; two of them,
+# minutes apart".
+#
+# curlimages/curl, the same pinned tag ../../../../compose.observability.yml's
+# opensearch-provision service already runs - a public image, so unlike
+# 6b.13's kuma-provision this needs no ghcr-pull secret.
+#
+# OPENSEARCH_URL and DASHBOARDS_URL point at ../../controllers/opensearch.yaml's
+# two chart-default Service names (opensearch-cluster-master:9200, confirmed
+# there against the same chart version; opensearch-dashboards:5601, the
+# chart's own default and unchanged by that file's values) rather than the
+# scripts' own compose-era fallbacks (opensearch:9200,
+# opensearch-dashboards:5601) - the second happens to already match, the
+# first does not, and both are set explicitly here rather than relied on by
+# accident.
+#
+# The scripts' own retry loops (30 attempts, 5s apart) come across unchanged
+# from ../../../../containers/opensearch-provision/ and are what makes the
+# startup ordering a non-problem - this CronJob carries no dependsOn or
+# initContainer wait on OpenSearch or Dashboards being Ready, because the
+# scripts already poll for it. `backoffLimit: 2` below is a second, outer
+# layer: if a run still exits non-zero after exhausting its own retries,
+# Kubernetes retries the Job itself up to twice before waiting for the next
+# hourly tick.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: opensearch-provision
+  namespace: observability
+spec:
+  schedule: "0 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: opensearch-provision
+              image: curlimages/curl:8.11.0
+              command:
+                - /bin/sh
+                - -c
+                - /scripts/apply-ism-policy.sh && /scripts/apply-index-template.sh && /scripts/create-index-pattern.sh
+              env:
+                - name: OPENSEARCH_URL
+                  value: http://opensearch-cluster-master:9200
+                - name: DASHBOARDS_URL
+                  value: http://opensearch-dashboards:5601
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+              # Per the sizing table's "provisioning CronJobs" row - transient,
+              # no CPU limit per the same table's "whole stack peaked at 5% of
+              # one core" finding every other HelmRelease/manifest in this
+              # phase leaves uncapped on.
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 128Mi
+          volumes:
+            - name: scripts
+              configMap:
+                name: opensearch-provision-scripts
+                defaultMode: 0o555

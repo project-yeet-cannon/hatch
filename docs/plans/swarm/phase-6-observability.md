@@ -944,7 +944,7 @@ gate.
       `service: longhorn-manager` returns cluster ones — one assertion for each
       half of the Lua.
 
-- [ ] **11. The three OpenSearch provisioning scripts, as CronJobs** —
+- [x] **11. The three OpenSearch provisioning scripts, as CronJobs** —
       `deploy/cluster/observability/config/provisioning/`. Finding 6's first
       half.
 
@@ -977,6 +977,16 @@ gate.
         or every index sits yellow forever)
       - the ISM policy's `min_index_age` is set from 6b.10's measurement rather
         than left at the 30 days written for one compose project
+
+      **Implemented with that second edit deferred, deliberately.** No week of
+      `aerie-logs-*` growth against fluent-bit's cluster-wide tail exists yet
+      to measure — 6b.10 landed immediately before this step, not a week
+      before it. `min_index_age` stays `30d`, but
+      [`apply-ism-policy.sh`](../../../deploy/cluster/observability/config/provisioning/apply-ism-policy.sh)'s
+      header now says so explicitly, as a placeholder pending the measurement
+      rather than a value that reads as a considered decision. Revisit once
+      `_cat/indices` has a week of data and write the number into that
+      comment, per 6b.10's own instruction.
 
       *Exit:* `_plugins/_ism/policies/aerie-log-retention` and
       `_index_template/aerie-logs` both return 200; the `aerie-logs` index
@@ -1186,9 +1196,12 @@ deploy/cluster/
         flux.yaml                 # 6b.8, the gotk_reconcile_condition rule
         cluster.yaml              # 6b.8, etcd / Longhorn / CNPG
       provisioning/
-        opensearch-scripts.yaml   # 6b.11, the three scripts as a ConfigMap
+        apply-ism-policy.sh       # 6b.11, real copies -> configMapGenerator,
+        apply-index-template.sh   #   same call ../../controllers/fluent-bit.yaml
+        create-index-pattern.sh   #   makes for its own Lua script
         opensearch-provision.yaml # 6b.11, CronJob
         kuma-provision.yaml       # 6b.13, CronJob
+        kustomization.yaml        # 6b.11, the configMapGenerator
       static-monitors.yaml        # 6b.12, the four rewritten monitors
       ingress-logs.yaml           # 6b.9
       ingress-status.yaml         # 6b.12

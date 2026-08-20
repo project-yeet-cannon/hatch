@@ -19,13 +19,18 @@
 # rather than in ../controllers - and is a single file rather than a
 # directory because it is one object, the same shape 5b.9's own Ingresses
 # take. static-monitors-configmap.yaml and ingress-status.yaml are 6b.12's,
-# same reasoning. Still to come: 6b.11 (provisioning/).
+# same reasoning. provisioning/ (6b.11) needs no CRD either, and holds two
+# plain objects - a ConfigMap and a CronJob - for the same reason
+# dashboards/ lives here rather than in ../controllers: they are content
+# this layer applies once ../controllers has registered what it needs to,
+# not plumbing a HelmRelease mounts.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - scrape/
   - dashboards/
   - alerts/
+  - provisioning/
   - ingress-logs.yaml
   - static-monitors-configmap.yaml
   - ingress-status.yaml
