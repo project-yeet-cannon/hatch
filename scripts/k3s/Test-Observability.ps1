@@ -794,7 +794,14 @@ try {
         # object, not one of this phase's own hand-written scrape objects, so
         # matched by the job label config/alerts/cluster.yaml's own
         # EtcdMemberDown rule already hardcodes rather than by scrapePool.
-        [pscustomobject]@{ Label = 'kube-prometheus-stack-kube-etcd (kubeEtcd, controllers/kube-prometheus-stack.yaml)'; Match = { param($t) [string](Get-Path $t 'labels.job') -eq 'kube-prometheus-stack-kube-etcd' } }
+        # Matched on scrapePool, not on `job`: the chart's kube-etcd
+        # ServiceMonitor sets jobLabel: jobLabel, and the Service it selects
+        # carries jobLabel: kube-etcd - so the `job` label on these targets is
+        # `kube-etcd`, not the release-prefixed name every other exporter in
+        # the chart uses. Expecting the latter failed a working scrape of both
+        # etcd members. scrapePool is derived from the ServiceMonitor's own
+        # namespace and name, so it says what this check actually means.
+        [pscustomobject]@{ Label = 'kube-prometheus-stack-kube-etcd (kubeEtcd, controllers/kube-prometheus-stack.yaml)'; Match = { param($t) [string](Get-Field $t 'scrapePool') -like '*kube-prometheus-stack-kube-etcd*' } }
     )
 
     $resolvedJobs = New-Object Collections.Generic.List[psobject]

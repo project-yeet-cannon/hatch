@@ -31,6 +31,10 @@ resources:
   - fluent-bit.yaml
   - uptime-kuma.yaml
   - autokuma.yaml
+  # 6b.12's monitor definitions. Here rather than in ../config/ because
+  # autokuma.yaml mounts it - see its own header, and ../config/
+  # kustomization.yaml's rule about objects a workload in this layer mounts.
+  - static-monitors-configmap.yaml
   - priorityclass.yaml
 
 # service_tag.lua as a ConfigMap ./fluent-bit.yaml's HelmRelease reads via

@@ -124,7 +124,7 @@ diagnosed as collateral:
 - Home Assistant, and the alert path through it — Aerie reaches HA outbound
 - Tailscale — the subnet routers are on the hosts (5b.13), not in the stack
 - the cluster's own Kuma monitors, which check
-  [in-cluster Service DNS](../../../deploy/cluster/observability/config/static-monitors-configmap.yaml)
+  [in-cluster Service DNS](../../../deploy/cluster/observability/controllers/static-monitors-configmap.yaml)
   and never resolved a public hostname to begin with
 
 The **old host's** Kuma is the one that will alarm, correctly and uselessly,

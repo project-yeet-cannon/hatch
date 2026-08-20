@@ -97,7 +97,7 @@ spec:
 # ../controllers/kube-prometheus-stack.yaml gives for Alertmanager's volume:
 # what this holds is monitor definitions, heartbeat history and the
 # Watchdog push token's owning monitor, none of which AutoKuma's
-# reconciliation from ../config/static-monitors-configmap.yaml (6b.12)
+# reconciliation from ./static-monitors-configmap.yaml (6b.12)
 # can fully rebuild - notification config and history are Kuma-only state.
 apiVersion: v1
 kind: PersistentVolumeClaim

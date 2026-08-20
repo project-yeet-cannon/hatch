@@ -1,12 +1,24 @@
 # The cluster plan Phase 6b.12 - the four monitors
 # containers/autokuma/static-monitors/*.toml rewrite into, plus two the old
 # host never had reason to run. One ConfigMap, not a configMapGenerator: its
-# name is referenced literally by ../controllers/autokuma.yaml's volume, the
-# same reason ../controllers/kustomization.yaml's fluent-bit-lua generator
-# sets disableNameSuffixHash rather than this file inheriting a hash suffix
-# it would then have to track. AutoKuma takes the filename (without
-# extension) as each monitor's stable id - one key per monitor below,
-# `<name>.toml`.
+# name is referenced literally by ./autokuma.yaml's volume, the same reason
+# ./kustomization.yaml's fluent-bit-lua generator sets disableNameSuffixHash
+# rather than this file inheriting a hash suffix it would then have to track.
+#
+# **In controllers/, not config/, and that is load-bearing.** ./autokuma.yaml
+# mounts this as a non-optional volume, so the kubelet will not start *any*
+# container in that pod - not even an initContainer - until it exists. Shipped
+# from config/ it could not: that layer dependsOn observability-controllers
+# with wait: true, controllers waits on AutoKuma's health, and AutoKuma's pod
+# was stuck in ContainerCreating on `configmap "kuma-static-monitors" not
+# found` - a deadlock that also held the 6b.11 provisioning CronJobs, in the
+# same blocked layer, hostage for as long as it lasted. ../config/
+# kustomization.yaml's own rule already covers this case and names the right
+# home for it: an object a workload in this layer *mounts* belongs beside that
+# workload, which is why ./admin-secrets.yaml's two Secrets are here too.
+#
+# AutoKuma takes the filename (without extension) as each monitor's stable id
+# - one key per monitor below, `<name>.toml`.
 #
 # Every rewrite against containers/autokuma/static-monitors/:
 #
@@ -30,7 +42,10 @@
 #                address in a redeployable repo is exactly what docs/ethos.md
 #                rules out, and 6b.3 made both keys required for exactly this
 #                consumer. Substituted the same way every other ${...} token in
-#                this tree is, via this Kustomization's postBuild.substituteFrom.
+#                this tree is, via this Kustomization's
+#                postBuild.substituteFrom - ../../observability.yaml sets it
+#                on observability-controllers as well as -config, so the move
+#                out of that layer costs this nothing.
 #                The old values are deliberately not quoted here either: 3b.13
 #                greps deploy/ for this installation's values and does not care
 #                whether it finds one in a manifest or in a comment about one.
@@ -64,7 +79,7 @@
 #                (kuma-client/src/models/monitor.rs) accepts a client-supplied
 #                32-character alphanumeric token and validates it against
 #                that shape, so pinning one here is what lets
-#                ../controllers/kube-prometheus-stack.yaml's receiver name a
+#                ./kube-prometheus-stack.yaml's receiver name a
 #                concrete push URL in the same commit instead of a human
 #                copying a generated one out of Kuma's UI after the fact.
 #                interval 300s / retry 60s / max_retries 3 gives roughly 8

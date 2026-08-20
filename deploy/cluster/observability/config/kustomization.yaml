@@ -18,8 +18,14 @@
 # no CRD either - a plain Ingress, the same reason dashboards/ lives here
 # rather than in ../controllers - and is a single file rather than a
 # directory because it is one object, the same shape 5b.9's own Ingresses
-# take. static-monitors-configmap.yaml and ingress-status.yaml are 6b.12's,
-# same reasoning. provisioning/ (6b.11) needs no CRD either, and holds two
+# take. ingress-status.yaml is 6b.12's, same reasoning - but 6b.12's
+# static-monitors-configmap.yaml is *not*, and lives in ../controllers/
+# instead: ../controllers/autokuma.yaml mounts it as a non-optional volume,
+# which is the mounted-by-a-workload case this comment already carves out for
+# ../controllers/admin-secrets.yaml two sentences up. Shipping it here
+# deadlocked both layers - see that file's own header for the full shape.
+#
+# provisioning/ (6b.11) needs no CRD either, and holds two
 # plain objects - a ConfigMap and a CronJob - for the same reason
 # dashboards/ lives here rather than in ../controllers: they are content
 # this layer applies once ../controllers has registered what it needs to,
@@ -32,5 +38,4 @@ resources:
   - alerts/
   - provisioning/
   - ingress-logs.yaml
-  - static-monitors-configmap.yaml
   - ingress-status.yaml

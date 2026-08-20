@@ -29,7 +29,8 @@
 # the Secret goes stale.
 #
 # HA_HOST/HA_PORT are postBuild-substituted from aerie-cluster-config, the
-# same mechanism ../static-monitors-configmap.yaml already uses for the same
+# same mechanism ../../controllers/static-monitors-configmap.yaml already
+# uses for the same
 # two keys - scripts/k3s/cluster-config.json's HA_HOST/HA_PORT.description
 # now says this CronJob is why they are `required: true`. HA_TOKEN reads
 # 6b.2's second `ha/token` kubernetes block, secretName home-assistant in

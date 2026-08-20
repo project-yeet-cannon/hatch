@@ -1,5 +1,5 @@
 # The cluster plan Phase 6b.12 - AutoKuma, syncing monitors from
-# ../config/static-monitors-configmap.yaml continuously, replacing the
+# ./static-monitors-configmap.yaml continuously, replacing the
 # compose bind mount with a ConfigMap volume.
 #
 # Reads the admin password from ../admin-secrets.yaml's kuma-admin Secret,

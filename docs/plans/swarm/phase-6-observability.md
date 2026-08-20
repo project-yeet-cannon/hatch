@@ -996,7 +996,7 @@ gate.
 
 - [x] **12. Uptime Kuma and AutoKuma, as plain manifests** —
       `deploy/cluster/observability/controllers/uptime-kuma.yaml`,
-      `.../autokuma.yaml`, `.../config/static-monitors-configmap.yaml`,
+      `.../autokuma.yaml`, `.../controllers/static-monitors-configmap.yaml`,
       `.../config/ingress-status.yaml`.
 
       Plain objects rather than a community chart — see the re-scope preamble.

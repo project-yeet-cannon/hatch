@@ -215,7 +215,7 @@ spec:
             # prove the pipeline works) is deliberately NOT left on the
             # default route - every repeat_interval would otherwise page a
             # human to say nothing is wrong. Routed instead to
-            # ../config/static-monitors-configmap.yaml's (6b.12) Kuma push
+            # ./static-monitors-configmap.yaml's (6b.12) Kuma push
             # monitor: as long as this fires, Kuma stays green; if Prometheus,
             # this rule evaluation or Alertmanager itself dies, the pushes
             # stop and Kuma's own Home Assistant notification takes over -
