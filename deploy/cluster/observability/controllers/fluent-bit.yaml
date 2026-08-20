@@ -65,11 +65,17 @@ spec:
   # and lives in this Kustomization rather than ../../config because a
   # HelmRelease mounts it, the same distinction ../../config/kustomization.yaml's
   # own comment draws for ./admin-secrets.yaml's two Secrets.
-  valuesFrom:
-    - kind: ConfigMap
-      name: fluent-bit-lua
-      valuesKey: service_tag.lua
-      targetPath: luaScripts.service_tag\.lua
+  #
+  # Not wired in via `valuesFrom`/`targetPath` into the chart's own
+  # `luaScripts` value, despite that being the mechanism the chart's README
+  # documents - found live, 2026-08-20: Flux pipes a `targetPath` value through
+  # Helm's `strvals` parser (the same grammar `helm --set` uses), which treats
+  # commas as list separators and chokes on the Lua source's own commas and
+  # newlines with a `ValuesError`. `extraVolumes`/`extraVolumeMounts` below
+  # sidestep the chart's `luaScripts` mechanism entirely and mount this
+  # ConfigMap straight onto the pod at the exact path `luaScripts` would have
+  # used (`/fluent-bit/scripts/<name>`, per the chart's own `_pod.tpl`) - the
+  # `[FILTER] lua` stanza's `script` line below already names that path.
   values:
     image:
       repository: fluent/fluent-bit
@@ -184,6 +190,20 @@ spec:
         mountPath: /var/log
       - name: fluent-bit-state
         mountPath: /fluent-bit/state
+
+    # ./fluent-bit/service_tag.lua's ConfigMap (../kustomization.yaml), mounted
+    # at the same path the chart's own `luaScripts` mechanism would use - see
+    # this file's earlier comment (above `values:`) for why it's wired in
+    # this way instead of `valuesFrom`/`targetPath`.
+    extraVolumes:
+      - name: fluent-bit-lua
+        configMap:
+          name: fluent-bit-lua
+    extraVolumeMounts:
+      - name: fluent-bit-lua
+        mountPath: /fluent-bit/scripts/service_tag.lua
+        subPath: service_tag.lua
+        readOnly: true
 
     # 7 MiB observed on the old host's one-project DaemonSet (phase-6-observability.md's
     # sizing table); no CPU limit, per that same table's "whole stack peaked at
