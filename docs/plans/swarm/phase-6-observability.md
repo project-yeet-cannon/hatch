@@ -683,7 +683,7 @@ gate.
       `count(cnpg_collector_up)` and `count(longhorn_volume_state)` all return
       non-zero.
 
-- [ ] **7. Grafana dashboards, as labelled ConfigMaps** —
+- [x] **7. Grafana dashboards, as labelled ConfigMaps** —
       `deploy/cluster/observability/config/dashboards/`. The sidecar 6b.5
       enabled watches for ConfigMaps labelled `grafana_dashboard: "1"` and loads
       whatever JSON they hold, which replaces
@@ -717,6 +717,35 @@ gate.
       signal to trim its panels, not to reach for a volume.
       *Exit:* `metrics.${DOMAIN}` (via `--resolve`) lists every dashboard, each
       renders with data, and Grafana's log shows no "datasource not found".
+
+      **Two things found live, confirmed against the running cluster
+      (2026-08-19), that this step's own text above did not anticipate:**
+
+      - **Every dashboard's `${...}` tokens — Grafana's own template-variable
+        and macro syntax — are textually identical to
+        [`observability.yaml`](../../../deploy/cluster/observability.yaml)'s
+        `postBuild.substituteFrom`, and this repo runs with
+        `StrictPostBuildSubstitutions` on.** `observability-config` failed to
+        reconcile outright: first "variable not set (strict mode)" on
+        windows-exporter.json's legacy Table-panel `${__cell_4}`/`${__cell_5}`
+        drill-down macros, then "missing closing brace" on longhorn.json's
+        `${__field.labels.*}` display-name macros once the first was fixed.
+        Every such token in all four files is now escaped to `$${...}`, which
+        Flux renders as the literal `${...}` Grafana expects rather than
+        trying to resolve it — see
+        [`dashboards/kustomization.yaml`](../../../deploy/cluster/observability/config/dashboards/kustomization.yaml)'s
+        own comment for the rule to follow when one of these dashboards is
+        next updated.
+      - **flux2-monitoring-example's `cluster.json` ("Flux Cluster Stats") —
+        the closer-sounding match to 6b.8's alert — keys every panel off
+        `gotk_resource_info`, which the pinned flux v2.9.4
+        ([`scripts/versions.json`](../../../scripts/versions.json)) does not
+        expose.** `count(gotk_resource_info)` returns empty on the live
+        Prometheus; every panel on that dashboard would have rendered blank.
+        `control-plane.json` ("Flux Control Plane") is what actually shipped
+        instead — `controller_runtime_reconcile_total`, `go_info`,
+        `rest_client_requests_total` and friends, all confirmed present with
+        data before being committed.
 
 - [ ] **8. Alerts, and the two things that make them trustworthy** —
       `deploy/cluster/observability/config/alerts/`. Two `PrometheusRule`s and
