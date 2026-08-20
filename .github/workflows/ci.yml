@@ -56,6 +56,24 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      # Not decoration: Aerie.Api.csproj has BeforeTargets="Build" targets that
+      # run `npm install` + `npm run build` for all five SPAs under
+      # src/Aerie.Web/apps (BuildDashboard, BuildAdmin, BuildModeler, BuildDocs,
+      # BuildFamily), so `dotnet build` fails outright with MSB3073 / exit 9009
+      # when npm isn't on PATH. That was invisible on ubuntu-latest, which ships
+      # Node; a Windows runner does not.
+      #
+      # All five .nvmrc files say 22, and Dockerfile.api builds them on
+      # node:22-alpine, so any one of them is the right pin - dashboard is named
+      # here rather than duplicating the version. The cache glob deliberately
+      # covers all five, since this job installs all five.
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: src/Aerie.Web/apps/dashboard/.nvmrc
+          cache: npm
+          cache-dependency-path: src/Aerie.Web/apps/*/package-lock.json
+
       - name: Restore
         run: dotnet restore src/Aerie.slnx
 
