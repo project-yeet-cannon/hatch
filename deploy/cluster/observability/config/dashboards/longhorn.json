@@ -92,7 +92,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "$${datasource}"
       },
       "description": "The total number of volumes in the Longhorn storage system",
       "fieldConfig": {
@@ -138,7 +138,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "editorMode": "code",
           "expr": "count(longhorn_volume_capacity_bytes{pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",volume=~\"$pv_name\"}) OR on() vector(0)",
@@ -154,7 +154,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "$${datasource}"
       },
       "description": "Healthy volumes are volumes that are attaching to a node and have the number of healthy replicas equals to the expected number of replicas.",
       "fieldConfig": {
@@ -204,7 +204,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "editorMode": "code",
           "expr": "count(\r\n  (longhorn_volume_robustness{pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",volume=~\"$pv_name\"} == 1)\r\n  or\r\n  (longhorn_volume_robustness{pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",robustness=\"healthy\",volume=~\"$pv_name\"} == 1)\r\n) OR on() vector(0)",
@@ -220,7 +220,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "$${datasource}"
       },
       "description": "Note that Longhorn volume actual size is not the size of the filesystem inside a Longhorn volume.  See more at : https://longhorn.io/docs/1.0.2/volumes-and-nodes/volume-size/#volume-actual-size",
       "fieldConfig": {
@@ -313,7 +313,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -330,7 +330,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "$${datasource}"
       },
       "description": "Degraded volumes are volumes that have the number of healthy replicas smaller than the expected number of replicas. e.g. User creates a volume with 2 replicas but 1 replicas is failed.",
       "fieldConfig": {
@@ -380,7 +380,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "editorMode": "code",
           "expr": "count(\r\n  (longhorn_volume_robustness{pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",volume=~\"$pv_name\"} == 2)\r\n  or\r\n  (longhorn_volume_robustness{pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",robustness=\"degraded\",volume=~\"$pv_name\"} == 1)\r\n) OR on() vector(0)",
@@ -396,7 +396,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "$${datasource}"
       },
       "description": "Fault volumes are volumes that doesn't have any healthy replica.",
       "fieldConfig": {
@@ -446,7 +446,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "editorMode": "code",
           "expr": "count(\r\n  (longhorn_volume_robustness{pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",volume=~\"$pv_name\"} == 3)\r\n  or\r\n  (longhorn_volume_robustness{pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",robustness=\"faulted\",volume=~\"$pv_name\"} == 1)\r\n) OR on() vector(0)",
@@ -462,7 +462,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "$${datasource}"
       },
       "description": "The capacity of each Longhorn volume",
       "fieldConfig": {
@@ -582,7 +582,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "editorMode": "code",
           "expr": "avg by (pvc_namespace, pvc, volume) (longhorn_volume_capacity_bytes{pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",volume=~\"$pv_name\"})",
@@ -596,7 +596,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "editorMode": "code",
           "exemplar": false,
@@ -610,7 +610,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "editorMode": "code",
           "exemplar": false,
@@ -684,7 +684,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "$${datasource}"
       },
       "description": "Attached volumes are volumes that are currently attaching to a node",
       "fieldConfig": {
@@ -734,7 +734,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "editorMode": "code",
           "expr": "count(\r\n  (longhorn_volume_state{pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",volume=~\"$pv_name\"} == 2)\r\n  or\r\n  (longhorn_volume_state{pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",state=\"attached\",volume=~\"$pv_name\"} == 1)\r\n) OR on() vector(0)",
@@ -750,7 +750,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "$${datasource}"
       },
       "description": "Detached volumes are volumes that aren't currently attaching to a node",
       "fieldConfig": {
@@ -800,7 +800,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "editorMode": "code",
           "expr": "count(\r\n  (longhorn_volume_state{pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",volume=~\"$pv_name\"} == 3)\r\n  or\r\n  (longhorn_volume_state{pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",state=\"detached\",volume=~\"$pv_name\"} == 1)\r\n) OR on() vector(0)",
@@ -826,7 +826,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "Longhorn volumes bound to a PVC in the selected Namespace/PVC scope. These are the volumes we expect to be backed up. NOTE: Longhorn does not export backup POLICY as a metric - this dashboard measures observed backup COVERAGE (via longhorn_volume_last_backup_at).",
           "fieldConfig": {
@@ -875,7 +875,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "editorMode": "code",
               "expr": "count(longhorn_volume_last_backup_at{pvc!=\"\",pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",volume=~\"$pv_name\"}) OR on() vector(0)",
@@ -889,7 +889,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "Volumes with a successful backup within the 'Stale after' window.",
           "fieldConfig": {
@@ -938,7 +938,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "editorMode": "code",
               "expr": "count(\n  ((time() - longhorn_volume_last_backup_at{pvc!=\"\",pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",volume=~\"$pv_name\"}) <= $stale_after)\n  and (longhorn_volume_last_backup_at{pvc!=\"\",pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",volume=~\"$pv_name\"} > 0)\n) OR on() vector(0)",
@@ -952,7 +952,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "Volumes that DO have backups, but the newest one is older than the 'Stale after' window - backups are falling behind schedule.",
           "fieldConfig": {
@@ -1005,7 +1005,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "editorMode": "code",
               "expr": "count(\n  ((time() - longhorn_volume_last_backup_at{pvc!=\"\",pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",volume=~\"$pv_name\"}) > $stale_after)\n  and (longhorn_volume_last_backup_at{pvc!=\"\",pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",volume=~\"$pv_name\"} > 0)\n) OR on() vector(0)",
@@ -1019,7 +1019,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "Backup-expected volumes that have NEVER been backed up (longhorn_volume_last_backup_at == 0). Either not covered by a backup policy, or the first run hasn't happened yet. Deselect known-OK namespaces/PVCs above to keep this at 0.",
           "fieldConfig": {
@@ -1072,7 +1072,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "editorMode": "code",
               "expr": "count(longhorn_volume_last_backup_at{pvc!=\"\",pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",volume=~\"$pv_name\"} == 0) OR on() vector(0)",
@@ -1086,7 +1086,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "Longhorn Backup CRs currently in the Error state (longhorn_backup_state == 4), for the selected Backup Job(s) and Namespace/PVC scope.",
           "fieldConfig": {
@@ -1139,7 +1139,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "editorMode": "code",
               "expr": "count(\n  (longhorn_backup_state{recurring_job=~\"$recurring_job\"} == 4)\n  and on(volume) longhorn_volume_last_backup_at{pvc!=\"\",pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",volume=~\"$pv_name\"}\n) OR on() vector(0)",
@@ -1153,7 +1153,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "Age of the oldest successful backup among backup-expected volumes.",
           "fieldConfig": {
@@ -1210,7 +1210,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "editorMode": "code",
               "expr": "max(\n  (time() - longhorn_volume_last_backup_at{pvc!=\"\",pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",volume=~\"$pv_name\"})\n  and (longhorn_volume_last_backup_at{pvc!=\"\",pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",volume=~\"$pv_name\"} > 0)\n) OR on() vector(0)",
@@ -1224,7 +1224,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "Every backup-expected Longhorn PVC and the age of its last successful backup. 'Never' (red) = no backup has ever completed for this volume. Sorted worst-first.",
           "fieldConfig": {
@@ -1344,7 +1344,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "editorMode": "code",
               "expr": "max by (pvc_namespace, pvc, volume) (\n  time() - longhorn_volume_last_backup_at{pvc!=\"\",pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",volume=~\"$pv_name\"}\n)",
@@ -1355,7 +1355,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "editorMode": "code",
               "expr": "sum by (pvc_namespace, pvc, volume) (\n  (longhorn_backup_actual_size_bytes\n  * on(volume) group_left(pvc, pvc_namespace) (max by(volume, pvc, pvc_namespace)(longhorn_volume_capacity_bytes) > bool 0))\n  and on(volume) longhorn_volume_last_backup_at{pvc!=\"\",pvc_namespace=~\"$namespace\",pvc=~\"$pvc\",volume=~\"$pv_name\"}\n)",
@@ -1406,7 +1406,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "Per recurring backup job (backup 'group'): number of Backup CRs tracked, how many are in Error state, and total storage consumed. Filtered by the Backup Job variable. Counts ALL Backup CRs including orphaned ones (volumes already deleted) - so 'Failed' here can exceed the 'Failed Backup Jobs' stat, which only counts failures for volumes that still exist. '(manual / no recurring job)' = backups not created by a recurring job.",
           "fieldConfig": {
@@ -1523,7 +1523,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "expr": "label_replace(count by (recurring_job) (longhorn_backup_state{recurring_job=~\"$recurring_job\"}), \"recurring_job\", \"(manual / no recurring job)\", \"recurring_job\", \"^$\")",
               "format": "table",
@@ -1533,7 +1533,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "expr": "label_replace(\n  (count by (recurring_job) (longhorn_backup_state{recurring_job=~\"$recurring_job\"} == 4))\n  or\n  (0 * count by (recurring_job) (longhorn_backup_state{recurring_job=~\"$recurring_job\"}))\n, \"recurring_job\", \"(manual / no recurring job)\", \"recurring_job\", \"^$\")",
               "format": "table",
@@ -1543,7 +1543,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "expr": "label_replace(sum by (recurring_job) (longhorn_backup_actual_size_bytes{recurring_job=~\"$recurring_job\"}), \"recurring_job\", \"(manual / no recurring job)\", \"recurring_job\", \"^$\")",
               "format": "table",
@@ -1591,7 +1591,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "Longhorn Backup CRs currently in Error (4) or Unknown (5) state, mapped to their PVC. Filtered by Backup Job + Namespace/PVC. Backup CR names (generic UIDs) are omitted; recurring_job shows which schedule produced it ('' = manual/on-demand).",
           "fieldConfig": {
@@ -1702,7 +1702,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "expr": "(\n  (longhorn_backup_state{recurring_job=~\"$recurring_job\"} >= 4)\n  * on(volume) group_left(pvc, pvc_namespace) (max by(volume, pvc, pvc_namespace)(longhorn_volume_capacity_bytes) > bool 0)\n)\nand on(volume) longhorn_volume_last_backup_at{pvc!=\"\",pvc_namespace=~\"$namespace\",pvc=~\"$pvc\"}",
               "format": "table",
@@ -1749,7 +1749,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "Total backup storage consumed per PVC (sum of all backup revisions) on the external backup target. Filtered by Backup Job + Namespace/PVC.",
           "fieldConfig": {
@@ -1834,7 +1834,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "expr": "sum by (pvc_namespace, pvc) (\n  (longhorn_backup_actual_size_bytes{recurring_job=~\"$recurring_job\"}\n  * on(volume) group_left(pvc, pvc_namespace) (max by(volume, pvc, pvc_namespace)(longhorn_volume_capacity_bytes) > bool 0))\n  and on(volume) longhorn_volume_last_backup_at{pvc!=\"\",pvc_namespace=~\"$namespace\",pvc=~\"$pvc\"}\n)",
               "legendFormat": "{{pvc_namespace}}/{{pvc}}",
@@ -1861,7 +1861,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "The total number of nodes in the Longhorn storage system",
           "fieldConfig": {
@@ -1906,7 +1906,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "expr": "avg(longhorn_node_count_total) OR on() vector(0)",
               "interval": "",
@@ -1920,7 +1920,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "Disabled nodes are nodes that are disabled by the user.  When users disable a node, Longhorn will not use the node's storage for replica scheduling. Note that Longhorn can still attach a volume to disabled nodes because the actual data of the volume could be on a different node.",
           "fieldConfig": {
@@ -1969,7 +1969,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "expr": "count(longhorn_node_status{condition=\"allowScheduling\"}==0) OR on() vector(0)",
               "interval": "",
@@ -1983,7 +1983,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -2069,7 +2069,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "exemplar": true,
               "expr": "(longhorn_node_storage_usage_bytes/longhorn_node_storage_capacity_bytes) * 100",
@@ -2084,7 +2084,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "Schedulable nodes are nodes that Longhorn can use their storage for replica scheduling.",
           "fieldConfig": {
@@ -2133,7 +2133,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "expr": "(count(longhorn_node_status{condition=\"schedulable\"}==1) OR on() vector(0)) - (count(longhorn_node_status{condition=\"allowScheduling\"}==0) OR on() vector(0))",
               "interval": "",
@@ -2147,7 +2147,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "Failed Nodes are nodes that Longhorn cannot attach volumes to and cannot schedule replicas onto. e.g: when the nodes went down.",
           "fieldConfig": {
@@ -2196,7 +2196,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "expr": "(avg(longhorn_node_count_total) OR on() vector(0)) - (count(longhorn_node_status{condition=\"ready\"}==1) OR on() vector(0))",
               "interval": "",
@@ -2210,7 +2210,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -2282,7 +2282,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "expr": "longhorn_node_storage_capacity_bytes",
               "format": "table",
@@ -2332,7 +2332,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -2415,7 +2415,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "exemplar": true,
               "expr": "count by (node) (\r\n  (longhorn_volume_state == 2)\r\n  or\r\n  (longhorn_volume_state{state=\"attached\"} == 1)\r\n)",
@@ -2444,7 +2444,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "The capacity of each Longhorn volume",
           "fieldConfig": {
@@ -2524,7 +2524,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "exemplar": true,
               "expr": "(longhorn_disk_usage_bytes/longhorn_disk_capacity_bytes)*100",
@@ -2539,7 +2539,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -2602,7 +2602,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "expr": "longhorn_disk_capacity_bytes",
               "format": "table",
@@ -2668,7 +2668,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -2746,7 +2746,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "exemplar": true,
               "expr": "(longhorn_node_cpu_usage_millicpu / longhorn_node_cpu_capacity_millicpu) * 100",
@@ -2761,7 +2761,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -2839,7 +2839,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "exemplar": true,
               "expr": "( longhorn_node_memory_usage_bytes / longhorn_node_memory_capacity_bytes ) * 100",
@@ -2854,7 +2854,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "Instance managers are pods that contains the engine and replica processes of Longhorn volumes. See more at https://longhorn.io/docs/1.0.2/concepts/#11-the-longhorn-manager-and-the-longhorn-engine ",
           "fieldConfig": {
@@ -2933,7 +2933,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "exemplar": true,
               "expr": "longhorn_instance_manager_cpu_usage_millicpu",
@@ -2948,7 +2948,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "Instance managers are pods that contains the engine and replica processes of Longhorn volumes. See more at https://longhorn.io/docs/1.0.2/concepts/#11-the-longhorn-manager-and-the-longhorn-engine ",
           "fieldConfig": {
@@ -3027,7 +3027,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "exemplar": true,
               "expr": "(longhorn_instance_manager_cpu_usage_millicpu/longhorn_instance_manager_cpu_requests_millicpu)*100",
@@ -3042,7 +3042,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "Instance managers are pods that contains the engine and replica processes of Longhorn volumes. See more at https://longhorn.io/docs/1.0.2/concepts/#11-the-longhorn-manager-and-the-longhorn-engine ",
           "fieldConfig": {
@@ -3120,7 +3120,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "exemplar": true,
               "expr": "longhorn_instance_manager_memory_usage_bytes",
@@ -3135,7 +3135,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "Longhorn manager pods manage the control plane of the Longhorn system. e.g. Volume scheduling, attaching, detaching, backup, etc,..",
           "fieldConfig": {
@@ -3214,7 +3214,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "exemplar": true,
               "expr": "longhorn_manager_cpu_usage_millicpu",
@@ -3229,7 +3229,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "$${datasource}"
           },
           "description": "Longhorn manager pods manage the control plane of the Longhorn system. e.g. Volume scheduling, attaching, detaching, backup, etc,..",
           "fieldConfig": {
@@ -3307,7 +3307,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "$${datasource}"
               },
               "exemplar": true,
               "expr": "longhorn_manager_memory_usage_bytes",
@@ -3384,7 +3384,7 @@
         "allowCustomValue": true,
         "current": {
           "text": "",
-          "value": "${DS_PROMETHEUS}",
+          "value": "$${DS_PROMETHEUS}",
           "selected": true
         },
         "includeAll": false,
@@ -3402,7 +3402,7 @@
         "current": {},
         "datasource": {
           "type": "prometheus",
-          "uid": "${datasource}"
+          "uid": "$${datasource}"
         },
         "definition": "label_values(longhorn_volume_state, pvc_namespace)",
         "description": "Namespace filter. Scopes the whole dashboard (volume + backup panels). Deselect a namespace to exclude it.",
@@ -3426,7 +3426,7 @@
         "current": {},
         "datasource": {
           "type": "prometheus",
-          "uid": "${datasource}"
+          "uid": "$${datasource}"
         },
         "definition": "label_values(longhorn_volume_state{pvc_namespace=~\"$namespace\"}, pvc)",
         "description": "PVC filter (friendly names, chained to the selected namespace).",
@@ -3450,7 +3450,7 @@
         "current": {},
         "datasource": {
           "type": "prometheus",
-          "uid": "${datasource}"
+          "uid": "$${datasource}"
         },
         "definition": "label_values(longhorn_volume_state{pvc_namespace=~\"$namespace\", pvc=~\"$pvc\"},volume)",
         "description": "PV filter (UUID, chained to the selected namespace and pvc-name).",
@@ -3475,7 +3475,7 @@
         "current": {},
         "datasource": {
           "type": "prometheus",
-          "uid": "${datasource}"
+          "uid": "$${datasource}"
         },
         "definition": "label_values(longhorn_backup_state, recurring_job)",
         "description": "Backup job/group filter (the recurring job that created each backup; empty = manual/on-demand). Drives the backup-job panels. NOTE: the per-volume coverage metric has no recurring_job label, so the coverage panels are filtered by Namespace/PVC only.",
