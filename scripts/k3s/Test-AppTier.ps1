@@ -681,21 +681,84 @@ try {
             }
         }
 
-        $restarted = @($componentPods | ForEach-Object {
-                $podName = Get-Path $_ 'metadata.name'
-                $statuses = @(Get-Path $_ 'status.containerStatuses' | Where-Object { $_ })
-                foreach ($status in $statuses) {
-                    if ([int](Get-Field $status 'restartCount') -gt 0) { "$podName/$(Get-Field $status 'name') (x$(Get-Field $status 'restartCount'))" }
+        # Restarts, classified by what killed the container rather than
+        # counted. A cumulative restartCount cannot stay at zero in this
+        # cluster: Phase 1 staggers a weekly reboot across the Hyper-V hosts
+        # (scripts/hyperv/Set-UpdateRebootSchedule.ps1), the guest goes down
+        # with its host, and every container that was running there comes
+        # back with its count incremented - the pod object itself survives a
+        # reboot short enough to stay inside the node-monitor grace period,
+        # so that count is history the workload had no say in. Asserting
+        # `restartCount -eq 0` fails on any pod old enough to have seen one
+        # reboot, which is a gate that goes red on a healthy cluster and
+        # teaches everyone reading it to ignore the row.
+        #
+        # What 5b.14 means by this check is "nothing here is crashing", and
+        # the last termination record is what distinguishes the two:
+        #   - reason Unknown with exit code 255 - the containerd shim went
+        #     away with the node. kubelet is reporting that it cannot account
+        #     for the exit, not that the container failed; a process that
+        #     exits on its own reports Error or Completed with its own code,
+        #     never Unknown. This is the node-lifecycle signature, and it
+        #     passes with the count and timestamp spelled out in the detail.
+        #   - reason OOMKilled - 5b.11's memory sizing regressed. A failure
+        #     whenever it happened.
+        #   - anything else, a missing record, or a container sitting in
+        #     CrashLoopBackOff right now - the workload failed. A failure.
+        # Kubernetes keeps exactly one previous state per container, so a
+        # restart older than the most recent one cannot be classified from
+        # pod status at all; CrashLoopBackOff is what still catches the case
+        # that matters now, and the detail below never claims more than the
+        # one record it actually read.
+        $restartFaults = [System.Collections.Generic.List[string]]::new()
+        $restartReboots = [System.Collections.Generic.List[string]]::new()
+        foreach ($pod in $componentPods) {
+            $podName = Get-Path $pod 'metadata.name'
+            $statuses = @(Get-Path $pod 'status.containerStatuses' | Where-Object { $_ })
+            foreach ($status in $statuses) {
+                $containerName = Get-Field $status 'name'
+                $count = [int](Get-Field $status 'restartCount')
+                $waitingReason = [string](Get-Path $status 'state.waiting.reason')
+                if ($waitingReason -eq 'CrashLoopBackOff') {
+                    $restartFaults.Add("$podName/$containerName in CrashLoopBackOff (x$count)")
+                    continue
                 }
-            } | Where-Object { $_ })
-        if ($componentPods.Count -eq 0) {
-            Add-Check -Step '5b.14' -Name "$component containers never restarted" -Status 'Fail' -Detail 'no pods found'
+                if ($count -le 0) { continue }
+
+                $terminated = Get-Path $status 'lastState.terminated'
+                $reason = [string](Get-Field $terminated 'reason')
+                $exitCode = Get-Field $terminated 'exitCode'
+                # ConvertFrom-Json turns an RFC 3339 timestamp into a
+                # [datetime] in the runner's local zone, so printing it raw
+                # would report this cluster's UTC-only clock in whichever
+                # culture the runner happens to carry. Back to UTC, in the
+                # one format, whether it arrived parsed or as a string.
+                $finishedAt = Get-Field $terminated 'finishedAt'
+                $finishedText = if ($finishedAt -is [datetime]) { $finishedAt.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') } elseif ($finishedAt) { [string]$finishedAt } else { '-' }
+                $where = "$podName/$containerName (x$count, last: $(if ($reason) { $reason } else { 'no record' })/$(if ($null -ne $exitCode) { $exitCode } else { '-' }) at $finishedText)"
+
+                if ($null -eq $terminated) {
+                    $restartFaults.Add($where)
+                }
+                elseif ($reason -eq 'Unknown' -and [int]$exitCode -eq 255) {
+                    $restartReboots.Add($where)
+                }
+                else {
+                    $restartFaults.Add($where)
+                }
+            }
         }
-        elseif ($restarted.Count -gt 0) {
-            Add-Check -Step '5b.14' -Name "$component containers never restarted" -Status 'Fail' -Detail ($restarted -join ', ')
+        if ($componentPods.Count -eq 0) {
+            Add-Check -Step '5b.14' -Name "$component containers not crash-restarting" -Status 'Fail' -Detail 'no pods found'
+        }
+        elseif ($restartFaults.Count -gt 0) {
+            Add-Check -Step '5b.14' -Name "$component containers not crash-restarting" -Status 'Fail' -Detail ($restartFaults -join ', ')
+        }
+        elseif ($restartReboots.Count -gt 0) {
+            Add-Check -Step '5b.14' -Name "$component containers not crash-restarting" -Status 'Pass' -Detail "$($componentPods.Count) pod(s), no crash restarts; $($restartReboots.Count) container(s) restarted with the node-lifecycle signature: $($restartReboots -join ', ')"
         }
         else {
-            Add-Check -Step '5b.14' -Name "$component containers never restarted" -Status 'Pass' -Detail "$($componentPods.Count) pod(s), 0 restarts"
+            Add-Check -Step '5b.14' -Name "$component containers not crash-restarting" -Status 'Pass' -Detail "$($componentPods.Count) pod(s), 0 restarts"
         }
     }
 

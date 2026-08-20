@@ -1035,7 +1035,17 @@ demands of any workload, plus the automation. 14 is the gate.
         reports `Complete` — asserted on the Job directly, because a hook's
         outcome is not separately visible in HelmRelease status
       - api is 3/3 and files 2/2, **spread across distinct nodes**, and no
-        container has restarted since its pod started
+        container is crash-restarting — read off the last termination record
+        per container, **not** off the cumulative `restartCount`. Phase 1
+        staggers a weekly reboot across the Hyper-V hosts, the guests go down
+        with them, and every container that survives one comes back with its
+        count incremented, so `restartCount -eq 0` is a property no pod older
+        than a week can hold and a gate asserting it goes red on a healthy
+        cluster. `reason: Unknown` with exit 255 is the containerd shim going
+        away with the node — kubelet reporting that it cannot account for the
+        exit, which a process exiting on its own never produces. `OOMKilled`
+        (5b.11 regressed), any other termination reason, and a live
+        `CrashLoopBackOff` are the failures
       - `ghcr-pull` exists in both namespaces, is `dockerconfigjson`, and no pod
         in `aerie` is in `ImagePullBackOff`
       - **every container in `aerie` declares `resources.requests`** — the
