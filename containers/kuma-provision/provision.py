@@ -44,9 +44,15 @@ NOTIFICATION_NAME = "Home Assistant"
 # so --setup-only does not require Home Assistant configuration it never uses.
 # The initContainer that runs it has no HA_TOKEN, and should not need one.
 def ha_settings() -> dict:
+    # One HA_URL rather than the HA_HOST/HA_PORT pair this used to split and
+    # immediately rejoin below. The caller composes it, and has to: an env
+    # `value` must be a string, but kustomize drops the quotes around
+    # `"${HA_PORT}"` and Flux substitutes textually afterwards, so a bare port
+    # number arrives at the API server as an integer and takes the entire
+    # observability-config Kustomization down with it. See the header of
+    # deploy/cluster/observability/config/provisioning/kuma-provision.yaml.
     return dict(
-        host=os.environ["HA_HOST"],
-        port=os.environ["HA_PORT"],
+        url=os.environ["HA_URL"],
         token=os.environ["HA_TOKEN"],
         notify_service=os.environ.get("HA_NOTIFY_SERVICE", ""),
     )
@@ -127,7 +133,7 @@ def ensure_notification(api: UptimeKumaApi) -> int:
         applyExisting=True,
         type=NotificationType.HOMEASSISTANT,
         notificationService=ha["notify_service"],
-        homeAssistantUrl=f"http://{ha['host']}:{ha['port']}",
+        homeAssistantUrl=ha["url"],
         longLivedAccessToken=ha["token"],
     )
     if existing is None:

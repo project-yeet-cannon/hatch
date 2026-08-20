@@ -28,13 +28,28 @@
 # (with ./../../controllers/autokuma.yaml) that starts failing silently if
 # the Secret goes stale.
 #
-# HA_HOST/HA_PORT are postBuild-substituted from aerie-cluster-config, the
-# same mechanism ../../controllers/static-monitors-configmap.yaml already
-# uses for the same
-# two keys - scripts/k3s/cluster-config.json's HA_HOST/HA_PORT.description
-# now says this CronJob is why they are `required: true`. HA_TOKEN reads
-# 6b.2's second `ha/token` kubernetes block, secretName home-assistant in
-# this namespace.
+# HA_URL is postBuild-substituted from aerie-cluster-config's HA_HOST and
+# HA_PORT, the same mechanism ../../controllers/static-monitors-configmap.yaml
+# already uses for the same two keys - scripts/k3s/cluster-config.json's
+# HA_HOST/HA_PORT.description now says this CronJob is why they are
+# `required: true`. HA_TOKEN reads 6b.2's second `ha/token` kubernetes block,
+# secretName home-assistant in this namespace.
+#
+# One env var holding a URL, not the two separate HA_HOST/HA_PORT this used to
+# pass, and the reason is a rendering hazard rather than a preference. An env
+# `value` must be a string, but kustomize re-emits `value: "${HA_PORT}"`
+# without its quotes - the scalar `${HA_PORT}` does not need them - and Flux's
+# postBuild substitution is textual and runs afterwards, so what finally
+# reaches the API server is `value: 8123`, an integer. The whole
+# observability-config Kustomization then fails its dry-run with `expected
+# string, got 8123` and applies *nothing*, which is a long way from a port
+# number: no opensearch-provision CronJob, so no ISM policy, no index
+# template, and no aerie-logs index pattern to open Discover with. Composing
+# the URL here sidesteps it, because `http://host:8123` is not a number in any
+# YAML sense and survives the same round trip as a plain scalar - the shape
+# cluster-config.json's HA_ALERT_WEBHOOK_ID description already writes by hand
+# for Alertmanager. Anything else substituted into an env `value` in this tree
+# needs the same care; HA_HOST was only ever safe by accident.
 #
 # ghcr-pull in imagePullSecrets: a first-party image in a private
 # repository, and 6b.2's third namespace on registry/pull-username and
@@ -79,10 +94,8 @@ spec:
                     secretKeyRef:
                       name: kuma-admin
                       key: password
-                - name: HA_HOST
-                  value: "${HA_HOST}"
-                - name: HA_PORT
-                  value: "${HA_PORT}"
+                - name: HA_URL
+                  value: "http://${HA_HOST}:${HA_PORT}"
                 - name: HA_TOKEN
                   valueFrom:
                     secretKeyRef:
