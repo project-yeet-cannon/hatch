@@ -1,7 +1,7 @@
 # The cluster plan Phase 6b.5 - Prometheus, its operator and CRDs, Alertmanager,
 # Grafana, node-exporter and kube-state-metrics, as one pinned HelmRelease. The
 # largest single object in this phase, and most of its length is turning things
-# off or pointing them at objects 6b.6-6b.8 have not been written yet.
+# off or pointing them at objects 6b.6-6b.8 add.
 #
 # No Namespace here, unlike ../../infrastructure/controllers/longhorn.yaml and
 # cloudnative-pg.yaml: `observability` already exists, created by
@@ -10,12 +10,15 @@
 # here. This chart does not create one of its own either; it installs into
 # whatever `.Release.Namespace` is, which the HelmRelease below sets.
 #
-# Two things read from ../../infrastructure/config/aerie-cluster-config, both
-# already required by the time this file lands: WINDOWS_EXPORTER_TARGETS is
-# 6b.6's, not this file's - kubeEtcd.endpoints below is the one substitution
-# this release itself makes. See scripts/k3s/cluster-config.json's
-# K3S_SERVER_ADDRESSES entry for why that value is a bare IP list with no port,
-# unlike WINDOWS_EXPORTER_TARGETS' host:port pairs.
+# Several things read from ../../infrastructure/config/aerie-cluster-config,
+# all already required by the time this file lands: WINDOWS_EXPORTER_TARGETS
+# is 6b.6's, not this file's; kubeEtcd.endpoints below (K3S_SERVER_ADDRESSES)
+# is this release's own substitution; HA_HOST, HA_PORT and
+# HA_ALERT_WEBHOOK_ID (6b.8, below) are the Alertmanager receiver's. See
+# scripts/k3s/cluster-config.json's K3S_SERVER_ADDRESSES entry for why that
+# value is a bare IP list with no port, unlike WINDOWS_EXPORTER_TARGETS'
+# host:port pairs; HA_HOST and HA_PORT are separate scalar keys, combined into
+# one URL only in the webhook_configs.url below.
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
@@ -187,16 +190,50 @@ spec:
             memory: 1.5Gi
 
     # -------------------------------------------------------------------
-    # Alertmanager - storage and sizing only; 6b.8 supplies alertmanager.config
+    # Alertmanager - 6b.8's receiver, route and Watchdog wiring
     # -------------------------------------------------------------------
-    # Deliberately not configured here beyond storage and resources: the
-    # receiver, route and Watchdog wiring are 6b.8's, added to this same
-    # values block as alertmanager.config once the Home Assistant webhook and
-    # the Kuma push monitor it targets both exist. Until then this release
-    # runs with the chart's own no-op 'null' receiver, which is a live
-    # Alertmanager with nowhere to send - correct for this step, not the
-    # phase's final state.
     alertmanager:
+      config:
+        route:
+          receiver: home-assistant
+          group_by: ["alertname", "severity"]
+          group_wait: 30s
+          group_interval: 5m
+          # Hours, not minutes: ../config/alerts/'s own `for: 15m`/`for: 30m`
+          # holds are already what keeps this from paging on a transient: a
+          # short repeat_interval on top of that would just re-page for
+          # something already acknowledged.
+          repeat_interval: 4h
+          routes:
+            # The chart's own Watchdog alert (always firing, existing only to
+            # prove the pipeline works) is deliberately NOT left on the
+            # default route - every repeat_interval would otherwise page a
+            # human to say nothing is wrong. The re-scope preamble's design is
+            # to route it to an Uptime Kuma push monitor instead, so a
+            # *stopped* Watchdog goes red in Kuma and fires through Kuma's own
+            # Home Assistant notification - the newer path proving itself
+            # over this older one. That monitor is 6b.12's and does not exist
+            # yet, so Watchdog goes to the 'null' receiver below rather than
+            # to home-assistant in the meantime. Replace this route the
+            # moment 6b.12 lands; until then a dead Prometheus is silent,
+            # which is the known gap 6b.12 exists to close.
+            - receiver: "null"
+              matchers:
+                - alertname = "Watchdog"
+        receivers:
+          - name: "null"
+          - name: home-assistant
+            webhook_configs:
+              # 6a.3's Home Assistant automation. HA_HOST/HA_PORT are 6b.3's,
+              # made required for exactly this consumer; HA_ALERT_WEBHOOK_ID
+              # is the same step's third key. Not authenticated with 6b.2's
+              # home-assistant/token Secret: a Home Assistant webhook
+              # automation's id is itself the capability grant, and 6a.3 did
+              # not also set the automation up to demand a bearer token - that
+              # Secret stays 6b.13's alone unless the automation changes to
+              # require one.
+              - url: "http://${HA_HOST}:${HA_PORT}/api/webhook/${HA_ALERT_WEBHOOK_ID}"
+                send_resolved: true
       alertmanagerSpec:
         # 1Gi on longhorn-r3 (critical, 3 replicas) rather than r2's bulk
         # class: what this volume holds is silences, and losing those to a

@@ -12,11 +12,14 @@
 # boundary is about - but it lives here rather than in ../controllers because
 # the dashboards themselves are content, not plumbing, the same distinction
 # that puts ../controllers/admin-secrets.yaml's two Secrets there instead of
-# here for the opposite reason (a HelmRelease mounts them). Still to come:
-# 6b.8 (alerts/), 6b.9 (ingress-logs.yaml), 6b.11 (provisioning/) and 6b.12
+# here for the opposite reason (a HelmRelease mounts them). alerts/ (6b.8) is
+# the third tenant, needing the same PrometheusRule CRD ../controllers/
+# kube-prometheus-stack.yaml (6b.5) registered. Still to come: 6b.9
+# (ingress-logs.yaml), 6b.11 (provisioning/) and 6b.12
 # (static-monitors-configmap.yaml, ingress-status.yaml).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - scrape/
   - dashboards/
+  - alerts/

@@ -747,7 +747,7 @@ gate.
         `rest_client_requests_total` and friends, all confirmed present with
         data before being committed.
 
-- [ ] **8. Alerts, and the two things that make them trustworthy** —
+- [x] **8. Alerts, and the two things that make them trustworthy** —
       `deploy/cluster/observability/config/alerts/`. Two `PrometheusRule`s and
       the Alertmanager configuration.
 

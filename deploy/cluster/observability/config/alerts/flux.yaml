@@ -1,0 +1,37 @@
+# The cluster plan Phase 6b.8, half 1 of 2 - the Flux reconciliation alert
+# 3b.14 named as its own durable half. ../../scrape/flux.yaml (6b.6) is what
+# gives gotk_reconcile_condition anywhere to come from; this is what turns it
+# into a notification.
+#
+# `for: 15m` is the whole design, not a default: Flux retries reconciliation
+# on its own retryInterval, so an alert without the hold fires on every
+# transient registry timeout or momentary apply conflict until it is ignored -
+# exactly the alarm-noise failure mode the re-scope preamble names. 3b.14's
+# `flux diff` and dry-run checks both run before a commit lands; this is the
+# only thing in the system that notices a HelmRelease breaking its own
+# upgrade at 3am with no commit involved.
+#
+# exported_namespace, not namespace: gotk_reconcile_condition already carries
+# its own `namespace` label (the reconciled object's namespace, e.g. `aerie`
+# or `flux-system`), and Prometheus's default collision handling
+# (honor_labels: false) keeps ../../scrape/flux.yaml's PodMonitor-added
+# `namespace` (the pod's own, always `flux-system`) under the plain name and
+# renames the metric's own conflicting label to `exported_namespace` - the
+# opposite of what the names suggest. Verify against the running controllers
+# before trusting this comment over the actual label set.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: flux-alerts
+  namespace: observability
+spec:
+  groups:
+    - name: flux
+      rules:
+        - alert: FluxReconciliationFailing
+          expr: gotk_reconcile_condition{type="Ready",status="False"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: '{{ $labels.kind }} {{ $labels.exported_namespace }}/{{ $labels.name }} has not reconciled for 15m'

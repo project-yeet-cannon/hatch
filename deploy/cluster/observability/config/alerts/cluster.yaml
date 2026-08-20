@@ -1,0 +1,83 @@
+# The cluster plan Phase 6b.8, half 2 of 2 - the cluster alerts goal 6.4
+# (design.md) asks for, beyond kube-prometheus-stack's own default rule
+# groups, which already cover node NotReady, pod crash-looping, PVC filling
+# and kubelet health - do not re-implement any of that here.
+#
+# etcd quorum - ../../controllers/kube-prometheus-stack.yaml's kubeEtcd block
+# and scripts/k3s/Install-K3sNode.ps1's etcd-expose-metrics (6b.1) are what put
+# a target here to alert on. `for: 1m` on both, not longer: with two servers,
+# quorum is 2 of 2 until Phase 7, and a lost member is an outage the instant
+# it happens, not fifteen minutes later. The job label on EtcdMemberDown is
+# the chart's default naming for the pinned 88.3.0 release
+# (`kube-prometheus-stack-kube-etcd`) and is the one part of this file that
+# was not checked against a running cluster - confirm it with `kubectl -n
+# observability get servicemonitor,endpoints -l app=kube-prometheus-stack-kube-etcd`
+# (or whatever the chart actually emits) before trusting it; a wrong job label
+# here is a silently-dead rule, not an error.
+#
+# Longhorn degraded volumes - ../../scrape/longhorn.yaml (6b.6) is the job.
+# `for: 30m`, deliberately long: Phase 1's staggered Windows Update reboots
+# produce exactly this state on a healthy cluster, and
+# ../../../infrastructure/config/longhorn-storageclasses.yaml's
+# staleReplicaTimeout: 30 (minutes) is the number this must not undercut.
+# Expect this to fire until Phase 7 - longhorn-r3 cannot be satisfied on two
+# nodes, which that storage class file already says out loud.
+#
+# CNPG replication lag and instance count - ../../scrape/cloudnative-pg.yaml
+# (6b.6) is the job. The instance-count threshold reads ${POSTGRES_INSTANCES}
+# rather than a literal 2, so Phase 7's raise to 3 does not also require an
+# edit here - the exact caveat the cluster plan's own text flags for a
+# hardcoded threshold, sidestepped by templating against the same key
+# deploy/cluster/data/cluster/cluster.yaml already uses.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cluster-alerts
+  namespace: observability
+spec:
+  groups:
+    - name: etcd
+      rules:
+        - alert: EtcdNoLeader
+          expr: etcd_server_has_leader == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'etcd member {{ $labels.instance }} reports no leader - quorum is 2 of 2 until Phase 7'
+        - alert: EtcdMemberDown
+          expr: up{job="kube-prometheus-stack-kube-etcd"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'etcd member {{ $labels.instance }} is not answering its metrics port'
+    - name: longhorn
+      rules:
+        - alert: LonghornVolumeDegraded
+          expr: longhorn_volume_robustness == 2
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'Longhorn volume {{ $labels.volume }} in {{ $labels.pvc_namespace }} has been degraded for 30m'
+    - name: cloudnative-pg
+      rules:
+        - alert: CNPGReplicationLagHigh
+          # Bytes behind primary, not seconds - cnpg_pg_replication_lag is the
+          # WAL-position gap; cnpg_pg_stat_replication_*_lag_seconds are the
+          # time-based siblings if this threshold turns out to be the wrong
+          # shape once there is real replication traffic to measure against.
+          expr: max(cnpg_pg_replication_lag{namespace="aerie"}) > 104857600
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'CNPG replica {{ $labels.pod }} is more than 100MiB of WAL behind the primary'
+        - alert: CNPGInstancesBelowExpected
+          expr: count(cnpg_collector_up{namespace="aerie"} == 1) < ${POSTGRES_INSTANCES}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'aerie-pg has fewer than ${POSTGRES_INSTANCES} instances reporting'
