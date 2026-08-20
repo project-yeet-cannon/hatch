@@ -141,14 +141,35 @@ So it stays an operator-installed prerequisite, and the `Docker` dependency
 reports on it instead. It separates four failures that have four different
 fixes:
 
-- `docker.exe` missing entirely. Note this is checked against Docker's usual
-  install directories as well as `PATH`, for the same reason
+- `docker.exe` missing entirely. Note this is checked against the registry
+  keys Docker Desktop writes and Docker's usual install directories as well as
+  `PATH`, for the same reason
   [The PATH problem it solves](#the-path-problem-it-solves) gives: a runner
   service that was already running when Docker was installed cannot see it,
   which looks exactly like Docker not being installed on a box where the
-  operator can plainly see the whale in the tray. Restarting the runner
-  service also fixes that; searching the install directories means you don't
-  have to.
+  operator can plainly see the whale in the tray. Docker Desktop makes that
+  worse by writing the *installing user's* `PATH`, which the service account
+  never had. Restarting the runner service also fixes it; searching the
+  registry and install directories means you don't have to.
+
+  When it does fail, the message prints the account the step ran as and every
+  path it probed — because "not installed" and "installed somewhere this
+  script doesn't look" are otherwise the same message. Two ways to be in the
+  second case:
+
+  - **Docker lives only inside WSL.** `apt install docker.io` in a distro is a
+    working Docker for a human at a prompt and produces no `docker.exe` at
+    all, so no Windows job can reach it. Needs Docker Desktop with the WSL2
+    backend, or the Windows CLI with `DOCKER_HOST` pointed at the distro.
+  - **Docker is somewhere unusual** — another drive, an unpacked CLI, a shim
+    in front of a daemon in a VM. Name it with a machine-level
+    `AERIE_DOCKER_PATH` (full path to `docker.exe`), which is probed first,
+    then restart the runner service so it picks the variable up:
+
+    ```powershell
+    [Environment]::SetEnvironmentVariable('AERIE_DOCKER_PATH', 'D:\Docker\docker.exe', 'Machine')
+    Restart-Service actions.runner.*
+    ```
 - Present, but the daemon isn't answering. **This is the one to expect after a
   reboot**: Docker Desktop is not a Windows service, and it does not start on
   its own with nobody logged in.

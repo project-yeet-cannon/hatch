@@ -799,13 +799,95 @@ function Install-AeriePowerShell7 {
     return $installedPath
 }
 
+function Get-AerieDockerCandidatePath {
+    <#
+    .SYNOPSIS
+        Every full path docker.exe could plausibly have on this machine, in
+        probe order.
+
+    .DESCRIPTION
+        Split out from Get-AerieDockerPath so the failure message can print
+        exactly what was looked at. "Docker isn't installed" and "Docker is
+        installed somewhere this script doesn't look" are the same symptom to
+        an operator who can see the whale in the tray, and only the list of
+        probed paths tells them apart.
+
+        Three sources, because "Docker is installed" is true in three
+        different shapes on a Windows box:
+
+          - $env:AERIE_DOCKER_PATH, a machine-level variable an operator sets
+            when their install is somewhere no list would guess - a second
+            drive, an unpacked CLI, a shim in front of a daemon in a VM. The
+            escape hatch that keeps an unusual machine from needing a code
+            change here.
+          - The registry keys Docker Desktop writes. Authoritative wherever it
+            was installed, which a hard-coded directory list can never be, and
+            the one lookup that survives a non-default install directory.
+          - The default install directories, for a Docker that wrote no
+            registry key: Docker Engine / Mirantis, or a CLI unpacked by hand.
+
+        Note the case none of these can find, because it is the likely one on
+        a machine with WSL: a docker that exists only *inside* a distro.
+        `apt install docker.io` is a perfectly good Docker for a human at a
+        prompt and produces no docker.exe at all, so a Windows job cannot
+        reach it by any path.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $candidates = New-Object Collections.Generic.List[string]
+
+    if ($env:AERIE_DOCKER_PATH) { $candidates.Add($env:AERIE_DOCKER_PATH) }
+
+    # AppPath is Docker Desktop's own record of where it put itself; the
+    # Uninstall entry is the same answer by a different route, kept because
+    # installer versions have differed about which of the two they write.
+    $registryLookups = @(
+        @{ Path = 'HKLM:\SOFTWARE\Docker Inc.\Docker\1.0'; Property = 'AppPath' },
+        @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop'; Property = 'InstallLocation' },
+        @{ Path = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop'; Property = 'InstallLocation' }
+    )
+
+    foreach ($lookup in $registryLookups) {
+        # PSObject.Properties rather than a direct property reference:
+        # Install-RunnerDependencies.ps1 runs under Set-StrictMode, where
+        # reading a property a key doesn't have is a terminating error.
+        $key = Get-ItemProperty -Path $lookup.Path -ErrorAction SilentlyContinue
+        $property = $null
+        if ($key) { $property = $key.PSObject.Properties[$lookup.Property] }
+        if ($property -and $property.Value) {
+            $candidates.Add((Join-Path $property.Value 'resources\bin\docker.exe'))
+            $candidates.Add((Join-Path $property.Value 'docker.exe'))
+        }
+    }
+
+    # Both Program Files spellings, for the reason
+    # Get-AerieAwsCliSearchDirectory documents: a 32-bit PowerShell host sees
+    # $env:ProgramFiles as the x86 directory.
+    $roots = @($env:ProgramW6432, $env:ProgramFiles, ${env:ProgramFiles(x86)}) |
+        Where-Object { $_ } |
+        Select-Object -Unique
+
+    foreach ($root in $roots) {
+        # Docker Desktop, then Docker Engine / Mirantis.
+        $candidates.Add((Join-Path $root 'Docker\Docker\resources\bin\docker.exe'))
+        $candidates.Add((Join-Path $root 'Docker\docker.exe'))
+    }
+
+    if ($env:ProgramData) {
+        $candidates.Add((Join-Path $env:ProgramData 'DockerDesktop\version-bin\docker.exe'))
+    }
+
+    return ($candidates | Select-Object -Unique)
+}
+
 function Get-AerieDockerPath {
     <#
     .SYNOPSIS
         Returns the full path to docker.exe, or $null.
 
     .NOTES
-        Resolve-only, deliberately - there is no Install-AerieDocker below and
+        Resolve-only, deliberately - there is no install counterpart below and
         that is not an oversight. Building the repository's Linux images on a
         Windows host means Docker Desktop with a WSL2 backend, or a daemon in
         a VM; neither is a hash-pinned MSI that can be dropped on a machine
@@ -813,6 +895,14 @@ function Get-AerieDockerPath {
         build depends on is worse than a clear message saying it's missing.
         So Docker stays the one operator-installed prerequisite, and this
         reports on it.
+
+        PATH is checked first but is not enough on its own, for exactly the
+        reason Get-AerieAwsCliPath documents: an installer writes the *machine*
+        PATH, and a Windows service keeps the environment it started with. A
+        runner service that was already running when Docker Desktop was
+        installed cannot see it - which looks identical to Docker not being
+        installed at all. Docker Desktop compounds it by writing the
+        *installing user's* PATH, which the service account never had.
     #>
     [CmdletBinding()]
     param()
@@ -820,27 +910,7 @@ function Get-AerieDockerPath {
     $onPath = Get-Command docker -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($onPath) { return $onPath.Source }
 
-    # PATH is not enough, for exactly the reason Get-AerieAwsCliPath documents:
-    # the installer writes the *machine* PATH, and a Windows service keeps the
-    # environment it started with. A runner service that was already running
-    # when Docker Desktop was installed cannot see it - which looks identical
-    # to Docker not being installed at all, and is a far more likely
-    # explanation on a box where the operator can see the whale in the tray.
-    $roots = @($env:ProgramW6432, $env:ProgramFiles, ${env:ProgramFiles(x86)}) |
-        Where-Object { $_ } |
-        Select-Object -Unique
-
-    $candidates = New-Object Collections.Generic.List[string]
-    foreach ($root in $roots) {
-        # Docker Desktop, then Docker Engine / Mirantis.
-        $candidates.Add((Join-Path $root 'Docker\Docker\resources\bin\docker.exe'))
-        $candidates.Add((Join-Path $root 'Docker\docker.exe'))
-    }
-    if ($env:ProgramData) {
-        $candidates.Add((Join-Path $env:ProgramData 'DockerDesktop\version-bin\docker.exe'))
-    }
-
-    foreach ($candidate in $candidates) {
+    foreach ($candidate in (Get-AerieDockerCandidatePath)) {
         if (Test-Path $candidate -PathType Leaf) { return $candidate }
     }
 
@@ -854,15 +924,19 @@ function Install-AerieDocker {
         Linux images is reachable. Never installs - see Get-AerieDockerPath.
 
     .DESCRIPTION
-        Three separate things can be wrong, and they have different fixes, so
-        they are reported separately rather than as one "docker failed":
+        Four separate things can be wrong, and they have four different
+        fixes, so they are reported separately rather than as one "docker
+        failed":
 
-          - docker.exe missing entirely
+          - docker.exe missing entirely (or missing from everywhere
+            Get-AerieDockerCandidatePath looks, which is not the same thing -
+            so that failure prints the list)
           - docker.exe present but the daemon isn't answering (Docker Desktop
             not started - it is not a service, so a runner rebooting without
             anyone logging in lands exactly here)
           - the daemon answering but in Windows-container mode, which cannot
             build any Dockerfile in this repository
+          - the daemon healthy but buildx missing for this account
 
         The third is the quiet one: everything looks installed and every build
         fails with an unhelpful base-image error.
@@ -872,7 +946,25 @@ function Install-AerieDocker {
 
     $dockerPath = Get-AerieDockerPath
     if (-not $dockerPath) {
-        throw "docker.exe is neither on PATH nor in any of Docker's usual install directories. Every publish.yml job builds an image, so this runner needs a Docker daemon that can build Linux containers. This is the one dependency Install-RunnerDependencies.ps1 will not install for you (see Get-AerieDockerPath). If Docker *is* installed on this machine, restart the runner service - a service keeps the environment it started with, so one that predates the install cannot see it: Restart-Service actions.runner.*"
+        # The probed list, verbatim, rather than a summary: the operator's next
+        # move depends entirely on whether the path they expected is on it.
+        $probed = (Get-AerieDockerCandidatePath | ForEach-Object { "    $_" }) -join "`n"
+        $identity = '<unknown>'
+        try { $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name } catch { }
+        throw @"
+docker.exe is neither on PATH nor at any location this script knows to look. Every publish.yml job builds an image, so this runner needs a Docker daemon that can build Linux containers, and this is the one dependency Install-RunnerDependencies.ps1 will not install for you (see Get-AerieDockerPath).
+
+  This step ran as: $identity
+  Searched PATH, then:
+$probed
+
+If Docker *is* on this machine, it is one of these three:
+
+  - Installed since this runner service last started. A service keeps the environment it started with, so a PATH entry written after it started is invisible to it: Restart-Service actions.runner.*
+  - Installed only inside WSL. A distro's dockerd is unreachable from a Windows job - there is no docker.exe for it. Use Docker Desktop with the WSL2 backend, or install the Windows Docker CLI and point DOCKER_HOST at the distro's daemon.
+  - Installed somewhere none of the paths above cover. Name it with a machine-level AERIE_DOCKER_PATH and restart the runner service:
+      [Environment]::SetEnvironmentVariable('AERIE_DOCKER_PATH', 'D:\Docker\docker.exe', 'Machine')
+"@
     }
 
     # Found, so make sure the rest of the job can reach it by name. Without
