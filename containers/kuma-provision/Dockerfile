@@ -9,4 +9,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY provision.py .
 
-CMD ["python", "provision.py"]
+# ENTRYPOINT rather than CMD so a caller can pass `--setup-only` through the
+# pod spec's `args` alone. With this as CMD, Kubernetes `args` replaces the
+# whole command line and the interpreter goes with it - the AutoKuma
+# initContainer in deploy/cluster/observability/controllers/autokuma.yaml is
+# the caller that needs the flag; the CronJob passes none and gets the full
+# pass.
+ENTRYPOINT ["python", "provision.py"]

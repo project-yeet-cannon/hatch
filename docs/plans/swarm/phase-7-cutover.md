@@ -143,7 +143,7 @@ the site down.*
 dispatch all four gates and get four green runs:
 - [x] [`verify-cluster-platform.yml`](../../../.github/workflows/verify-cluster-platform.yml),
 - [x] [`verify-data-tier.yml`](../../../.github/workflows/verify-data-tier.yml),
-- [] [`verify-app-tier.yml`](../../../.github/workflows/verify-app-tier.yml),
+- [x] [`verify-app-tier.yml`](../../../.github/workflows/verify-app-tier.yml),
 - [] `verify-observability.yml` (6b.15). Four, in that order, because each phase's
 gate assumes the one below it.
 

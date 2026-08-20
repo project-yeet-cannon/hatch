@@ -191,6 +191,64 @@ function ConvertFrom-ProbeJson {
     catch { return $null }
 }
 
+function ConvertTo-FlatArray {
+    <#
+    .SYNOPSIS
+        A *top-level* JSON array, as a flat array under both PowerShell
+        editions.
+    .DESCRIPTION
+        Windows PowerShell 5.1 emits a top-level JSON array from
+        ConvertFrom-Json as one object rather than enumerating it; PowerShell 6
+        changed that and added -NoEnumerate to opt back in. So
+        `@($json | ConvertFrom-Json)` is the real array under 7 and a
+        one-element array *wrapping* it under 5.1 - and every downstream .Count
+        and -join then describes the wrapper instead of the data. The symptom is
+        a count of 1 and a literal "System.Object[]" in a check's detail text,
+        which is what ../../.github/workflows/verify-observability.yml's
+        `shell: powershell` (5.1, not pwsh) produced for the Windows exporter
+        target list, the Alertmanager alert list and the OpenSearch index list
+        alike.
+
+        Unwrapping one level covers both editions. None of the three arrays this
+        is used on has array elements of its own, so the flattening cannot
+        collapse real structure; strings are excluded explicitly because a
+        string is IEnumerable over its characters.
+
+        Not needed for a JSON array reached as a *property* of an object
+        (`data.activeTargets`, `hits.hits`) - that is an ordinary Object[] in
+        both editions. Those need `@(...)` at the call site for a different
+        reason, which Get-Field's own note covers.
+    #>
+    param([Parameter(Mandatory)][AllowNull()]$InputObject)
+    $items = New-Object Collections.Generic.List[object]
+    foreach ($item in @($InputObject)) {
+        if ($null -eq $item) { continue }
+        if ($item -is [string] -or $item -isnot [System.Collections.IEnumerable]) {
+            $items.Add($item)
+            continue
+        }
+        foreach ($inner in $item) { if ($null -ne $inner) { $items.Add($inner) } }
+    }
+    # Emitted element by element, and every call site wraps the call in
+    # `@(...)` - the same contract Get-Items above already uses. Returning
+    # `, $items.ToArray()` instead looks safer and is not: `@(<call>)` collects
+    # what a function *emits*, so handing it one pre-wrapped array puts the
+    # wrapper straight back and this function fixes nothing.
+    return $items.ToArray()
+}
+
+function ConvertFrom-ProbeJsonArray {
+    <#
+    .SYNOPSIS
+        ConvertFrom-ProbeJson for a section whose JSON is a top-level array.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Output,
+        [Parameter(Mandatory)][string]$Name
+    )
+    return (ConvertTo-FlatArray (ConvertFrom-ProbeJson -Output $Output -Name $Name))
+}
+
 $script:Checks = New-Object Collections.Generic.List[psobject]
 function Add-Check {
     param(
@@ -531,9 +589,9 @@ try {
     $priorityClass = ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'priorityclass'
     $promTargets = ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'promtargets'
     $promRules = ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'promrules'
-    $amAlerts = @(ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'amalerts')
+    $amAlerts = @(ConvertFrom-ProbeJsonArray -Output $probe.StdOut -Name 'amalerts')
     $osHealth = ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'oshealth'
-    $osIndices = @(ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'osindices')
+    $osIndices = @(ConvertFrom-ProbeJsonArray -Output $probe.StdOut -Name 'osindices')
     $osLogSample = ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'oslogsample'
     $osIsmPolicyExists = (Get-ProbeSection -Output $probe.StdOut -Name 'osismpolicy').Trim() -eq 'yes'
     $osIndexTemplateExists = (Get-ProbeSection -Output $probe.StdOut -Name 'osindextemplate').Trim() -eq 'yes'
@@ -585,7 +643,11 @@ try {
                 'echo ''--- maxmap'''
                 'sudo sysctl -n vm.max_map_count 2>/dev/null || echo 0'
                 'echo ''--- etcdmetrics'''
-                'curl -s --max-time 5 -o /dev/null -w ''%{http_code}'' http://127.0.0.1:2381/metrics 2>/dev/null || echo 000'
+                # -w's trailing \n is load-bearing: without it curl writes the status
+                # code with no line terminator, it runs into the next
+                # `printf '--- ...'` marker, and Get-ProbeSection hands back
+                # "200--- end" - a passing node reported as a failing one.
+                'curl -s --max-time 5 -o /dev/null -w ''%{http_code}\n'' http://127.0.0.1:2381/metrics 2>/dev/null || echo 000'
                 'echo ''--- end'''
             ) -join '; ')
 
@@ -642,7 +704,7 @@ try {
     }
     else {
         try {
-            $parsed = @($windowsExporterTargetsRaw | ConvertFrom-Json)
+            $parsed = @(ConvertTo-FlatArray ($windowsExporterTargetsRaw | ConvertFrom-Json))
             $badEntries = @($parsed | Where-Object { $_ -notmatch '^[^:\s]+:\d+$' })
             if ($parsed.Count -eq 0) {
                 Add-Check -Step '6b.15' -Name 'WINDOWS_EXPORTER_TARGETS parses (6b.3)' -Status 'Fail' -Detail 'parsed to an empty list'
@@ -866,7 +928,13 @@ try {
     # after it finishes, so this is opportunistic rather than guaranteed to
     # ever see one, exactly as 6b.14's own text expects.
     $priorityClassValue = Get-Field $priorityClass 'value'
-    $priorityClassGlobalDefault = Get-Field $priorityClass 'globalDefault'
+    # `globalDefault` is `omitempty` on the API's PriorityClass type, so the
+    # default of false is absent from the JSON rather than present as
+    # `false` - an absent field and an explicit false are the same state, and
+    # only the true case is a finding. Comparing the raw value against $false
+    # fails a correct PriorityClass, which is what ../../deploy/cluster/
+    # observability/controllers/priorityclass.yaml ships.
+    $priorityClassGlobalDefault = [bool](Get-Field $priorityClass 'globalDefault')
     if ($null -eq $priorityClass -or -not (Get-Path $priorityClass 'metadata.name')) {
         Add-Check -Step '6b.15' -Name 'PriorityClass aerie-observability exists (6b.14)' -Status 'Fail' -Detail 'not found'
     }
@@ -939,9 +1007,16 @@ try {
             for ($i = 0; $i -lt $resolvedJobs.Count; $i++) {
                 $entry = $resolvedJobs[$i]
                 $result = ConvertFrom-ProbeJson -Output $seriesProbe.StdOut -Name "job$i"
-                $resultValue = Get-Path $result 'data.result'
+                # @(...) is not decoration: `count({job="..."})` returns
+                # exactly one sample, and Get-Field returns its value, so
+                # PowerShell unrolls the one-element array into a bare
+                # PSCustomObject on the way out. Windows PowerShell 5.1 does
+                # not synthesize .Count on one of those, so reading it under
+                # Set-StrictMode ended the whole run here - before the HTTPS
+                # stage below had reported anything at all.
+                $resultValue = @(Get-Path $result 'data.result' | Where-Object { $_ })
                 $count = 0
-                if ($resultValue -and $resultValue.Count -gt 0) {
+                if ($resultValue.Count -gt 0) {
                     $valuePair = @(Get-Field $resultValue[0] 'value')
                     if ($valuePair.Count -ge 2) { [void][int]::TryParse([string]$valuePair[1], [ref]$count) }
                 }

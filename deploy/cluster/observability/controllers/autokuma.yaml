@@ -5,8 +5,10 @@
 # Reads the admin password from ../admin-secrets.yaml's kuma-admin Secret,
 # not a literal - that file's own comment is the one to read before ever
 # rotating Kuma's password, since this Deployment is where a UI-only change
-# shows up (authentication failures in this container's log, monitors that
-# quietly stop converging).
+# shows up. After a UI-only rotation the failure now surfaces one step
+# earlier and far more legibly, in the kuma-setup initContainer below: it
+# logs in with the Secret's value and fails the pod when that is rejected,
+# rather than letting AutoKuma start and quietly stop converging monitors.
 #
 # Image pinned to 2.0.0, the plain (non "uptime-kuma-v1-") tag from
 # BigBoot/AutoKuma's docker-build-push.yml matrix - that build carries no
@@ -45,6 +47,75 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
+      # For the initContainer below only - a first-party image in a private
+      # repository, the same reason ../config/provisioning/kuma-provision.yaml
+      # carries this. 6b.2's ghcr-pull ExternalSecret puts it in this
+      # namespace; the autokuma image itself is public and needs none.
+      imagePullSecrets:
+        - name: ghcr-pull
+      initContainers:
+        # Creates Uptime Kuma's admin account before AutoKuma ever tries to
+        # authenticate. Without it the two layers deadlock: `setup` is only
+        # called by containers/kuma-provision/provision.py, whose CronJob is in
+        # observability-config, which dependsOn observability-controllers with
+        # wait: true - and this Deployment is in controllers. AutoKuma never
+        # goes Ready against an unconfigured Kuma, so controllers never goes
+        # Ready, so config never applies, so the account is never created.
+        # Presents as `HealthCheckFailed ... Deployment/observability/autokuma`
+        # on the controllers Kustomization with nothing obviously wrong in it,
+        # and takes the whole OpenSearch provisioning chain (6b.11) down with
+        # it, since that CronJob is in the same blocked layer.
+        #
+        # Same image and same script as that CronJob, with --setup-only: the
+        # account setup is the only part AutoKuma depends on, and it is the
+        # only part that needs no Home Assistant configuration. The hourly
+        # CronJob still owns the notification provider and its attachment to
+        # every monitor - this does not replace it, and running both is
+        # idempotent by that script's own design.
+        #
+        # An initContainer rather than a probe or a wrapper on the main
+        # container because the ordering is per-pod and absolute: it must
+        # finish before AutoKuma starts, every time AutoKuma restarts, and a
+        # failure here should hold the pod rather than let AutoKuma spin
+        # against a Kuma it cannot log into.
+        - name: kuma-setup
+          # ${IMAGE_REGISTRY} resolves from aerie-cluster-config through this
+          # layer's postBuild.substituteFrom (../../observability.yaml), the
+          # same substitution ../config/provisioning/kuma-provision.yaml uses
+          # for the same image. Pinned to :latest by hand for the reason that
+          # file gives - this script changes twice a year.
+          image: ${IMAGE_REGISTRY}/aerie-kuma-provision:latest
+          args: ["--setup-only"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: KUMA_URL
+              value: http://uptime-kuma:3001
+            - name: KUMA_USERNAME
+              value: admin
+            - name: KUMA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kuma-admin
+                  key: password
+            # 60 attempts, 2s apart - two minutes, against the CronJob's
+            # default of 30 seconds. This one races ../uptime-kuma.yaml's own
+            # cold start in the same namespace: a Longhorn RWO attach plus
+            # SQLite's first-run migration. The pod-level retry would converge
+            # anyway, but only after presenting as Init:CrashLoopBackOff,
+            # which reads as a broken deployment rather than a slow volume.
+            - name: KUMA_CONNECT_RETRIES
+              value: "60"
+          # Same sizing note as the provisioning CronJobs: transient, no CPU
+          # limit, and it holds none of this while AutoKuma runs.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
       containers:
         - name: autokuma
           image: ghcr.io/bigboot/autokuma:2.0.0
