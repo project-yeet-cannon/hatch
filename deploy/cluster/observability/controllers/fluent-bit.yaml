@@ -96,6 +96,15 @@ spec:
         [INPUT]
             Name              tail
             Path              /var/log/containers/*.log
+            # Found live, 2026-08-20: with no exclusion, this DaemonSet tails
+            # its own container's log file - at Log_Level debug it logs one
+            # line per bulk flush, each of which becomes a new record for it
+            # to ship, which is itself a new line to flush. That fed back
+            # fast enough to write ~1.8M documents in minutes against two
+            # idle-cluster DaemonSet pods. Excluded unconditionally, not just
+            # for debug: a self-referential source is never something this
+            # index should carry regardless of verbosity.
+            Exclude_Path      /var/log/containers/fluent-bit-*_observability_fluent-bit-*.log
             multiline.parser  cri
             Tag               kube.*
             DB                /fluent-bit/state/tail-containers-state.db
