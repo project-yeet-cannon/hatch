@@ -1,0 +1,92 @@
+# The cluster plan Phase 6b.13 - kuma-provision as a built image and a
+# CronJob. Finding 6's second half; ./opensearch-provision.yaml (6b.11) is
+# the same shape one directory tenant over, against OpenSearch instead of
+# Kuma.
+#
+# Image built by ../../../../../.github/workflows/publish.yml from
+# ../../../../../containers/kuma-provision/, pinned here to :latest by hand -
+# deliberately **not** an ImagePolicy/ImageRepository
+# (../../../apps/automation/image-repositories.yaml), because that automation
+# exists for images that change with the app and this script changes twice a
+# year. Bump the tag here by hand when it does. Same precedent as
+# ../../../data/schema/restore-job.yaml's aerie-backup:latest pin.
+#
+# CronJob, not a Job, for the same reason as ./opensearch-provision.yaml:
+# this script's own idempotent passes (setup is a no-op once an account
+# exists, the notification is re-synced, attachment is per-monitor) are
+# meant to converge on every run, and a Job's immutable pod template means
+# Flux re-applying an unchanged Job never runs again. The extra reason here:
+# AutoKuma creates monitors continuously, so a one-shot run at install time
+# would attach the Home Assistant notification to whatever existed in that
+# instant and nothing created after - hourly convergence means a monitor
+# added next month gets alerting without anyone remembering this step
+# exists.
+#
+# KUMA_PASSWORD reads ../../controllers/admin-secrets.yaml's kuma-admin
+# Secret, not a literal - see that file's own comment before ever rotating
+# Kuma's password from its UI alone; this CronJob is one of the two clients
+# (with ./../../controllers/autokuma.yaml) that starts failing silently if
+# the Secret goes stale.
+#
+# HA_HOST/HA_PORT are postBuild-substituted from aerie-cluster-config, the
+# same mechanism ../static-monitors-configmap.yaml already uses for the same
+# two keys - scripts/k3s/cluster-config.json's HA_HOST/HA_PORT.description
+# now says this CronJob is why they are `required: true`. HA_TOKEN reads
+# 6b.2's second `ha/token` kubernetes block, secretName home-assistant in
+# this namespace.
+#
+# ghcr-pull in imagePullSecrets: a first-party image in a private
+# repository, and 6b.2's third namespace on registry/pull-username and
+# registry/pull-token exists for exactly this - unlike ./opensearch-provision.yaml's
+# curlimages/curl, which is public and needs none.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kuma-provision
+  namespace: observability
+spec:
+  schedule: "0 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: ghcr-pull
+          containers:
+            - name: kuma-provision
+              image: ghcr.io/eouw0o83hf/aerie-kuma-provision:latest
+              env:
+                - name: KUMA_URL
+                  value: http://uptime-kuma:3001
+                - name: KUMA_USERNAME
+                  value: admin
+                - name: KUMA_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: kuma-admin
+                      key: password
+                - name: HA_HOST
+                  value: "${HA_HOST}"
+                - name: HA_PORT
+                  value: "${HA_PORT}"
+                - name: HA_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: home-assistant
+                      key: token
+              # Per the sizing table's "provisioning CronJobs" row - transient,
+              # no CPU limit per the same table's "whole stack peaked at 5% of
+              # one core" finding every other HelmRelease/manifest in this
+              # phase leaves uncapped on.
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 128Mi

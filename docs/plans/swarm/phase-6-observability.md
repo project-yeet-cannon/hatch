@@ -1049,7 +1049,7 @@ gate.
       valid certificate, every static monitor is present and green except any
       pointed at something legitimately down, and the page updates live.
 
-- [ ] **13. `kuma-provision` as a built image and a CronJob** —
+- [x] **13. `kuma-provision` as a built image and a CronJob** —
       `containers/kuma-provision/Dockerfile`,
       [publish.yml](../../../.github/workflows/publish.yml),
       `deploy/cluster/observability/config/provisioning/kuma-provision.yaml`.

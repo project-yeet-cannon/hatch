@@ -1,8 +1,8 @@
 # The cluster plan Phase 6b.11 - the three OpenSearch provisioning scripts,
 # as a CronJob. Finding 6's first half; ../../controllers/opensearch.yaml's
-# sibling HelmReleases are what this runs against, and
-# ../../controllers/kuma-provision.yaml (6b.13, still to come) is Finding 6's
-# second half, the same shape one layer over.
+# sibling HelmReleases are what this runs against, and ./kuma-provision.yaml
+# (6b.13) is Finding 6's second half, the same shape one directory tenant
+# over.
 #
 # A CronJob, not a Job - the same tension
 # ../../../data/schema/restore-job.yaml resolved the other way, and the
