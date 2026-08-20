@@ -14,8 +14,11 @@
 # that puts ../controllers/admin-secrets.yaml's two Secrets there instead of
 # here for the opposite reason (a HelmRelease mounts them). alerts/ (6b.8) is
 # the third tenant, needing the same PrometheusRule CRD ../controllers/
-# kube-prometheus-stack.yaml (6b.5) registered. Still to come: 6b.9
-# (ingress-logs.yaml), 6b.11 (provisioning/) and 6b.12
+# kube-prometheus-stack.yaml (6b.5) registered. ingress-logs.yaml (6b.9) needs
+# no CRD either - a plain Ingress, the same reason dashboards/ lives here
+# rather than in ../controllers - and is a single file rather than a
+# directory because it is one object, the same shape 5b.9's own Ingresses
+# take. Still to come: 6b.11 (provisioning/) and 6b.12
 # (static-monitors-configmap.yaml, ingress-status.yaml).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -23,3 +26,4 @@ resources:
   - scrape/
   - dashboards/
   - alerts/
+  - ingress-logs.yaml

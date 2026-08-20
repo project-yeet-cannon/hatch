@@ -825,7 +825,7 @@ gate.
       Deployment to zero) and confirm a notification arrives in Home Assistant
       after the hold; the Watchdog monitor in Kuma is green.
 
-- [ ] **9. OpenSearch and OpenSearch Dashboards, single-node** —
+- [x] **9. OpenSearch and OpenSearch Dashboards, single-node** —
       `deploy/cluster/observability/controllers/opensearch.yaml`,
       `.../config/ingress-logs.yaml`. Two pinned `HelmRelease`s from the
       `opensearch-project` chart repository — a new `HelmRepository`, like 5b.3's.

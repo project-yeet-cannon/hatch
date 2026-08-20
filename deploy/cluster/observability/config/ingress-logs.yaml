@@ -1,0 +1,30 @@
+# The cluster plan Phase 6b.9 - the fourth public-facing hostname this phase
+# adds, in the same shape
+# ../../../infrastructure/config (5b.9's Ingresses, referenced there and
+# again by ../controllers/kube-prometheus-stack.yaml's metrics.${DOMAIN})
+# already established: no `tls:` block, because
+# ../../../infrastructure/config/traefik-tlsstore.yaml's default certificate
+# covers every hostname in the cluster from one Secret in kube-system, and an
+# Ingress naming no Secret of its own inherits it without asking. That is the
+# entire argument for having bought a wildcard, applied a fourth time.
+#
+# Backend is ../controllers/opensearch.yaml's opensearch-dashboards Service,
+# port 5601 - the chart's own default, unchanged by that file's values.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: opensearch-dashboards
+  namespace: observability
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: logs.${DOMAIN}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: opensearch-dashboards
+                port:
+                  number: 5601

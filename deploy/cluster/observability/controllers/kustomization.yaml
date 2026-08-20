@@ -27,3 +27,4 @@ kind: Kustomization
 resources:
   - admin-secrets.yaml
   - kube-prometheus-stack.yaml
+  - opensearch.yaml
