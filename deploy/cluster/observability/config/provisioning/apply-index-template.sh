@@ -25,7 +25,13 @@ set -eu
 
 OPENSEARCH_URL="${OPENSEARCH_URL:-http://opensearch:9200}"
 TEMPLATE_NAME="aerie-logs"
-MAX_ATTEMPTS=30
+# 120, not the compose original's 30, for the reason ./apply-ism-policy.sh
+# spells out in full: this pod talks to :9200 through
+# ../../controllers/opensearch.yaml's NetworkPolicy, whose enforcement lags
+# pod creation by up to kube-router's 5m default sync period. This script
+# normally runs second, so it is usually past that lag by the time it starts -
+# but it is reachable on its own and must not depend on that.
+MAX_ATTEMPTS=120
 RETRY_DELAY_SECONDS=5
 
 TEMPLATE_BODY=$(cat <<'JSON'

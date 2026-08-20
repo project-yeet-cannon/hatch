@@ -20,7 +20,25 @@ set -eu
 
 OPENSEARCH_URL="${OPENSEARCH_URL:-http://opensearch:9200}"
 POLICY_ID="aerie-log-retention"
-MAX_ATTEMPTS=30
+# 120 rather than the compose original's 30, and the extra 7.5 minutes are not
+# about OpenSearch being slow to start. ../../controllers/opensearch.yaml's
+# opensearch-restrict-ingress NetworkPolicy admits this pod by label, but that
+# admission is eventually consistent: k3s runs kube-router's firewall
+# controller without overriding --iptables-sync-period, so its 5m default
+# stands, and a pod that has only just been created can be REJECTed for
+# anything up to a full sync period before its address lands in the ipset the
+# policy compiles to. Measured on this cluster: one pod was admitted after
+# 30s, another was still refused at 100s. 30 attempts is 150s, which loses
+# that race often enough to look like OpenSearch is down - `HTTP 000` on every
+# line, which is a refused connection, not an unhealthy cluster. 120 attempts
+# is 10 minutes, comfortably past the 5m worst case.
+#
+# The alternative fix is to keep ephemeral pods out from behind the policy
+# entirely - reaching :9200 through the API server's service proxy the way
+# scripts/k3s/Test-Observability.ps1 does, which is unaffected by it. That
+# buys RBAC and a kubectl in this image; waiting is cheaper for a CronJob
+# whose whole job is to converge eventually.
+MAX_ATTEMPTS=120
 RETRY_DELAY_SECONDS=5
 
 POLICY_BODY=$(cat <<'JSON'
