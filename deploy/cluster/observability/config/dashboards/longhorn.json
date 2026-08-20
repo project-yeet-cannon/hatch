@@ -262,7 +262,7 @@
               "mode": "line+area"
             }
           },
-          "displayName": "${__field.labels.volume}",
+          "displayName": "$${__field.labels.volume}",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -2023,7 +2023,7 @@
                   "mode": "off"
                 }
               },
-              "displayName": "${__field.labels.node}",
+              "displayName": "$${__field.labels.node}",
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
@@ -2373,7 +2373,7 @@
                 }
               },
               "decimals": 0,
-              "displayName": "${__field.labels.node}",
+              "displayName": "$${__field.labels.node}",
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
@@ -2482,7 +2482,7 @@
                   "mode": "off"
                 }
               },
-              "displayName": "${__field.labels.disk}",
+              "displayName": "$${__field.labels.disk}",
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
@@ -2706,7 +2706,7 @@
                 }
               },
               "decimals": 0,
-              "displayName": "${__field.labels.node}",
+              "displayName": "$${__field.labels.node}",
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
@@ -2799,7 +2799,7 @@
                 }
               },
               "decimals": 0,
-              "displayName": "${__field.labels.node}",
+              "displayName": "$${__field.labels.node}",
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
@@ -2893,7 +2893,7 @@
                 }
               },
               "decimals": 0,
-              "displayName": "${__field.labels.instance_manager}",
+              "displayName": "$${__field.labels.instance_manager}",
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
@@ -2987,7 +2987,7 @@
                 }
               },
               "decimals": 0,
-              "displayName": "${__field.labels.instance_manager}",
+              "displayName": "$${__field.labels.instance_manager}",
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
@@ -3080,7 +3080,7 @@
                   "mode": "off"
                 }
               },
-              "displayName": "${__field.labels.instance_manager}",
+              "displayName": "$${__field.labels.instance_manager}",
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
@@ -3174,7 +3174,7 @@
                 }
               },
               "decimals": 0,
-              "displayName": "${__field.labels.manager}",
+              "displayName": "$${__field.labels.manager}",
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
@@ -3267,7 +3267,7 @@
                   "mode": "off"
                 }
               },
-              "displayName": "${__field.labels.manager}",
+              "displayName": "$${__field.labels.manager}",
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
