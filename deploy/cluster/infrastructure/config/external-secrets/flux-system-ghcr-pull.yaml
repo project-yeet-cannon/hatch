@@ -56,7 +56,7 @@ spec:
     - secretKey: username
       remoteRef:
         key: /aerie/registry/pull-username
-    # Classic PAT, read:packages scope, for pulling ghcr.io/eouw0o83hf/aerie-* images. Fine-grained tokens do not grant GHCR pull.
+    # Classic PAT, read:packages scope, for pulling the private aerie-* images from whichever registry IMAGE_REGISTRY names. Fine-grained tokens do not grant GHCR pull.
     # Consumed by: 5b.12 ImageRepository secretRef
     - secretKey: token
       remoteRef:

@@ -388,10 +388,12 @@ function Add-Check {
         A check that could not be evaluated is a Fail: the cluster has not
         demonstrated the property, and a gate that distinguishes "false" from
         "unknown" in its exit code is a gate that passes on a cluster that is
-        merely unreachable. Warn exists for the two things that are genuinely
+        merely unreachable. Warn exists for the things that are genuinely
         advisory - an ICMP reply, which a firewall may legitimately swallow
-        while the service underneath is perfectly healthy, and drift that is
-        expected to be repaired on the next reconciliation.
+        while the service underneath is perfectly healthy; drift that is
+        expected to be repaired on the next reconciliation; and 3b.13's report
+        of which values were too indistinct to grep for, where the check did
+        run and this installation's own values narrowed what it could cover.
     #>
     param(
         [Parameter(Mandatory)][string]$Step,
@@ -938,8 +940,20 @@ try {
         # Only what this phase creates. Phases 4, 5 and 8 add their own, and
         # this gate is Phase 3's.
         if ([int](Get-Field $parameter 'phase') -ne 3) { continue }
-        $key = "$(Get-Field $kubernetes 'namespace')/$(Get-Field $kubernetes 'secretName')"
-        $expectedSecrets[$key] = $true
+        # 'kubernetes' is one block or an array of them - one value landing in
+        # more than one namespace, which ha/token does: 'aerie' for Phase 5's
+        # API and 'observability' for 6b.13's kuma-provision CronJob.
+        # New-ExternalSecrets.ps1 normalizes the same way and emits a manifest
+        # per entry, so reading .namespace straight off an array here asked the
+        # cluster for '/' - a Secret nothing could ever sync, reported as a
+        # missing ExternalSecret, while the two real ones went unchecked.
+        # @() is enough where the generator needs an if: $kubernetes is
+        # non-null by the guard above, so there is no zero-element case to
+        # protect from PowerShell's unravelling.
+        foreach ($target in @($kubernetes)) {
+            $key = "$(Get-Field $target 'namespace')/$(Get-Field $target 'secretName')"
+            $expectedSecrets[$key] = $true
+        }
     }
 
     foreach ($key in @($expectedSecrets.Keys | Sort-Object)) {
@@ -1433,20 +1447,42 @@ try {
     # this installation's actual values at the same time. ci.yml carries the
     # half that needs neither: no IPv4 literal anywhere under deploy/.
     #
-    # NODE_INTERFACE and LONGHORN_REPLICA_COUNT are excluded on purpose. They
-    # are per-installation values like the rest, but 'eth0' and '2' appear in
-    # prose in almost every file here, so grepping for them would produce a
-    # permanent wall of false positives - which is how a check gets turned off.
-    $portabilityKeys = @($configValues.Keys | Where-Object { $_ -notin @('NODE_INTERFACE', 'LONGHORN_REPLICA_COUNT') } | Sort-Object)
+    # Which keys this can honestly grep for is decided from the *values*, not
+    # from a list of key names kept here. A value that is nothing but letters
+    # cannot be told apart from the same word in prose, and this tree is
+    # mostly prose: a share named 'public' is also the Postgres schema in
+    # ../data/schema/restore.sh, "a public image" in a comment, and every
+    # "public-facing hostname" in ../observability. Grepping for it produces a
+    # permanent wall of false positives, which is how a check gets turned off.
+    #
+    # Deciding that per value rather than per key is the whole point. SHARE_NAME
+    # is unmatchable at an installation that called its share 'public' and
+    # perfectly matchable at one that called it 'aerie-media'; a list of key
+    # names committed here would bake the first operator's answer into a
+    # structural file, which is the exact move docs/ethos.md exists to stop.
+    # NODE_INTERFACE and LONGHORN_REPLICA_COUNT used to be excluded by name for
+    # this reason and no longer need to be - 'eth0' appears nowhere under
+    # deploy/, and '2' is caught by the length floor below.
+    #
+    # Nothing is skipped silently: whatever could not be grepped for is warned
+    # about with the reason, because a check that quietly shrinks is worse than
+    # one that fails.
+    $portabilityKeys = @($configValues.Keys | Sort-Object)
     if ($portabilityKeys.Count -eq 0) {
         Add-Check -Step '3b.13' -Name 'No installation values in deploy/' -Status 'Fail' -Detail 'the ConfigMap yielded no values to grep for'
     }
     else {
         $deployFiles = @(Get-ChildItem -Path $DeployPath -Recurse -File)
         $leaks = New-Object Collections.Generic.List[string]
+        $unmatchable = New-Object Collections.Generic.List[string]
+        $greppedKeys = New-Object Collections.Generic.List[string]
         foreach ($key in $portabilityKeys) {
-            $value = $configValues[$key]
-            if ([string]::IsNullOrWhiteSpace($value) -or $value.Length -lt 4) { continue }
+            $value = [string]$configValues[$key]
+            if ([string]::IsNullOrWhiteSpace($value)) { $unmatchable.Add("$key (no value in the ConfigMap)"); continue }
+            # Three characters or fewer is a coincidence, not a match.
+            if ($value.Length -lt 4) { $unmatchable.Add("$key ('$value' is too short)"); continue }
+            if ($value -notmatch '[^A-Za-z]') { $unmatchable.Add("$key ('$value' is an ordinary word)"); continue }
+            $greppedKeys.Add($key)
             $hits = @($deployFiles | Select-String -SimpleMatch -Pattern $value -ErrorAction SilentlyContinue)
             foreach ($hit in $hits) {
                 $relative = $hit.Path.Substring((Resolve-Path $DeployPath).Path.Length).TrimStart('\', '/')
@@ -1455,10 +1491,19 @@ try {
         }
         if ($leaks.Count -gt 0) {
             Add-Check -Step '3b.13' -Name 'No installation values in deploy/' -Status 'Fail' `
-                -Detail "$($leaks -join '; '). Every one of these belongs in the tree as a `${...} substitution and nowhere else - see docs/ethos.md"
+                -Detail "$($leaks -join '; '). Every one of these belongs in the tree as a `${...} substitution and nowhere else - see docs/ethos.md. A comment quoting the value counts: the next operator reads it and it is still wrong for them"
+        }
+        elseif ($greppedKeys.Count -eq 0) {
+            Add-Check -Step '3b.13' -Name 'No installation values in deploy/' -Status 'Fail' `
+                -Detail 'no value in the ConfigMap was distinctive enough to grep for, so this proved nothing'
         }
         else {
-            Add-Check -Step '3b.13' -Name 'No installation values in deploy/' -Status 'Pass' -Detail "$($deployFiles.Count) file(s) checked against $($portabilityKeys.Count) value(s)"
+            Add-Check -Step '3b.13' -Name 'No installation values in deploy/' -Status 'Pass' `
+                -Detail "$($deployFiles.Count) file(s) checked against $($greppedKeys.Count) value(s): $($greppedKeys -join ', ')"
+        }
+        if ($unmatchable.Count -gt 0) {
+            Add-Check -Step '3b.13' -Name 'Values too indistinct to grep for' -Status 'Warn' `
+                -Detail "not grepped for: $($unmatchable -join '; '). These keys are as per-installation as the rest, so the `${...} tokens still have to be used for them - this run just cannot prove they were. Read the manifests that consume them by eye when one changes"
         }
     }
 }

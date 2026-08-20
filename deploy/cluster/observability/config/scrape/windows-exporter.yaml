@@ -10,10 +10,13 @@
 # targets below is 6b.2's WINDOWS_EXPORTER_TARGETS, substituted textually by
 # Flux's postBuild before this file is even parsed as YAML - see
 # scripts/k3s/cluster-config.json's own entry and 3b.3's ConfigMap key for the
-# full argument. The value already carries its own brackets and quotes
-# (`["10.0.0.11:9182","10.0.0.12:9182","10.0.0.13:9182"]`), so the substituted
-# result is a plain YAML flow sequence in this position - do not add brackets
-# here, the token supplies them.
+# full argument. The value already carries its own brackets and quotes - see
+# that entry's `example` field for the shape - so the substituted result is a
+# plain YAML flow sequence in this position: do not add brackets here, the
+# token supplies them. The example is pointed at rather than quoted because
+# ci.yml's portability step rejects an IPv4 literal anywhere under deploy/,
+# and it is right to: a comment is where a "just documenting it" address
+# survives longest.
 #
 # These are the physical machines, scraped from inside the cluster instead of
 # from a container on the same host (6a.2) - still worth it after everything

@@ -1,25 +1,96 @@
 name: Build and publish containers
 
-# Triggered directly off the push, in parallel with the "Build and test" CI
-# workflow, rather than waiting for CI to finish first. Each job builds its
-# image optimistically and only pushes it once CI reports success for the
-# same commit (see .github/actions/wait-for-ci). This assumes main usually
-# builds cleanly; if CI fails, the already-built image is simply discarded.
+# Triggered directly off the push, alongside the "Build and test" CI workflow.
+# No image is pushed unless CI reports success for the same commit, which the
+# single `wait-for-ci` job below establishes once for all of them.
+#
+# It used to be established six times: every build job ran the wait-for-ci
+# action itself, building its image optimistically first so the build
+# overlapped CI. That was free on GitHub's effectively unlimited runners. On
+# three self-hosted ones it is not - a job sitting in that poll is a job
+# holding a runner, and with several of them at once they can hold every
+# runner in the pool while polling for a CI run that has nowhere left to
+# start. They would all sit there until the 30-minute timeout.
+#
+# So the wait is hoisted into one job that the build jobs depend on. Exactly
+# one runner is ever parked on the poll, the rest of the pool stays free for
+# the CI it is waiting on, and the guarantee is unchanged. What is lost is the
+# build/CI overlap, which on a three-runner pool was contention rather than
+# speed.
+#
+# Note this cannot be done with `concurrency:`. A shared group would cap the
+# builds, but GitHub keeps at most one running and one *pending* job per
+# group and cancels the older pending one - so of six queued build jobs, four
+# would be silently cancelled rather than queued.
 #
 # Note for any job below that uses sparse-checkout: a local `uses: ./path`
 # action is resolved from the workspace on disk, not fetched, so every such
 # job must also list the action's directory in its sparse-checkout or it fails
 # with "Can't find 'action.yml' ... under .github/actions/<name>".
+#
+# Runners: the self-hosted `builder` pool, not ubuntu-latest - this repository
+# is private, so GitHub-hosted minutes are billed. Three things follow from
+# those runners being Windows, and all three are load-bearing:
+#
+#   - `defaults.run.shell` below. A Windows runner defaults to PowerShell and
+#     every `run:` here (and in both composite actions) is bash.
+#   - Nothing is preinstalled. docker, jq and gh all came free with GitHub's
+#     Ubuntu image; each job now installs what it uses through
+#     scripts/runner/Install-RunnerDependencies.ps1. Docker is the exception
+#     it will not install - see Get-AerieDockerPath - so that step only
+#     verifies the daemon is up and in Linux-container mode.
+#   - Any job using sparse-checkout must include `scripts`, or the installer
+#     it is about to run isn't on disk. Same class of mistake as the local
+#     `uses: ./path` note below.
 on:
   push:
     branches: [main]
+
+defaults:
+  run:
+    shell: bash
 
 env:
   REGISTRY: ghcr.io
 
 jobs:
+  # The CI gate for every build job below. One job, so that exactly one runner
+  # is parked on the poll no matter how many images turn out to need building
+  # - see the header. Deliberately holds no Docker dependency and builds
+  # nothing; all it does is answer "did CI pass for this commit".
+  wait-for-ci:
+    runs-on: [self-hosted, builder]
+    # Comfortably longer than the action's own 120 x 15s ceiling, so a timeout
+    # here is reported by the action (which says what it was waiting for)
+    # rather than by the runner killing the job.
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            .github/actions/wait-for-ci
+            scripts
+
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitHubCli, Jq
+
+      - name: Wait for CI to succeed
+        uses: ./.github/actions/wait-for-ci
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
   build-and-push-api-image:
-    runs-on: ubuntu-latest
+    needs: wait-for-ci
+    runs-on: [self-hosted, builder]
     timeout-minutes: 30
     permissions:
       contents: read
@@ -29,6 +100,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      # Just Docker: the CI gate this job used to run itself now lives in the
+      # wait-for-ci job, so gh and jq are that job's problem, not this one's.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker
 
       - name: Log in to the Container registry
         uses: docker/login-action@v4
@@ -57,16 +137,11 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Wait for CI to succeed
-        uses: ./.github/actions/wait-for-ci
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Push Docker image
         run: docker push --all-tags ghcr.io/eouw0o83hf/aerie-api
 
   detect-db-changes:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, builder]
     permissions:
       contents: read
       packages: read
@@ -83,6 +158,18 @@ jobs:
           sparse-checkout: |
             containers/aerie-db
             .github/actions/detect-image-changes
+            scripts
+
+      # The composite action below shells out to docker and jq, both of which came
+      # free with GitHub's Ubuntu image. `shell: powershell` overrides the
+      # workflow-level bash default - this is the step that installs the toolchain,
+      # so it is the one step that cannot assume one.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker, Jq
 
       - name: Check for changes under containers/aerie-db
         id: filter
@@ -94,9 +181,9 @@ jobs:
           registry-password: ${{ secrets.GITHUB_TOKEN }}
 
   build-and-push-db-image:
-    needs: detect-db-changes
+    needs: [detect-db-changes, wait-for-ci]
     if: needs.detect-db-changes.outputs.db-changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, builder]
     timeout-minutes: 30
     permissions:
       contents: read
@@ -109,7 +196,16 @@ jobs:
         with:
           sparse-checkout: |
             containers/aerie-db
-            .github/actions/wait-for-ci
+            scripts
+
+      # Just Docker: the CI gate this job used to run itself now lives in the
+      # wait-for-ci job, so gh and jq are that job's problem, not this one's.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker
 
       - name: Log in to the Container registry
         uses: docker/login-action@v4
@@ -137,16 +233,11 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Wait for CI to succeed
-        uses: ./.github/actions/wait-for-ci
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Push Docker image
         run: docker push --all-tags ghcr.io/eouw0o83hf/aerie-db
 
   detect-backup-changes:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, builder]
     permissions:
       contents: read
       packages: read
@@ -161,6 +252,18 @@ jobs:
           sparse-checkout: |
             containers/backup
             .github/actions/detect-image-changes
+            scripts
+
+      # The composite action below shells out to docker and jq, both of which came
+      # free with GitHub's Ubuntu image. `shell: powershell` overrides the
+      # workflow-level bash default - this is the step that installs the toolchain,
+      # so it is the one step that cannot assume one.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker, Jq
 
       - name: Check for changes under containers/backup
         id: filter
@@ -172,9 +275,9 @@ jobs:
           registry-password: ${{ secrets.GITHUB_TOKEN }}
 
   build-and-push-backup-image:
-    needs: detect-backup-changes
+    needs: [detect-backup-changes, wait-for-ci]
     if: needs.detect-backup-changes.outputs.backup-changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, builder]
     timeout-minutes: 30
     permissions:
       contents: read
@@ -187,7 +290,16 @@ jobs:
         with:
           sparse-checkout: |
             containers/backup
-            .github/actions/wait-for-ci
+            scripts
+
+      # Just Docker: the CI gate this job used to run itself now lives in the
+      # wait-for-ci job, so gh and jq are that job's problem, not this one's.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker
 
       - name: Log in to the Container registry
         uses: docker/login-action@v4
@@ -215,16 +327,11 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Wait for CI to succeed
-        uses: ./.github/actions/wait-for-ci
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Push Docker image
         run: docker push --all-tags ghcr.io/eouw0o83hf/aerie-backup
 
   detect-kuma-provision-changes:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, builder]
     permissions:
       contents: read
       packages: read
@@ -239,6 +346,18 @@ jobs:
           sparse-checkout: |
             containers/kuma-provision
             .github/actions/detect-image-changes
+            scripts
+
+      # The composite action below shells out to docker and jq, both of which came
+      # free with GitHub's Ubuntu image. `shell: powershell` overrides the
+      # workflow-level bash default - this is the step that installs the toolchain,
+      # so it is the one step that cannot assume one.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker, Jq
 
       - name: Check for changes under containers/kuma-provision
         id: filter
@@ -250,9 +369,9 @@ jobs:
           registry-password: ${{ secrets.GITHUB_TOKEN }}
 
   build-and-push-kuma-provision-image:
-    needs: detect-kuma-provision-changes
+    needs: [detect-kuma-provision-changes, wait-for-ci]
     if: needs.detect-kuma-provision-changes.outputs.kuma-provision-changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, builder]
     timeout-minutes: 30
     permissions:
       contents: read
@@ -265,7 +384,16 @@ jobs:
         with:
           sparse-checkout: |
             containers/kuma-provision
-            .github/actions/wait-for-ci
+            scripts
+
+      # Just Docker: the CI gate this job used to run itself now lives in the
+      # wait-for-ci job, so gh and jq are that job's problem, not this one's.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker
 
       - name: Log in to the Container registry
         uses: docker/login-action@v4
@@ -293,16 +421,11 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Wait for CI to succeed
-        uses: ./.github/actions/wait-for-ci
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Push Docker image
         run: docker push --all-tags ghcr.io/eouw0o83hf/aerie-kuma-provision
 
   detect-caddy-changes:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, builder]
     permissions:
       contents: read
       packages: read
@@ -317,6 +440,18 @@ jobs:
           sparse-checkout: |
             containers/caddy
             .github/actions/detect-image-changes
+            scripts
+
+      # The composite action below shells out to docker and jq, both of which came
+      # free with GitHub's Ubuntu image. `shell: powershell` overrides the
+      # workflow-level bash default - this is the step that installs the toolchain,
+      # so it is the one step that cannot assume one.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker, Jq
 
       - name: Check for changes under containers/caddy
         id: filter
@@ -328,9 +463,9 @@ jobs:
           registry-password: ${{ secrets.GITHUB_TOKEN }}
 
   build-and-push-caddy-image:
-    needs: detect-caddy-changes
+    needs: [detect-caddy-changes, wait-for-ci]
     if: needs.detect-caddy-changes.outputs.caddy-changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, builder]
     timeout-minutes: 30
     permissions:
       contents: read
@@ -343,7 +478,16 @@ jobs:
         with:
           sparse-checkout: |
             containers/caddy
-            .github/actions/wait-for-ci
+            scripts
+
+      # Just Docker: the CI gate this job used to run itself now lives in the
+      # wait-for-ci job, so gh and jq are that job's problem, not this one's.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker
 
       - name: Log in to the Container registry
         uses: docker/login-action@v4
@@ -371,16 +515,11 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Wait for CI to succeed
-        uses: ./.github/actions/wait-for-ci
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Push Docker image
         run: docker push --all-tags ghcr.io/eouw0o83hf/aerie-caddy
 
   detect-kiosk-changes:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, builder]
     permissions:
       contents: read
       packages: read
@@ -395,6 +534,18 @@ jobs:
           sparse-checkout: |
             apps/kiosk
             .github/actions/detect-image-changes
+            scripts
+
+      # The composite action below shells out to docker and jq, both of which came
+      # free with GitHub's Ubuntu image. `shell: powershell` overrides the
+      # workflow-level bash default - this is the step that installs the toolchain,
+      # so it is the one step that cannot assume one.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker, Jq
 
       - name: Check for changes under apps/kiosk
         id: filter
@@ -406,9 +557,9 @@ jobs:
           registry-password: ${{ secrets.GITHUB_TOKEN }}
 
   build-and-push-kiosk-image:
-    needs: detect-kiosk-changes
+    needs: [detect-kiosk-changes, wait-for-ci]
     if: needs.detect-kiosk-changes.outputs.kiosk-changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, builder]
     timeout-minutes: 30
     permissions:
       contents: read
@@ -425,6 +576,17 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # After setup-java, because sdkmanager is a Java program and this step is what
+      # fetches the Android SDK. AndroidSdk is asked for by name - it is ~700MB and
+      # deliberately outside the default dependency set - and installs under
+      # ProgramData, so it is downloaded once per runner rather than once per job.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker, AndroidSdk
+
       - name: Write release signing config
         working-directory: apps/kiosk
         env:
@@ -433,10 +595,30 @@ jobs:
           RELEASE_KEY_ALIAS: ${{ vars.KIOSK_RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.KIOSK_RELEASE_KEY_PASSWORD }}
         run: |
-          KEYSTORE_PATH="$RUNNER_TEMP/aerie-kiosk-release.jks"
-          echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
+          set -euo pipefail
+
+          # $RUNNER_TEMP is a Windows path on these runners (D:\a\_temp), and
+          # two *different* rewrites of it are needed - neither of which is the
+          # raw value:
+          #
+          #   - bash wants a POSIX path for its own redirects and rm.
+          #   - local.properties is a Java .properties file, where a backslash
+          #     is an escape character. Writing D:\a\_temp\aerie-kiosk-release.jks
+          #     there does not fail; Gradle reads back D:a_tempaerie-kiosk-release.jks
+          #     and the signing config silently points at nothing. The forward-slash
+          #     form is what a Java properties value has to carry, and the JVM
+          #     accepts it on Windows.
+          #
+          # Both are exported so the later steps use the same two paths rather
+          # than recomputing (and getting it subtly wrong in one place).
+          KEYSTORE_UNIX="$(cygpath -u "$RUNNER_TEMP")/aerie-kiosk-release.jks"
+          KEYSTORE_JAVA="$(cygpath -m "$RUNNER_TEMP")/aerie-kiosk-release.jks"
+          echo "KEYSTORE_UNIX=$KEYSTORE_UNIX" >> "$GITHUB_ENV"
+          echo "KEYSTORE_JAVA=$KEYSTORE_JAVA" >> "$GITHUB_ENV"
+
+          echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_UNIX"
           cat > local.properties <<EOF
-          RELEASE_STORE_FILE=$KEYSTORE_PATH
+          RELEASE_STORE_FILE=$KEYSTORE_JAVA
           RELEASE_STORE_PASSWORD=$RELEASE_STORE_PASSWORD
           RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS
           RELEASE_KEY_PASSWORD=$RELEASE_KEY_PASSWORD
@@ -460,8 +642,10 @@ jobs:
           RELEASE_KEY_ALIAS: ${{ vars.KIOSK_RELEASE_KEY_ALIAS }}
           RELEASE_STORE_PASSWORD: ${{ secrets.KIOSK_RELEASE_STORE_PASSWORD }}
         run: |
-          KEYSTORE_PATH="$RUNNER_TEMP/aerie-kiosk-release.jks"
-          keytool -export -alias "$RELEASE_KEY_ALIAS" -keystore "$KEYSTORE_PATH" \
+          set -euo pipefail
+          # $KEYSTORE_JAVA, not $KEYSTORE_UNIX: keytool is a JVM program, so it
+          # needs the Windows-shaped path, not the /d/a/_temp one bash uses.
+          keytool -export -alias "$RELEASE_KEY_ALIAS" -keystore "$KEYSTORE_JAVA" \
               -storepass "$RELEASE_STORE_PASSWORD" -rfc \
             | openssl x509 -outform DER \
             | openssl dgst -sha256 -binary | openssl base64 | tr '+/' '-_' | tr -d '=' \
@@ -478,7 +662,12 @@ jobs:
 
       - name: Remove keystore (no longer needed once the APK is signed)
         if: always()
-        run: rm -f "$RUNNER_TEMP/aerie-kiosk-release.jks"
+        # $KEYSTORE_UNIX may be unset if the job failed before the step that
+        # exports it, and `set -u` plus `if: always()` would turn that into a
+        # confusing red on an already-failing run - hence the :- default.
+        # Unlike a GitHub-hosted runner, this machine is reused, so a keystore
+        # left behind here stays on disk indefinitely.
+        run: rm -f "${KEYSTORE_UNIX:-$RUNNER_TEMP/aerie-kiosk-release.jks}"
 
       - name: Log in to the Container registry
         uses: docker/login-action@v4
@@ -506,11 +695,6 @@ jobs:
           load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-
-      - name: Wait for CI to succeed
-        uses: ./.github/actions/wait-for-ci
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push Docker image
         run: docker push --all-tags ghcr.io/eouw0o83hf/aerie-kiosk-files

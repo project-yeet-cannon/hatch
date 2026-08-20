@@ -636,8 +636,16 @@ try {
         foreach ($parameter in @(Get-Field $parameters 'parameters' | Where-Object { $_ })) {
             $kubernetes = Get-Field $parameter 'kubernetes'
             if ($null -eq $kubernetes) { continue }
-            if ((Get-Field $kubernetes 'namespace') -eq 'aerie' -and (Get-Field $kubernetes 'secretName') -eq 'cnpg-wal-s3') {
-                $expectedKeys += [string](Get-Field $kubernetes 'secretKey')
+            # One block or an array of them, per New-ExternalSecrets.ps1: a
+            # value can land in several namespaces. None of the cnpg-wal-s3
+            # three do today, and an array read as a single object matches
+            # nothing rather than erroring - so the day one of them gains a
+            # second target, this would quietly drop its key from the expected
+            # set and report the *cluster* as wrong.
+            foreach ($target in @($kubernetes)) {
+                if ((Get-Field $target 'namespace') -eq 'aerie' -and (Get-Field $target 'secretName') -eq 'cnpg-wal-s3') {
+                    $expectedKeys += [string](Get-Field $target 'secretKey')
+                }
             }
         }
         $expectedKeys = @($expectedKeys | Sort-Object)

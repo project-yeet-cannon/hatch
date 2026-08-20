@@ -826,4 +826,16 @@ nothing below waits on a human except the one explicit stop in step 10.*
       error. The half that greps for the base domain and the VIP themselves
       cannot live there at all: [ethos](../../ethos.md) keeps those values out of
       the repository, so the gate is the only place the tree and the values are
-      both present.*
+      both present. **Which values that half can grep for is decided from the
+      values, not from a list of key names in the script.** A value that is
+      nothing but letters — a share called `public`, which is also the Postgres
+      schema in `restore.sh` and the word in every "public-facing hostname"
+      comment — cannot be told apart from prose, and grepping for it is a wall
+      of false positives, which is how a check gets turned off. Deciding it per
+      value is what keeps that honest: the same key is unmatchable at one
+      installation and perfectly matchable at the next, so a list of key names
+      committed here would bake the first operator's share name into a
+      structural file. Whatever it could not grep for is reported as a warning
+      naming the value and the reason. That is not the skip this gate refuses
+      elsewhere — the check ran, over every value that can carry the property —
+      it is the gate saying out loud how far it reached.*

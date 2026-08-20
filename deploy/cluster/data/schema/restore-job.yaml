@@ -49,7 +49,17 @@ spec:
           # Already ships restic and postgres:18.4's psql/pg_restore - see
           # containers/backup/Dockerfile. Its own ENTRYPOINT (supercronic) is
           # overridden below; this container runs the script once and exits.
-          image: ghcr.io/eouw0o83hf/aerie-backup:latest
+          #
+          # ${IMAGE_REGISTRY} rather than the registry this repository's author
+          # happens to push to: it resolves from aerie-cluster-config through
+          # data-schema's postBuild.substituteFrom (../../data.yaml), the same
+          # way ${POSTGRES_INSTANCES} does next door. A registry host baked in
+          # here is one installation's fact in a shared tree - docs/ethos.md -
+          # and 3b.13 greps deploy/ for exactly this. Changing it re-applies an
+          # immutable pod template, so the same rule ./kustomization.yaml gives
+          # for a script edit applies: delete the suspended Job and let Flux
+          # recreate it.
+          image: ${IMAGE_REGISTRY}/aerie-backup:latest
           command: ["sh", "/scripts/restore.sh"]
           env:
             - name: PGHOST

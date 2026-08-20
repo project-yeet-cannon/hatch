@@ -1,8 +1,10 @@
 <#
 .SYNOPSIS
-    Installs the third-party tooling the Aerie provisioning scripts expect to
-    find on a self-hosted runner: the AWS CLI v2 and the Windows OpenSSH
-    client.
+    Installs the third-party tooling the Aerie workflows expect to find on a
+    self-hosted runner - the AWS CLI v2 and the Windows OpenSSH client for the
+    provisioning scripts, and the build toolchain (pwsh, kubectl, helm, jq,
+    gh, the Android SDK) that ci.yml and publish.yml used to get free from
+    GitHub's ubuntu-latest image.
 
 .DESCRIPTION
     Every provisioning workflow runs this as its first step after checkout, so
@@ -15,18 +17,27 @@
     are resolved and reported, not reinstalled - so running it on every
     dispatch costs a second or two.
 
-    What it does *not* do: install the runner service itself, or anything the
-    OS ships enabled. Registering a runner is the one genuinely manual step,
-    because it needs a registration token that only a human can mint.
+    What it does *not* do: install the runner service itself, anything the OS
+    ships enabled, or Docker. Registering a runner needs a registration token
+    that only a human can mint. Docker is excluded on different grounds -
+    building this repository's Linux images on a Windows host means Docker
+    Desktop or a VM, not an unattended MSI - so 'Docker' here is a check that
+    reports precisely what is wrong rather than an install.
 
     Versions come from scripts\versions.json, not from parameters here, for the
     reason that file documents: a pin is structural, identical for every
     installation, so it belongs in git.
 
 .PARAMETER Dependency
-    Which tools to ensure. Defaults to all of them; each workflow names only
-    what its script actually uses, so a k3s install doesn't fail on a machine
-    with no reason to hold AWS credentials.
+    Which tools to ensure. Each workflow names only what its own jobs
+    actually use, so a k3s install doesn't fail on a machine with no reason to
+    hold AWS credentials, and a container build doesn't drag in a 700MB
+    Android SDK.
+
+    The default is everything *except* AndroidSdk - that one is large enough,
+    and needed by few enough jobs, that it should be asked for by name. Note
+    it also has an ordering requirement the others don't: sdkmanager is a Java
+    program, so actions/setup-java has to run before it.
 
 .PARAMETER CheckOnly
     Report what's missing and fail without touching the machine. What to use
@@ -37,13 +48,17 @@
     .\Install-RunnerDependencies.ps1 -Dependency AwsCli, OpenSshClient
 
 .EXAMPLE
+    # What ci.yml's deploy-manifests job runs
+    .\Install-RunnerDependencies.ps1 -Dependency PowerShell7, Kubectl, Helm, Jq
+
+.EXAMPLE
     # Audit this machine without changing it
     .\Install-RunnerDependencies.ps1 -CheckOnly
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('AwsCli', 'OpenSshClient')]
-    [string[]]$Dependency = @('AwsCli', 'OpenSshClient'),
+    [ValidateSet('AwsCli', 'OpenSshClient', 'PowerShell7', 'Kubectl', 'Helm', 'Jq', 'GitHubCli', 'Docker', 'AndroidSdk')]
+    [string[]]$Dependency = @('AwsCli', 'OpenSshClient', 'PowerShell7', 'Kubectl', 'Helm', 'Jq', 'GitHubCli', 'Docker'),
 
     [switch]$CheckOnly
 )
@@ -67,6 +82,13 @@ foreach ($name in ($Dependency | Select-Object -Unique)) {
         switch ($name) {
             'AwsCli' { Install-AerieAwsCli -CheckOnly:$CheckOnly | Out-Null }
             'OpenSshClient' { Install-AerieOpenSshClient -CheckOnly:$CheckOnly }
+            'PowerShell7' { Install-AeriePowerShell7 -CheckOnly:$CheckOnly | Out-Null }
+            'Kubectl' { Install-AerieKubectl -CheckOnly:$CheckOnly | Out-Null }
+            'Helm' { Install-AerieHelm -CheckOnly:$CheckOnly | Out-Null }
+            'Jq' { Install-AerieJq -CheckOnly:$CheckOnly | Out-Null }
+            'GitHubCli' { Install-AerieGitHubCli -CheckOnly:$CheckOnly | Out-Null }
+            'Docker' { Install-AerieDocker -CheckOnly:$CheckOnly }
+            'AndroidSdk' { Install-AerieAndroidSdk -CheckOnly:$CheckOnly | Out-Null }
         }
     }
     catch {

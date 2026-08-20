@@ -25,12 +25,15 @@
 #                CNPG's read-write Service for the aerie-pg Cluster
 #                (deploy/cluster/data/cluster/cluster.yaml). Follows a
 #                failover, unlike a pod IP.
-#   ha.toml    - http://homeassistant.local:8123 becomes
-#                http://${HA_HOST}:${HA_PORT} - a hardcoded hostname in a
-#                redeployable repo is exactly what docs/ethos.md rules out,
-#                and 6b.3 made both keys required for exactly this consumer.
-#                Substituted the same way every other ${...} token in this
-#                tree is, via this Kustomization's postBuild.substituteFrom.
+#   ha.toml    - the compose stack's hardcoded host and port become
+#                http://${HA_HOST}:${HA_PORT} - a hardcoded Home Assistant
+#                address in a redeployable repo is exactly what docs/ethos.md
+#                rules out, and 6b.3 made both keys required for exactly this
+#                consumer. Substituted the same way every other ${...} token in
+#                this tree is, via this Kustomization's postBuild.substituteFrom.
+#                The old values are deliberately not quoted here either: 3b.13
+#                greps deploy/ for this installation's values and does not care
+#                whether it finds one in a manifest or in a comment about one.
 #
 # New, since Phase 5 gave them something to check:
 #

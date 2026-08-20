@@ -1127,7 +1127,7 @@ gate.
       and the sum of requests across all namespaces fits one node's allocatable
       with the app tier still schedulable.
 
-- [ ] **15. Phase gate as a command** — `scripts/k3s/Test-Observability.ps1`,
+- [x] **15. Phase gate as a command** — `scripts/k3s/Test-Observability.ps1`,
       `.github/workflows/verify-observability.yml`, dispatched as *Verify:
       Observability*. The shape 3b.13, 4b.11 and 5b.14 established: a read-only
       script over SSH, a thin workflow wrapper that hands it every decision, and

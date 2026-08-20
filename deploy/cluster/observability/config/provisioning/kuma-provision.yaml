@@ -62,7 +62,12 @@ spec:
             - name: ghcr-pull
           containers:
             - name: kuma-provision
-              image: ghcr.io/eouw0o83hf/aerie-kuma-provision:latest
+              # ${IMAGE_REGISTRY} resolves from aerie-cluster-config through
+              # this layer's postBuild.substituteFrom (../../../observability.yaml).
+              # The pull secret above says the repository is private; the
+              # registry host it lives on is still an operator value, and
+              # docs/ethos.md keeps those out of the tree.
+              image: ${IMAGE_REGISTRY}/aerie-kuma-provision:latest
               env:
                 - name: KUMA_URL
                   value: http://uptime-kuma:3001

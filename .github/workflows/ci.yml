@@ -1,13 +1,38 @@
 name: Build and test
 
+# Runs on the self-hosted `builder` pool rather than ubuntu-latest. This
+# repository is private, so every GitHub-hosted minute is billed, and there
+# are three Windows runners on the LAN already. `builder` is an opt-in label
+# rather than bare `self-hosted` for the reason cd.yml's comment gives: a
+# newly registered node should not start taking build jobs the moment it
+# appears, before anyone has put a toolchain or a Docker daemon on it.
+#
+# Those runners are Windows, which is the thing to keep in mind when editing
+# this file. Two consequences:
+#
+#   - `defaults.run.shell` below. A Windows runner's default shell is
+#     PowerShell and every `run:` block here is bash, so without it they fail
+#     on the first `set -euo pipefail`. bash comes from Git for Windows,
+#     which the runner already needs in order to check anything out.
+#   - Nothing is preinstalled. GitHub's Ubuntu image shipped pwsh, kubectl,
+#     helm and jq; here each job installs exactly what it uses via
+#     scripts/runner/Install-RunnerDependencies.ps1, hash-pinned in
+#     scripts/versions.json. actions/setup-* still behave as they do
+#     anywhere - they populate the runner tool cache, which survives between
+#     jobs, so only the first run after a version bump pays the download.
+
 on:
   push:
     branches: [main]
   pull_request:
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   api:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, builder]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -27,7 +52,7 @@ jobs:
         run: dotnet test src/Aerie.slnx --no-build --configuration Release
 
   web:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, builder]
     strategy:
       matrix:
         app: [admin, dashboard, modeler, docs, family]
@@ -67,16 +92,20 @@ jobs:
     #
     # Every directory carrying a kustomization.yaml is built, discovered rather
     # than listed, so the layers added by 3b.4-3b.12 are covered without editing
-    # this file. `kubectl kustomize` is the runner image's own, deliberately
-    # unpinned: this is a lint whose worst failure is a false red, not
-    # provisioning tooling whose version changes what a node becomes - those are
-    # pinned in scripts/versions.json.
+    # this file. `kubectl kustomize` used to be the GitHub runner image's own and
+    # deliberately unpinned, on the grounds that a lint's worst failure is a
+    # false red. That argument died with the move to self-hosted runners: a tool
+    # nobody installs is a tool nobody chose, but once we install it ourselves it
+    # has to be *some* version. So kubectl is now pinned in scripts/versions.json
+    # to the same minor as k3s - kustomize is built into kubectl, and a client
+    # several minors from the cluster's own renders resources the cluster
+    # wouldn't.
     #
     # What this does *not* check is the Flux CRD schemas, so a misspelled field
     # in a Kustomization or HelmRelease spec still passes. 3b.13's
     # Test-ClusterPlatform.ps1 is the gate that catches those, against a real
     # cluster.
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, builder]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -90,10 +119,23 @@ jobs:
       # target and never got one, and on a required parameter nothing consumes
       # and nothing explains.
       #
+      # Everything this job runs on - pwsh, kubectl, helm, jq - came free with
+      # GitHub's Ubuntu image and comes with nothing here. Named individually
+      # rather than taking the default set, same convention as the provisioning
+      # workflows: this job has no reason to hold AWS credentials or an SSH
+      # client. `shell: powershell` overrides the workflow-level bash default -
+      # this one step is the one that cannot assume a toolchain, since it is
+      # what installs it.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency PowerShell7, Kubectl, Helm, Jq
+
       # Ahead of the build below because it is the more specific failure - a
       # stale manifest still builds perfectly, and a missing one is reported
       # here as "regenerate" rather than as a kustomize resource-not-found.
-      # pwsh is preinstalled on the GitHub-hosted Ubuntu image.
       - name: Check the generated ExternalSecrets match parameters.json
         run: pwsh -NoProfile -File scripts/secrets/New-ExternalSecrets.ps1 -Check
 
@@ -117,10 +159,10 @@ jobs:
       # deploy/cluster/apps/helmrelease.yaml is an ordinary manifest pointing
       # at the chart, not a render of it, so a template that doesn't parse or
       # a values.yaml that doesn't match its own defaults would otherwise
-      # reach helm-controller undetected. Unpinned, same reasoning as
-      # `kubectl kustomize`'s own comment above: this is a lint whose worst
-      # failure is a false red, not provisioning tooling whose version
-      # changes what a node becomes.
+      # reach helm-controller undetected. Pinned in scripts/versions.json for
+      # the same reason kubectl now is - see that comment above - and held on
+      # the Helm 3 line deliberately; the versions.json note says what would
+      # have to be checked before moving it to 4.
       - name: Lint and render the aerie chart
         run: |
           set -euo pipefail
@@ -188,7 +230,7 @@ jobs:
           echo "$(echo "$used" | grep -c . || true) token(s) used, all declared."
 
   detect-kiosk-changes:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, builder]
     outputs:
       kiosk-changed: ${{ steps.filter.outputs.kiosk }}
     steps:
@@ -209,7 +251,7 @@ jobs:
   kiosk:
     needs: detect-kiosk-changes
     if: needs.detect-kiosk-changes.outputs.kiosk-changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, builder]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -219,6 +261,19 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+
+      # After setup-java, not before: sdkmanager is itself a Java program, so
+      # this step fails without a JDK already on PATH. Asked for by name
+      # because AndroidSdk is deliberately not in the default dependency set -
+      # it is ~700MB, and only the two kiosk jobs need it. It installs under
+      # ProgramData and is reused across jobs, so only the first run after a
+      # pin bump actually downloads anything.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency AndroidSdk
 
       - name: Lint and build
         working-directory: apps/kiosk
