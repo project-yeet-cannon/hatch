@@ -40,6 +40,8 @@ spec:
         app.kubernetes.io/name: autokuma
         app.kubernetes.io/instance: autokuma
     spec:
+      # 6b.14's PriorityClass.
+      priorityClassName: aerie-observability
       securityContext:
         seccompProfile:
           type: RuntimeDefault

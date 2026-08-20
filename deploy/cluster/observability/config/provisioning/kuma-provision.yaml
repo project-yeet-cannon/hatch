@@ -56,6 +56,8 @@ spec:
       template:
         spec:
           restartPolicy: Never
+          # 6b.14's PriorityClass.
+          priorityClassName: aerie-observability
           imagePullSecrets:
             - name: ghcr-pull
           containers:

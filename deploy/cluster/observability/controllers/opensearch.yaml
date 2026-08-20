@@ -129,6 +129,22 @@ spec:
         memory: 1.5Gi
       limits:
         memory: 2Gi
+
+    # 6b.14's sweep caught this one: persistence.enableInitChown defaults to
+    # true (unset above, so it's on), which runs a fsgroup-volume
+    # initContainer on every start - and that initContainer reads its own
+    # initResources key, not the `resources:` block above. Confirmed by
+    # rendering the pinned 3.7.0 chart: left unset it renders `resources: {}`,
+    # the exact chart-hidden gap the cluster plan's own text warns this step
+    # to look for.
+    initResources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 64Mi
+
+    priorityClassName: aerie-observability
 ---
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
@@ -195,6 +211,8 @@ spec:
         # survives Helm's values merge silently.
         cpu: null
         memory: 768Mi
+
+    priorityClassName: aerie-observability
 ---
 # The re-scope preamble's mitigation for DISABLE_SECURITY_PLUGIN: only
 # fluent-bit (6b.10, shipping logs in) and Dashboards (reading them back out)

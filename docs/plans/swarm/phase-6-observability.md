@@ -1087,7 +1087,7 @@ gate.
       lists "Home Assistant" as default; every monitor shows it attached; and
       6b.8's watchdog notification actually arrives on a phone.
 
-- [ ] **14. PriorityClasses, and the resource sweep** —
+- [x] **14. PriorityClasses, and the resource sweep** —
       `deploy/cluster/observability/controllers/priorityclass.yaml` plus requests
       on everything above. The property [design.md](design.md#decisions)'s "HA
       *not* required — observability" line has been asserting since Phase 0 and

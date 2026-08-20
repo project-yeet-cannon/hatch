@@ -1,0 +1,34 @@
+# The cluster plan Phase 6b.14 - the mechanism behind design.md's "HA *not*
+# required - observability" decision, made mechanical rather than asserted.
+#
+# A negative value, not merely a low one: 0 is the value every Phase 5
+# workload gets by default without opting into anything, so this has to sit
+# below that default rather than requiring the rest of the cluster to
+# out-rank this phase - the same statement made in twenty more places. On a
+# surviving node that cannot fit everything, the scheduler evicts pods
+# carrying this class to make room for zero-and-above priority pods rather
+# than leaving an app-tier replica Pending.
+#
+# Set on every pod-creating object in this phase - the HelmReleases'
+# priorityClassName values below their sibling files, the two plain
+# Deployments, and both provisioning CronJobs' pod templates.
+#
+# Two consequences that look like bugs later and are not:
+#   - An evicted Grafana (or Prometheus, or Kuma, or anything else in this
+#     namespace) during a node failure is normal and comes back on its own
+#     once the node returns or the survivor has room again.
+#   - A pod from this namespace stuck permanently Pending after a node loss
+#     means the remaining node genuinely cannot hold everything at once -
+#     that is 5a.6/5b.11's sizing budget being exceeded, a capacity answer,
+#     not something a scheduling change fixes.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: aerie-observability
+value: -10
+globalDefault: false
+description: >-
+  Below every workload's default priority (0). Observability is explicitly
+  scoped out of HA (design.md#decisions); on resource pressure the scheduler
+  sheds pods in this class first rather than leaving a higher-priority
+  workload Pending.

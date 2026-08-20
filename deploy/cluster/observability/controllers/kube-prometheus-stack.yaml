@@ -176,6 +176,12 @@ spec:
         # overrides first.
         retentionSize: 16GiB
 
+        # 6b.14's PriorityClass. Covers the config-reloader sidecar the
+        # operator injects into this same pod too - priority is pod-scoped,
+        # not per-container, so prometheusConfigReloader.resources below
+        # needs no matching priorityClassName of its own.
+        priorityClassName: aerie-observability
+
         # The sizing table's estimate, not this cluster's own measurement -
         # kube-prometheus-stack additionally scrapes kube-state-metrics,
         # kubelet cAdvisor, Longhorn and Flux at several times a compose
@@ -272,11 +278,15 @@ spec:
             memory: 64Mi
           limits:
             memory: 128Mi
+        priorityClassName: aerie-observability
 
     # -------------------------------------------------------------------
     # Grafana
     # -------------------------------------------------------------------
     grafana:
+      # 6b.14's PriorityClass - covers the dashboard sidecar and the
+      # datasources sidecar below too, both in this same pod.
+      priorityClassName: aerie-observability
       admin:
         # admin/password until changed from Grafana's own UI - 6a.4 and
         # 6b.4's admin-secrets.yaml carry the full reasoning. userKey and
@@ -345,6 +355,14 @@ spec:
     # The rest of the sizing table - the workloads the chart hides
     # -------------------------------------------------------------------
     prometheusOperator:
+      priorityClassName: aerie-observability
+      # The webhook cert-gen Job the operator's admission webhook wires up
+      # (helm.sh/hook: pre-install,pre-upgrade) - a separate pod outside the
+      # operator's own Deployment, and priorityClassName is pod-scoped, so
+      # it needs this instead of inheriting the line above.
+      admissionWebhooks:
+        patch:
+          priorityClassName: aerie-observability
       resources:
         requests:
           cpu: 10m
@@ -368,6 +386,7 @@ spec:
           limits:
             memory: 64Mi
     kube-state-metrics:
+      priorityClassName: aerie-observability
       resources:
         requests:
           cpu: 10m
@@ -375,6 +394,11 @@ spec:
         limits:
           memory: 256Mi
     prometheus-node-exporter:
+      # A DaemonSet, unlike everything else this key touches - but 6b.14's
+      # rule is "every workload in this phase", not "every workload that
+      # isn't a DaemonSet", and eviction of one node-exporter pod costs
+      # nothing an operator would notice the way an evicted Grafana might.
+      priorityClassName: aerie-observability
       resources:
         requests:
           cpu: 10m

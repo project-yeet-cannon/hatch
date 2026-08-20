@@ -236,3 +236,8 @@ spec:
         memory: 64Mi
       limits:
         memory: 128Mi
+
+    # 6b.14's PriorityClass. A DaemonSet, same as
+    # ../controllers/kube-prometheus-stack.yaml's prometheus-node-exporter -
+    # every workload in this phase, not just the single-replica ones.
+    priorityClassName: aerie-observability
