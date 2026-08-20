@@ -1049,11 +1049,29 @@ function Get-AerieGitBashPath {
         Where-Object { $_ } |
         Select-Object -Unique
     foreach ($root in $roots) {
+        # Both spellings: a machine-wide install is <root>\Git, a per-user one
+        # (which is what a non-admin 'winget install Git.Git' leaves behind) is
+        # %LOCALAPPDATA%\Programs\Git.
         $candidates.Add((Join-Path $root 'Git\bin\bash.exe'))
+        $candidates.Add((Join-Path $root 'Programs\Git\bin\bash.exe'))
     }
 
+    # Get-Item plus GetValue(), never (Get-ItemProperty ...).InstallPath. The
+    # entry point sets Set-StrictMode -Version Latest, under which dereferencing
+    # a property that isn't there is a *terminating error* rather than an empty
+    # value - and that includes dereferencing the $null a missing key returns,
+    # so -ErrorAction SilentlyContinue does not save it. lib\AerieVersions.ps1
+    # avoids the same trap for the same reason, and its header says so.
+    #
+    # Getting this wrong is worse than it looks: this loop runs while the
+    # candidate list is still being *built*, so a throw here happens before a
+    # single path has been tested - including the git.exe-adjacent one above
+    # that would have matched.
     foreach ($key in @('HKLM:\SOFTWARE\GitForWindows', 'HKLM:\SOFTWARE\WOW6432Node\GitForWindows')) {
-        $installPath = (Get-ItemProperty -Path $key -Name 'InstallPath' -ErrorAction SilentlyContinue).InstallPath
+        $item = Get-Item -Path $key -ErrorAction SilentlyContinue
+        if (-not $item) { continue }
+
+        $installPath = $item.GetValue('InstallPath')
         if ($installPath) { $candidates.Add((Join-Path $installPath 'bin\bash.exe')) }
     }
 
@@ -1061,6 +1079,9 @@ function Get-AerieGitBashPath {
         if (Test-Path $candidate -PathType Leaf) { return $candidate }
     }
 
+    # Recorded so the caller's error can say where it looked - a bare "not
+    # found" on a machine that plainly has Git is not an actionable message.
+    $script:AerieGitBashSearched = $candidates
     return $null
 }
 
@@ -1092,9 +1113,11 @@ function Install-AerieGitBash {
     [CmdletBinding()]
     param([switch]$CheckOnly)
 
+    $script:AerieGitBashSearched = @()
     $bash = Get-AerieGitBashPath
     if (-not $bash) {
-        throw "Git for Windows' bash.exe not found. Every 'shell: bash' step needs it, and on this host 'bash' otherwise resolves to WSL (C:\Windows\System32\bash.exe), which cannot run under the runner service's LOCAL SYSTEM account. Install Git for Windows - https://git-scm.com/download/win - which the runner needs for checkout anyway."
+        $looked = ($script:AerieGitBashSearched | ForEach-Object { "  - $_" }) -join "`n"
+        throw "Git for Windows' bash.exe not found. Every 'shell: bash' step needs it, and on this host 'bash' otherwise resolves to WSL (C:\Windows\System32\bash.exe), which cannot run under the runner service's LOCAL SYSTEM account. Install Git for Windows - https://git-scm.com/download/win - which the runner needs for checkout anyway.`n`nLooked in:`n$looked"
     }
 
     # Proves it is really Git Bash and not something else called bash.exe -
