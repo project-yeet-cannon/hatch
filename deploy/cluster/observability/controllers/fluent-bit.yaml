@@ -82,7 +82,7 @@ spec:
       tag: "4.2.7"
 
     flush: 5
-    logLevel: debug
+    logLevel: info
 
     # config.service is left at the chart's own default: it already
     # parameterizes Flush/Log_Level from the two values above, points
@@ -159,7 +159,18 @@ spec:
       # Host is the Service name (../opensearch.yaml's chart-default host,
       # confirmed there against the same chart version); everything else -
       # Logstash_Format, the aerie-logs prefix, Suppress_Type_Name - is
-      # unchanged from the compose config.
+      # unchanged from the compose config, except Retry_Limit, which the
+      # compose config also left unset (default: 1). Found live, 2026-08-20:
+      # against one compose project that default was never visible; against
+      # a whole node's worth of concurrent tail coroutines hitting a single
+      # small OpenSearch pod, a debug capture showed chunks failing with no
+      # response ever logged (a client-side timeout, not a rejected bulk
+      # item - every response body this cluster captured came back
+      # "errors":false) and getting permanently dropped after that one
+      # retry. Mem_Buf_Limit above already bounds how much can back up
+      # in memory, so unlimited retries can't grow without limit - they
+      # just mean a transient contention spike delays delivery instead of
+      # losing it.
       outputs: |
         [OUTPUT]
             Name                opensearch
@@ -171,6 +182,7 @@ spec:
             Logstash_Prefix     aerie-logs
             tls                 Off
             Suppress_Type_Name  On
+            Retry_Limit         False
 
     # Three mount details that each fail silently (the cluster plan's own
     # phrasing) if any one of them is skipped:
