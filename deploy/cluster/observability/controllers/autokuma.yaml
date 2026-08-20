@@ -135,22 +135,34 @@ spec:
                   key: password
             - name: AUTOKUMA__STATIC_MONITORS
               value: /static-monitors
-          # The image's own Dockerfile HEALTHCHECK targets this port/path -
-          # kubelet never reads a Docker HEALTHCHECK, so it is wired here
-          # directly instead of left unobserved.
-          ports:
-            - name: health
-              containerPort: 8090
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: health
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: health
-            periodSeconds: 10
+            # Default is true (autokuma/src/config.rs's DockerConfig), and on
+            # a machine with no /var/run/docker.sock that costs a failed sync
+            # every five seconds - "Socket not found: /var/run/docker.sock",
+            # forever, drowning the log this container exists to be read
+            # from. The whole point of 6b.12 is that the cluster's monitors
+            # come from ../static-monitors-configmap.yaml rather than from
+            # container labels, so the Docker source has nothing to find
+            # here even where a socket exists.
+            - name: AUTOKUMA__DOCKER__ENABLED
+              value: "false"
+          # No ports and no probes, and this is a correction rather than an
+          # omission. What stood here was a `health` port on 8090 with an
+          # httpGet on /health, justified as mirroring "the image's own
+          # Dockerfile HEALTHCHECK" - AutoKuma 2.0.0's Dockerfile has no
+          # HEALTHCHECK, and its source has no HTTP listener of any kind
+          # (nothing in autokuma/src/ binds a socket or serves /health). The
+          # probes could therefore only ever fail: kubelet got `connection
+          # refused` on every attempt, killed the container on the liveness
+          # probe roughly every 30 seconds, and the Deployment never went
+          # Available. That kept observability-controllers un-Ready, which
+          # kept observability-config - and with it the opensearch-provision
+          # CronJob - from ever being applied.
+          #
+          # A single-process container that exits when its work fails is
+          # already covered by restartPolicy; the gap a real liveness probe
+          # would close is a *hung* AutoKuma, and there is no endpoint here
+          # to detect that with. An invented probe that always fails is
+          # strictly worse than none.
           # observed 32MiB (sizing table) against one reconciler with no
           # series of its own - the smallest request in this phase alongside
           # ../opensearch.yaml's operator-shaped workloads.
