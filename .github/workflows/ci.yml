@@ -1,78 +1,21 @@
 name: Build and test
 
-# Runs on the self-hosted `builder` pool rather than ubuntu-latest. This
-# repository is private, so every GitHub-hosted minute is billed, and there
-# are three Windows runners on the LAN already. `builder` is an opt-in label
-# rather than bare `self-hosted` for the reason cd.yml's comment gives: a
-# newly registered node should not start taking build jobs the moment it
-# appears, before anyone has put a toolchain or a Docker daemon on it.
-#
-# Those runners are Windows, which is the thing to keep in mind when editing
-# this file. Two consequences:
-#
-#   - `defaults.run.shell` below. A Windows runner's default shell is
-#     PowerShell and every `run:` block here is bash, so without it they fail
-#     on the first `set -euo pipefail`. bash comes from Git for Windows,
-#     which the runner already needs in order to check anything out.
-#   - Nothing is preinstalled. GitHub's Ubuntu image shipped pwsh, kubectl,
-#     helm and jq; here each job installs exactly what it uses via
-#     scripts/runner/Install-RunnerDependencies.ps1, hash-pinned in
-#     scripts/versions.json. actions/setup-* still behave as they do
-#     anywhere - they populate the runner tool cache, which survives between
-#     jobs, so only the first run after a version bump pays the download.
-
 on:
   push:
     branches: [main]
   pull_request:
 
-defaults:
-  run:
-    shell: bash
-
 jobs:
   api:
-    runs-on: [self-hosted, builder]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
-
-      # Nothing here needs a toolchain - but every `run:` below is bash, and on
-      # a host with WSL enabled `bash` resolves to C:\Windows\System32\bash.exe
-      # (the WSL launcher) rather than Git Bash. The runner service is LOCAL
-      # SYSTEM, which WSL refuses to run under, so those steps fail with
-      # WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED. This puts Git Bash in front for the
-      # rest of the job, and must come before the first bash step since it
-      # cannot fix one that already ran.
-      - name: Ensure runner dependencies
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"
-
-      # Not decoration: Aerie.Api.csproj has BeforeTargets="Build" targets that
-      # run `npm install` + `npm run build` for all five SPAs under
-      # src/Aerie.Web/apps (BuildDashboard, BuildAdmin, BuildModeler, BuildDocs,
-      # BuildFamily), so `dotnet build` fails outright with MSB3073 / exit 9009
-      # when npm isn't on PATH. That was invisible on ubuntu-latest, which ships
-      # Node; a Windows runner does not.
-      #
-      # All five .nvmrc files say 22, and Dockerfile.api builds them on
-      # node:22-alpine, so any one of them is the right pin - dashboard is named
-      # here rather than duplicating the version. The cache glob deliberately
-      # covers all five, since this job installs all five.
-      - name: Setup Node
-        uses: actions/setup-node@v7
-        with:
-          node-version-file: src/Aerie.Web/apps/dashboard/.nvmrc
-          cache: npm
-          cache-dependency-path: src/Aerie.Web/apps/*/package-lock.json
 
       - name: Restore
         run: dotnet restore src/Aerie.slnx
@@ -84,27 +27,13 @@ jobs:
         run: dotnet test src/Aerie.slnx --no-build --configuration Release
 
   web:
-    runs-on: [self-hosted, builder]
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         app: [admin, dashboard, modeler, docs, family]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
-
-      # Nothing here needs a toolchain - but every `run:` below is bash, and on
-      # a host with WSL enabled `bash` resolves to C:\Windows\System32\bash.exe
-      # (the WSL launcher) rather than Git Bash. The runner service is LOCAL
-      # SYSTEM, which WSL refuses to run under, so those steps fail with
-      # WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED. This puts Git Bash in front for the
-      # rest of the job, and must come before the first bash step since it
-      # cannot fix one that already ran.
-      - name: Ensure runner dependencies
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -138,20 +67,16 @@ jobs:
     #
     # Every directory carrying a kustomization.yaml is built, discovered rather
     # than listed, so the layers added by 3b.4-3b.12 are covered without editing
-    # this file. `kubectl kustomize` used to be the GitHub runner image's own and
-    # deliberately unpinned, on the grounds that a lint's worst failure is a
-    # false red. That argument died with the move to self-hosted runners: a tool
-    # nobody installs is a tool nobody chose, but once we install it ourselves it
-    # has to be *some* version. So kubectl is now pinned in scripts/versions.json
-    # to the same minor as k3s - kustomize is built into kubectl, and a client
-    # several minors from the cluster's own renders resources the cluster
-    # wouldn't.
+    # this file. `kubectl kustomize` is the runner image's own, deliberately
+    # unpinned: this is a lint whose worst failure is a false red, not
+    # provisioning tooling whose version changes what a node becomes - those are
+    # pinned in scripts/versions.json.
     #
     # What this does *not* check is the Flux CRD schemas, so a misspelled field
     # in a Kustomization or HelmRelease spec still passes. 3b.13's
     # Test-ClusterPlatform.ps1 is the gate that catches those, against a real
     # cluster.
-    runs-on: [self-hosted, builder]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -165,23 +90,10 @@ jobs:
       # target and never got one, and on a required parameter nothing consumes
       # and nothing explains.
       #
-      # Everything this job runs on - pwsh, kubectl, helm, jq - came free with
-      # GitHub's Ubuntu image and comes with nothing here. Named individually
-      # rather than taking the default set, same convention as the provisioning
-      # workflows: this job has no reason to hold AWS credentials or an SSH
-      # client. `shell: powershell` overrides the workflow-level bash default -
-      # this one step is the one that cannot assume a toolchain, since it is
-      # what installs it.
-      - name: Ensure runner dependencies
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash, PowerShell7, Kubectl, Helm, Jq
-
       # Ahead of the build below because it is the more specific failure - a
       # stale manifest still builds perfectly, and a missing one is reported
       # here as "regenerate" rather than as a kustomize resource-not-found.
+      # pwsh is preinstalled on the GitHub-hosted Ubuntu image.
       - name: Check the generated ExternalSecrets match parameters.json
         run: pwsh -NoProfile -File scripts/secrets/New-ExternalSecrets.ps1 -Check
 
@@ -205,10 +117,10 @@ jobs:
       # deploy/cluster/apps/helmrelease.yaml is an ordinary manifest pointing
       # at the chart, not a render of it, so a template that doesn't parse or
       # a values.yaml that doesn't match its own defaults would otherwise
-      # reach helm-controller undetected. Pinned in scripts/versions.json for
-      # the same reason kubectl now is - see that comment above - and held on
-      # the Helm 3 line deliberately; the versions.json note says what would
-      # have to be checked before moving it to 4.
+      # reach helm-controller undetected. Unpinned, same reasoning as
+      # `kubectl kustomize`'s own comment above: this is a lint whose worst
+      # failure is a false red, not provisioning tooling whose version
+      # changes what a node becomes.
       - name: Lint and render the aerie chart
         run: |
           set -euo pipefail
@@ -257,12 +169,6 @@ jobs:
           # says nothing when its input disagrees, so both lists have to be
           # sorted the same way it reads them.
           export LC_ALL=C
-          # `tr -d '\r'`, because the runner is Windows: jq.exe opens stdout in
-          # text mode, so every key it prints arrives here as KEY\r and matches
-          # no token kustomize emitted - which reads exactly like the whole
-          # ConfigMap being undeclared. (jq's own `--binary` fixes it too, but
-          # only on Windows builds; this stays correct on a Linux runner.)
-          #
           # AERIE_API_IMAGE_TAG / KIOSK_FILES_IMAGE_TAG (5b.10, 5b.12) resolve
           # from the site repo's aerie-image-tags ConfigMap (5a.3), not
           # cluster-config.json - deliberately, since which build one
@@ -270,7 +176,7 @@ jobs:
           # out of this repository. They are declared here by hand instead,
           # the same reason Test-ClusterPlatform.ps1 hand-excludes its own
           # non-cluster-config tokens.
-          declared=$(cat <(jq -r '.keys[].key' scripts/k3s/cluster-config.json | tr -d '\r') \
+          declared=$(cat <(jq -r '.keys[].key' scripts/k3s/cluster-config.json) \
             <(printf '%s\n' AERIE_API_IMAGE_TAG KIOSK_FILES_IMAGE_TAG) | sort -u)
           used=$(find deploy -name kustomization.yaml -exec dirname {} \; | sort \
             | while IFS= read -r dir; do kubectl kustomize "$dir"; done \
@@ -285,16 +191,8 @@ jobs:
           fi
           echo "$(echo "$used" | grep -c . || true) token(s) used, all declared."
 
-  # TEMPORARILY DISABLED while CI runs on the self-hosted builders: the kiosk
-  # jobs pull a ~700MB Android SDK and run a Gradle build, which is by far the
-  # most expensive thing on a single Windows builder. Nothing else in CI
-  # depends on these jobs, and the workflow conclusion (what publish.yml's
-  # wait-for-ci gates on) treats skipped jobs as neutral.
-  # To re-enable: drop the `if: false` here and on the `kiosk` job below, and
-  # restore that job's original condition noted there.
   detect-kiosk-changes:
-    if: false
-    runs-on: [self-hosted, builder]
+    runs-on: ubuntu-latest
     outputs:
       kiosk-changed: ${{ steps.filter.outputs.kiosk }}
     steps:
@@ -302,20 +200,6 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 2
-
-      # Nothing here needs a toolchain - but every `run:` below is bash, and on
-      # a host with WSL enabled `bash` resolves to C:\Windows\System32\bash.exe
-      # (the WSL launcher) rather than Git Bash. The runner service is LOCAL
-      # SYSTEM, which WSL refuses to run under, so those steps fail with
-      # WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED. This puts Git Bash in front for the
-      # rest of the job, and must come before the first bash step since it
-      # cannot fix one that already ran.
-      - name: Ensure runner dependencies
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash
 
       - name: Check for changes under apps/kiosk
         id: filter
@@ -326,12 +210,10 @@ jobs:
             echo "kiosk=true" >> "$GITHUB_OUTPUT"
           fi
 
-  # TEMPORARILY DISABLED - see detect-kiosk-changes above.
-  # Original condition: if: needs.detect-kiosk-changes.outputs.kiosk-changed == 'true'
   kiosk:
     needs: detect-kiosk-changes
-    if: false
-    runs-on: [self-hosted, builder]
+    if: needs.detect-kiosk-changes.outputs.kiosk-changed == 'true'
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -341,19 +223,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-
-      # After setup-java, not before: sdkmanager is itself a Java program, so
-      # this step fails without a JDK already on PATH. Asked for by name
-      # because AndroidSdk is deliberately not in the default dependency set -
-      # it is ~700MB, and only the two kiosk jobs need it. It installs under
-      # ProgramData and is reused across jobs, so only the first run after a
-      # pin bump actually downloads anything.
-      - name: Ensure runner dependencies
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash, AndroidSdk
 
       - name: Lint and build
         working-directory: apps/kiosk
