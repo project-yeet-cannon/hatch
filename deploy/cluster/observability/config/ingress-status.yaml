@@ -1,0 +1,29 @@
+# The cluster plan Phase 6b.12 - the fifth public-facing hostname this phase
+# adds, same shape as ../ingress-logs.yaml (6b.9) and 5b.9's four before it:
+# no `tls:` block, since
+# ../../infrastructure/config/traefik-tlsstore.yaml's default certificate
+# covers every hostname in the cluster from one Secret in kube-system.
+#
+# Kuma's UI is WebSocket-driven (Socket.IO) for live updates - Traefik
+# passes Upgrade/Connection headers by default, so nothing extra is needed
+# here, but it is the failure mode worth knowing: a status page that renders
+# once and never updates again reads as a broken monitor, not a broken
+# proxy, and this Ingress is where that would actually be wrong.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: uptime-kuma
+  namespace: observability
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: status.${DOMAIN}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: uptime-kuma
+                port:
+                  number: 3001

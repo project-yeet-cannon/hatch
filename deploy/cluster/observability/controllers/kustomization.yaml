@@ -29,6 +29,8 @@ resources:
   - kube-prometheus-stack.yaml
   - opensearch.yaml
   - fluent-bit.yaml
+  - uptime-kuma.yaml
+  - autokuma.yaml
 
 # service_tag.lua as a ConfigMap ./fluent-bit.yaml's HelmRelease reads via
 # valuesFrom - disableNameSuffixHash: true because that reference names this

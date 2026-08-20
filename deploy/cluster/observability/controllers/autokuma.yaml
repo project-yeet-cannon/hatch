@@ -1,0 +1,97 @@
+# The cluster plan Phase 6b.12 - AutoKuma, syncing monitors from
+# ../config/static-monitors-configmap.yaml continuously, replacing the
+# compose bind mount with a ConfigMap volume.
+#
+# Reads the admin password from ../admin-secrets.yaml's kuma-admin Secret,
+# not a literal - that file's own comment is the one to read before ever
+# rotating Kuma's password, since this Deployment is where a UI-only change
+# shows up (authentication failures in this container's log, monitors that
+# quietly stop converging).
+#
+# Image pinned to 2.0.0, the plain (non "uptime-kuma-v1-") tag from
+# BigBoot/AutoKuma's docker-build-push.yml matrix - that build carries no
+# `uptime-kuma-v1` Cargo feature, which is what targets the current Kuma
+# wire protocol ../uptime-kuma.yaml's 2.4.0 speaks. The "uptime-kuma-v1-"
+# prefixed tags in the same registry are for the old API and would silently
+# fail to talk to this cluster's Kuma.
+#
+# No securityContext beyond seccompProfile/capabilities, same caution as
+# ../uptime-kuma.yaml: the upstream Dockerfile builds on
+# gcr.io/distroless/cc-debian13:debug with no USER directive, i.e. root by
+# default, and this file has not verified the image tolerates being forced
+# non-root.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: autokuma
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: autokuma
+    app.kubernetes.io/instance: autokuma
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: autokuma
+      app.kubernetes.io/instance: autokuma
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: autokuma
+        app.kubernetes.io/instance: autokuma
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: autokuma
+          image: ghcr.io/bigboot/autokuma:2.0.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: AUTOKUMA__KUMA__URL
+              value: http://uptime-kuma:3001
+            - name: AUTOKUMA__KUMA__USERNAME
+              value: admin
+            - name: AUTOKUMA__KUMA__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kuma-admin
+                  key: password
+            - name: AUTOKUMA__STATIC_MONITORS
+              value: /static-monitors
+          # The image's own Dockerfile HEALTHCHECK targets this port/path -
+          # kubelet never reads a Docker HEALTHCHECK, so it is wired here
+          # directly instead of left unobserved.
+          ports:
+            - name: health
+              containerPort: 8090
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: health
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+            periodSeconds: 10
+          # observed 32MiB (sizing table) against one reconciler with no
+          # series of its own - the smallest request in this phase alongside
+          # ../opensearch.yaml's operator-shaped workloads.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: static-monitors
+              mountPath: /static-monitors
+              readOnly: true
+      volumes:
+        - name: static-monitors
+          configMap:
+            name: kuma-static-monitors

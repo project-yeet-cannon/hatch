@@ -1,0 +1,119 @@
+# The cluster plan Phase 6b.12 - the four monitors
+# containers/autokuma/static-monitors/*.toml rewrite into, plus two the old
+# host never had reason to run. One ConfigMap, not a configMapGenerator: its
+# name is referenced literally by ../controllers/autokuma.yaml's volume, the
+# same reason ../controllers/kustomization.yaml's fluent-bit-lua generator
+# sets disableNameSuffixHash rather than this file inheriting a hash suffix
+# it would then have to track. AutoKuma takes the filename (without
+# extension) as each monitor's stable id - one key per monitor below,
+# `<name>.toml`.
+#
+# Every rewrite against containers/autokuma/static-monitors/:
+#
+#   api.toml   - http://api:8080/health becomes http://api.aerie.svc:8080/
+#                health/ready. The plan text names this Service
+#                "aerie-api"; the chart (charts/aerie/templates/
+#                api-service.yaml) actually names it "api", the same
+#                literal-name convention files/share below already use -
+#                followed here over the prose, and worth a correction on
+#                sight rather than a silent edit, the same allowance 6b.4
+#                and 6b.7 already used live.
+#   caddy.toml - deleted. Finding 7: Caddy does not exist in the cluster:
+#                Traefik fronts everything now, and there is nothing this
+#                monitor would still be checking.
+#   db.toml    - port monitor on db:5432 becomes aerie-pg-rw.aerie.svc:5432,
+#                CNPG's read-write Service for the aerie-pg Cluster
+#                (deploy/cluster/data/cluster/cluster.yaml). Follows a
+#                failover, unlike a pod IP.
+#   ha.toml    - http://homeassistant.local:8123 becomes
+#                http://${HA_HOST}:${HA_PORT} - a hardcoded hostname in a
+#                redeployable repo is exactly what docs/ethos.md rules out,
+#                and 6b.3 made both keys required for exactly this consumer.
+#                Substituted the same way every other ${...} token in this
+#                tree is, via this Kustomization's postBuild.substituteFrom.
+#
+# New, since Phase 5 gave them something to check:
+#
+#   files.toml - nginx serving the kiosk APK (charts/aerie/templates/
+#                files-deployment.yaml). Probed on /version.json, the same
+#                path that Deployment's own readinessProbe already trusts,
+#                rather than / - nginx serves that main page but /version.json
+#                is the one nginx also returns to *UpdateManager* if that page
+#                fails to load.
+#   share.toml - dufs (charts/aerie/templates/share-deployment.yaml), probed
+#                on /__dufs__/health, dufs's own purpose-built unauthenticated
+#                endpoint. Not the root path: charts/aerie/values.yaml's
+#                share.auth comment reads as though only *writes* need the
+#                login, but dufs's own auth model (sigoden/dufs's `-a
+#                user:pass@/:rw`, no separate `@/` anonymous rule) requires
+#                the account for the path entirely once no anonymous rule
+#                names it - a plain GET / would 401 as often as it 200s, and
+#                a health monitor that sometimes reports down for the reason
+#                it exists to catch is worse than one narrowly scoped to an
+#                endpoint the auth model was never meant to gate.
+#
+# The push monitor kube-prometheus-stack.yaml's Watchdog route now targets -
+# see that file's own comment on the receiver side of this pairing:
+#
+#   watchdog.toml - type "push", AutoKuma's heartbeat monitor. push_token is
+#                normally server-generated and unknowable until after Kuma
+#                creates the monitor - but kuma-client's Monitor struct
+#                (kuma-client/src/models/monitor.rs) accepts a client-supplied
+#                32-character alphanumeric token and validates it against
+#                that shape, so pinning one here is what lets
+#                ../controllers/kube-prometheus-stack.yaml's receiver name a
+#                concrete push URL in the same commit instead of a human
+#                copying a generated one out of Kuma's UI after the fact.
+#                interval 300s / retry 60s / max_retries 3 gives roughly 8
+#                minutes of grace before a missed Alertmanager cycle (5m
+#                repeat_interval on that route) reads as the monitor going
+#                red, rather than every ordinary jitter doing so.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kuma-static-monitors
+  namespace: observability
+data:
+  api.toml: |
+    type = "http"
+    name = "API"
+    url = "http://api.aerie.svc:8080/health/ready"
+    interval = 60
+    retry_interval = 60
+    max_retries = 1
+  db.toml: |
+    type = "port"
+    name = "Database"
+    hostname = "aerie-pg-rw.aerie.svc"
+    port = 5432
+    interval = 60
+    retry_interval = 60
+    max_retries = 1
+  ha.toml: |
+    type = "http"
+    name = "Home Assistant"
+    url = "http://${HA_HOST}:${HA_PORT}"
+    interval = 60
+    retry_interval = 60
+    max_retries = 1
+  files.toml: |
+    type = "http"
+    name = "Files"
+    url = "http://files.aerie.svc:80/version.json"
+    interval = 60
+    retry_interval = 60
+    max_retries = 1
+  share.toml: |
+    type = "http"
+    name = "Share"
+    url = "http://share.aerie.svc:5000/__dufs__/health"
+    interval = 60
+    retry_interval = 60
+    max_retries = 1
+  watchdog.toml: |
+    type = "push"
+    name = "Watchdog"
+    push_token = "vWtpuKK1o4q60Nrm5s04glSM7umvtI4A"
+    interval = 300
+    retry_interval = 60
+    max_retries = 3

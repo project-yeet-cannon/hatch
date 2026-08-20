@@ -984,7 +984,7 @@ gate.
       [create-index-pattern.sh](../../../containers/opensearch-provision/create-index-pattern.sh)'s
       long header exists to prevent — and Discover renders its histogram.
 
-- [ ] **12. Uptime Kuma and AutoKuma, as plain manifests** —
+- [x] **12. Uptime Kuma and AutoKuma, as plain manifests** —
       `deploy/cluster/observability/controllers/uptime-kuma.yaml`,
       `.../autokuma.yaml`, `.../config/static-monitors-configmap.yaml`,
       `.../config/ingress-status.yaml`.

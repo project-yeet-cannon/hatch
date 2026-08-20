@@ -208,20 +208,39 @@ spec:
             # The chart's own Watchdog alert (always firing, existing only to
             # prove the pipeline works) is deliberately NOT left on the
             # default route - every repeat_interval would otherwise page a
-            # human to say nothing is wrong. The re-scope preamble's design is
-            # to route it to an Uptime Kuma push monitor instead, so a
-            # *stopped* Watchdog goes red in Kuma and fires through Kuma's own
-            # Home Assistant notification - the newer path proving itself
-            # over this older one. That monitor is 6b.12's and does not exist
-            # yet, so Watchdog goes to the 'null' receiver below rather than
-            # to home-assistant in the meantime. Replace this route the
-            # moment 6b.12 lands; until then a dead Prometheus is silent,
-            # which is the known gap 6b.12 exists to close.
-            - receiver: "null"
+            # human to say nothing is wrong. Routed instead to
+            # ../config/static-monitors-configmap.yaml's (6b.12) Kuma push
+            # monitor: as long as this fires, Kuma stays green; if Prometheus,
+            # this rule evaluation or Alertmanager itself dies, the pushes
+            # stop and Kuma's own Home Assistant notification takes over -
+            # the newer path proving itself over this older one, which is
+            # most of the argument the re-scope preamble owed for keeping
+            # both.
+            #
+            # repeat_interval overridden to 5m on this route alone - the
+            # parent's 4h would make this a dead-man's switch with a 4-hour
+            # blind spot, defeating the point. static-monitors-configmap.yaml's
+            # watchdog.toml sets Kuma's own interval/retries to tolerate this
+            # cadence without false-positiving on ordinary jitter.
+            - receiver: kuma-watchdog
+              repeat_interval: 5m
               matchers:
                 - alertname = "Watchdog"
         receivers:
-          - name: "null"
+          - name: kuma-watchdog
+            webhook_configs:
+              # The URL Kuma generates for a push monitor is normally only
+              # knowable after Kuma creates it - static-monitors-configmap.yaml's
+              # watchdog.toml pins the 32-character push_token AutoKuma passes
+              # through instead, so this URL is a fact of that file rather
+              # than a value someone copies out of Kuma's UI after the fact.
+              # Same-namespace bare Service name, like
+              # ../controllers/autokuma.yaml's AUTOKUMA__KUMA__URL.
+              # send_resolved: false - this alert is not meant to resolve in
+              # normal operation, and Kuma's push route ignores the request
+              # body regardless (status/msg/ping come from the query string).
+              - url: "http://uptime-kuma:3001/api/push/vWtpuKK1o4q60Nrm5s04glSM7umvtI4A?status=up&msg=OK"
+                send_resolved: false
           - name: home-assistant
             webhook_configs:
               # 6a.3's Home Assistant automation. HA_HOST/HA_PORT are 6b.3's,

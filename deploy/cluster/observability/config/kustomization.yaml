@@ -18,8 +18,8 @@
 # no CRD either - a plain Ingress, the same reason dashboards/ lives here
 # rather than in ../controllers - and is a single file rather than a
 # directory because it is one object, the same shape 5b.9's own Ingresses
-# take. Still to come: 6b.11 (provisioning/) and 6b.12
-# (static-monitors-configmap.yaml, ingress-status.yaml).
+# take. static-monitors-configmap.yaml and ingress-status.yaml are 6b.12's,
+# same reasoning. Still to come: 6b.11 (provisioning/).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
@@ -27,3 +27,5 @@ resources:
   - dashboards/
   - alerts/
   - ingress-logs.yaml
+  - static-monitors-configmap.yaml
+  - ingress-status.yaml
