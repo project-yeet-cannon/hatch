@@ -253,6 +253,16 @@ jobs:
       - name: Portability - every substitution token is a declared key
         run: |
           set -euo pipefail
+          # Byte order, not locale order: `comm` compares byte by byte and
+          # says nothing when its input disagrees, so both lists have to be
+          # sorted the same way it reads them.
+          export LC_ALL=C
+          # `tr -d '\r'`, because the runner is Windows: jq.exe opens stdout in
+          # text mode, so every key it prints arrives here as KEY\r and matches
+          # no token kustomize emitted - which reads exactly like the whole
+          # ConfigMap being undeclared. (jq's own `--binary` fixes it too, but
+          # only on Windows builds; this stays correct on a Linux runner.)
+          #
           # AERIE_API_IMAGE_TAG / KIOSK_FILES_IMAGE_TAG (5b.10, 5b.12) resolve
           # from the site repo's aerie-image-tags ConfigMap (5a.3), not
           # cluster-config.json - deliberately, since which build one
@@ -260,7 +270,7 @@ jobs:
           # out of this repository. They are declared here by hand instead,
           # the same reason Test-ClusterPlatform.ps1 hand-excludes its own
           # non-cluster-config tokens.
-          declared=$(cat <(jq -r '.keys[].key' scripts/k3s/cluster-config.json) \
+          declared=$(cat <(jq -r '.keys[].key' scripts/k3s/cluster-config.json | tr -d '\r') \
             <(printf '%s\n' AERIE_API_IMAGE_TAG KIOSK_FILES_IMAGE_TAG) | sort -u)
           used=$(find deploy -name kustomization.yaml -exec dirname {} \; | sort \
             | while IFS= read -r dir; do kubectl kustomize "$dir"; done \
