@@ -104,3 +104,11 @@ configMapGenerator:
       disableNameSuffixHash: true
       labels:
         grafana_dashboard: "1"
+  - name: dashboard-flux
+    namespace: observability
+    files:
+      - flux.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
