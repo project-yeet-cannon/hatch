@@ -255,6 +255,21 @@ spec:
             matchLabels:
               app.kubernetes.io/name: opensearch-dashboards
               app.kubernetes.io/instance: opensearch-dashboards
+        # 6b.11's provisioning pods. Missing from this list when it was
+        # written, and the omission is easy to make twice: the policy was
+        # reasoned about as "who reads and writes logs" - fluent-bit in,
+        # Dashboards out - and the thing that *configures* the cluster is
+        # neither. What it cost is out of all proportion to a missing
+        # selector: apply-ism-policy.sh and apply-index-template.sh could not
+        # open a connection, so no ISM policy and no index template were ever
+        # created, and because ../../config/provisioning/opensearch-provision.yaml
+        # chains the three scripts with `&&`, create-index-pattern.sh never
+        # ran either - leaving Discover asking for an index pattern on a
+        # cluster that had been ingesting logs the whole time. The label is
+        # set on that CronJob's pod template; the two have to stay in sync.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opensearch-provision
       ports:
         - port: 9200
           protocol: TCP

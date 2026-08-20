@@ -56,6 +56,20 @@ spec:
       backoffLimit: 2
       ttlSecondsAfterFinished: 3600
       template:
+        metadata:
+          # Not decoration - this label is what
+          # ../../controllers/opensearch.yaml's opensearch-restrict-ingress
+          # NetworkPolicy matches to let these pods reach :9200 at all. That
+          # policy names fluent-bit and Dashboards, and its own comment says
+          # everything else "is denied by the implicit default-deny a
+          # NetworkPolicy creates" - which turns out to include the two
+          # scripts below, whose whole job is talking to OpenSearch. Without
+          # it every curl here fails to connect, apply-ism-policy.sh burns
+          # its 30 attempts reporting `HTTP 000`, and the `&&` chain never
+          # reaches create-index-pattern.sh. Keep the two in sync: renaming
+          # this label silently restores the default-deny.
+          labels:
+            app.kubernetes.io/name: opensearch-provision
         spec:
           restartPolicy: Never
           # 6b.14's PriorityClass.
