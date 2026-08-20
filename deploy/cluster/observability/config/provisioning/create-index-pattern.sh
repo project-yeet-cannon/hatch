@@ -23,7 +23,14 @@
 # "time" field is actually discoverable.
 set -eu
 
-DASHBOARDS_URL="${DASHBOARDS_URL:-http://opensearch-dashboards:5601}"
+# No `${DASHBOARDS_URL:-...}` fallback - Flux's postBuild envsubst rewrites
+# that form inside a configMapGenerator body, as ./apply-ism-policy.sh explains
+# at length. This one was only ever harmless by luck: the default it collapsed
+# to, `http://opensearch-dashboards:5601`, happens to be the right Service
+# here, so this script alone would have kept working while its two siblings
+# silently talked to a host that does not resolve. Removed anyway - the next
+# person to copy this line should not inherit a landmine that is currently
+# defused.
 INDEX_PATTERN_ID="aerie-logs"
 INDEX_PATTERN_TITLE="aerie-logs-*"
 MAX_ATTEMPTS=30

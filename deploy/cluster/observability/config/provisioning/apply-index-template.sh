@@ -23,15 +23,12 @@
 # is needed before creating/updating it.
 set -eu
 
-OPENSEARCH_URL="${OPENSEARCH_URL:-http://opensearch:9200}"
+# No `${OPENSEARCH_URL:-...}` fallback - Flux's postBuild envsubst rewrites
+# that form inside a configMapGenerator body and would pin this to compose's
+# `http://opensearch:9200` instead of the Service that exists here. The full
+# account is in ./apply-ism-policy.sh, which hit it first.
 TEMPLATE_NAME="aerie-logs"
-# 120, not the compose original's 30, for the reason ./apply-ism-policy.sh
-# spells out in full: this pod talks to :9200 through
-# ../../controllers/opensearch.yaml's NetworkPolicy, whose enforcement lags
-# pod creation by up to kube-router's 5m default sync period. This script
-# normally runs second, so it is usually past that lag by the time it starts -
-# but it is reachable on its own and must not depend on that.
-MAX_ATTEMPTS=120
+MAX_ATTEMPTS=30
 RETRY_DELAY_SECONDS=5
 
 TEMPLATE_BODY=$(cat <<'JSON'

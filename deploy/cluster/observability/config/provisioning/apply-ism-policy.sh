@@ -18,27 +18,35 @@
 # before creating it, so re-runs are no-ops.
 set -eu
 
-OPENSEARCH_URL="${OPENSEARCH_URL:-http://opensearch:9200}"
-POLICY_ID="aerie-log-retention"
-# 120 rather than the compose original's 30, and the extra 7.5 minutes are not
-# about OpenSearch being slow to start. ../../controllers/opensearch.yaml's
-# opensearch-restrict-ingress NetworkPolicy admits this pod by label, but that
-# admission is eventually consistent: k3s runs kube-router's firewall
-# controller without overriding --iptables-sync-period, so its 5m default
-# stands, and a pod that has only just been created can be REJECTed for
-# anything up to a full sync period before its address lands in the ipset the
-# policy compiles to. Measured on this cluster: one pod was admitted after
-# 30s, another was still refused at 100s. 30 attempts is 150s, which loses
-# that race often enough to look like OpenSearch is down - `HTTP 000` on every
-# line, which is a refused connection, not an unhealthy cluster. 120 attempts
-# is 10 minutes, comfortably past the 5m worst case.
+# No `${OPENSEARCH_URL:-http://opensearch:9200}` fallback here, and this is
+# the one edit that separates this copy from
+# ../../../../../containers/opensearch-provision/apply-ism-policy.sh. That
+# fallback is not shell syntax by the time this script runs: ../../../..
+# /observability.yaml gives this Kustomization a postBuild.substituteFrom, and
+# Flux runs envsubst over everything it renders - including the body of a
+# configMapGenerator file. `${VAR:-default}` is envsubst's *own* default-value
+# syntax, so with no OPENSEARCH_URL key in aerie-cluster-config it collapsed
+# the whole expression to the literal `http://opensearch:9200` before this
+# ever reached the cluster. That is compose's Service name; here the Service
+# is opensearch-cluster-master, so every request went to a host that does not
+# resolve, the retry loop reported `HTTP 000` on every line as though
+# OpenSearch were down, and ../opensearch-provision.yaml's carefully-set
+# OPENSEARCH_URL env var was never consulted at all - the shell default had
+# already won at build time.
 #
-# The alternative fix is to keep ephemeral pods out from behind the policy
-# entirely - reaching :9200 through the API server's service proxy the way
-# scripts/k3s/Test-Observability.ps1 does, which is unaffected by it. That
-# buys RBAC and a kubectl in this image; waiting is cheaper for a CronJob
-# whose whole job is to converge eventually.
-MAX_ATTEMPTS=120
+# Bare `$OPENSEARCH_URL` below is untouched by the same pass (Flux leaves
+# names it has no value for alone; only the `:-`, `:=`, `:?` and `:+` forms
+# are rewritten), so reading the env var directly is both correct and the
+# safest thing to write in a file that gets envsubst'd. `set -u` above turns a
+# missing env var into an immediate, obvious failure instead of a silent
+# wrong-host default - which is what should have happened here.
+POLICY_ID="aerie-log-retention"
+# 30 attempts at 5s is 150s, unchanged from the compose original and ample.
+# A brand-new pod does get one refused connection before
+# ../../controllers/opensearch.yaml's opensearch-restrict-ingress NetworkPolicy
+# starts admitting it by label - measured at under 20s on this cluster, so the
+# first attempt or two can fail on a cold pod and the loop absorbs it.
+MAX_ATTEMPTS=30
 RETRY_DELAY_SECONDS=5
 
 POLICY_BODY=$(cat <<'JSON'
