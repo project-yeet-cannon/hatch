@@ -57,7 +57,7 @@ resolved and reported, never reinstalled.
 |---|---|---|
 | `AwsCli` | AWS CLI v2, from the version-specific MSI. Needed by [`Sync-AerieSecrets.ps1`](../secrets/Sync-AerieSecrets.ps1) to write the SSM parameter tree. | Yes — `awsCli` in [`scripts/versions.json`](../versions.json), URL *and* SHA256, verified before the MSI runs. |
 | `OpenSshClient` | The `OpenSSH.Client` Windows optional feature (`ssh.exe`, `ssh-keygen.exe`). Every provisioning script reaches the nodes over SSH. | No — it's an OS feature, so the build is whatever the host's Windows ships. There is nothing to download and nothing honest to pin. |
-| `GitBash` | **Resolved, never installed.** Puts Git for Windows' `bash.exe` ahead of WSL's on `PATH` for the rest of the job. | n/a — see below. |
+| `GitBash` | **Checked, never installed.** Verifies Git for Windows is present and puts its `bash.exe` ahead of WSL's on `PATH` for the rest of the job. | n/a — see below. |
 | `PowerShell7` | `pwsh`, from the version-specific MSI. `ci.yml` runs [`New-ExternalSecrets.ps1`](../secrets/New-ExternalSecrets.ps1) with it. Installs *beside* Windows PowerShell 5.1, which the provisioning scripts still target. | Yes — `powerShell`, URL and SHA256 (Microsoft's own, from the release's `hashes.sha256`). |
 | `Kubectl` | `kubectl.exe`, which carries kustomize. `ci.yml` builds every kustomization under `deploy/` with it. | Yes — `kubectl`, URL and SHA256 (Kubernetes' own). Held to the same minor as the `k3s` pin; bump the two together. |
 | `Helm` | `helm.exe`. `ci.yml` lints and renders `charts/aerie`. | Yes — `helm`, URL and SHA256 (Helm's own). Held on the v3 line deliberately — see the note in `versions.json`. |
@@ -90,11 +90,31 @@ It reads like a workflow bug and isn't one — and note that *enabling* WSL is
 what causes it, so it appears on exactly the hosts you'd expect to be better
 equipped.
 
-The `GitBash` dependency is the fix. It finds `bash.exe` by locating Git
-(beside `git.exe`, then the default install directories, then the registry) and
+The `GitBash` dependency handles this. It finds `bash.exe` by locating Git —
+beside `git.exe`, then the default install directories, then the `GitForWindows`
+and Inno Setup uninstall registry keys, then `<runner>\externals\git` — and
 never by asking `PATH` for `bash`, which is the thing that's broken. It then
 prepends that directory via `$GITHUB_PATH`, which wins over System32 for every
 later step.
+
+**Git for Windows itself is a prerequisite, not something this installs.** It
+cannot be: `actions/checkout` runs before any dependency step, and with no git
+on the machine it silently falls back to downloading a tarball through the REST
+API — the checkout "succeeds", but the workspace is not a git repository. A git
+installed mid-job would arrive too late to fix that, and would only turn a clear
+failure into a confusing one. Five steps depend on real history:
+`ci.yml`'s `detect-kiosk-changes`, `publish.yml`'s version stamp, and three in
+[`detect-image-changes`](../../.github/actions/detect-image-changes).
+
+So Git belongs with Docker in *What stays manual* below. Installing it needs a
+runner service restart to take effect, for the reason [The PATH problem it
+solves](#the-path-problem-it-solves) describes — a Windows service keeps the
+environment it started with:
+
+```powershell
+winget install --id Git.Git --source winget --silent
+Restart-Service actions.runner.*
+```
 
 Two consequences for anyone editing a workflow:
 
@@ -118,15 +138,31 @@ dropped on a machine unattended, and a half-working silent install of the thing
 every image build depends on is worse than a clear message saying it's missing.
 
 So it stays an operator-installed prerequisite, and the `Docker` dependency
-reports on it instead. It separates three failures that have three different
+reports on it instead. It separates four failures that have four different
 fixes:
 
-- `docker.exe` missing entirely.
+- `docker.exe` missing entirely. Note this is checked against Docker's usual
+  install directories as well as `PATH`, for the same reason
+  [The PATH problem it solves](#the-path-problem-it-solves) gives: a runner
+  service that was already running when Docker was installed cannot see it,
+  which looks exactly like Docker not being installed on a box where the
+  operator can plainly see the whale in the tray. Restarting the runner
+  service also fixes that; searching the install directories means you don't
+  have to.
 - Present, but the daemon isn't answering. **This is the one to expect after a
   reboot**: Docker Desktop is not a Windows service, and it does not start on
   its own with nobody logged in.
 - Answering, but in Windows-container mode — everything looks installed and
   every build fails on the base image.
+- Daemon healthy but `docker buildx` missing. buildx is a CLI plugin loaded
+  from the *invoking user's* Docker config, and jobs run as the runner service
+  account rather than whoever installed Docker — so a runner with a perfectly
+  healthy daemon can still fail every image job.
+  [`detect-image-changes`](../../.github/actions/detect-image-changes) and
+  `docker/build-push-action` both need it.
+
+When Docker is found somewhere other than `PATH`, its directory is published to
+`$GITHUB_PATH` so the rest of the job can just say `docker`.
 
 ## Where installed tools go
 
@@ -182,7 +218,14 @@ requires anyway for the Hyper-V cmdlets.
 
 ## What stays manual
 
-Registering the runner itself. That needs a registration token only a human
-can mint, so it's the one step the pipeline can't bootstrap — see the runner
+Three things, all for the same underlying reason — they have to be true *before*
+a job starts, so no step inside a job can establish them:
+
+- **Registering the runner.** Needs a registration token only a human can mint.
+- **Git for Windows.** `actions/checkout` runs before any dependency step; see
+  [The WSL bash trap](#the-wsl-bash-trap).
+- **Docker.** See [Why Docker isn't installed](#why-docker-isnt-installed).
+
+The registration is the original of the three — see the runner
 requirements in
 [`provision-0-new-node.yml`](../../.github/workflows/provision-0-new-node.yml).

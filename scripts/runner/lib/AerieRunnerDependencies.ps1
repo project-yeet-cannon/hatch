@@ -819,6 +819,31 @@ function Get-AerieDockerPath {
 
     $onPath = Get-Command docker -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($onPath) { return $onPath.Source }
+
+    # PATH is not enough, for exactly the reason Get-AerieAwsCliPath documents:
+    # the installer writes the *machine* PATH, and a Windows service keeps the
+    # environment it started with. A runner service that was already running
+    # when Docker Desktop was installed cannot see it - which looks identical
+    # to Docker not being installed at all, and is a far more likely
+    # explanation on a box where the operator can see the whale in the tray.
+    $roots = @($env:ProgramW6432, $env:ProgramFiles, ${env:ProgramFiles(x86)}) |
+        Where-Object { $_ } |
+        Select-Object -Unique
+
+    $candidates = New-Object Collections.Generic.List[string]
+    foreach ($root in $roots) {
+        # Docker Desktop, then Docker Engine / Mirantis.
+        $candidates.Add((Join-Path $root 'Docker\Docker\resources\bin\docker.exe'))
+        $candidates.Add((Join-Path $root 'Docker\docker.exe'))
+    }
+    if ($env:ProgramData) {
+        $candidates.Add((Join-Path $env:ProgramData 'DockerDesktop\version-bin\docker.exe'))
+    }
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate -PathType Leaf) { return $candidate }
+    }
+
     return $null
 }
 
@@ -847,8 +872,14 @@ function Install-AerieDocker {
 
     $dockerPath = Get-AerieDockerPath
     if (-not $dockerPath) {
-        throw "docker.exe not found. Every publish.yml job builds an image, so this runner needs a Docker daemon that can build Linux containers - Docker Desktop with the WSL2 backend is what the other runners use. This is the one dependency Install-RunnerDependencies.ps1 will not install for you (see Get-AerieDockerPath in scripts\runner\lib\AerieRunnerDependencies.ps1)."
+        throw "docker.exe is neither on PATH nor in any of Docker's usual install directories. Every publish.yml job builds an image, so this runner needs a Docker daemon that can build Linux containers. This is the one dependency Install-RunnerDependencies.ps1 will not install for you (see Get-AerieDockerPath). If Docker *is* installed on this machine, restart the runner service - a service keeps the environment it started with, so one that predates the install cannot see it: Restart-Service actions.runner.*"
     }
+
+    # Found, so make sure the rest of the job can reach it by name. Without
+    # this, docker/build-push-action and the bash in .github/actions/* would
+    # each fail on their own 'docker: command not found' - having been told,
+    # here, that Docker is fine.
+    Publish-AerieToolPath -Directory ([IO.Path]::GetDirectoryName($dockerPath))
 
     # Merging stderr, and tolerating a non-zero exit, for the same reason
     # Get-AerieAwsCliVersion does: a daemon that isn't running makes this a
@@ -867,7 +898,22 @@ function Install-AerieDocker {
         throw "The Docker daemon on this runner is in '$osType'-container mode. Every Dockerfile in this repository is a Linux image, so builds here would fail on the base image. Switch the daemon to Linux containers (Docker Desktop: 'Switch to Linux containers')."
     }
 
-    Write-Host "Docker: $dockerPath, daemon in linux-container mode."
+    # buildx specifically, not just the daemon: .github/actions/detect-image-changes
+    # runs `docker buildx imagetools inspect`, and build-push-action drives
+    # buildx too. It ships as a CLI plugin resolved from the user profile, and
+    # the runner service's profile is not the one anybody installed Docker
+    # under - so this is a real and otherwise-baffling way for a runner with a
+    # perfectly healthy daemon to fail every image job.
+    $ErrorActionPreference = 'Continue'
+    $buildx = & $dockerPath buildx version 2>&1
+    $buildxExit = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+
+    if ($buildxExit -ne 0) {
+        throw "'$dockerPath' works but 'docker buildx version' failed:`n$($buildx -join "`n")`nbuildx is a CLI plugin loaded from the invoking user's Docker config, and this job runs as the runner service account rather than whoever installed Docker. Install the buildx plugin machine-wide, or for this account."
+    }
+
+    Write-Host "Docker: $dockerPath, daemon in linux-container mode, $(($buildx -join ' ').Trim())."
 }
 
 function Install-AerieAndroidSdk {
@@ -1039,10 +1085,16 @@ function Get-AerieGitBashPath {
 
     # git.exe normally lives in <root>\cmd\git.exe or <root>\bin\git.exe;
     # bash.exe is in <root>\bin\bash.exe either way.
+    # [IO.Path]::GetDirectoryName, not Split-Path: Split-Path resolves the
+    # drive qualifier through the PowerShell provider, so it *throws* on a path
+    # whose drive doesn't exist - and with the caller's
+    # $ErrorActionPreference = 'Stop' that aborts the whole dependency run
+    # rather than skipping one candidate. This is only building a list of paths
+    # to test; it has no business touching drives.
     $git = Get-Command git.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($git) {
-        $root = Split-Path (Split-Path $git.Source -Parent) -Parent
-        $candidates.Add((Join-Path $root 'bin\bash.exe'))
+        $root = [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($git.Source))
+        if ($root) { $candidates.Add((Join-Path $root 'bin\bash.exe')) }
     }
 
     $roots = @($env:ProgramW6432, $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA) |
@@ -1073,6 +1125,31 @@ function Get-AerieGitBashPath {
 
         $installPath = $item.GetValue('InstallPath')
         if ($installPath) { $candidates.Add((Join-Path $installPath 'bin\bash.exe')) }
+    }
+
+    # The Inno Setup uninstall entry, which is written even by installs that
+    # skip the GitForWindows key above (a /VERYSILENT run, or a per-user
+    # install landing in HKCU rather than HKLM).
+    foreach ($key in @(
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Git_is1',
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Git_is1',
+            'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Git_is1')) {
+        $item = Get-Item -Path $key -ErrorAction SilentlyContinue
+        if (-not $item) { continue }
+
+        $installLocation = $item.GetValue('InstallLocation')
+        if ($installLocation) { $candidates.Add((Join-Path $installLocation 'bin\bash.exe')) }
+    }
+
+    # Some runner packages ship a private git under <runner>\externals\git.
+    # Worth one Test-Path: if it is there it is a complete Git Bash, and it is
+    # the copy the runner itself would have used.
+    $workspace = $env:RUNNER_WORKSPACE
+    if ($workspace) {
+        $runnerRoot = [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($workspace))
+        if ($runnerRoot) {
+            $candidates.Add((Join-Path $runnerRoot 'externals\git\bin\bash.exe'))
+        }
     }
 
     foreach ($candidate in $candidates) {
@@ -1117,7 +1194,39 @@ function Install-AerieGitBash {
     $bash = Get-AerieGitBashPath
     if (-not $bash) {
         $looked = ($script:AerieGitBashSearched | ForEach-Object { "  - $_" }) -join "`n"
-        throw "Git for Windows' bash.exe not found. Every 'shell: bash' step needs it, and on this host 'bash' otherwise resolves to WSL (C:\Windows\System32\bash.exe), which cannot run under the runner service's LOCAL SYSTEM account. Install Git for Windows - https://git-scm.com/download/win - which the runner needs for checkout anyway.`n`nLooked in:`n$looked"
+        throw @"
+Git for Windows is not installed on this runner.
+
+Two things break without it, and only one of them is obvious:
+
+  1. Every 'shell: bash' step. With no Git Bash, 'bash' resolves to
+     C:\Windows\System32\bash.exe - the WSL launcher - and the runner service
+     runs as LOCAL SYSTEM, which WSL refuses to run under:
+     WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED.
+
+  2. actions/checkout. With no git it silently falls back to downloading a
+     tarball through the REST API, so the workspace is NOT a git repository.
+     That is why this went unnoticed: checkout still 'succeeds'. But
+     ci.yml's detect-kiosk-changes, publish.yml's version stamp and the
+     detect-image-changes action all run git against history, and they fail.
+
+So this is a prerequisite the pipeline cannot install for itself: checkout
+runs before this step, and a git installed here would arrive too late to give
+that job a real repository. Same category as Docker.
+
+Fix, on this machine, once:
+
+  winget install --id Git.Git --source winget --silent
+      (or the installer from https://git-scm.com/download/win, default options)
+
+Then restart the runner service, so it picks up the new machine PATH - a
+Windows service keeps the environment it started with:
+
+  Restart-Service actions.runner.*
+
+Looked in:
+$looked
+"@
     }
 
     # Proves it is really Git Bash and not something else called bash.exe -
