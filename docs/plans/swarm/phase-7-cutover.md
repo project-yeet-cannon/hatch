@@ -4,34 +4,51 @@
 
 # Phase 7 — Cutover
 
-**Status: Not started**
+**Status: In progress — 7a underway**
 
-> Re-scoped, the same way Phases 3, 4, 5 and 6 were. The five bullets this file
-> used to hold were correct about *what* has to happen and wrong about the one
-> thing this phase is: an **order**. Working them through against the repo
-> turned up six things that either lose data, lose the rollback, or stop the
-> phase dead partway.
+> Re-scoped twice. The first pass turned five bullets into an **order**, and
+> found six things that either lose data, lose the rollback, or stop the phase
+> dead partway. This second pass takes three facts about *this* installation
+> seriously and deletes the machinery those three facts make unnecessary:
 >
-> - **The bullet order was backwards, and the first bullet destroys writes.**
->   Pointing DNS at the VIP is listed first and the data cutover third. Done in
->   that order, every write the family makes after the flip lands in the
->   cluster's Postgres — which is still holding [4a.6](phase-4-data-tier.md)'s
->   *snapshot* — and is then overwritten by the final restore. Done in the
->   other order (restore, then flip much later) the writes made on the old host
->   in between are lost instead. There is exactly one correct sequence, and it
->   is what makes this phase an outage: **freeze the old host's writes → final
->   dump → restore → flip DNS**. Everything else in 7b is arranged around
->   keeping that middle stretch short (7b.3–7b.7).
-> - **DNS does not flip atomically, and one class of client never flips at
->   all.** Unbound's `local-data` answers with a default TTL of 3600, so a
->   laptop that resolved `home.${DOMAIN}` two minutes before the change keeps
->   the old address for up to an hour, and Windows, Android and Sonos all hold
->   their own caches under that. Worse, DNS is irrelevant to a connection that
->   is already open — the family shell's SSE streams, held open for hours, keep
->   talking to the old Caddy until something closes them. Both are handled, and
->   neither by waiting: an explicit low TTL goes on the record an hour ahead
->   (7b.1), and the old stack is *stopped*, not merely bypassed, which is what
->   forces every long-lived connection to reconnect into DNS (7b.9).
+> - **Nobody depends on this yet.** The house is being stood up for the first
+>   time. Downtime is paid out of the operator's own evening rather than out of
+>   anyone's trust, which means its length is no longer a design constraint.
+> - **The restore already in the cluster is the one we cut over to.** 4b.9's
+>   Job has been run for real, against a real dump. Aerie's data is almost
+>   entirely *derived* from Home Assistant, which has not stopped producing it,
+>   so being up to the minute is not what makes the restore correct.
+> - **The participating devices can be power-cycled.** There is a handful of
+>   them and they are all in this house. A stale DNS cache is a reboot, not a
+>   propagation problem.
+>
+> Together those delete: the measured outage window and the rehearsal that timed
+> it, the announcement to the house, the DNS TTL lowered an hour ahead, the
+> per-client Unbound view for devices that could not be handed a hosts file,
+> and the freeze → dump → restore → compare sequence the entire middle of this
+> phase used to be arranged around. Seventeen scripted steps become fourteen,
+> and the cutover proper is five of them with no clock on any: **stop the old
+> stack → take the final dump → flip DNS → restart the clients → look at
+> everything.**
+>
+> One thing the simplification costs, named here rather than discovered later:
+> **any write made on the old host since that restore is not in the cluster.**
+> Sensor history refills itself from Home Assistant; things a person typed — a
+> storage location, a printed label — do not. 7b.3 and 7b.4 keep the escape
+> hatch open (a fresh dump and a second run of the same Job, at leisure, with
+> the site already down), which is a cheap option to hold rather than a step
+> anyone has to perform.
+>
+> Five findings survive the re-scope, because none of them were ever about the
+> window. The first has lost half its content and kept the half that matters.
+>
+> - **Long-lived connections never consult DNS.** The family shell's SSE
+>   streams, held open for hours, keep talking to the old Caddy until something
+>   closes them — no matter what the resolver says. Stopping the old stack is
+>   the only thing that closes them, which is why 7b.2 *stops* it rather than
+>   merely bypassing it, and why the stop now comes **before** the flip instead
+>   of a soak-length after it. The client-cache half of this finding is handled
+>   by rebooting the clients (7b.5).
 > - **Building the external vSwitch on the old box moves the host's own
 >   address.** `New-VMSwitch -AllowManagementOS $true` relocates the host's
 >   traffic onto a `vEthernet (ExternalSwitch)` adapter carrying a **new MAC**
@@ -40,7 +57,7 @@
 >   physical NIC stops matching, the host takes a pool address, and
 >   `WINDOWS_EXPORTER_TARGETS` — a `staticConfigs` list, discovered by nothing —
 >   starts pointing at an address that answers for someone else. It presents as
->   a firing `up == 0` on a host that is visibly running (7b.12).
+>   a firing `up == 0` on a host that is visibly running (7b.9).
 > - **Flipping `whenUnsatisfiable` to `DoNotSchedule` deadlocks the api
 >   rollout.** [5b.11](phase-5-app-tier.md) left a note saying a third node
 >   makes `DoNotSchedule` free. It makes it *satisfiable*, which is not the same
@@ -50,18 +67,18 @@
 >   any, and a fourth pod is skew 2 on every node. The surge pod sits Pending
 >   and the rollout never completes — on the next image-automation bump, not on
 >   the commit that made the change. The flip comes with an explicit
->   `maxSurge: 0` / `maxUnavailable: 1` strategy or it does not happen (7b.15).
+>   `maxSurge: 0` / `maxUnavailable: 1` strategy or it does not happen (7b.12).
 > - **The local half of the backup dies with the old box.** `E:/restic-repo`
 >   ([compose.backup.yml](../../../compose.backup.yml)) is one of
 >   [Phase 0](phase-0-backup-and-dr.md)'s two repos, and it is on a disk this
 >   phase reformats for Longhorn. Everything else about backup coverage narrows
->   at the same moment: `backup.sh` stops running when its `db` stops existing,
->   so from 7b.9 until Phase 8 lands the only thing being backed up at all is
+>   at the same moment: `backup.sh` stops running when its `db` stops running,
+>   so from 7b.2 until Phase 8 lands the only thing being backed up at all is
 >   Postgres, by CNPG's own WAL archiving and `ScheduledBackup` (4b.10). Two
 >   consequences are handled here rather than deferred: the repo is **copied
->   off the box before it is wiped**, and the final pre-cutover snapshot is
->   **tagged** so Phase 8's `restic forget` cannot prune the last consistent
->   copy of the old world out from under a rollback (7b.4, 7b.12).
+>   off the box before it is wiped**, and the final dump is **tagged** so Phase
+>   8's `restic forget` cannot prune the last consistent copy of the old world
+>   out from under a rollback (7b.3, 7b.9).
 > - **Phase 5 handed over a deletion that breaks local development.**
 >   [5b.13's handover](phase-5-app-tier.md#additions-this-phase-makes-to-other-phases)
 >   lists "the connection strings in `appsettings.Docker.json`" among Phase 7's
@@ -70,22 +87,23 @@
 >   `DOTNET_ENVIRONMENT=Docker` against a `db` container built from
 >   [`containers/aerie-db/`](../../../containers/aerie-db/), and those two lines
 >   are how it connects. `containers/aerie-db/` survives for the same reason.
->   The deletion list in 7b.11 is the checked version of that handover, not a
+>   The deletion list in 7b.8 is the checked version of that handover, not a
 >   copy of it.
 >
-> Three decisions, taken deliberately and recorded so they are not relitigated
-> mid-phase. **The cutover and the rebuild are two sittings with a soak between
-> them**, not the single evening [Phase 2](phase-2-k3s-flux-secrets.md)'s note
-> implies — because the old box, powered off and untouched, *is* the rollback,
-> and wiping it the same night converts every problem found on day two into a
-> restore-from-S3 instead of a `docker compose up`. The cost is real and is
-> named in 7b.10: two-node etcd for the length of the soak, which has worse
-> availability than one node. **The house share does not participate in the
-> outage.** `share.${DOMAIN}` and the media library both mount the same external
-> `//server/share` device from both stacks
-> ([compose.share.yml](../../../compose.share.yml), 5b.7) — there is no data to
-> move, so dufs keeps serving through the entire window and only stops when the
-> old stack does. **Phase 7 does not close the apiserver-VIP gap.**
+> Three decisions, unchanged in substance and cheaper than they were. **The
+> cutover and the rebuild are still two sittings with a soak between them** —
+> the old box, powered off and untouched, *is* the rollback, and wiping it the
+> same night converts every problem found on day two into a restore-from-S3
+> instead of a `docker compose start`. What has changed is the price: the soak
+> costs two-node etcd, and two-node etcd on a cluster nobody depends on yet
+> costs nothing worth naming. So the soak is as long as it is useful and as
+> short as you like (7a.4), rather than the 48–72 hours a family's weekday used
+> to argue for. **The house share has no data to move.** `share.${DOMAIN}` and
+> the media library both mount the same external `//server/share` device from
+> both stacks ([compose.share.yml](../../../compose.share.yml), 5b.7) — so the
+> dufs in front of it blinks for the same few minutes as everything else, there
+> is no copy to make, and there is no window in which the two stacks can
+> diverge. **Phase 7 does not close the apiserver-VIP gap.**
 > [Phase 2](phase-2-k3s-flux-secrets.md) says the kubeconfig points at node 1
 > "until Phase 7 restores a third node", which reads like a fix and is not one:
 > three nodes restore *quorum tolerance*, and the kubeconfig still names one
@@ -94,77 +112,75 @@
 
 ---
 
-## The outage, measured
+## The outage
 
-The window is 7b.3 through 7b.7 — from the moment the old api stops to the
-moment DNS answers with the VIP. Everything in it is deliberate; nothing in it
-is waiting on a build.
+There is no window to announce and no stopwatch to run. The site is down from
+the moment the old stack stops (7b.2) until the clients have picked up the new
+answer (7b.5) — a few minutes if you reboot them, up to an hour for anything
+left to expire Unbound's default 3600-second TTL on its own. Both are
+acceptable, which is the whole point of the re-scope. Take the evening.
 
-| Step | What it costs | Rough duration |
-|---|---|---|
-| 7b.3 stop the old api | `home` / `kiosk` return 502 | instant |
-| 7b.4 final backup | none beyond 7b.3 | **measure it** — 7a.4 |
-| 7b.5 restore Job | none beyond 7b.3 | **measure it** — 7a.4 |
-| 7b.6 hand comparison | none beyond 7b.3 | as long as it takes; this is the gate |
-| 7b.7 DNS flip + client caches | tail of stale answers, bounded by the TTL set in 7b.1 | 1–2 min plus the TTL |
+The only sequencing that still matters is the one the first finding names: the
+old stack is stopped **before** DNS moves, not after. A flip that leaves the
+old Caddy answering leaves every open SSE stream pinned to it.
 
-**Do not guess these.** 7a.4 rehearses 7b.4 and 7b.5 against a live old host —
-a dump taken while the api runs is worthless as an artifact and perfectly good
-as a stopwatch — so the window announced to the house is a measured number plus
-margin rather than an optimistic one.
+What is **not** affected, and is worth knowing so it is not diagnosed as
+collateral:
 
-What is **not** down during the window, and is worth knowing so it is not
-diagnosed as collateral:
-
-- `share.${DOMAIN}` and the Sonos media library — the share is external to both
-  stacks (see the decision above)
-- `status`, `logs`, `metrics` — those hostnames still resolve to the old host
-  until 7b.7, where they have never had a route; the *cluster's* copies have
-  been serving over `--resolve` since Phase 6 and are unaffected throughout
+- the **data** on the house share and the media library — the device is
+  external to both stacks, and only the dufs in front of it is in the outage
 - Home Assistant, and the alert path through it — Aerie reaches HA outbound
 - Tailscale — the subnet routers are on the hosts (5b.13), not in the stack
 - the cluster's own Kuma monitors, which check
   [in-cluster Service DNS](../../../deploy/cluster/observability/controllers/static-monitors-configmap.yaml)
   and never resolved a public hostname to begin with
+- the cluster's `status`, `logs` and `metrics` — they have been serving over
+  `--resolve` since Phase 6 and are unaffected throughout. It is the **old
+  host's** copies of those three that stop at 7b.2, and they are what is being
+  replaced
 
-The **old host's** Kuma is the one that will alarm, correctly and uselessly,
-about a stack being stopped on purpose. 7b.2 silences it.
+The old host's own Kuma, Prometheus and Alertmanager are *in* the stack, so
+they stop alongside what they were watching rather than alarming about it —
+which is one more thing the simplified order deletes rather than manages.
+7b.1 covers the seconds before they go.
 
 ---
 
 ## Phase 7a — Manual prerequisites
 
-*Seven one-time steps, none of them code. The whole of 7a is about arriving at
-7b.3 with nothing left to find out — because 7b.3 is the first step that costs
-the family something, and every question still open at that point is asked with
-the site down.*
+*Six one-time steps, none of them code. 7a used to exist because every question
+still open at the start of the outage got asked with the site down. That is no
+longer the expensive failure — an evening is cheap. What is still expensive is
+**irreversibility**: 7b.9 reformats the disk that holds the old world. So 7a is
+now about arriving at the rebuild with nothing left to find out, and the
+cutover itself is allowed to be scrappy.*
 
-**[ ] 1. Confirm Phases 3–6 actually landed.** Not "the boxes are ticked" —
-dispatch all four gates and get four green runs:
+### [ ] 1. Confirm Phases 3–6 actually landed
+
+Not "the boxes are ticked" — dispatch all four gates and get four green runs:
+
 - [x] [`verify-cluster-platform.yml`](../../../.github/workflows/verify-cluster-platform.yml),
 - [x] [`verify-data-tier.yml`](../../../.github/workflows/verify-data-tier.yml),
 - [x] [`verify-app-tier.yml`](../../../.github/workflows/verify-app-tier.yml),
-- [ ] WAIT UNTIL 6:30PM AUG 20 for hourly changes to land
-- [] `verify-observability.yml` (6b.15). Four, in that order, because each phase's
+- [ ] `verify-observability.yml` (6b.15). Four, in that order, because each phase's
 gate assumes the one below it.
-
-
 
 Two results in that output are load-bearing here and worth reading rather than
 skimming past: the app tier's assertion that **all four Ingresses answer 200
-over the VIP with a production certificate** is the thing 7b.7 is about to point
+over the VIP with a production certificate** is the thing 7b.5 is about to point
 the whole house at, and the data tier's assertion that **the newest CNPG
 `Backup` is completed and younger than the schedule interval** is the only
-backup this phase leaves standing after 7b.9.
+backup this phase leaves standing after 7b.2.
 
-**[ ] 2. Inspect the ecosystem, with your own hands, before anything is
-irreversible.** The gates prove properties. They do not tell you whether the
-family shell *feels* right, whether a dashboard panel is empty, or whether the
-kiosk's dashboard renders on the actual tablet. This is the step that does, and
+### [x] 2. Inspect the ecosystem, with your own hands, before anything is irreversible
+
+The gates prove properties. They do not tell you whether the family shell
+*feels* right, whether a dashboard panel is empty, or whether the kiosk's
+dashboard renders on the actual tablet. This is the step that does, and
 it is deliberately the longest one in 7a.
 
-Three ways in, in increasing order of blast radius. **Start at the top and stop
-as soon as it answers your question.**
+Two ways in, and a third that no longer exists. **Start at the top and stop as
+soon as it answers your question.**
 
 *Tier 1 — one command, no state changed anywhere.* The
 `--resolve` path [5a.7](phase-5-app-tier.md) and
@@ -198,39 +214,22 @@ wildcard certificate is genuine for these names, so there is nothing to click
 through. **Your machine only.** The warning 5a.7 and 6a.6 both carry is not
 about tidiness: a hosts entry on a machine someone else uses is an outage they
 cannot diagnose, sitting behind a file they do not know exists, surviving the
-rollback in 7b.10 that fixes everyone else. Remove the lines when you are done,
-before 7b.7 rather than after — a stale hosts file that happens to be correct
+rollback in 7a.6 that fixes everyone else. Remove the lines when you are done,
+before 7b.5 rather than after — a stale hosts file that happens to be correct
 today is the one that breaks the day the VIP moves.
 
-*Tier 3 — a per-client Unbound view, for the devices you cannot edit.* The
-kiosk tablet, a phone, a Sonos speaker: no hosts file, and their whole point is
-that they behave differently from a laptop. pfSense's resolver can hand a
-different answer to a named set of clients, which is a hosts file for devices
-that have none. In **Services → DNS Resolver → General Settings → Custom
-options**, alongside the existing pair
-([reverse-proxy-architecture.md](../../reverse-proxy-architecture.md)):
+*There is no Tier 3.* This is where a per-client Unbound view used to go — a
+way to hand the kiosk tablet, a phone or a Sonos speaker the new address
+without touching the rest of the house, since none of them can be given a hosts
+file. It was the riskiest thing in 7a (a custom-options block Unbound rejects
+is a resolver that does not start, for everyone at once), and it existed only
+because the flip had to be right the first time.
 
-```text
-server:access-control-view: <inspecting-client-ip>/32 aerie-cutover
-view:
-view:name: "aerie-cutover"
-view:view-first: yes
-view:local-zone: "${DOMAIN}." redirect
-view:local-data: "${DOMAIN}. 60 IN A ${INGRESS_VIP}"
-```
-
-`view-first: yes` means those clients get the view's answer and fall through to
-the normal one for everything else; every other client on the LAN is untouched
-and still reaches the old host.
-
-**This tier can take DNS down for the entire house**, which the other two
-cannot — a custom-options block Unbound rejects is a resolver that does not
-start, and the failure lands on everyone at once. So: change it at a time you
-can afford to be wrong, confirm from a *non*-inspecting client that ordinary
-resolution still works before you walk away, and know the rollback is emptying
-the box and pressing Save. If that trade is not worth it for the device in
-question, Tier 2 plus a careful look at the device's *configuration* usually
-answers the same question.
+It does not have to be. **Inspect those devices after the flip instead** —
+7b.6. If one of them is unhappy, reverting the flip is one line in the same box
+and a reboot of the handful of devices that took the new answer. Trading a
+resolver outage for the whole house against an evening of your own is not a
+trade worth making twice.
 
 **What to actually inspect**, once you are in:
 
@@ -238,7 +237,8 @@ answers the same question.
   QR label. `Apps__PublicBaseUrl` is `https://home.${DOMAIN}` in the chart, and
   labels outlive the laptop that printed them — a label produced here must be
   scannable after the cutover, which is the point of it being canonical.
-- **`kiosk`** — on the tablet, not a desktop window sized to look like one. The
+- **`kiosk`** — on the tablet, not a desktop window sized to look like one;
+  after the flip (7b.6), since the tablet cannot be given a hosts file. The
   `/` rewrite to `/apps/dashboard/` is Ingress-level (5b.9) and the compose
   version was Caddy-level; this is where a difference shows.
 - **`files`** — `/version.json` and the APK itself, and then the update path
@@ -248,9 +248,10 @@ answers the same question.
   on the real share from a Windows box. Both stacks mount the same device, so a
   file written here appears on the old host too; that is the confirmation, not
   a coincidence.
-- **the media library** — play something on a Sonos speaker. It is the only
-  consumer of the read-only mount, it cannot log in, and it is the client most
-  likely to have an opinion about a certificate or a redirect.
+- **the media library** — play something on a Sonos speaker; also after the
+  flip (7b.6). It is the only consumer of the read-only mount, it cannot log
+  in, and it is the client most likely to have an opinion about a certificate
+  or a redirect.
 - **`status`** — every monitor green, and the Home Assistant notification
   provider present and *tested* from Kuma's own UI (6b.13 created it; a
   provider that exists and has never fired is not a path).
@@ -267,16 +268,17 @@ answers the same question.
   something is up; this is the only one that proves you will be *told* when
   something is not.
 
-Anything this step finds gets fixed **now**, on the old host's watch, in the
-phase that owns it — not carried into 7b as a known issue. A defect found here
-costs a commit and a reconcile. The same defect found at 7b.8 costs the
-rollback.
+Anything this step finds gets fixed **now**, in the phase that owns it — not
+carried into 7b as a known issue. A defect found here costs a commit and a
+reconcile. The same defect found after 7b.9 has reformatted `E:` costs a DR
+restore.
 
-**[ ] 3. Prove the new delivery path before deleting the old one.** 7b.11
-deletes [`cd.yml`](../../../.github/workflows/cd.yml), and after that the only
-way a code change reaches production is 5b.12's image automation. That path has
-been running alongside a deploy that also worked, which means a silent failure
-in it is invisible. Make it visible while there is still a fallback:
+### [x] 3. Prove the new delivery path before deleting the old one
+
+7b.8 deletes [`cd.yml`](../../../.github/workflows/cd.yml), and after that the
+only way a code change reaches production is 5b.12's image automation. That
+path has been running alongside a deploy that also worked, which means a silent
+failure in it is invisible. Make it visible while there is still a fallback:
 
 push a trivial commit, then follow it all the way — [publish.yml](../../../.github/workflows/publish.yml)
 emits the `<timestamp>-<sha>` tag, the `ImagePolicy` selects it, the
@@ -289,53 +291,39 @@ Do it twice if the first is the first one that has ever run — the interesting
 failure is the second bump, where a stale ConfigMap or an unsorted tag shows up
 as "nothing happened" rather than as an error.
 
-**[ ] 4. Rehearse the data cutover, and time it.** 7b.4 and 7b.5 are the two
-steps inside the outage whose duration nobody knows, and the dump is the one
-that grows with the database. Run both now against the **live** old host:
+### [x] 4. Decide how long the soak is, and write the end date down
 
-```sh
-docker compose -f compose.prod.yml -f compose.observability.yml \
-  -f compose.metrics.yml -f compose.backup.yml exec -T backup \
-  /app/scripts/backup.sh
-```
+The soak is the deliberate gap between the cutover (7b.1–7b.8) and the rebuild
+(7b.9 onwards), and it is the last stretch during which rollback is a
+`docker compose start` rather than a restore from S3.
 
-then the restore Job exactly as 7b.5 runs it. A dump taken while the api is
-writing is not a usable artifact — it is a stopwatch, and a full-size one. Note
-both numbers; their sum plus the comparison in 7b.6 is the window you announce.
+It used to be 48–72 hours, argued from "one ordinary weekday's use by people
+who are not you". There is no such weekday yet, so the argument that remains is
+the smaller one: **one overnight** (the hourly and nightly jobs, the staggered
+reboots, anything that only runs when nobody is watching) and **one completed
+CNPG backup cycle**. Overnight-plus-a-morning is enough. A day or two more
+costs little — [Phase 2](phase-2-k3s-flux-secrets.md) is explicit that two-node
+etcd has worse availability than one node, and the soak is exactly that window,
+but a cluster nobody depends on can afford a bad night.
 
-This rehearsal doubles as the dry run of 7b.5's prerequisite: the manually
-created `aerie-pg-restore-restic` Secret that
-[`restore-job.yaml`](../../../deploy/cluster/data/schema/restore-job.yaml)
-documents at the top of the file and that nothing in Phase 4 generates. Create
-it here, once, and confirm the Job can read it — discovering it is missing
-belongs in a rehearsal, not in a window.
+What is *not* optional is the end date. A soak with no end is a two-node
+cluster with a story attached, and the old box sitting powered-on and
+half-retired is the thing that quietly becomes permanent.
 
-**[ ] 5. Decide the window and the soak, and tell the house.** The window is
-7a.4's measurement plus margin. The soak is the deliberate gap between the
-cutover (7b.1–7b.11) and the rebuild (7b.12 onwards), and it is the last stretch
-during which rollback is a `docker compose up` rather than a restore.
+No announcement is needed this time. If someone happens to be using the site
+that evening, tell them; otherwise the only person the outage costs is you.
 
-Pick a soak long enough to cover **one overnight**, **one full CNPG backup
-cycle**, and **one ordinary weekday's use by people who are not you** — 48 to
-72 hours in practice. Longer is not better: [Phase 2](phase-2-k3s-flux-secrets.md)
-is explicit that two-node etcd has *worse* availability than one node, and the
-soak is exactly that window. Write the end date down; a soak with no end is a
-two-node cluster with a story attached.
+### [x] 5. Pre-stage everything the old box's rebuild needs
 
-Then tell the house, in the terms they experience: the site is down for N
-minutes on this evening, the share and the music keep working, and if anything
-looks wrong afterwards say so rather than working around it.
-
-**[ ] 6. Pre-stage everything the old box's rebuild needs.** All of this is
-discoverable during 7b.12 and all of it is much cheaper now, because each item
-is a thing that has to be true *before* a workflow will run and none of them are
-in the workflow's control:
+All of this is discoverable during 7b.9 and all of it is much cheaper now,
+because each item is a thing that has to be true *before* a workflow will run
+and none of them are in the workflow's control:
 
   1. **A `hyperv-host-N` label on that box's runner.** Provision 0/1/5 dispatch
      by label ([`provision-1-install-k3s.yml`](../../../.github/workflows/provision-1-install-k3s.yml)
      offers `hyperv-host-0|1|2`); the old box's runner today has only
      `legacy-deployer`. Add the free label — do not remove `legacy-deployer`
-     until 7b.11 has retargeted
+     until 7b.8 has retargeted
      [`stagger-update-reboots.yml`](../../../.github/workflows/stagger-update-reboots.yml),
      whose `plan` job still names it as "the one runner guaranteed to exist".
   2. **The external vSwitch, and the reservation that follows it.** Creating it
@@ -360,16 +348,26 @@ in the workflow's control:
      rather than for the length of a reboot. The old box's stale tailnet
      device — registered as `aerie` by `cd.yml`, before Provision 0 started
      naming hosts `aerie-hyperv-host-N` — gets removed from the admin console
-     in 7b.16, not before: it is a working way in until it isn't.
+     in 7b.13, not before: it is a working way in until it isn't.
 
-**[ ] 7. Know the rollback, and know when it expires.** Written down before it
-is needed, because it is needed at the moment nobody wants to be composing one:
+### [x] 6. Know the rollback, and know when it expires
+
+Written down before it is needed, because it is needed at the moment nobody
+wants to be composing one:
 
 | Found at | Rollback | Cost |
 |---|---|---|
-| 7b.3–7b.6 (before the DNS flip) | `docker compose … start api` | Nothing moved. The cluster's database holds a restore nobody is reading. |
-| 7b.7–7b.10 (soak) | Revert the one `local-data` line, `docker compose … up -d` on the old box | Writes made against the cluster since 7b.7 are stranded. Dump them out first if there are any that matter. |
-| After 7b.12 (box wiped) | Restore from S3 onto new hardware — [`docs/disaster-recovery.md`](../../disaster-recovery.md) | Hours, and it is a DR exercise, not a rollback. |
+| 7b.2–7b.4 (before the flip) | `docker compose … start` on the old box | Nothing moved. The cluster holds a restore nobody is reading. |
+| 7b.5–7b.7 (after the flip, during the soak) | Revert the one `local-data` line, `docker compose … start` on the old box, reboot the clients | Writes made against the cluster since the flip are stranded. Dump them out first if any matter. |
+| After 7b.9 (box wiped) | Restore from S3 onto new hardware — [`docs/disaster-recovery.md`](../../disaster-recovery.md) | Hours, and it is a DR exercise, not a rollback. |
+
+`start`, not `up -d`, in both of the first two rows. The old stack's containers
+were created by [`cd.yml`](../../../.github/workflows/cd.yml) with an env block
+that only exists inside that workflow; `up -d` re-evaluates the compose files
+by hand, finds `${RESTIC_PASSWORD}` and friends empty, and **recreates the
+containers without them**. `start` starts what is already there, with the
+environment it was built with. This is the single most likely way to turn a
+working rollback into a puzzle.
 
 The middle row is the reason the soak exists, and the bottom row is the reason
 it ends.
@@ -378,129 +376,142 @@ it ends.
 
 ## Phase 7b — Scriptable, in this order
 
-Steps 1–2 are preparation that changes nothing anyone can see. **3–7 are the
-outage**, and they are the reason the rest of this file exists. 8–10 are the
-proof and the soak. 11 deletes the old path from the repo. 12–15 are the third
-node and the four settings it makes affordable, 16 is the paperwork, and 17 is
-the gate.
+Step 1 is preparation that changes nothing anyone can see. **2–6 are the
+cutover** — no clock on them, but in this order, and 2-before-5 is the one
+piece of ordering that is not negotiable. 7 is the soak. 8 deletes the old path
+from the repo. 9–12 are the third node and the settings it makes affordable,
+13 is the paperwork, and 14 is the gate.
 
-- [ ] **1. Lower the DNS TTL, an hour before anything else** — pfSense
-      **Services → DNS Resolver → General Settings → Custom options**. The
-      existing pair
-      ([reverse-proxy-architecture.md](../../reverse-proxy-architecture.md)) is
-      a `local-zone`/`local-data` redirect for the whole base domain. The
-      `local-data` line takes an explicit TTL, and unset means 3600:
-
-      ```text
-      server:local-zone: "${DOMAIN}." redirect
-      server:local-data: "${DOMAIN}. 60 IN A <old host LAN ip>"
-      ```
-
-      Same address, one added field. Save, and confirm from a LAN client that
-      `dig ${DOMAIN}` now reports a TTL counting down from 60 rather than 3600.
-
-      This is the only step in the phase that has to happen **before** the
-      window rather than in it, and it is the difference between a flip whose
-      tail is a minute and one whose tail is an hour. Restore the record to its
-      default TTL after the soak — a 60-second TTL on a stable record is
-      needless query volume, and leaving it is how the next person concludes it
-      was load-bearing.
-
-- [ ] **2. Take the old path out of everyone's hands, including your own.**
-      Two things can restart the api mid-dump, and neither of them is a person
-      making a decision.
+- [ ] **1. Take the old path out of your own hands, and silence the alerts you
+      are about to trip on purpose.** Two chores, neither interesting, both
+      noticed only by their absence.
 
       **Disable the Deploy workflow.** `cd.yml` fires on `workflow_run` from
-      publish — so a merge to `main` during the window, by anyone, restarts the
-      api on the old host in the middle of 7b.4:
+      publish, so a merge to `main` at any point tonight redeploys a host you
+      are in the middle of retiring — quietly, and after you have stopped it:
 
       ```sh
       gh workflow disable "Deploy"
       ```
 
-      **Silence both alert paths, for the window's length.** The old host's
-      Kuma and Alertmanager will correctly report a stack that is stopped on
-      purpose; the cluster's Kuma checks in-cluster Services and has nothing to
-      say about any of this. Silence the old host's, and take the cluster's
-      Alertmanager silence out to cover 7b.12–7b.14 as well — the rebuild fires
-      `EtcdMemberDown`, `KubeNodeNotReady` and `LonghornVolumeDegraded` on
-      purpose, and a phase that trains the house to swipe those away is the
-      failure mode [3b.11](phase-3-platform-services.md) named.
-      *Exit:* a push to `main` produces no deploy, and a test alert produces no
-      notification. Both are re-enabled in 7b.16, which is why that step is not
-      optional.
+      It is deleted outright in 7b.8; disabling it now is what keeps the next
+      few hours legible.
 
-- [ ] **3. Freeze the writes — stop the old api, and only the api.** From the
-      old host, in the checkout `cd.yml` deploys from:
+      **Silence the cluster's Alertmanager, out far enough to cover
+      7b.9–7b.11.** The rebuild fires `EtcdMemberDown`, `KubeNodeNotReady` and
+      `LonghornVolumeDegraded` on purpose, and a phase that trains you to swipe
+      those away is the failure mode
+      [3b.11](phase-3-platform-services.md) named.
+
+      **Silence those three by name, not the whole receiver** —
+      `alertname=~"EtcdMemberDown|KubeNodeNotReady|LonghornVolumeDegraded"`.
+      A blanket silence would still be in force at 7b.6, where the point of the
+      step is to fire a real alert and watch it arrive on a phone; a silence
+      that eats the one test of the alert path is worse than no silence at all.
+      The cluster's Kuma needs nothing either way — it checks in-cluster
+      Services and has no opinion about any of this.
+
+      **The old host's alert path silences itself**, which is new: stopping the
+      whole stack at once (7b.2) takes its Kuma, Prometheus and Alertmanager
+      down with everything they were watching. The old plan left them running
+      and had to gag them. All that is left is a few seconds of monitors going
+      red as the stack winds down — silence Kuma first if you would rather not
+      get the burst, but nothing here depends on it.
+      *Exit:* a push to `main` produces no deploy, and a test alert against the
+      cluster produces no notification. Both are undone in 7b.13, which is why
+      that step is not optional.
+
+- [ ] **2. Stop the old stack — all of it, and never `-v`.** From the old host,
+      in the checkout `cd.yml` deploys from:
 
       ```sh
-      docker compose -f compose.prod.yml -f compose.observability.yml \
-        -f compose.metrics.yml -f compose.backup.yml stop api
+      docker compose -f compose.prod.yml -f compose.share.yml \
+        -f compose.observability.yml -f compose.metrics.yml \
+        -f compose.backup.yml stop
       ```
 
-      **`api` alone**, deliberately. `db` stays up — 7b.4 dumps it and 7b.6
-      queries it. `caddy` stays up, so `home`/`kiosk` answer 502 rather than
-      failing to connect, which is the difference between "it's down" and "the
-      network is broken" for whoever finds out the hard way. `share` stays up
-      because it writes to the house share, not to Postgres, and has no reason
-      to be in this outage at all.
+      This is the step the old plan spent five steps arranging around, and with
+      no live-data requirement it is just a stop. It freezes the writes, it
+      takes the site down, and — the part that actually matters — **it closes
+      every long-lived connection**, which is the only way an SSE stream opened
+      an hour ago will ever be told about the new address.
+
+      `stop`, not `down`, and **never `docker compose down -v`.** The volumes
+      are `pgdata`, `caddy_data`, `caddy_config` and `uptime_kuma_data`, and
+      `pgdata` is the rollback. `stop` leaves the containers in place with the
+      environment `cd.yml` created them with, which is what makes both the
+      rollback in 7a.6 and the dump in 7b.3 a `start` rather than a
+      reconstruction.
 
       Interpolation warnings from compose about unset `${...}` variables are
-      expected and harmless for `stop`; the env block those come from is
-      `cd.yml`'s, and nothing here reads them.
-      *Exit:* `docker compose ps` shows `api` exited and `db`, `caddy`, `share`
-      still up. `https://home.${DOMAIN}` returns 502. **The clock starts here.**
+      expected and harmless here: `stop` and `start` act on containers that
+      already exist, and nothing re-reads that env block.
+      *Exit:* `docker compose ps` shows everything exited, `docker volume ls`
+      still lists all four volumes, and `https://home.${DOMAIN}` fails to
+      connect. Leave the machine powered on.
 
-- [ ] **4. Take the final backup, and tag it so it cannot be pruned** —
-      [`backup.sh`](../../../containers/backup/scripts/backup.sh), run on demand
-      rather than waited for:
+- [ ] **3. Take the final backup, and tag it so it cannot be pruned.** Two
+      services, briefly, and nothing else:
 
       ```sh
-      docker compose -f compose.prod.yml -f compose.observability.yml \
-        -f compose.metrics.yml -f compose.backup.yml exec -T backup \
-        /app/scripts/backup.sh
+      docker compose -f compose.prod.yml -f compose.share.yml \
+        -f compose.observability.yml -f compose.metrics.yml \
+        -f compose.backup.yml start db backup
+      docker compose -f compose.prod.yml -f compose.share.yml \
+        -f compose.observability.yml -f compose.metrics.yml \
+        -f compose.backup.yml exec -T backup /app/scripts/backup.sh
       ```
 
-      This is the artifact the whole phase turns on: post-4b.1, so it carries
-      `aerie.dump` and `quartz.dump` in custom format alongside the dumpall, and
-      it is consistent because 7b.3 stopped the only writer.
+      This dump is strictly better than the one the old plan took under a
+      stopwatch: nothing is writing to `db`, and `uptime_kuma_data`'s SQLite is
+      quiescent rather than live. It is post-4b.1, so it carries `aerie.dump`
+      and `quartz.dump` in custom format alongside the dumpall — which is what
+      makes 7b.4 possible at all.
 
       Then tag the snapshot in **both** repos, because
       `--keep-daily 7 --keep-weekly 4 --keep-monthly 12` will eventually reach
       it and Phase 8's CronJob inherits that policy against the same S3 repo:
 
       ```sh
-      ID=$(restic -r "$REPO" snapshots --latest 1 --json | jq -r '.[0].short_id')
-      restic -r "$REPO" tag --add cutover-final "$ID"
+      docker compose -f compose.prod.yml -f compose.backup.yml exec -T backup sh -c '
+        for REPO in "$RESTIC_REPOSITORY_LOCAL" "$RESTIC_REPOSITORY_S3"; do
+          restic -r "$REPO" tag --add cutover-final latest
+        done'
       ```
 
-      Phase 8 gets a `--keep-tag cutover-final` on its `forget` — recorded in
-      that phase's handover below, because the tag is worthless if the thing
-      that prunes does not know about it.
-      *Exit:* `restic snapshots --tag cutover-final` lists one snapshot in each
-      repo, timestamped after 7b.3.
+      Inside the container, and `latest` rather than a short ID looked up with
+      `jq` — [the image](../../../containers/backup/Dockerfile) has restic and
+      sqlite but no jq, and the repo passwords only exist in that container's
+      environment.
 
-- [ ] **5. Re-run the restore Job against that dump** — 4b.9 built this to be
-      run more than once, and this is the run it was built for:
+      Phase 8 gets a `--keep-tag cutover-final` on its `forget` — recorded in
+      that phase's handover below, because a tag is worthless if the thing that
+      prunes does not know about it.
+      *Exit:* `restic snapshots --tag cutover-final` lists one snapshot in each
+      repo, timestamped after 7b.2. **This is now the only complete copy of the
+      old world**, and 7b.9 reformats the disk holding one of its two repos.
+
+- [x] **4. IGNORE — put the last few hours into the cluster too.** Skip this
+      unless the answer to "has anyone typed anything into the old site since
+      the restore?" is yes. Sensor history is derived from Home Assistant and
+      refills itself; storage locations, printed labels and anything else a
+      person entered by hand do not.
+
+      It is the same Job 4b.9 built to be run more than once, and the
+      hand-created `aerie-pg-restore-restic` Secret it needs already exists —
+      it was created for the run that has already happened:
 
       ```sh
       kubectl -n aerie create job --from=job/aerie-pg-restore aerie-pg-restore-cutover
       kubectl -n aerie logs -f job/aerie-pg-restore-cutover
       ```
 
-      Two things it needs, both settled in 7a.4 rather than discovered here: the
-      hand-created `aerie-pg-restore-restic` Secret, and `aerie-pg` reporting
-      Ready. The Job pulls from **S3**, not the local repo — see the header of
+      The Job pulls from **S3**, not the local repo — see the header of
       [`restore-job.yaml`](../../../deploy/cluster/data/schema/restore-job.yaml) —
-      so 7b.4's push to S3 having completed is a precondition, not a formality.
-      *Exit:* the Job reports `Complete`, and
-      [`restore.sh`](../../../deploy/cluster/data/schema/restore.sh)'s own checks
-      pass: tables across `public`+`storage`, row counts on `"Devices"` and
-      `"EnvironmentReadings"`, and eleven `qrtz_*` tables.
+      so 7b.3's push having completed is a precondition, not a formality.
 
-- [ ] **6. The hand comparison — this is the gate, not the Job's exit code.**
-      `restore.sh` says so itself in its closing lines. The old `db` is still
-      running, so both sides can answer the same question:
+      Whether or not you re-ran it, spend two minutes comparing while the old
+      `db` is still started, because this is the last cheap moment to:
 
       ```sh
       # old host
@@ -511,29 +522,45 @@ the gate.
         psql -U postgres -d aerie -tAc 'SELECT count(*) FROM "EnvironmentReadings"'
       ```
 
-      Run the same pair for `"Devices"`, for the newest channel-history
-      timestamp, and for anything else whose absence a person would notice
-      within a day. Equality on every one of them is what makes the cluster the
-      source of truth; the Job's `Complete` only proves nothing errored.
+      A mismatch is **expected** if you skipped the re-run — that is the gap
+      the re-scope accepted, and its size is the useful thing to know. What
+      would be a stop is a cluster count that is *wildly* off, or `"Devices"`
+      missing rows a person would notice: that is a bad restore rather than a
+      stale one, and it is worth finding now rather than after the old box is
+      gone.
 
-      **A mismatch here is a stop, not a puzzle to solve with the site down.**
-      Restart the old api (7a.7's top row), reschedule, and find out why with
-      everything running. Nothing has moved yet — that is the entire reason
-      this step sits before the DNS flip rather than after it.
+      Then stop the two services again:
 
-- [ ] **7. Point pfSense Unbound at the VIP** — the one-line change this phase
-      was originally described as. Same custom-options box as 7b.1, same TTL,
-      one address:
-
-      ```text
-      server:local-data: "${DOMAIN}. 60 IN A ${INGRESS_VIP}"
+      ```sh
+      docker compose -f compose.prod.yml -f compose.share.yml \
+        -f compose.observability.yml -f compose.metrics.yml \
+        -f compose.backup.yml stop
       ```
 
-      Save. Unbound restarts and its own cache goes with it; what remains is
-      client-side, bounded by the 60 seconds 7b.1 bought. If 7a.2's Tier 3 view
-      is still in the box, **delete it in the same edit** — a view pointing at
-      the same address it now falls through to is dead config that will confuse
-      the next person to read the box.
+- [ ] **5. Point pfSense Unbound at the VIP, then reboot the clients** — the
+      one-line change this phase was originally described as. **Services → DNS
+      Resolver → General Settings → Custom options**, where the existing pair
+      ([reverse-proxy-architecture.md](../../reverse-proxy-architecture.md))
+      is a `local-zone`/`local-data` redirect for the whole base domain:
+
+      ```text
+      server:local-zone: "${DOMAIN}." redirect
+      server:local-data: "${DOMAIN}. IN A ${INGRESS_VIP}"
+      ```
+
+      One address changed, nothing else. Save; Unbound restarts and its own
+      cache goes with it.
+
+      What remains is client-side, and the old plan spent a whole pre-step an
+      hour ahead of the window lowering the record's TTL to 60 so that tail
+      would be short. **Don't.** The record keeps its default 3600, and the
+      handful of devices that matter get power-cycled instead — the kiosk
+      tablet, the Sonos speakers, whatever laptop or phone is in the house.
+      That is a minute of scrappiness against a scheduled pre-step and a
+      matching cleanup step, on an installation where an hour of a stale answer
+      would have been survivable anyway. (`ipconfig /flushdns`,
+      `sudo dscacheutil -flushcache`, or a Wi-Fi off/on will do for anything
+      you would rather not reboot.)
 
       Verify in this order, because each answers a different question:
 
@@ -547,11 +574,12 @@ the gate.
       ([tailscale-vpn-architecture.md](../../tailscale-vpn-architecture.md)), so
       it follows automatically, and confirming it is cheaper than assuming it.
       *Exit:* the seven hostnames resolve to the VIP from the LAN and from the
-      tailnet. **The clock stops here.**
+      tailnet.
 
-- [ ] **8. Verify the seven hostnames without `--resolve`** — the first time in
-      the entire plan that this is possible, and the reason the check is worth
-      more than the identical-looking one in 5b.14:
+- [ ] **6. Verify the seven hostnames without `--resolve`, and then the things
+      that are not a browser** — the first time in the entire plan that the
+      first half is possible, and the reason it is worth more than the
+      identical-looking check in 5b.14:
 
       ```sh
       for h in home kiosk files share status logs metrics; do
@@ -564,51 +592,32 @@ the gate.
       address proves it was the cluster. Seven lines, seven `${INGRESS_VIP}`
       (`share` still 401s).
 
-      Then the clients that are not a browser and were not part of 7a.2 because
-      they could not be: the **kiosk tablet** (which has been showing an error
-      page since 7b.3 and should recover on its own), a **Sonos** speaker
-      playing from the media library, and **Home Assistant** — trigger one real
-      alert and confirm it lands. The count of hostnames is not what this step
-      is about; the original bullet's "verify all seven" is satisfied by the
-      loop above in ten seconds, and everything expensive is in this paragraph.
+      Then the clients 7a.2 deliberately deferred to this moment, because there
+      is no longer a Tier 3 to preview them through: the **kiosk tablet** (which
+      has been showing an error page since 7b.2 and should recover on its own,
+      or after a reboot), a **Sonos** speaker playing from the media library,
+      and **Home Assistant** — trigger one real alert and confirm it lands on a
+      phone. Every other check in this list proves something is up; that last
+      one is the only one that proves you will be *told* when something is not.
 
-- [ ] **9. Stop the old stack for good** — and note what this step is really
-      for. Long-lived connections do not consult DNS: an SSE stream opened
-      before 7b.7 is still talking to the old Caddy, and will be tomorrow.
-      Stopping the stack is what closes them.
+      The loop takes ten seconds. This paragraph is the step.
 
-      ```sh
-      docker compose -f compose.prod.yml -f compose.share.yml \
-        -f compose.observability.yml -f compose.metrics.yml \
-        -f compose.backup.yml down
-      ```
-
-      **Never `-v`.** The volumes are `pgdata`, `caddy_data`, `caddy_config` and
-      `uptime_kuma_data`, and `pgdata` is the rollback. `down` without it stops
-      and removes containers and leaves every volume where it is.
-
-      Leave the machine **powered on and otherwise untouched** for the soak.
-      Nothing about it is needed and everything about it is the fallback.
-      *Exit:* `docker ps` is empty on the old host, `docker volume ls` still
-      lists all four, and the seven hostnames still answer from the cluster.
-
-- [ ] **10. Soak, on the schedule 7a.5 set.** Not a waiting step — a watching
+- [ ] **7. Soak, on the schedule 7a.4 set.** Not a waiting step — a watching
       one. Each day of it, look at: `metrics` for a target that went down and
       stayed down, `logs` for a service that stopped shipping (an absence is
       invisible in a dashboard built to show volume), `status` for a monitor
       that flaps, and the CNPG `Backup` list for a completed backup younger than
-      the schedule. And ask the family, out loud, rather than waiting for a
-      complaint — the failure this catches is the one nobody reports because
-      they assume it is how the new thing works.
+      the schedule.
 
       Two things are true only during this window and worth holding in mind.
-      **Rollback is still cheap** — 7a.7's middle row. And **etcd is two of
-      two**, so a single node lost is a cluster lost, which means: no
-      maintenance, no reboots, no experiments on either node until 7b.13. If a
-      Windows Update reboot is scheduled to land on one of the two hosts inside
-      the soak ([Phase 1](phase-1-node-substrate.md)'s staggering), move it.
+      **Rollback is still cheap** — 7a.6's middle row, and the old box is
+      sitting there stopped rather than wiped. And **etcd is two of two**, so a
+      single node lost is a cluster lost, which means: no maintenance, no
+      reboots, no experiments on either node until 7b.10. If a Windows Update
+      reboot is scheduled to land on one of the two hosts inside the soak
+      ([Phase 1](phase-1-node-substrate.md)'s staggering), move it.
 
-- [ ] **11. Delete the compose path from the repo** — one commit, after the soak
+- [ ] **8. Delete the compose path from the repo** — one commit, after the soak
       passes, not before. Doing it during the soak would make the tree describe
       a system the rollback needs.
 
@@ -667,14 +676,14 @@ the gate.
 
 ---
 
-- [ ] **12. Rebuild the old box as the third Hyper-V host** — everything
-      7a.6 pre-staged, executed. In this order, because two of these are
+- [ ] **9. Rebuild the old box as the third Hyper-V host** — everything
+      7a.5 pre-staged, executed. In this order, because two of these are
       one-way:
 
       1. **Copy `E:/restic-repo` off the machine** and verify the copy with
          `restic -r <copy> check`. An unverified copy of a backup repo is the
          same category of object as an untested backup.
-      2. **Confirm the S3 repo still holds the `cutover-final` tag** (7b.4).
+      2. **Confirm the S3 repo still holds the `cutover-final` tag** (7b.3).
          From here on it is the only copy of the old world that is not on a
          disk about to be reformatted.
       3. Remove Docker Desktop and enable the Hyper-V role. Reboot.
@@ -700,7 +709,7 @@ the gate.
       `:9182` from another machine on the LAN, and its Tailscale device is
       present under its `aerie-hyperv-host-N` name.
 
-- [ ] **13. Join it as the third k3s server** — Provision 1 with `-JoinServer`,
+- [ ] **10. Join it as the third k3s server** — Provision 1 with `-JoinServer`,
       the branch [`Install-K3sNode.ps1`](../../../scripts/k3s/Install-K3sNode.ps1)
       has carried since Phase 2 and that nothing has used yet:
 
@@ -726,7 +735,7 @@ the gate.
       and `etcd_server_has_leader` is 1 for three members in Prometheus rather
       than two.
 
-- [ ] **14. Raise the two counts, and confirm the cluster acts on them** —
+- [ ] **11. Raise the two counts, and confirm the cluster acts on them** —
       repository variables plus one Provision 4 dispatch, **no commit**, which
       is the entire reason [3b.11](phase-3-platform-services.md) and
       [4b.7](phase-4-data-tier.md) put them in a ConfigMap:
@@ -771,8 +780,8 @@ the gate.
       `kubectl -n flux-system get cm aerie-cluster-config -o yaml` shows both
       values as `3`.
 
-- [ ] **15. The three settings the third node makes affordable** — one commit,
-      after 7b.14 is green rather than alongside it. Each of these was a
+- [ ] **12. The three settings the third node makes affordable** — one commit,
+      after 7b.11 is green rather than alongside it. Each of these was a
       deliberate two-node compromise with a note pointing here, and each is
       wrong to change before the node exists:
 
@@ -824,16 +833,20 @@ the gate.
       completes rather than stalling with a Pending pod; `promtool check rules`
       passes on the edited file.
 
-- [ ] **16. Put back everything 7b turned off, and fix the documents that now
+- [ ] **13. Put back everything 7b turned off, and fix the documents that now
       lie.** The unglamorous half, and the half whose omission is discovered
       during an incident.
 
-      Re-enable: the alert paths silenced in 7b.2 (**both**, and confirm a test
-      alert arrives — a silence that outlives its window is indistinguishable
-      from an alerting system that works), and the DNS record's default TTL from
-      7b.1.
+      Re-enable: **expire the three-alert silence from 7b.1** rather than
+      letting it lapse on its own, and confirm a test alert still arrives
+      afterwards — a silence that outlives the thing it was covering is
+      indistinguishable from an alerting system that works. The Deploy workflow
+      disabled in that same step needs nothing, because 7b.8 deleted it
+      outright; confirm instead that `gh workflow list` no longer shows it. The
+      DNS record keeps its default TTL — the re-scope never lowered it, so
+      there is nothing to put back there either.
 
-      Remove: the stale `aerie` Tailscale device from the admin console (7a.6.5),
+      Remove: the stale `aerie` Tailscale device from the admin console (7a.5.5),
       now that the rebuilt host is on the tailnet under its own name; and any
       hosts-file entries from 7a.2's Tier 2, if that has not already happened.
 
@@ -848,7 +861,7 @@ the gate.
         8), and how to restore the former.
       - [`docs/reverse-proxy-architecture.md`](../../reverse-proxy-architecture.md) —
         Caddy, container labels and the `edge` network are gone; the
-        `local-zone`/`local-data` half is still exactly right and is what 7b.7
+        `local-zone`/`local-data` half is still exactly right and is what 7b.5
         changed. Rewrite the routing half around Traefik and Ingress objects.
       - [`docs/delivery-architecture.md`](../../delivery-architecture.md) — its
         "Path 1" and its "Where this is going" section both describe this phase
@@ -865,7 +878,7 @@ the gate.
       are **not** on this list — Phase 6 already assigned them to Phase 9, as
       candidates for folding into `cluster-architecture.md` rather than patching.
 
-- [ ] **17. Phase gate as a command** — `scripts/k3s/Test-Cutover.ps1`, wrapped
+- [ ] **14. Phase gate as a command** — `scripts/k3s/Test-Cutover.ps1`, wrapped
       by `.github/workflows/verify-cutover.yml`, in the exact shape 3b.13, 4b.11,
       5b.14 and 6b.15 established: read-only, **not** numbered into the Provision
       sequence, does not stop at the first failure, and a check it cannot
@@ -898,7 +911,7 @@ the gate.
       - all three `WINDOWS_EXPORTER_TARGETS` are `up`, including the rebuilt
         host — the check that catches finding 3
       - the newest CNPG `Backup` is `completed` and younger than the schedule
-        interval, which after 7b.9 is the only backup the system has
+        interval, which after 7b.2 is the only backup the system has
       - **the compose path is gone from the tree**: no `compose.prod.yml`,
         `compose.share.yml`, `compose.observability.yml`, `compose.metrics.yml`,
         `compose.backup.yml`, `cd.yml` or `containers/caddy/`. A half-finished
@@ -917,7 +930,7 @@ the gate.
 ## What this phase deletes, and what survives
 
 ```text
-compose.prod.yml            # 7b.11, deleted
+compose.prod.yml            # 7b.8, deleted
 compose.share.yml           #   all five, with the host that ran them
 compose.observability.yml
 compose.metrics.yml
@@ -925,14 +938,14 @@ compose.backup.yml
 compose.yaml                # SURVIVES - local dev, untouched by this phase
 
 .github/workflows/
-  cd.yml                    # 7b.11, deleted whole
-  publish.yml               # 7b.11, minus the aerie-caddy job
-  stagger-update-reboots.yml# 7b.11, plan job retargeted off legacy-deployer
-  verify-cutover.yml        # 7b.17, new
+  cd.yml                    # 7b.8, deleted whole
+  publish.yml               # 7b.8, minus the aerie-caddy job
+  stagger-update-reboots.yml# 7b.8, plan job retargeted off legacy-deployer
+  verify-cutover.yml        # 7b.14, new
 
 containers/
-  caddy/                    # 7b.11, deleted - Traefik replaced it
-  fluent-bit/               # 7b.11, deleted - deploy/ holds the cluster copies
+  caddy/                    # 7b.8, deleted - Traefik replaced it
+  fluent-bit/               # 7b.8, deleted - deploy/ holds the cluster copies
   prometheus/
   grafana/provisioning/
   opensearch-provision/
@@ -942,14 +955,14 @@ containers/
   kuma-provision/           # SURVIVES - 6b.13 made it a cluster image
 
 charts/aerie/templates/
-  api-deployment.yaml       # 7b.15, DoNotSchedule + explicit strategy
+  api-deployment.yaml       # 7b.12, DoNotSchedule + explicit strategy
 
 deploy/cluster/
-  data/cluster/cluster.yaml # 7b.15, dataDurability: required
-  observability/config/alerts/cluster.yaml   # 7b.15, two annotations
+  data/cluster/cluster.yaml # 7b.12, dataDurability: required
+  observability/config/alerts/cluster.yaml   # 7b.12, two annotations
 
 scripts/k3s/
-  Test-Cutover.ps1          # 7b.17
+  Test-Cutover.ps1          # 7b.14
 ```
 
 Nothing else under `deploy/` changes. That is the shape of a cutover done
@@ -960,10 +973,10 @@ phase is mostly deletions elsewhere plus two variables and three settings.
 
 - **It does not close the apiserver-VIP gap.** Three nodes make losing one
   survivable; the kubeconfig still names node 1, and losing *that* one is still
-  a manual repoint. 7b.16 corrects Phase 2's sentence rather than the situation.
+  a manual repoint. 7b.13 corrects Phase 2's sentence rather than the situation.
 - **It does not migrate the house share, or anything on it.** Both stacks mount
   the same external device; there was never a copy to make.
-- **It does not replace the local restic repo.** 7b.12 copies it off and Phase 8
+- **It does not replace the local restic repo.** 7b.9 copies it off and Phase 8
   owns the cluster-native replacement. The gap between them is named, not
   papered over.
 - **It does not rewrite `docs/metrics-architecture.md` or
@@ -982,7 +995,7 @@ phase is mostly deletions elsewhere plus two variables and three settings.
 
 Recorded here, to be written into the phases that own them:
 
-- **Phase 8 inherits a `--keep-tag cutover-final` requirement.** 7b.4 tags the
+- **Phase 8 inherits a `--keep-tag cutover-final` requirement.** 7b.3 tags the
   final pre-cutover snapshot in both repos; Phase 8's restic CronJob inherits
   Phase 0's `--keep-daily 7 --keep-weekly 4 --keep-monthly 12` against the same
   S3 repo, and without the keep-tag it will eventually prune the last consistent
@@ -990,13 +1003,13 @@ Recorded here, to be written into the phases that own them:
   phase's own text, since a tag whose pruner does not know about it is
   decoration.
 - **Phase 8 inherits a narrowed backup, and should know the shape of it.**
-  Between 7b.9 and Phase 8, the only thing backed up anywhere is Postgres, via
+  Between 7b.2 and Phase 8, the only thing backed up anywhere is Postgres, via
   CNPG's WAL archiving and `ScheduledBackup`. Kuma's SQLite, Grafana's database
   and the OpenSearch indices have no copy at all. That is an argument for Phase
   8 starting with the restic CronJob rather than with the Longhorn backup
   target, and for its **backup-age alert** — already called the most valuable
   alert that does not exist — being the first thing in it rather than the last.
-- **Phase 8's DR rehearsal now has a real target.** 7b.16 leaves
+- **Phase 8's DR rehearsal now has a real target.** 7b.13 leaves
   `docs/disaster-recovery.md` accurate but minimal; the quarterly rehearsal is
   what turns it back into a document someone can follow, and the first rehearsal
   after this phase is the one that finds what the rewrite missed.
@@ -1005,7 +1018,7 @@ Recorded here, to be written into the phases that own them:
   ones [`docs/secrets-architecture.md`](../../secrets-architecture.md#known-gap-no-vip-in-front-of-the-apiserver)
   already names; picking one is a Phase 9 decision, and the site-repo split is
   the natural moment, since a kubeconfig is per-installation.
-- **Phase 9's `cluster-architecture.md` has one fewer excuse.** After 7b.16 the
+- **Phase 9's `cluster-architecture.md` has one fewer excuse.** After 7b.13 the
   four documents rewritten here describe one system rather than two, which is
   what makes consolidating them a merge rather than an archaeology exercise.
 - **[`docs/family-apps-architecture.md`](../../family-apps-architecture.md)'s
@@ -1013,3 +1026,4 @@ Recorded here, to be written into the phases that own them:
   cutover", pointing at this phase — not as work for it, but as the condition
   that unblocks it. Longhorn now exists; the deferral should be re-decided
   rather than left pointing at a phase that has closed.
+

@@ -1,6 +1,6 @@
 # The cluster plan Phase 4b.9 - the restore, as a re-runnable Job. Committed
 # suspended so Flux reconciling this file can never itself trigger a data
-# load; a real run is always a deliberate human action:
+# load; running it is always a deliberate human action:
 #
 #   kubectl -n aerie get job aerie-pg-restore -o json \
 #     | jq 'del(.spec.selector, .spec.template.metadata.labels, .status,
@@ -12,7 +12,7 @@
 #     | kubectl -n aerie create -f -
 #
 # Not `kubectl create job --from=job/aerie-pg-restore`, which is what this
-# comment said until a real run tried it: `--from` accepts a CronJob and
+# comment said until someone ran it: `--from` accepts a CronJob and
 # nothing else ("unknown object type *v1.Job"). Nor `kubectl patch ...
 # suspend=false` on the committed Job itself - that works exactly once, and
 # races Flux, whose next reconcile of this file sets suspend back to true and
@@ -66,8 +66,8 @@ spec:
       # this repository publishes, so this pull needs the credential
       # ../../infrastructure/config/external-secrets/aerie-ghcr-pull.yaml
       # lands in this namespace - exactly what charts/aerie's own
-      # migrate-job.yaml does through `image.pullSecret`. Missing here until a
-      # real run hit it, and the failure gives no hint of the cause: kubelet
+      # migrate-job.yaml does through `image.pullSecret`. Missing here until the
+      # first run hit it, and the failure gives no hint of the cause: kubelet
       # falls back to an anonymous token and reports a bare
       # `401 Unauthorized` from ghcr.io, which reads like the image is absent
       # rather than like the pod never presented a credential.
