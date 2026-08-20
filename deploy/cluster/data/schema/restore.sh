@@ -25,11 +25,29 @@ if [ -z "$AERIE_DUMP" ] || [ -z "$QUARTZ_DUMP" ]; then
   exit 1
 fi
 
+# --clean --if-exists, not a bare pg_restore. Both target databases already
+# have a schema by the time anyone runs this, and neither got it from a
+# backup: ../../apps/helmrelease.yaml's api-migrate Job runs EF's migrations
+# against `aerie` on every app deploy, and ./quartz-ddl-job.yaml fills
+# `quartz` from ./quartz-ddl.sql. A bare pg_restore into those meets an
+# existing object for every CREATE in the dump, reports "errors ignored on
+# restore", and exits non-zero - which `set -e` above turns into a failed Job
+# that has, confusingly, still loaded most of the rows. --clean drops each
+# object before recreating it, and --if-exists keeps that quiet for anything
+# the dump names that this database does not have.
+#
+# This is deliberately destructive, and that is the point: the dump is the
+# authority here, __EFMigrationsHistory included, so the restored database
+# matches the old host's migration state rather than whatever api-migrate
+# happened to apply first. Phase 7's ordering (freeze the old host -> final
+# dump -> restore -> flip DNS) is what keeps that from costing writes;
+# running this Job at any other time discards whatever the cluster's own copy
+# has accumulated since.
 echo "[restore] pg_restore aerie <- $AERIE_DUMP"
-pg_restore --no-owner --no-privileges -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d aerie "$AERIE_DUMP"
+pg_restore --clean --if-exists --no-owner --no-privileges -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d aerie "$AERIE_DUMP"
 
 echo "[restore] pg_restore quartz <- $QUARTZ_DUMP"
-pg_restore --no-owner --no-privileges -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d quartz "$QUARTZ_DUMP"
+pg_restore --clean --if-exists --no-owner --no-privileges -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d quartz "$QUARTZ_DUMP"
 
 echo "[restore] sanity: table count across public+storage (aerie)"
 # 'storage' is in this list because the module contexts

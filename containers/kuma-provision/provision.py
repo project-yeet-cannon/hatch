@@ -74,11 +74,46 @@ def connect() -> UptimeKumaApi:
 
 
 def ensure_account(api: UptimeKumaApi) -> None:
+    # Two things this gets wrong if written the obvious way, both found
+    # against the pinned Uptime Kuma 2.4.0 rather than in review - and
+    # together they are why AutoKuma's initContainer crash-looped, which
+    # stalled observability-controllers, which left observability-config
+    # (and with it the whole opensearch-provision CronJob) never applied.
+    #
+    #   1. The arguments have to be a *tuple*, not a list. python-socketio
+    #      packs a tuple into multiple socket.io arguments and anything else
+    #      into exactly one, so `[username, password]` arrives at Kuma's
+    #      `socket.on("setup", (username, password, callback))` as a single
+    #      array in `username`, with the ack function landing in `password`
+    #      and `callback` left undefined. Kuma's handler then throws on the
+    #      array, and its own `catch` dies calling that undefined callback
+    #      (server.js:712 in 2.4.0) - so no ack is ever sent, and this call
+    #      hangs until socketio's own timeout raises TimeoutError. Every
+    #      multi-argument caller inside uptime_kuma_api itself passes a
+    #      tuple; this was the one place in the repository that didn't.
+    #   2. `needSetup` is the question to ask, not `setup`. The setup handler
+    #      is only useful while Kuma has no account, and reading its failure
+    #      to find that out is what the old `except UptimeKumaException`
+    #      here was doing - which swallowed (1) into a silent "already
+    #      configured" on any Kuma that answered at all, and would have gone
+    #      on swallowing it.
+    if not api._call("needSetup"):
+        print("Kuma already has an admin account, nothing to set up")
+        return
+
     try:
-        api._call("setup", [KUMA_USERNAME, KUMA_PASSWORD])
+        api._call("setup", (KUMA_USERNAME, KUMA_PASSWORD))
         print("created initial Kuma admin account")
     except UptimeKumaException as e:
-        print(f"skipping setup (already configured): {e}")
+        # Only the setup race is survivable: the initContainer and the hourly
+        # CronJob can both see needSetup true and both call setup. Anything
+        # else - notably `passwordTooWeak`, which is what Kuma 2.x answers to
+        # a KUMA_PASSWORD its check-password-strength gate rates "Too weak" -
+        # has to fail the container rather than fall through to a login that
+        # can only report it as authIncorrectCreds.
+        if "has been initialized" not in str(e):
+            raise
+        print(f"another provisioner won the setup race: {e}")
 
 
 def ensure_notification(api: UptimeKumaApi) -> int:

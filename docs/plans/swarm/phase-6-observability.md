@@ -515,8 +515,10 @@ gate.
       in `stringData` so they are readable as written rather than base64 that
       has to be decoded to be reviewed.
 
-      - `kuma-admin` — key `password`, value `password`. Read by AutoKuma
-        (6b.12) and `kuma-provision` (6b.13).
+      - `kuma-admin` — key `password`, value `changeme1`. Read by AutoKuma
+        (6b.12) and `kuma-provision` (6b.13). Not `password`, which Uptime
+        Kuma 2.x's `check-password-strength` gate rates "Too weak" and
+        refuses outright — see that file's own header.
       - `grafana-admin` — keys `admin-user` (`admin`) and `admin-password`
         (`password`), the pair `admin.existingSecret` expects in 6b.5.
 
@@ -1242,8 +1244,9 @@ and `wait: true` on the first is what makes the second's assumption true.
   its own default (6a.4); `aerie-kuma-admin!23` keeps working on a system being
   deleted. Changing it means a live SQLite database that disagrees with git.
 - **It does not put the two admin passwords behind ESO, and does not change them
-  for you.** 6a.4 ships `admin`/`password` on Kuma and Grafana as a known
-  default, committed, with the security implication accepted deliberately. The
+  for you.** 6a.4 ships a known default on Kuma (`admin`/`changeme1`) and
+  Grafana (`admin`/`password`), committed, with the security implication
+  accepted deliberately. The
   first operator to log into either is expected to change it; nothing in this
   phase enforces that, checks for it, or expires the default — 6b.15's verify
   does not assert on it, precisely so that changing it does not turn the

@@ -144,8 +144,11 @@ dispatch all four gates and get four green runs:
 - [x] [`verify-cluster-platform.yml`](../../../.github/workflows/verify-cluster-platform.yml),
 - [x] [`verify-data-tier.yml`](../../../.github/workflows/verify-data-tier.yml),
 - [x] [`verify-app-tier.yml`](../../../.github/workflows/verify-app-tier.yml),
+- [ ] WAIT UNTIL 6:30PM AUG 20 for hourly changes to land
 - [] `verify-observability.yml` (6b.15). Four, in that order, because each phase's
 gate assumes the one below it.
+
+
 
 Two results in that output are load-bearing here and worth reading rather than
 skimming past: the app tier's assertion that **all four Ingresses answer 200
