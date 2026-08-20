@@ -82,7 +82,7 @@ spec:
       tag: "4.2.7"
 
     flush: 5
-    logLevel: debug
+    logLevel: info
 
     # config.service is left at the chart's own default: it already
     # parameterizes Flush/Log_Level from the two values above, points
