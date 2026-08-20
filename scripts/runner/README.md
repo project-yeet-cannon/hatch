@@ -57,6 +57,7 @@ resolved and reported, never reinstalled.
 |---|---|---|
 | `AwsCli` | AWS CLI v2, from the version-specific MSI. Needed by [`Sync-AerieSecrets.ps1`](../secrets/Sync-AerieSecrets.ps1) to write the SSM parameter tree. | Yes — `awsCli` in [`scripts/versions.json`](../versions.json), URL *and* SHA256, verified before the MSI runs. |
 | `OpenSshClient` | The `OpenSSH.Client` Windows optional feature (`ssh.exe`, `ssh-keygen.exe`). Every provisioning script reaches the nodes over SSH. | No — it's an OS feature, so the build is whatever the host's Windows ships. There is nothing to download and nothing honest to pin. |
+| `GitBash` | **Resolved, never installed.** Puts Git for Windows' `bash.exe` ahead of WSL's on `PATH` for the rest of the job. | n/a — see below. |
 | `PowerShell7` | `pwsh`, from the version-specific MSI. `ci.yml` runs [`New-ExternalSecrets.ps1`](../secrets/New-ExternalSecrets.ps1) with it. Installs *beside* Windows PowerShell 5.1, which the provisioning scripts still target. | Yes — `powerShell`, URL and SHA256 (Microsoft's own, from the release's `hashes.sha256`). |
 | `Kubectl` | `kubectl.exe`, which carries kustomize. `ci.yml` builds every kustomization under `deploy/` with it. | Yes — `kubectl`, URL and SHA256 (Kubernetes' own). Held to the same minor as the `k3s` pin; bump the two together. |
 | `Helm` | `helm.exe`. `ci.yml` lints and renders `charts/aerie`. | Yes — `helm`, URL and SHA256 (Helm's own). Held on the v3 line deliberately — see the note in `versions.json`. |
@@ -69,6 +70,44 @@ resolved and reported, never reinstalled.
 and only the two kiosk jobs want it. Ask for it by name. It also has an
 ordering requirement the others don't — `sdkmanager` is a Java program, so
 `actions/setup-java` has to run *before* it.
+
+## The WSL bash trap
+
+`ci.yml` and `publish.yml` set a workflow-level `defaults.run.shell: bash`, and
+the runner resolves that shell from `PATH` — per step, not once per job.
+
+On a Windows host with WSL enabled, `C:\Windows\System32\bash.exe` is the WSL
+launcher, and System32 almost always precedes Git's directory on the machine
+`PATH`. So `bash` resolves to WSL. The runner service runs as LOCAL SYSTEM,
+which WSL refuses to run under, and the first bash step in the job dies with:
+
+```
+Running WSL as local system is not supported.
+Error code: Bash/WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED
+```
+
+It reads like a workflow bug and isn't one — and note that *enabling* WSL is
+what causes it, so it appears on exactly the hosts you'd expect to be better
+equipped.
+
+The `GitBash` dependency is the fix. It finds `bash.exe` by locating Git
+(beside `git.exe`, then the default install directories, then the registry) and
+never by asking `PATH` for `bash`, which is the thing that's broken. It then
+prepends that directory via `$GITHUB_PATH`, which wins over System32 for every
+later step.
+
+Two consequences for anyone editing a workflow:
+
+- **Any job with a `run:` bash step needs `GitBash`**, and the step that
+  ensures it must come *first* — it cannot fix a step that already ran. That
+  includes jobs that need nothing else installed, which is why `ci.yml`'s
+  `api`, `web` and `detect-kiosk-changes` jobs each carry one.
+- Composite actions (`.github/actions/*`) declare `shell: bash` too, but they
+  inherit the job's `PATH`, so they're covered by the job's own step.
+
+The machine `PATH` is deliberately left alone. Reordering System32 for every
+process on a Hyper-V host, to suit one runner service, is not a trade worth
+making.
 
 ## Why Docker isn't installed
 

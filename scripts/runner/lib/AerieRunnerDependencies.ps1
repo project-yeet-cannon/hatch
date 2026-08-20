@@ -1007,3 +1007,105 @@ function Install-AerieAndroidSdk {
     Write-Host "Android SDK: $platform + build-tools $buildTools at $sdkRoot."
     return $sdkRoot
 }
+
+function Get-AerieGitBashPath {
+    <#
+    .SYNOPSIS
+        Returns the full path to Git for Windows' bash.exe, or $null.
+
+    .DESCRIPTION
+        Deliberately does *not* use `Get-Command bash` - that is precisely the
+        thing that is broken. On a Windows host with WSL enabled,
+        C:\Windows\System32\bash.exe is the WSL launcher, and System32 almost
+        always precedes Git's directory on the machine PATH. So `bash` resolves
+        to WSL, and a runner service running as LOCAL SYSTEM gets
+
+            Running WSL as local system is not supported.
+            Error code: Bash/WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED
+
+        on the first `shell: bash` step, which reads like a workflow bug and
+        isn't one. Git Bash is therefore located by where Git actually is,
+        never by asking PATH for 'bash'.
+
+        Three lookups, cheapest first: beside git.exe (which covers a portable
+        or non-default install, and is the one that matters because the runner
+        already needs git), then the default install directories, then the
+        registry key the installer writes.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $candidates = New-Object Collections.Generic.List[string]
+
+    # git.exe normally lives in <root>\cmd\git.exe or <root>\bin\git.exe;
+    # bash.exe is in <root>\bin\bash.exe either way.
+    $git = Get-Command git.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($git) {
+        $root = Split-Path (Split-Path $git.Source -Parent) -Parent
+        $candidates.Add((Join-Path $root 'bin\bash.exe'))
+    }
+
+    $roots = @($env:ProgramW6432, $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA) |
+        Where-Object { $_ } |
+        Select-Object -Unique
+    foreach ($root in $roots) {
+        $candidates.Add((Join-Path $root 'Git\bin\bash.exe'))
+    }
+
+    foreach ($key in @('HKLM:\SOFTWARE\GitForWindows', 'HKLM:\SOFTWARE\WOW6432Node\GitForWindows')) {
+        $installPath = (Get-ItemProperty -Path $key -Name 'InstallPath' -ErrorAction SilentlyContinue).InstallPath
+        if ($installPath) { $candidates.Add((Join-Path $installPath 'bin\bash.exe')) }
+    }
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate -PathType Leaf) { return $candidate }
+    }
+
+    return $null
+}
+
+function Install-AerieGitBash {
+    <#
+    .SYNOPSIS
+        Puts Git for Windows' bash.exe ahead of WSL's on PATH for the rest of
+        the job. Never installs anything.
+
+    .DESCRIPTION
+        Every `run:` block in ci.yml and publish.yml is bash, and those
+        workflows set a workflow-level `defaults.run.shell: bash`. The runner
+        resolves that shell from PATH per step, which means an entry added to
+        $env:GITHUB_PATH here decides which bash every *later* step in the job
+        gets - GITHUB_PATH prepends, so this wins over System32.
+
+        Which is the whole fix: nothing is downloaded, the machine PATH is left
+        alone (reordering System32 for every process on a Hyper-V host, to suit
+        one runner service, is not a trade worth making), and the effect is
+        scoped to the jobs that ask for it.
+
+        This has to be the first step after checkout in any job that runs bash,
+        because it cannot fix a step that already ran.
+
+    .NOTES
+        No -CheckOnly branch that behaves differently: this never mutates the
+        machine, so the check and the fix are the same operation.
+    #>
+    [CmdletBinding()]
+    param([switch]$CheckOnly)
+
+    $bash = Get-AerieGitBashPath
+    if (-not $bash) {
+        throw "Git for Windows' bash.exe not found. Every 'shell: bash' step needs it, and on this host 'bash' otherwise resolves to WSL (C:\Windows\System32\bash.exe), which cannot run under the runner service's LOCAL SYSTEM account. Install Git for Windows - https://git-scm.com/download/win - which the runner needs for checkout anyway."
+    }
+
+    # Proves it is really Git Bash and not something else called bash.exe -
+    # and, more usefully, that it runs at all under this service account.
+    $version = Get-AerieToolVersion -Path $bash -Arguments @('--version') -Pattern 'version (\d+\.\d+\.\d+)'
+    if (-not $version) {
+        throw "'$bash' exists but didn't answer to --version like GNU bash. Check the machine by hand."
+    }
+
+    Publish-AerieToolPath -Directory (Split-Path $bash -Parent)
+
+    Write-Host "Git Bash: $version at $bash (now ahead of any WSL bash for the rest of this job)."
+    return $bash
+}

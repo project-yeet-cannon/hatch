@@ -37,6 +37,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      # Nothing here needs a toolchain - but every `run:` below is bash, and on
+      # a host with WSL enabled `bash` resolves to C:\Windows\System32\bash.exe
+      # (the WSL launcher) rather than Git Bash. The runner service is LOCAL
+      # SYSTEM, which WSL refuses to run under, so those steps fail with
+      # WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED. This puts Git Bash in front for the
+      # rest of the job, and must come before the first bash step since it
+      # cannot fix one that already ran.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
@@ -59,6 +73,20 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      # Nothing here needs a toolchain - but every `run:` below is bash, and on
+      # a host with WSL enabled `bash` resolves to C:\Windows\System32\bash.exe
+      # (the WSL launcher) rather than Git Bash. The runner service is LOCAL
+      # SYSTEM, which WSL refuses to run under, so those steps fail with
+      # WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED. This puts Git Bash in front for the
+      # rest of the job, and must come before the first bash step since it
+      # cannot fix one that already ran.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -131,7 +159,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency PowerShell7, Kubectl, Helm, Jq
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash, PowerShell7, Kubectl, Helm, Jq
 
       # Ahead of the build below because it is the more specific failure - a
       # stale manifest still builds perfectly, and a missing one is reported
@@ -239,6 +267,20 @@ jobs:
         with:
           fetch-depth: 2
 
+      # Nothing here needs a toolchain - but every `run:` below is bash, and on
+      # a host with WSL enabled `bash` resolves to C:\Windows\System32\bash.exe
+      # (the WSL launcher) rather than Git Bash. The runner service is LOCAL
+      # SYSTEM, which WSL refuses to run under, so those steps fail with
+      # WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED. This puts Git Bash in front for the
+      # rest of the job, and must come before the first bash step since it
+      # cannot fix one that already ran.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash
+
       - name: Check for changes under apps/kiosk
         id: filter
         run: |
@@ -273,7 +315,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency AndroidSdk
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash, AndroidSdk
 
       - name: Lint and build
         working-directory: apps/kiosk

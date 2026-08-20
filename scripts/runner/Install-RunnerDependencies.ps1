@@ -57,8 +57,8 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('AwsCli', 'OpenSshClient', 'PowerShell7', 'Kubectl', 'Helm', 'Jq', 'GitHubCli', 'Docker', 'AndroidSdk')]
-    [string[]]$Dependency = @('AwsCli', 'OpenSshClient', 'PowerShell7', 'Kubectl', 'Helm', 'Jq', 'GitHubCli', 'Docker'),
+    [ValidateSet('AwsCli', 'OpenSshClient', 'GitBash', 'PowerShell7', 'Kubectl', 'Helm', 'Jq', 'GitHubCli', 'Docker', 'AndroidSdk')]
+    [string[]]$Dependency = @('AwsCli', 'OpenSshClient', 'GitBash', 'PowerShell7', 'Kubectl', 'Helm', 'Jq', 'GitHubCli', 'Docker'),
 
     [switch]$CheckOnly
 )
@@ -82,6 +82,7 @@ foreach ($name in ($Dependency | Select-Object -Unique)) {
         switch ($name) {
             'AwsCli' { Install-AerieAwsCli -CheckOnly:$CheckOnly | Out-Null }
             'OpenSshClient' { Install-AerieOpenSshClient -CheckOnly:$CheckOnly }
+            'GitBash' { Install-AerieGitBash -CheckOnly:$CheckOnly | Out-Null }
             'PowerShell7' { Install-AeriePowerShell7 -CheckOnly:$CheckOnly | Out-Null }
             'Kubectl' { Install-AerieKubectl -CheckOnly:$CheckOnly | Out-Null }
             'Helm' { Install-AerieHelm -CheckOnly:$CheckOnly | Out-Null }

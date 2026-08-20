@@ -81,7 +81,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitHubCli, Jq
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash, GitHubCli, Jq
 
       - name: Wait for CI to succeed
         uses: ./.github/actions/wait-for-ci
@@ -108,7 +108,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash, Docker
 
       - name: Log in to the Container registry
         uses: docker/login-action@v4
@@ -169,7 +169,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker, Jq
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash, Docker, Jq
 
       - name: Check for changes under containers/aerie-db
         id: filter
@@ -205,7 +205,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash, Docker
 
       - name: Log in to the Container registry
         uses: docker/login-action@v4
@@ -263,7 +263,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker, Jq
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash, Docker, Jq
 
       - name: Check for changes under containers/backup
         id: filter
@@ -299,7 +299,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash, Docker
 
       - name: Log in to the Container registry
         uses: docker/login-action@v4
@@ -357,7 +357,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker, Jq
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash, Docker, Jq
 
       - name: Check for changes under containers/kuma-provision
         id: filter
@@ -393,7 +393,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash, Docker
 
       - name: Log in to the Container registry
         uses: docker/login-action@v4
@@ -451,7 +451,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker, Jq
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash, Docker, Jq
 
       - name: Check for changes under containers/caddy
         id: filter
@@ -487,7 +487,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash, Docker
 
       - name: Log in to the Container registry
         uses: docker/login-action@v4
@@ -545,7 +545,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker, Jq
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash, Docker, Jq
 
       - name: Check for changes under apps/kiosk
         id: filter
@@ -585,7 +585,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency Docker, AndroidSdk
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency GitBash, Docker, AndroidSdk
 
       - name: Write release signing config
         working-directory: apps/kiosk
