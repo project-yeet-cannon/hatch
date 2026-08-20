@@ -46,14 +46,37 @@
 #     charts/cluster/grafana-dashboard.json - the project's own maintained
 #     dashboard, replication lag and instance count among its panels.
 #   - flux.json: github.com/fluxcd/flux2-monitoring-example,
-#     monitoring/configs/dashboards/cluster.json ("Flux Cluster Stats") - the
-#     project's own example, already cited by ../scrape/flux.yaml for the
-#     PodMonitor these panels read. Chosen over the same repo's
-#     control-plane.json (controller CPU/memory and throughput, not object
-#     health) because its "Failing Reconcilers" and "Suspended Objects" panels
-#     are the visual form of the exact metric - gotk_reconcile_condition -
-#     6b.8's FluxReconciliationFailing alert evaluates; logs.json needs Loki,
-#     which this phase does not run.
+#     monitoring/configs/dashboards/control-plane.json ("Flux Control Plane")
+#     - the project's own example, already cited by ../scrape/flux.yaml for
+#     the PodMonitor these panels read. Not that repo's cluster.json ("Flux
+#     Cluster Stats"), despite its "Failing Reconcilers"/"Suspended Objects"
+#     panels reading as the closer match to 6b.8's FluxReconciliationFailing
+#     alert: verified live against the pinned flux v2.9.4
+#     (scripts/versions.json) that cluster.json's panels all key off
+#     gotk_resource_info, a metric this Flux version's controllers do not
+#     expose - every panel on it would have rendered empty. control-plane.json
+#     keys off controller_runtime_reconcile_total, go_info,
+#     rest_client_requests_total and friends, all confirmed present with data
+#     via observability/flux-system's own scrape (../scrape/flux.yaml) before
+#     this file was written. logs.json needs Loki, which this phase does not
+#     run.
+#
+# **Every dashboard's own template-variable/macro tokens collide textually
+# with ../../../observability.yaml's postBuild.substituteFrom, and this repo
+# runs with the StrictPostBuildSubstitutions feature gate on** - found live,
+# 2026-08-19, as observability-config failing to reconcile with "variable
+# substitution failed: variable not set (strict mode)" on
+# dashboard-windows-exporter (its legacy Table-panel \${__cell_4}/\${__cell_5}
+# drill-down macros), then again with "missing closing brace" on
+# dashboard-longhorn (its \${__field.labels.*} display-name macros, whose
+# dotted contents aren't a bare identifier). Every \${TOKEN} in all four JSON
+# files here - datasource variables and Grafana macros alike - is escaped to
+# \$\${TOKEN}, which Flux renders as the literal \${TOKEN} Grafana expects
+# instead of trying to resolve TOKEN against aerie-cluster-config. **If you
+# update or replace one of these dashboards, grep the new JSON for \${ and
+# escape every hit before committing** - kubectl kustomize does not catch
+# this, since kustomize itself never touches postBuild tokens; only Flux's
+# own reconcile does, on the live cluster.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 configMapGenerator:
