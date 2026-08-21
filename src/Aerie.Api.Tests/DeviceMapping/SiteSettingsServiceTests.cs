@@ -85,6 +85,77 @@ public class SiteSettingsServiceTests
         Assert.Equal("123.apps.googleusercontent.com", snapshot.GoogleClientId);
     }
 
+    [Fact]
+    public async Task HazardProviders_DefaultToTheTwoKeylessOnes_WhenUnset()
+    {
+        // Both are keyless, so an operator who never opens the settings page
+        // still gets alerts - the defaults are the feature being on.
+        var snapshot = await NewService().GetAsync(CancellationToken.None);
+
+        Assert.Equal(HazardProviders.Nws, snapshot.WeatherAlertProvider);
+        Assert.Equal(HazardProviders.OpenMeteo, snapshot.AirQualityProvider);
+    }
+
+    [Fact]
+    public async Task HazardProviders_ReadTheStoredValue_IncludingNone()
+    {
+        var snapshot = await NewService(
+                (SiteSettingKeys.WeatherAlertProvider, HazardProviders.None),
+                (SiteSettingKeys.AirQualityProvider, "some-other-provider"))
+            .GetAsync(CancellationToken.None);
+
+        // The snapshot reports what was typed; HazardProviderResolver is what
+        // decides that one of these resolves to nothing.
+        Assert.Equal(HazardProviders.None, snapshot.WeatherAlertProvider);
+        Assert.Equal("some-other-provider", snapshot.AirQualityProvider);
+    }
+
+    [Fact]
+    public async Task HazardProviders_FallBackToTheDefault_WhenBlank()
+    {
+        var snapshot = await NewService((SiteSettingKeys.WeatherAlertProvider, "  ")).GetAsync(CancellationToken.None);
+
+        Assert.Equal(HazardProviders.Nws, snapshot.WeatherAlertProvider);
+    }
+
+    [Fact]
+    public async Task WeatherAlertContact_IsNull_WhenUnset()
+    {
+        var snapshot = await NewService().GetAsync(CancellationToken.None);
+
+        Assert.Null(snapshot.WeatherAlertContact);
+    }
+
+    [Fact]
+    public async Task WeatherAlertContact_ReadsTheStoredValue()
+    {
+        var snapshot = await NewService((SiteSettingKeys.WeatherAlertContact, "aerie@example.com"))
+            .GetAsync(CancellationToken.None);
+
+        Assert.Equal("aerie@example.com", snapshot.WeatherAlertContact);
+    }
+
+    [Fact]
+    public async Task HazardThresholds_UseTheirDefaults_WhenUnset()
+    {
+        var snapshot = await NewService().GetAsync(CancellationToken.None);
+
+        Assert.Equal(101, snapshot.AirQualityAlertThresholdAqi);
+        Assert.Equal(48, snapshot.HazardMaxSeverityAgeHours);
+    }
+
+    [Fact]
+    public async Task HazardThresholds_ReadStoredValuesAndIgnoreNonsense()
+    {
+        var snapshot = await NewService(
+                (SiteSettingKeys.AirQualityAlertThresholdAqi, "151"),
+                (SiteSettingKeys.HazardMaxSeverityAgeHours, "two days"))
+            .GetAsync(CancellationToken.None);
+
+        Assert.Equal(151, snapshot.AirQualityAlertThresholdAqi);
+        Assert.Equal(48, snapshot.HazardMaxSeverityAgeHours);
+    }
+
     private sealed class TestDbContextFactory(DbContextOptions<AerieContext> options) : IDbContextFactory<AerieContext>
     {
         public AerieContext CreateDbContext() => new(options);

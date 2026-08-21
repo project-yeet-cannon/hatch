@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using Aerie.Api.Common;
+using Aerie.Api.Ef;
 using Aerie.Api.Services.Calendar;
 using Aerie.Api.Services.DeviceMapping;
 
@@ -27,7 +28,12 @@ internal sealed class StubSiteSettings(
         GoogleClientId: googleClientId,
         GoogleClientSecret: googleClientSecret,
         GoogleOAuthRedirectUri: googleOAuthRedirectUri,
-        CalendarAgendaDays: calendarAgendaDays));
+        CalendarAgendaDays: calendarAgendaDays,
+        WeatherAlertProvider: HazardProviders.Nws,
+        AirQualityProvider: HazardProviders.OpenMeteo,
+        WeatherAlertContact: null,
+        AirQualityAlertThresholdAqi: 101,
+        HazardMaxSeverityAgeHours: 48));
 }
 
 /// <summary>Records every request and answers from a queue of canned responses, so a test can assert on the form Google would have received.</summary>

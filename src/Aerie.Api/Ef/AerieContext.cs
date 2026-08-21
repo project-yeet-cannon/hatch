@@ -22,6 +22,9 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
     public DbSet<EfCalendarEvent> CalendarEvents => Set<EfCalendarEvent>();
     public DbSet<EfOAuthState> OAuthStates => Set<EfOAuthState>();
 
+    public DbSet<EfWeatherAlert> WeatherAlerts => Set<EfWeatherAlert>();
+    public DbSet<EfAirQualitySample> AirQualitySamples => Set<EfAirQualitySample>();
+
     public DbSet<EfAuthGrant> AuthGrants => Set<EfAuthGrant>();
     public DbSet<EfAuthInvite> AuthInvites => Set<EfAuthInvite>();
 
@@ -74,6 +77,13 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
             .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<EfOAuthState>();
+
+        // Hazards hang off nothing: an alert is about the site's coordinates,
+        // not about any device or zone, and both tables are written by the
+        // sync job from whatever provider the settings name. Their keys are
+        // (Source, provider id) and (Source, hour), declared on the entities.
+        modelBuilder.Entity<EfWeatherAlert>();
+        modelBuilder.Entity<EfAirQualitySample>();
 
         // Auth lives in the core context and the public schema on purpose: it
         // is infrastructure every module sits behind, and a Modules/ schema

@@ -71,5 +71,10 @@ internal sealed class FakeSiteSettingsService(string? mediaBaseUrl = null, int o
         GoogleClientId: null,
         GoogleClientSecret: null,
         GoogleOAuthRedirectUri: null,
-        CalendarAgendaDays: 2));
+        CalendarAgendaDays: 2,
+        WeatherAlertProvider: HazardProviders.Nws,
+        AirQualityProvider: HazardProviders.OpenMeteo,
+        WeatherAlertContact: null,
+        AirQualityAlertThresholdAqi: 101,
+        HazardMaxSeverityAgeHours: 48));
 }

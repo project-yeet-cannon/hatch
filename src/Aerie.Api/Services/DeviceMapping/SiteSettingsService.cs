@@ -19,7 +19,12 @@ public record SiteSettingsSnapshot(
     string? GoogleClientId,
     string? GoogleClientSecret,
     string? GoogleOAuthRedirectUri,
-    int CalendarAgendaDays);
+    int CalendarAgendaDays,
+    string WeatherAlertProvider,
+    string AirQualityProvider,
+    string? WeatherAlertContact,
+    int AirQualityAlertThresholdAqi,
+    int HazardMaxSeverityAgeHours);
 
 public interface ISiteSettingsService
 {
@@ -75,7 +80,20 @@ public class SiteSettingsService(IDbContextFactory<AerieContext> dbFactory, Time
                 GoogleClientSecret: Deobfuscated(values.GetValueOrDefault(SiteSettingKeys.GoogleClientSecret)),
                 GoogleOAuthRedirectUri: NullIfEmpty(values.GetValueOrDefault(SiteSettingKeys.GoogleOAuthRedirectUri)),
                 // Today plus tomorrow: the window the kiosk agenda is sized for.
-                CalendarAgendaDays: ParseInt(values, SiteSettingKeys.CalendarAgendaDays, 2));
+                CalendarAgendaDays: ParseInt(values, SiteSettingKeys.CalendarAgendaDays, 2),
+                // Both providers are keyless, so they can default to on: an
+                // operator who never opens the settings page still gets alerts.
+                // HazardProviderResolver decides what an unknown name means -
+                // the snapshot only reports what was typed.
+                WeatherAlertProvider: NullIfEmpty(values.GetValueOrDefault(SiteSettingKeys.WeatherAlertProvider)) ?? HazardProviders.Nws,
+                AirQualityProvider: NullIfEmpty(values.GetValueOrDefault(SiteSettingKeys.AirQualityProvider)) ?? HazardProviders.OpenMeteo,
+                WeatherAlertContact: NullIfEmpty(values.GetValueOrDefault(SiteSettingKeys.WeatherAlertContact)),
+                // 101 is the bottom of "Unhealthy for Sensitive Groups". Below
+                // it the air is fine and the banner would be furniture.
+                AirQualityAlertThresholdAqi: ParseInt(values, SiteSettingKeys.AirQualityAlertThresholdAqi, 101),
+                // Two days, matching the agenda half of the kiosk: a warning
+                // that starts Thursday is not what a Tuesday glance is for.
+                HazardMaxSeverityAgeHours: ParseInt(values, SiteSettingKeys.HazardMaxSeverityAgeHours, 48));
 
             cached = snapshot;
             expiresAt = time.GetUtcNow() + CacheTtl;

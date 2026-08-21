@@ -10,6 +10,7 @@ using Aerie.Api.Services.Calendar;
 using Aerie.Api.Services.ClimateControl;
 using Aerie.Api.Services.Dashboard;
 using Aerie.Api.Services.DeviceMapping;
+using Aerie.Api.Services.Hazards;
 using Aerie.Api.Services.Media;
 using Aerie.Api.Services.Routines;
 using HADotNet.Core;
@@ -158,6 +159,12 @@ builder.Services.AddScoped<IGoogleCalendarClient, GoogleCalendarClient>();
 builder.Services.AddScoped<ICalendarDiscoveryService, CalendarDiscoveryService>();
 builder.Services.AddScoped<ICalendarSyncService, CalendarSyncService>();
 builder.Services.AddScoped<ICalendarAgendaService, CalendarAgendaService>();
+
+// Outdoor hazards (docs/plans/kiosk.md track B). The resolver is a singleton
+// with no providers registered behind it yet - it answers null, which is
+// exactly what "no provider" already means to it, so the feature is off rather
+// than broken until B2/B3 add the two classes.
+builder.Services.AddSingleton<IHazardProviderResolver, HazardProviderResolver>();
 
 // Auth (docs/plans/auth.md). Wired but switched off: AuthMiddleware and
 // AuthController both run, and both no-op or allow, until Auth:Enabled becomes

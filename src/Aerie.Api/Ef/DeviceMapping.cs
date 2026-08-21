@@ -153,6 +153,21 @@ public static class SiteSettingKeys
 
     /// <summary>How many days of agenda the kiosk shows, counting today. Defaults to 2 - today and tomorrow.</summary>
     public const string CalendarAgendaDays = "CalendarAgendaDays";
+
+    /// <summary>Which IWeatherAlertProvider supplies watches and warnings, by its Name - "nws" (default) or "none" to disable. The seam that keeps NWS's US-only reach from being a decision baked into the schema; see HazardProviders.</summary>
+    public const string WeatherAlertProvider = "WeatherAlertProvider";
+
+    /// <summary>Which IAirQualityProvider supplies AQI, by its Name - "open-meteo" (default) or "none" to disable.</summary>
+    public const string AirQualityProvider = "AirQualityProvider";
+
+    /// <summary>Contact string (email or site URL) sent in the outbound User-Agent to the weather alert provider. NWS asks callers to identify themselves and documents that anonymous traffic may be throttled or blocked.</summary>
+    public const string WeatherAlertContact = "WeatherAlertContact";
+
+    /// <summary>US AQI at or above which air quality is worth showing on the wall. Defaults to 101, the bottom of "Unhealthy for Sensitive Groups" - below that, clean air is not news.</summary>
+    public const string AirQualityAlertThresholdAqi = "AirQualityAlertThresholdAqi";
+
+    /// <summary>How far ahead, in hours, a hazard still counts as "today or the next day". Defaults to 48. Bounds both what the providers keep and what reaches the dashboard.</summary>
+    public const string HazardMaxSeverityAgeHours = "HazardMaxSeverityAgeHours";
 }
 
 /// <summary>A single numeric sample from a DeviceChannel. Replaces the wide EfEnvironmentReading table - every sample is "channel X had value V at time T."</summary>
