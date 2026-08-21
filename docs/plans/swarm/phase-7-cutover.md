@@ -417,7 +417,7 @@ order the evening runs in — but they are never mixed inside one step:
 | *manual* | hands on a UI, a device, or a power switch. Nothing to paste. |
 | *both* | the body separates them: **By hand** first, **then run**. |
 
-- [ ] **1. Take the old path out of your own hands** — *scripted*
+- [x] **1. Take the old path out of your own hands** — *scripted*
 
   <details><summary>One commit, and the reason the old plan's second half is gone</summary>
 
@@ -467,7 +467,7 @@ order the evening runs in — but they are never mixed inside one step:
 
   </details>
 
-- [ ] **2. Stop the old stack — all of it, and never `-v`** — *scripted*
+- [x] **2. Stop the old stack — all of it, and never `-v`** — *scripted*
 
   <details><summary>The command, the two flags that matter, and what the stop actually buys</summary>
 
@@ -513,7 +513,28 @@ order the evening runs in — but they are never mixed inside one step:
   reach it. Phase 8's CronJob inherits that policy against the same S3 repo.
 
   Only the `backup` service needs to be up — the repo passwords live in that
-  container's environment, and `restic tag` reads nothing from `db`:
+  container's environment, and `restic tag` reads nothing from `db`. Dispatch
+  **Cutover: tag the last old-world snapshot**
+  ([`cutover-tag-snapshot.yml`](../../../.github/workflows/cutover-tag-snapshot.yml)),
+  which runs on the `legacy-deployer` runner: the same box, the same
+  `DOCKER_HOST`, and the containers `cd.yml` itself created. It takes one
+  input, the compose project name, and `aerie` is already the answer unless the
+  runner's workspace has moved. It starts `backup`, tags `latest` in both
+  repos, **asserts** the exit criterion below rather than printing it for
+  someone to read, and stops `backup` again on the way out — including when the
+  tag fails, because a `backup` left running is the one container of a retired
+  stack still on the daily schedule, dumping from a `db` that 7b.2 stopped.
+
+  Nothing in the workflow may create a container, and it holds no credentials:
+  `start`, `stop` and `exec` all act on what already exists, which is where
+  `RESTIC_PASSWORD` and the restic IAM user's keys live — 7a.6's `start`,
+  not `up -d`, in workflow form. It reads each repository location out of the
+  container with `printenv` and hands it to restic as a fixed argv rather than
+  sending the loop below across the Windows-runner-to-Linux-container boundary,
+  where PowerShell's command-line quoting fragments a multi-line shell script;
+  `cd.yml`'s `init-repos.sh` step is the same lesson, learned the expensive way.
+
+  By hand instead, from the old host, if the runner is not available:
 
   ```sh
   docker compose -f compose.prod.yml -f compose.backup.yml start backup
@@ -526,7 +547,8 @@ order the evening runs in — but they are never mixed inside one step:
 
   Inside the container, and `latest` rather than a short ID looked up with
   `jq` — [the image](../../../containers/backup/Dockerfile) has restic and
-  sqlite but no jq.
+  sqlite but no jq. The workflow parses `snapshots --json` on the runner side
+  for the same reason.
 
   Phase 8 gets a `--keep-tag cutover-final` on its `forget` — recorded in that
   phase's handover below, because a tag is worthless if the thing that prunes
@@ -540,6 +562,7 @@ order the evening runs in — but they are never mixed inside one step:
 
   </details>
 
+
 - [ ] **4. Point pfSense Unbound at the VIP** — *manual*
 
   <details><summary>The one line this phase was originally described as</summary>
@@ -552,6 +575,8 @@ order the evening runs in — but they are never mixed inside one step:
   server:local-zone: "${DOMAIN}." redirect
   server:local-data: "${DOMAIN}. IN A ${INGRESS_VIP}"
   ```
+
+    NOTE - IT USED TO BE 192.168.1.236, CHANGED TO 192.168.1.230
 
   One address changed, nothing else. Save; Unbound restarts and its own cache
   goes with it.
@@ -696,6 +721,9 @@ order the evening runs in — but they are never mixed inside one step:
     [`compose.observability.yml`](../../../compose.observability.yml),
     [`compose.metrics.yml`](../../../compose.metrics.yml),
     [`compose.backup.yml`](../../../compose.backup.yml)
+  - [`.github/workflows/cutover-tag-snapshot.yml`](../../../.github/workflows/cutover-tag-snapshot.yml)
+    — 7b.3's wrapper, which exists to run once against containers this commit
+    stops describing. Its own header carries the TODO pointing here.
   - [`.github/workflows/cd.yml`](../../../.github/workflows/cd.yml) — whole
     file, which 5b.13 spent a step making possible by moving the two host
     installs into Provision 0. 7b.1 left it commented out rather than deleted,
@@ -1141,6 +1169,7 @@ compose.yaml                # SURVIVES - local dev, untouched by this phase
 
 .github/workflows/
   cd.yml                    # 7b.9, deleted whole
+  cutover-tag-snapshot.yml  # 7b.3, new - and 7b.9, deleted with the compose files
   publish.yml               # 7b.9, minus the aerie-caddy job
   stagger-update-reboots.yml# 7b.9, plan job retargeted off legacy-deployer
   verify-cutover.yml        # 7c.11, new
