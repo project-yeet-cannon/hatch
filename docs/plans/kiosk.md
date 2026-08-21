@@ -29,7 +29,7 @@ and lint it and leave the clicking to a human.
 ## Status
 
 - [x] **A1** — Calendar schema + settings keys
-- [ ] **A2** — Google OAuth connect flow + token refresh
+- [x] **A2** — Google OAuth connect flow + token refresh
 - [ ] **A3** — Calendar discovery + visibility API
 - [ ] **A4** — Admin Calendars page
 - [ ] **A5** — Event sync job
@@ -269,7 +269,11 @@ can be toggled on or off.
    (updating `Name`/`ProviderColor`/`TimeZone`/`IsPrimary`, **never**
    `Included`/`ColorOverride` — those are the admin's), and delete local rows
    whose calendar no longer appears.
-3. `Controllers/CalendarsController.cs` (route `api/calendar`), following
+3. Call `SyncCalendarListAsync` from `CalendarOAuthController.Callback`, where
+   A2 left the comment marking the spot — A2 shipped without it because
+   discovery didn't exist yet, so a freshly connected account currently arrives
+   with an empty calendar list.
+4. `Controllers/CalendarsController.cs` (route `api/calendar`), following
    `RoutinesController`'s DTO-and-write-request shape with records in
    `Models/Calendar/`:
    - `GET accounts` → accounts, each with its calendars, `NeedsReauth`,
@@ -281,7 +285,11 @@ can be toggled on or off.
      is logged, not fatal: the operator asked for it gone locally.
    - `POST sync` → runs A5's sync service immediately, so "I just toggled a
      calendar on" doesn't mean waiting for the next firing.
-4. Update `docs/dashboard-api-manifest.md`.
+5. Update `docs/dashboard-api-manifest.md` — which is still the stale
+   "nothing here is implemented yet" proposal it was written as, and lists none
+   of the endpoints added since (`/api/routines`, `/api/settings`,
+   `/api/kiosk`…). A2 deliberately didn't append two OAuth routes to a document
+   that isn't tracking the surface; either bring it current here or retire it.
 
 **Tests:** `CalendarDiscoveryServiceTests` against the in-memory provider —
 upsert preserves `Included` and `ColorOverride` across a re-sync, and a

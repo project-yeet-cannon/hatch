@@ -5,6 +5,16 @@ using Microsoft.EntityFrameworkCore;
 namespace Aerie.Api.Ef;
 
 /// <summary>
+/// The values EfCalendarAccount.Provider takes. A string rather than an enum
+/// so a second provider is a new constant, not a migration - this is the one
+/// place the spelling is decided.
+/// </summary>
+public static class CalendarProviders
+{
+    public const string Google = "google";
+}
+
+/// <summary>
 /// One connected calendar provider account - today always a Google account an
 /// admin authorized through CalendarOAuthController. Holds the OAuth grant;
 /// the calendars it can see hang off it as EfCalendar rows.

@@ -4,6 +4,7 @@ using Aerie.Api.Jobs;
 using Aerie.Api.Models.Environment;
 using Aerie.Api.Modules;
 using Aerie.Api.Services;
+using Aerie.Api.Services.Calendar;
 using Aerie.Api.Services.ClimateControl;
 using Aerie.Api.Services.Dashboard;
 using Aerie.Api.Services.DeviceMapping;
@@ -139,6 +140,16 @@ builder.Services.AddTransient<IHomeAssistantCommandService, HomeAssistantCommand
 // nothing else should be resolving IHomeAssistantCommandService directly (see
 // docs/climate-brain-architecture.md Phase 1).
 builder.Services.AddScoped<IClimateCommandService, ClimateCommandService>();
+
+// Family calendar (docs/plans/kiosk.md track A). One named client covers every
+// host Google answers on - accounts.google.com and oauth2.googleapis.com for
+// OAuth, www.googleapis.com for the Calendar API - so it carries no
+// BaseAddress and the services call absolute URLs. The explicit timeout is the
+// fail-soft convention: a slow Google leaves the calendar stale, it never
+// stalls a request.
+builder.Services.AddHttpClient(GoogleOAuthService.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
+builder.Services.AddScoped<IGoogleOAuthService, GoogleOAuthService>();
+builder.Services.AddScoped<IGoogleTokenProvider, GoogleTokenProvider>();
 
 // Jobs
 builder.Services.AddTransient<IAerieJob, SampleChannels>();
