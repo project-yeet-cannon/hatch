@@ -92,6 +92,20 @@ jobs:
       # $LASTEXITCODE is checked after each native call: a multi-line `run:`
       # under PowerShell only surfaces the *last* command's exit code, so an
       # unchecked failure here would be masked by the `stop` that follows it.
+      #
+      # ASCII only below this line - no em dashes, no curly quotes, in code OR
+      # in comments. The runner writes this block to a temp .ps1 as UTF-8 with
+      # no BOM, and Windows PowerShell 5.1 decodes a BOM-less script as the
+      # ANSI code page (CP1252 here) rather than as UTF-8. An em dash's bytes
+      # (E2 80 94) come back as three CP1252 characters ending in 0x94, which
+      # is a curly closing double quote - and PowerShell treats curly quotes as
+      # real string delimiters. One em dash inside a double-quoted string
+      # therefore ends that string early and the whole file stops parsing, with
+      # errors pointing at innocent lines further down. It is a parse failure,
+      # so nothing runs at all: the em dash that caused it took the containers
+      # nowhere. Every other PowerShell `run:` block in this repo is already
+      # ASCII; the prose in this file's YAML comments above is free to use em
+      # dashes, because those are never handed to a shell.
       - name: Tag the newest snapshot in both repos, then verify
         shell: powershell
         env:
@@ -172,13 +186,13 @@ jobs:
 
           if ($failure) { throw $failure }
           if ($stopExit -ne 0) {
-            throw "The tag landed, but ``docker compose stop backup`` failed with exit code $stopExit. Stop it by hand — a running backup container will try the 03:10 dump against a stopped db."
+            throw "The tag landed, but ``docker compose stop backup`` failed with exit code $stopExit. Stop it by hand: a running backup container will try the 03:10 dump against a stopped db."
           }
 
           # The snapshot's date is the point of printing it: it is from the
           # last scheduled run *before* 7b.2's stop, not from tonight.
           $lines = @(
-            '### 7b.3 — `cutover-final` tagged',
+            '### 7b.3: `cutover-final` tagged',
             '',
             '| Repository | Snapshot | Taken | Tags |',
             '|---|---|---|---|'
