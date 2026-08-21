@@ -17,6 +17,11 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
     public DbSet<EfRoutine> Routines => Set<EfRoutine>();
     public DbSet<EfRoutineAction> RoutineActions => Set<EfRoutineAction>();
 
+    public DbSet<EfCalendarAccount> CalendarAccounts => Set<EfCalendarAccount>();
+    public DbSet<EfCalendar> Calendars => Set<EfCalendar>();
+    public DbSet<EfCalendarEvent> CalendarEvents => Set<EfCalendarEvent>();
+    public DbSet<EfOAuthState> OAuthStates => Set<EfOAuthState>();
+
     public DbSet<EfCommand> Commands => Set<EfCommand>();
     public DbSet<EfControlDecision> ControlDecisions => Set<EfControlDecision>();
     public DbSet<EfControlOverride> ControlOverrides => Set<EfControlOverride>();
@@ -63,6 +68,23 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
             .HasOne(a => a.Channel)
             .WithMany()
             .HasForeignKey(a => a.ChannelId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<EfOAuthState>();
+
+        // A calendar has no meaning without the account whose grant reaches it,
+        // and an event has none without its calendar - disconnecting an account
+        // takes the whole subtree, cached events included.
+        modelBuilder.Entity<EfCalendar>()
+            .HasOne(c => c.Account)
+            .WithMany(a => a.Calendars)
+            .HasForeignKey(c => c.AccountId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<EfCalendarEvent>()
+            .HasOne(e => e.Calendar)
+            .WithMany(c => c.Events)
+            .HasForeignKey(e => e.CalendarId)
             .OnDelete(DeleteBehavior.Cascade);
 
         // Commands cascade with their channel, the same way Measurements and

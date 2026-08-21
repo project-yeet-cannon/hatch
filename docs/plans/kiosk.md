@@ -28,7 +28,7 @@ and lint it and leave the clicking to a human.
 
 ## Status
 
-- [ ] **A1** — Calendar schema + settings keys
+- [x] **A1** — Calendar schema + settings keys
 - [ ] **A2** — Google OAuth connect flow + token refresh
 - [ ] **A3** — Calendar discovery + visibility API
 - [ ] **A4** — Admin Calendars page

@@ -138,6 +138,21 @@ public static class SiteSettingKeys
     public const string KioskWifiSsid = "KioskWifiSsid";
     public const string KioskWifiPassword = "KioskWifiPassword";
     public const string KioskWifiSecurityType = "KioskWifiSecurityType";
+
+    /// <summary>OAuth client credentials for the operator's own Google Cloud project, used to connect family calendars - see CalendarOAuthController. Operator-supplied rather than shipped, since Aerie redeploys to other households (docs/ethos.md).</summary>
+    public const string GoogleClientId = "GoogleClientId";
+    public const string GoogleClientSecret = "GoogleClientSecret";
+
+    /// <summary>
+    /// Optional exact-match override for the OAuth redirect URI. When blank it's
+    /// derived from the incoming request. It exists because Google compares the
+    /// redirect URI byte-for-byte against a registered value, and a proxy can
+    /// rewrite what the app believes its own host is.
+    /// </summary>
+    public const string GoogleOAuthRedirectUri = "GoogleOAuthRedirectUri";
+
+    /// <summary>How many days of agenda the kiosk shows, counting today. Defaults to 2 - today and tomorrow.</summary>
+    public const string CalendarAgendaDays = "CalendarAgendaDays";
 }
 
 /// <summary>A single numeric sample from a DeviceChannel. Replaces the wide EfEnvironmentReading table - every sample is "channel X had value V at time T."</summary>

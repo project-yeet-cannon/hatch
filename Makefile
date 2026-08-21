@@ -41,13 +41,18 @@ test-web:
 		(cd ./src/Aerie.Web/apps/$$app && nvm use && npm ci && npm run lint && npm run test --if-present && npm run build); \
 	done'
 
+# Which DbContext the ef-* targets act on. Defaults to the core schema; a module
+# owns its own context and migrations folder (see src/Aerie.Api/Modules/README.md),
+# so target one with e.g. `make ef-database-update context=StorageContext`.
+context ?= AerieContext
+
 # make ef-migration migration=MyMigrationName
 ef-migration:
-	dotnet ef migrations add $(migration) --project ./src/Aerie.Api/Aerie.Api.csproj
+	dotnet ef migrations add $(migration) --context $(context) --project ./src/Aerie.Api/Aerie.Api.csproj
 
 # Applies pending EF migrations to the running `db` container without starting the full app (no HA/Quartz dependency).
 ef-database-update:
-	dotnet ef database update --project ./src/Aerie.Api/Aerie.Api.csproj
+	dotnet ef database update --context $(context) --project ./src/Aerie.Api/Aerie.Api.csproj
 
 # Opens a psql shell against the running `db` container's aerie database, for manual inspection.
 db-shell:

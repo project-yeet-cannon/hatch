@@ -67,5 +67,9 @@ internal sealed class FakeSiteSettingsService(string? mediaBaseUrl = null, int o
         DefaultComfortLowF: 68m,
         DefaultComfortHighF: 72m,
         MediaLibraryBaseUrl: mediaBaseUrl,
-        OverrideBackoffMinutes: overrideBackoffMinutes));
+        OverrideBackoffMinutes: overrideBackoffMinutes,
+        GoogleClientId: null,
+        GoogleClientSecret: null,
+        GoogleOAuthRedirectUri: null,
+        CalendarAgendaDays: 2));
 }

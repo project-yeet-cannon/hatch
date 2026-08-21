@@ -1,4 +1,5 @@
 using System.Globalization;
+using Aerie.Api.Common;
 using Aerie.Api.Ef;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,7 +15,11 @@ public record SiteSettingsSnapshot(
     decimal DefaultComfortLowF,
     decimal DefaultComfortHighF,
     string? MediaLibraryBaseUrl,
-    int OverrideBackoffMinutes);
+    int OverrideBackoffMinutes,
+    string? GoogleClientId,
+    string? GoogleClientSecret,
+    string? GoogleOAuthRedirectUri,
+    int CalendarAgendaDays);
 
 public interface ISiteSettingsService
 {
@@ -62,7 +67,15 @@ public class SiteSettingsService(IDbContextFactory<AerieContext> dbFactory, Time
                 // thermostat gets the evening they wanted, short enough that a
                 // one-off adjustment doesn't silently disable the controller
                 // for the rest of the week.
-                OverrideBackoffMinutes: ParseInt(values, SiteSettingKeys.OverrideBackoffMinutes, 120));
+                OverrideBackoffMinutes: ParseInt(values, SiteSettingKeys.OverrideBackoffMinutes, 120),
+                GoogleClientId: NullIfEmpty(values.GetValueOrDefault(SiteSettingKeys.GoogleClientId)),
+                // The read side has to hand back something usable, so the
+                // client secret is deobfuscated here - the same trade
+                // KioskProvisioningController makes with the Wi-Fi password.
+                GoogleClientSecret: Deobfuscated(values.GetValueOrDefault(SiteSettingKeys.GoogleClientSecret)),
+                GoogleOAuthRedirectUri: NullIfEmpty(values.GetValueOrDefault(SiteSettingKeys.GoogleOAuthRedirectUri)),
+                // Today plus tomorrow: the window the kiosk agenda is sized for.
+                CalendarAgendaDays: ParseInt(values, SiteSettingKeys.CalendarAgendaDays, 2));
 
             cached = snapshot;
             expiresAt = time.GetUtcNow() + CacheTtl;
@@ -75,6 +88,25 @@ public class SiteSettingsService(IDbContextFactory<AerieContext> dbFactory, Time
     }
 
     private static string? NullIfEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    /// <summary>
+    /// Reverses SettingsController's obfuscation. Unlike that controller's own
+    /// call sites, this one is on the path of every settings read in the app,
+    /// so a value that isn't valid obfuscated text - hand-edited in the DB, say
+    /// - degrades to "unset" rather than throwing out of the snapshot.
+    /// </summary>
+    private static string? Deobfuscated(string? value)
+    {
+        if (NullIfEmpty(value) is not { } obfuscated) return null;
+        try
+        {
+            return NullIfEmpty(SecretObfuscator.Deobfuscate(obfuscated));
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+    }
 
     private static decimal ParseDecimal(IReadOnlyDictionary<string, string> values, string key, decimal fallback) =>
         values.TryGetValue(key, out var raw) && decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)
