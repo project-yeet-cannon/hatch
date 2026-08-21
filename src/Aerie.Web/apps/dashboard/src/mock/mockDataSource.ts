@@ -1,4 +1,6 @@
 import type {
+  CalendarDay,
+  CalendarEventSummary,
   ComfortRange,
   DailyExtreme,
   DashboardData,
@@ -13,7 +15,7 @@ import type {
 import { type DiurnalCurve, clamp, diurnalTempF, pseudoNoise } from './diurnal';
 import { deriveZoneStatus } from '../lib/zonePresentation';
 import { formatShortTime } from '../lib/format';
-import { hourOfDayInZone, zonedWallClock } from '../lib/timezone';
+import { calendarDateInZone, hourOfDayInZone, zonedWallClock } from '../lib/timezone';
 import { DEFAULT_TIME_ZONE } from '../config';
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -143,6 +145,57 @@ function deriveSunEvents(now: Date): SunEvents {
   };
 }
 
+/**
+ * Today and tomorrow, the window CalendarAgendaDays defaults to. Hours past 24
+ * roll into the next day, which is exactly how the API's second CalendarDay
+ * gets populated - and tomorrow deliberately holds one all-day event and one
+ * timed one so the ordering rule is visible against this source.
+ */
+function buildCalendar(now: Date): CalendarDay[] {
+  const at = (hoursFromMidnight: number, minute = 0) => zonedWallClock(now, TIME_ZONE, hoursFromMidnight, minute);
+  const dateOf = (dayOffset: number) =>
+    calendarDateInZone(new Date(now.getTime() + dayOffset * 24 * HOUR_MS), TIME_ZONE);
+
+  const event = (
+    id: string,
+    calendarName: string,
+    color: string,
+    title: string,
+    location: string | null,
+    startHour: number,
+    endHour: number,
+    isAllDay = false,
+    endMinute = 0,
+  ): CalendarEventSummary => ({
+    id,
+    calendarName,
+    color,
+    title,
+    location,
+    isAllDay,
+    startsAt: at(startHour).toISOString(),
+    endsAt: at(endHour, endMinute).toISOString(),
+  });
+
+  return [
+    {
+      date: dateOf(0),
+      events: [
+        event('cal-1', 'Family', '#7c9c6c', 'Trash out', null, 0, 24, true),
+        event('cal-2', 'Family', '#7c9c6c', 'Dentist', '1200 Market St', 9, 10),
+        event('cal-3', 'Work', '#5c6ac4', 'Design review', 'Zoom', 14, 15),
+      ],
+    },
+    {
+      date: dateOf(1),
+      events: [
+        event('cal-4', 'Family', '#7c9c6c', 'Anna out of town', null, 24, 48, true),
+        event('cal-5', 'Family', '#7c9c6c', 'Soccer practice', 'Riverside Park', 41, 42, false, 30),
+      ],
+    },
+  ];
+}
+
 function deriveOutsideNote(zones: ZoneClimate[], outsideNow: number, outsideForecast: TempPoint[]): string {
   const warmest = [...zones].sort((a, b) => (b.currentTempF ?? -Infinity) - (a.currentTempF ?? -Infinity))[0];
   const later = outsideForecast[outsideForecast.length - 1]?.tempF ?? outsideNow;
@@ -186,6 +239,7 @@ export class MockDashboardDataSource implements DashboardDataSource {
       outside: buildOutside(now, zones, sunEvents),
       sunEvents,
       routines: ROUTINES,
+      calendar: buildCalendar(now),
     };
   }
 }

@@ -59,10 +59,34 @@ public record SunEvents(DateTimeOffset Dawn, DateTimeOffset Sunrise, DateTimeOff
 /// </summary>
 public record RoutineSummary(Guid Id, string Name, string? Description, string? Icon, string? Color, bool IsToggle, bool? IsActive);
 
+/// <summary>
+/// One cached calendar event as the kiosk agenda renders it. Color is the
+/// calendar's ColorOverride when the admin set one, otherwise the provider's
+/// own color - the client never sees which of the two it got.
+/// </summary>
+public record CalendarEventSummary(
+    Guid Id,
+    string CalendarName,
+    string? Color,
+    string Title,
+    string? Location,
+    bool IsAllDay,
+    DateTimeOffset StartsAt,
+    DateTimeOffset EndsAt);
+
+/// <summary>
+/// One local calendar day in the agenda window. Days with no events are still
+/// present, so the kiosk can say "nothing tomorrow" rather than collapsing the
+/// section and leaving it ambiguous whether tomorrow is empty or unsynced.
+/// DateOnly serializes as "2026-08-21", which is the grouping key the client wants.
+/// </summary>
+public record CalendarDay(DateOnly Date, IReadOnlyList<CalendarEventSummary> Events);
+
 public record DashboardData(
     DateTimeOffset GeneratedAt,
     string Timezone,
     IReadOnlyList<ZoneClimate> Zones,
     OutsideClimate Outside,
     SunEvents SunEvents,
-    IReadOnlyList<RoutineSummary> Routines);
+    IReadOnlyList<RoutineSummary> Routines,
+    IReadOnlyList<CalendarDay> Calendar);

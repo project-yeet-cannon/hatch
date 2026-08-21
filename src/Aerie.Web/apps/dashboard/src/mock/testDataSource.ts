@@ -1,4 +1,5 @@
 import type {
+  CalendarDay,
   ComfortRange,
   DailyExtreme,
   DashboardData,
@@ -53,6 +54,30 @@ function xComfortRange(): ComfortRange {
 
 function xRoutine(index: number): RoutineSummary {
   return { id: `${X}-${index}`, name: X_LONG, description: X_LONG, icon: 'certificate', color: '#ff00ff', isToggle: false, isActive: null };
+}
+
+// Two days, so the empty-day case and the populated one are both on screen.
+// The dates have to stay real - CalendarSection parses them for its heading -
+// which is the same exemption TIME_ZONE takes above.
+function xCalendar(now: Date): CalendarDay[] {
+  const date = (dayOffset: number) =>
+    new Date(now.getTime() + dayOffset * 24 * HOUR_MS).toISOString().slice(0, 10);
+  return [
+    {
+      date: date(0),
+      events: [1, 2].map((i) => ({
+        id: `${X}-cal-${i}`,
+        calendarName: X_LONG,
+        color: '#ff00ff',
+        title: X_LONG,
+        location: X_LONG,
+        isAllDay: i === 1,
+        startsAt: now.toISOString(),
+        endsAt: new Date(now.getTime() + HOUR_MS).toISOString(),
+      })),
+    },
+    { date: date(1), events: [] },
+  ];
 }
 
 function xZone(index: number, now: Date): ZoneClimate {
@@ -119,6 +144,7 @@ export class TestDataSource implements DashboardDataSource {
       outside: xOutside(now),
       sunEvents: xSunEvents(now),
       routines: [1, 2].map((i) => xRoutine(i)),
+      calendar: xCalendar(now),
     };
   }
 }

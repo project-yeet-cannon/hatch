@@ -9,6 +9,7 @@ import { circadianTokens } from './theme/tokens';
 import { ZoneCard } from './components/ZoneCard';
 import { OutsideCard } from './components/OutsideCard';
 import { RoutinesSection } from './components/RoutinesSection';
+import { CalendarSection } from './components/CalendarSection';
 import { DashboardSkeleton } from './components/DashboardSkeleton';
 import { clientLogger } from './lib/clientLogger';
 import { useKioskLifecycle } from './hooks/useKioskLifecycle';
@@ -98,6 +99,14 @@ export function App() {
                 <ZoneCard key={zone.id} zone={zone} timeZone={data.timezone} defaultOpen={i === 0} />
               ))}
             </div>
+            {/* Provisional placement: below the zones, above the routines.
+                Phase C1 (docs/plans/kiosk.md) owns where the agenda actually
+                belongs on the wall and what it looks like there. An agenda
+                whose every day is empty renders nothing at all - an empty day
+                is only worth saying when some other day isn't. */}
+            {data.calendar.some((day) => day.events.length > 0) && (
+              <CalendarSection calendar={data.calendar} timeZone={data.timezone} />
+            )}
             {data.routines.length > 0 && <RoutinesSection routines={data.routines} resetToken={resetToken} />}
           </>
         ) : error ? (

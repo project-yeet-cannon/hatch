@@ -45,22 +45,13 @@ public class CalendarSyncService(
     TimeProvider time,
     ILogger<CalendarSyncService> logger) : ICalendarSyncService
 {
-    /// <summary>
-    /// A floor and a ceiling on CalendarAgendaDays, which is operator-typed
-    /// free text in SiteSettings. Zero would sync nothing at all, and a large
-    /// number would quietly turn a glanceable panel into a full calendar fetch
-    /// against every connected account every five minutes.
-    /// </summary>
-    private const int MinAgendaDays = 1;
-    private const int MaxAgendaDays = 14;
-
     public async Task<CalendarSyncResult> SyncAsync(CancellationToken ct)
     {
         var settings = await siteSettings.GetAsync(ct);
-        var tz = ResolveTimeZone(settings.TimeZone);
+        var tz = CalendarWindow.ResolveTimeZone(settings.TimeZone, logger);
 
-        var days = Math.Clamp(settings.CalendarAgendaDays, MinAgendaDays, MaxAgendaDays);
-        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(time.GetUtcNow(), tz).DateTime);
+        var days = CalendarWindow.ClampDays(settings.CalendarAgendaDays);
+        var today = CalendarWindow.Today(time.GetUtcNow(), tz);
         // Exclusive, like the provider's own all-day end and like the query
         // bound it becomes: "two days" is today and tomorrow, not three days.
         var endExclusive = today.AddDays(days);
@@ -393,25 +384,6 @@ public class CalendarSyncService(
             : tz.GetUtcOffset(local);
 
         return new DateTimeOffset(local, offset).ToUniversalTime();
-    }
-
-    /// <summary>
-    /// IANA ids resolve on Windows too from .NET 6 on, which matters because
-    /// the legacy production host is Windows (docs/delivery-architecture.md).
-    /// A typo'd or unknown id degrades to UTC rather than throwing out of the
-    /// job - one wrong-looking agenda beats no agenda at all.
-    /// </summary>
-    private TimeZoneInfo ResolveTimeZone(string id)
-    {
-        try
-        {
-            return TimeZoneInfo.FindSystemTimeZoneById(id);
-        }
-        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
-        {
-            logger.LogWarning(ex, "Unknown site timezone {TimeZone}; resolving calendar dates in UTC instead", id);
-            return TimeZoneInfo.Utc;
-        }
     }
 
     /// <summary>The agenda window in both the forms it is needed: local dates for the stored day columns, UTC instants for the provider query.</summary>

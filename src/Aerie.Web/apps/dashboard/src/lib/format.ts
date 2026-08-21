@@ -44,3 +44,15 @@ export function formatShortTime(iso: string, timeZone: string): string {
     .toLowerCase()
     .replace(' ', '');
 }
+
+/**
+ * A "YYYY-MM-DD" agenda date as a day heading. Parsed field by field into a
+ * local Date rather than through `new Date(iso)`, which would read it as UTC
+ * midnight and render the day before it anywhere west of Greenwich.
+ */
+export function formatAgendaDate(date: string): string {
+  const [year, month, day] = date.split('-').map(Number);
+  return new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric' }).format(
+    new Date(year, month - 1, day),
+  );
+}

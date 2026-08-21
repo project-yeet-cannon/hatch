@@ -33,7 +33,7 @@ and lint it and leave the clicking to a human.
 - [x] **A3** — Calendar discovery + visibility API
 - [x] **A4** — Admin Calendars page
 - [x] **A5** — Event sync job
-- [ ] **A6** — Calendar on the dashboard contract + provisional kiosk UI
+- [x] **A6** — Calendar on the dashboard contract + provisional kiosk UI
 - [ ] **B1** — Hazard schema + provider interfaces
 - [ ] **B2** — NWS weather alert provider
 - [ ] **B3** — Open-Meteo air quality provider

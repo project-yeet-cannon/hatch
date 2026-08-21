@@ -47,3 +47,23 @@ export function zonedWallClock(date: Date, timeZone: string, hour: number, minut
   );
   return new Date(zonedTarget.getTime() - offset * 60_000);
 }
+
+/**
+ * The calendar date at `date` as seen in `timeZone`, "YYYY-MM-DD" - the same
+ * spelling the API's CalendarDay.date uses, so the two can be compared as
+ * strings instead of as instants.
+ */
+export function calendarDateInZone(date: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+    .formatToParts(date)
+    .reduce<Record<string, string>>((acc, p) => {
+      acc[p.type] = p.value;
+      return acc;
+    }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}

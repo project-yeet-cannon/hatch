@@ -157,6 +157,7 @@ builder.Services.AddScoped<IGoogleTokenProvider, GoogleTokenProvider>();
 builder.Services.AddScoped<IGoogleCalendarClient, GoogleCalendarClient>();
 builder.Services.AddScoped<ICalendarDiscoveryService, CalendarDiscoveryService>();
 builder.Services.AddScoped<ICalendarSyncService, CalendarSyncService>();
+builder.Services.AddScoped<ICalendarAgendaService, CalendarAgendaService>();
 
 // Auth (docs/plans/auth.md). Wired but switched off: AuthMiddleware and
 // AuthController both run, and both no-op or allow, until Auth:Enabled becomes

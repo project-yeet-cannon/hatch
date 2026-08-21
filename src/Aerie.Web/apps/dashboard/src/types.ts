@@ -96,6 +96,34 @@ export interface RoutineSummary {
   isActive: boolean | null;
 }
 
+/**
+ * One cached calendar event as the kiosk agenda renders it. `color` is the
+ * calendar's admin override when there is one and the provider's own color
+ * otherwise - the client can't tell which it got, and shouldn't care.
+ */
+export interface CalendarEventSummary {
+  id: string;
+  calendarName: string;
+  color: string | null;
+  title: string;
+  location: string | null;
+  isAllDay: boolean;
+  /** ISO 8601 timestamp. For an all-day event, the day's bounds in the house's timezone. */
+  startsAt: string;
+  endsAt: string;
+}
+
+/**
+ * One local day of the agenda window. Days with no events are still present,
+ * so "nothing tomorrow" is renderable and distinguishable from a day that
+ * never synced. A multi-day event appears on each day it covers.
+ */
+export interface CalendarDay {
+  /** Local calendar date, "YYYY-MM-DD". */
+  date: string;
+  events: CalendarEventSummary[];
+}
+
 export interface DashboardData {
   /** ISO 8601 timestamp of when this snapshot was produced. */
   generatedAt: string;
@@ -105,6 +133,7 @@ export interface DashboardData {
   outside: OutsideClimate;
   sunEvents: SunEvents;
   routines: RoutineSummary[];
+  calendar: CalendarDay[];
 }
 
 /** Anything that can produce a dashboard snapshot — mock today, a live API later. */

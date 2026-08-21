@@ -58,7 +58,7 @@ sub-resources under it exist for reuse, debugging, and other screens.
 
 | Method & route | Returns | Notes |
 |---|---|---|
-| `GET /api/dashboard` | `DashboardData` | **Primary.** Composes zones + outside. Query: `historyHours` (9), `forecastHours` (7), `bucketMinutes` (30). |
+| `GET /api/dashboard` | `DashboardData` | **Primary.** Composes zones + outside + routines + the calendar agenda. Query: `historyHours` (9), `forecastHours` (7), `bucketMinutes` (30). |
 | `GET /api/zones` · `GET /api/zones/{id}` | `ZoneDto` | Zone CRUD for the admin app. |
 | `POST /api/zones` · `PUT /api/zones/{id}` · `DELETE /api/zones/{id}` | `ZoneDto` | |
 | `GET /api/zones/climate` · `GET /api/zones/{id}/climate` | `ZoneClimate` | Current snapshot, history, forecast. Same window query params as `/api/dashboard`. |
@@ -112,6 +112,18 @@ The schedule is `SyncCalendarEvents`, every five minutes, caching only today
 through today + `CalendarAgendaDays` — so nothing in the request path calls
 Google, and an account that stops syncing ages off the wall instead of freezing
 last week onto it.
+
+The agenda itself has no endpoint of its own: it rides on `GET /api/dashboard`
+as `calendar`, one `CalendarDay` per local day from today through today +
+`CalendarAgendaDays`. **Every day in that window is present even when it holds
+no events** — the kiosk has to be able to say "nothing tomorrow" rather than
+collapse the day, which would read the same as a day that never synced. A
+multi-day event appears on each day it covers, all-day events sort ahead of
+timed ones, and each event's `color` is the calendar's `colorOverride` when the
+admin set one and the provider's color otherwise. Excluded calendars and
+disabled accounts are filtered on read as well as at sync, so un-including a
+calendar takes it off the wall on the next 60-second poll rather than at the
+next prune.
 
 The two OAuth endpoints are **navigated to, not fetched**: the admin page links
 to `start`, Google redirects the browser to `callback`, and both outcomes end as
