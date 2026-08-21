@@ -30,8 +30,7 @@
         min-height: 100vh;
         display: flex;
         justify-content: center;
-        align-items: center;
-        padding: 24px;
+        padding: 40px 24px;
         background: var(--bg);
         font-family: "Manrope", sans-serif;
         color: var(--ink);
@@ -39,10 +38,10 @@
 
       main {
         width: 100%;
-        max-width: 420px;
+        max-width: 900px;
         display: flex;
         flex-direction: column;
-        gap: 22px;
+        gap: 34px;
       }
 
       header {
@@ -66,9 +65,38 @@
         color: var(--muted);
       }
 
-      .apps {
+      section {
         display: flex;
         flex-direction: column;
+        gap: 14px;
+      }
+
+      .tier-head {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        padding: 0 4px;
+      }
+
+      .tier-name {
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ok-ink);
+        flex: none;
+      }
+
+      .tier-desc {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--muted);
+        min-width: 0;
+      }
+
+      .apps {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
         gap: 12px;
       }
 
@@ -127,6 +155,17 @@
         font-size: 14px;
       }
 
+      /* Applied by the script below to cross-subdomain cards when this page is
+         being served from somewhere with no domain to borrow (an IP, or
+         localhost during development). The service exists, but not at any
+         address this page can name - so it is shown greyed out rather than
+         linking somewhere that will not resolve. */
+      a.app.unavailable {
+        opacity: 0.45;
+        pointer-events: none;
+        box-shadow: none;
+      }
+
       footer {
         padding: 0 4px;
         font-size: 12px;
@@ -142,100 +181,170 @@
         <h1>Aerie</h1>
         <p>Home citadel</p>
       </header>
-      <div class="apps">
-        <a class="app" href="/apps/dashboard/">
-          <span class="icon">🏠</span>
-          <span class="app-info">
-            <span class="app-name">Kiosk Dashboard</span>
-            <span class="app-desc">Live zone temps &amp; outside weather</span>
-          </span>
-          <span class="chev">›</span>
-        </a>
-        <a class="app" href="/apps/family/">
-          <span class="icon">📦</span>
-          <span class="app-info">
-            <span class="app-name">Family</span>
-            <span class="app-desc"
-              >Household apps — add to your home screen</span
-            >
-          </span>
-          <span class="chev">›</span>
-        </a>
-        <a class="app" href="/apps/admin/">
-          <span class="icon">⚙️</span>
-          <span class="app-info">
-            <span class="app-name">Admin</span>
-            <span class="app-desc"
-              >System configuration &amp; data management</span
-            >
-          </span>
-          <span class="chev">›</span>
-        </a>
-        <a class="app" href="/apps/logo/">
-          <span class="icon">🐦</span>
-          <span class="app-info">
-            <span class="app-name">Logo</span>
-            <span class="app-desc">Parametric bird mark &amp; wordmark</span>
-          </span>
-          <span class="chev">›</span>
-        </a>
-        <a class="app" href="/apps/modeler/">
-          <span class="icon">🏗️</span>
-          <span class="app-info">
-            <span class="app-name">Modeler</span>
-            <span class="app-desc">Sketch the home in 3D for CFD/CAD export</span>
-          </span>
-          <span class="chev">›</span>
-        </a>
-        <a class="app" href="/apps/docs/">
-          <span class="icon">📚</span>
-          <span class="app-info">
-            <span class="app-name">Docs</span>
-            <span class="app-desc">Browse the architecture docs</span>
-          </span>
-          <span class="chev">›</span>
-        </a>
-        <!-- The only entry that isn't same-origin: the file browser is its own
-             container on its own subdomain (compose.share.yml), not an SPA under
-             /apps. data-subdomain is rewritten to this page's own domain by the
-             script at the bottom, so the href below is only the fallback. -->
-        <a class="app" href="https://share.landis.family/" data-subdomain="share">
-          <span class="icon">📁</span>
-          <span class="app-info">
-            <span class="app-name">Files</span>
-            <span class="app-desc">Browse &amp; upload files on the house share</span>
-          </span>
-          <span class="chev">›</span>
-        </a>
-        <a class="app" href="/swagger">
-          <span class="icon">📄</span>
-          <span class="app-info">
-            <span class="app-name">API</span>
-            <span class="app-desc">Swagger docs &amp; API explorer</span>
-          </span>
-          <span class="chev">›</span>
-        </a>
-      </div>
+
+      <section>
+        <div class="tier-head">
+          <span class="tier-name">Family</span>
+          <span class="tier-desc">Everyday apps, on any enrolled device</span>
+        </div>
+        <div class="apps">
+          <a class="app" href="/apps/dashboard/">
+            <span class="icon">🏠</span>
+            <span class="app-info">
+              <span class="app-name">Kiosk Dashboard</span>
+              <span class="app-desc">Live zone temps &amp; outside weather</span>
+            </span>
+            <span class="chev">›</span>
+          </a>
+          <a class="app" href="/apps/family/">
+            <span class="icon">📦</span>
+            <span class="app-info">
+              <span class="app-name">Family</span>
+              <span class="app-desc"
+                >Household apps — add to your home screen</span
+              >
+            </span>
+            <span class="chev">›</span>
+          </a>
+          <a class="app" href="#" data-subdomain="share">
+            <span class="icon">📁</span>
+            <span class="app-info">
+              <span class="app-name">Files</span>
+              <span class="app-desc"
+                >Browse &amp; upload files on the house share</span
+              >
+            </span>
+            <span class="chev">›</span>
+          </a>
+        </div>
+      </section>
+
+      <section>
+        <div class="tier-head">
+          <span class="tier-name">Operations</span>
+          <span class="tier-desc"
+            >Configuring, documenting and extending the house</span
+          >
+        </div>
+        <div class="apps">
+          <a class="app" href="/apps/admin/">
+            <span class="icon">⚙️</span>
+            <span class="app-info">
+              <span class="app-name">Admin</span>
+              <span class="app-desc"
+                >System configuration &amp; data management</span
+              >
+            </span>
+            <span class="chev">›</span>
+          </a>
+          <a class="app" href="/apps/docs/">
+            <span class="icon">📚</span>
+            <span class="app-info">
+              <span class="app-name">Docs</span>
+              <span class="app-desc">Browse the architecture docs</span>
+            </span>
+            <span class="chev">›</span>
+          </a>
+          <a class="app" href="/swagger">
+            <span class="icon">📄</span>
+            <span class="app-info">
+              <span class="app-name">API</span>
+              <span class="app-desc">Swagger docs &amp; API explorer</span>
+            </span>
+            <span class="chev">›</span>
+          </a>
+          <a class="app" href="/apps/modeler/">
+            <span class="icon">🏗️</span>
+            <span class="app-info">
+              <span class="app-name">Modeler</span>
+              <span class="app-desc"
+                >Sketch the home in 3D for CFD/CAD export</span
+              >
+            </span>
+            <span class="chev">›</span>
+          </a>
+          <a class="app" href="/apps/logo/">
+            <span class="icon">🐦</span>
+            <span class="app-info">
+              <span class="app-name">Logo</span>
+              <span class="app-desc">Parametric bird mark &amp; wordmark</span>
+            </span>
+            <span class="chev">›</span>
+          </a>
+        </div>
+      </section>
+
+      <!-- The observability tier. Every entry here is a service Aerie operates
+           but did not write, on its own subdomain and behind its own login -
+           these hosts deliberately do not carry the auth middleware (see
+           docs/plans/auth.md, "The allow-list is load-bearing"), so the sign-in
+           that covers the two tiers above does not cover these. -->
+      <section>
+        <div class="tier-head">
+          <span class="tier-name">Infrastructure</span>
+          <span class="tier-desc"
+            >Monitoring stack — each keeps its own login</span
+          >
+        </div>
+        <div class="apps">
+          <a class="app" href="#" data-subdomain="status">
+            <span class="icon">🩺</span>
+            <span class="app-info">
+              <span class="app-name">Status</span>
+              <span class="app-desc">Uptime Kuma — is everything up?</span>
+            </span>
+            <span class="chev">›</span>
+          </a>
+          <a class="app" href="#" data-subdomain="metrics">
+            <span class="icon">📈</span>
+            <span class="app-info">
+              <span class="app-name">Metrics</span>
+              <span class="app-desc">Grafana dashboards over Prometheus</span>
+            </span>
+            <span class="chev">›</span>
+          </a>
+          <a class="app" href="#" data-subdomain="logs">
+            <span class="icon">🔎</span>
+            <span class="app-info">
+              <span class="app-name">Logs</span>
+              <span class="app-desc"
+                >OpenSearch Dashboards — search all logs</span
+              >
+            </span>
+            <span class="chev">›</span>
+          </a>
+        </div>
+      </section>
+
       <footer>❤️</footer>
     </main>
     <script>
+      // Cards marked data-subdomain are the entries that aren't same-origin:
+      // each is its own container on its own subdomain (share and the three
+      // observability services), not an SPA under /apps.
+      //
       // This page is a plain static file (copied to wwwroot/apps/index.html by
       // Aerie.Api.csproj, no build step), so ${DOMAIN} can't be interpolated
-      // into cross-subdomain links the way it is in compose labels. Instead,
-      // derive them from the domain this page is already being served on -
-      // home.<domain> becomes media.<domain> - which keeps the base domain out
-      // of source and follows it if it ever changes.
+      // into those links the way it is in compose labels and chart values.
+      // Instead, derive them from the domain this page is already being served
+      // on - home.<domain> becomes metrics.<domain> - which keeps the base
+      // domain out of source, so a redeploy under someone else's domain needs
+      // no edit here, and follows it if it ever changes.
       //
-      // Skipped when the host is an IP or a single label (direct-to-container
-      // or localhost during development), where there's no domain to borrow;
-      // the hardcoded href stays as-is in that case.
+      // The hrefs above are `#` on purpose rather than a hardcoded fallback:
+      // where the host is an IP or a single label (direct-to-container, or
+      // localhost during development) there is no domain to borrow and no
+      // correct address to guess, so those cards are greyed out instead.
       const host = location.hostname;
       const isIpv4 = /^\d+(\.\d+){3}$/.test(host);
       const labels = host.split(".");
-      if (!isIpv4 && labels.length > 1) {
-        const domain = labels.slice(1).join(".");
-        for (const link of document.querySelectorAll("a[data-subdomain]")) {
+      const domain =
+        !isIpv4 && labels.length > 1 ? labels.slice(1).join(".") : null;
+      for (const link of document.querySelectorAll("a[data-subdomain]")) {
+        if (domain) {
           link.href = `https://${link.dataset.subdomain}.${domain}/`;
+        } else {
+          link.classList.add("unavailable");
         }
       }
     </script>
