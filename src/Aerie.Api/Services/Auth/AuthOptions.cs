@@ -1,0 +1,82 @@
+namespace Aerie.Api.Services.Auth;
+
+/// <summary>
+/// Deploy-time config for the wall (the "Auth" appsettings section).
+///
+/// Nothing operator-specific is a literal here - the cookie domain and the
+/// exempt hosts are supplied at deploy from the DOMAIN operator variable, per
+/// docs/ethos.md. <see cref="Enabled"/> is the whole rollback: false leaves the
+/// app behaving exactly as it did before auth existed.
+/// </summary>
+public class AuthOptions
+{
+    public const string SectionName = "Auth";
+
+    /// <summary>
+    /// Whether the gate refuses anything. False through phase 4 of
+    /// docs/plans/auth.md, and false in Development so `make run` stays
+    /// frictionless; flip it locally with <c>Auth__Enabled=true dotnet run</c>.
+    /// </summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// The cookie the grant token rides in. The <c>__Secure-</c> prefix is
+    /// correct rather than <c>__Host-</c>: <c>__Host-</c> forbids a Domain
+    /// attribute, and the Domain attribute is the entire single-sign-on story
+    /// here - it's what makes one enrollment cover home., kiosk. and share.
+    /// Local dev over http has to override this, since browsers reject a
+    /// <c>__Secure-</c> cookie that arrives without TLS.
+    /// </summary>
+    public string CookieName { get; set; } = "__Secure-aerie_grant";
+
+    /// <summary>
+    /// The cookie's Domain attribute, e.g. ".example.com" - one enrollment
+    /// across every subdomain. Empty (the default, and the only sane value on
+    /// localhost) makes the cookie host-only.
+    /// </summary>
+    public string CookieDomain { get; set; } = "";
+
+    /// <summary>
+    /// Hostnames the gate never challenges, whatever the path - the hosts whose
+    /// Ingress simply never gets the middleware annotation, repeated here so
+    /// the in-process gate agrees with the proxy. files.&lt;domain&gt; is the
+    /// standing example: the kiosk APK and its checksum are public by design.
+    /// </summary>
+    public string[] ExemptHosts { get; set; } = [];
+
+    /// <summary>How long an invite code is worth typing. Short because the code is only 40 bits; see EfAuthInvite.</summary>
+    public int InviteTtlMinutes { get; set; } = 15;
+
+    /// <summary>
+    /// TTL for the invite the migrate Job mints into an empty install. Longer
+    /// than a normal one because nobody is standing at the tablet when a deploy
+    /// finishes - it has to survive the walk from the terminal to the room.
+    /// </summary>
+    public int BootstrapInviteTtlMinutes { get; set; } = 60;
+
+    /// <summary>
+    /// Re-issue the cookie once it's this old. Comfortably inside Chrome's
+    /// 400-day Max-Age cap, so an in-use device never lapses; a device that
+    /// goes untouched past the cap re-enrolls, which is the intended failure.
+    /// </summary>
+    public int GrantRenewAfterDays { get; set; } = 30;
+
+    /// <summary>
+    /// Floor on how often a grant's LastSeenAt is written. This runs on every
+    /// request through the wall, so an unthrottled write is a write amplifier
+    /// on the hottest path in the app - a minute of staleness on a "last seen"
+    /// column costs nothing and saves every one of those writes.
+    /// </summary>
+    public int LastSeenThrottleSeconds { get; set; } = 60;
+
+    /// <summary>Where a document request is sent when it has no grant. Exempt by construction, or the redirect is a loop.</summary>
+    public string SignInPath { get; set; } = "/apps/auth/";
+
+    public TimeSpan InviteTtl => TimeSpan.FromMinutes(Math.Max(1, InviteTtlMinutes));
+
+    public TimeSpan BootstrapInviteTtl => TimeSpan.FromMinutes(Math.Max(1, BootstrapInviteTtlMinutes));
+
+    public TimeSpan GrantRenewAfter => TimeSpan.FromDays(Math.Max(1, GrantRenewAfterDays));
+
+    public TimeSpan LastSeenThrottle => TimeSpan.FromSeconds(Math.Max(0, LastSeenThrottleSeconds));
+}

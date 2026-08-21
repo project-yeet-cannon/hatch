@@ -25,7 +25,7 @@ clicking to a human.
 
 ## Status
 
-- [ ] **1** — Grant + invite schema, token primitives, the gate decision
+- [x] **1** — Grant + invite schema, token primitives, the gate decision
 - [ ] **2** — Auth endpoints and in-process middleware (still off)
 - [ ] **3** — The sign-in shell (`apps/auth`)
 - [ ] **4** — Admin Sessions page: view, delete, generate invite

@@ -22,6 +22,9 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
     public DbSet<EfCalendarEvent> CalendarEvents => Set<EfCalendarEvent>();
     public DbSet<EfOAuthState> OAuthStates => Set<EfOAuthState>();
 
+    public DbSet<EfAuthGrant> AuthGrants => Set<EfAuthGrant>();
+    public DbSet<EfAuthInvite> AuthInvites => Set<EfAuthInvite>();
+
     public DbSet<EfCommand> Commands => Set<EfCommand>();
     public DbSet<EfControlDecision> ControlDecisions => Set<EfControlDecision>();
     public DbSet<EfControlOverride> ControlOverrides => Set<EfControlOverride>();
@@ -71,6 +74,14 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
             .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<EfOAuthState>();
+
+        // Auth lives in the core context and the public schema on purpose: it
+        // is infrastructure every module sits behind, and a Modules/ schema
+        // would make every module depend on one module (Modules/README.md).
+        // Neither entity has a relationship - a grant outlives the invite that
+        // made it, which is why EfAuthInvite.RedeemedGrantId is a bare Guid.
+        modelBuilder.Entity<EfAuthGrant>();
+        modelBuilder.Entity<EfAuthInvite>();
 
         // A calendar has no meaning without the account whose grant reaches it,
         // and an event has none without its calendar - disconnecting an account

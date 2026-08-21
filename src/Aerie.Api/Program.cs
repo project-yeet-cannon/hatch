@@ -4,6 +4,7 @@ using Aerie.Api.Jobs;
 using Aerie.Api.Models.Environment;
 using Aerie.Api.Modules;
 using Aerie.Api.Services;
+using Aerie.Api.Services.Auth;
 using Aerie.Api.Services.Calendar;
 using Aerie.Api.Services.ClimateControl;
 using Aerie.Api.Services.Dashboard;
@@ -152,6 +153,13 @@ builder.Services.AddScoped<IGoogleOAuthService, GoogleOAuthService>();
 builder.Services.AddScoped<IGoogleTokenProvider, GoogleTokenProvider>();
 builder.Services.AddScoped<IGoogleCalendarClient, GoogleCalendarClient>();
 builder.Services.AddScoped<ICalendarDiscoveryService, CalendarDiscoveryService>();
+
+// Auth (docs/plans/auth.md). Registered but inert: nothing resolves IAuthGate
+// until the middleware and the forwardAuth endpoint arrive in phase 2, and
+// Auth:Enabled is false everywhere until phase 5.
+builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOptions.SectionName));
+builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IAuthGate, AuthGate>();
 
 // Jobs
 builder.Services.AddTransient<IAerieJob, SampleChannels>();
