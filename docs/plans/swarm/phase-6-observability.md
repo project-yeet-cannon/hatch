@@ -972,13 +972,62 @@ gate.
       `successfulJobsHistoryLimit: 1`, `ttlSecondsAfterFinished` so finished pods
       do not accumulate.
 
-      **Two edits to the scripts themselves**, both consequences of decisions
-      above rather than of the move:
+      **Four edits to the scripts themselves**, the first two consequences of
+      decisions above rather than of the move, the last two a 6b.15 finding:
 
       - the index template gains `number_of_replicas: 0` (6b.9 — single node,
         or every index sits yellow forever)
       - the ISM policy's `min_index_age` is set from 6b.10's measurement rather
         than left at the 30 days written for one compose project
+      - `apply-index-template.sh` also PUTs `number_of_replicas: 0` onto the
+        `aerie-logs-*` indices that already exist, not only onto the template
+      - `apply-ism-policy.sh` PUTs the same onto `.opendistro-ism-config`, the
+        index the ISM plugin creates for itself
+
+      **The last two edits are what the gate found, and the first edit is why
+      the failure looked impossible.** 6b.15 reported cluster health `yellow`
+      with `_index_template/aerie-logs` correctly in place and carrying
+      `number_of_replicas: 0`. Two unassigned replica shards, two unrelated
+      causes, one shared symptom:
+
+      - `aerie-logs-2026.08.20`, `rep=1`. A composable index template binds at
+        index-*creation* time and converges nothing that already exists, and
+        this index predated the template — it came from the window this step's
+        own NetworkPolicy bug left open (see
+        [opensearch.yaml](../../../deploy/cluster/observability/controllers/opensearch.yaml)'s
+        `opensearch-restrict-ingress` comment), during which fluent-bit kept
+        ingesting while no provisioning pod could reach `:9200`. Every index
+        born in that window took the cluster default of one replica, which a
+        one-node cluster can never allocate.
+      - `.opendistro-ism-config`, `rep=1`, hidden. The ISM plugin creates it
+        with a hardcoded replica and no `auto_expand_replicas` to walk it back
+        — read off the live index's settings, not inferred. Nothing this tree
+        writes chose that number and no plugin setting asks for a different
+        one, so the only lever is a settings update on the index itself. It
+        goes in `apply-ism-policy.sh` because that script's own PUT is what
+        causes the index to exist; converging it there rather than next door
+        keeps cause and cleanup in the same file. That script's two `exit 0`s
+        became `break`s so the convergence runs on the already-exists path too,
+        which after the first install is the only path that ever runs.
+
+      Both belong in the scripts rather than in a runbook for the reason
+      everything else here does — they converge on every deploy, and both
+      reproduce on any fresh installation. Only the replica count is
+      recoverable after the fact, though: per-index settings are mutable, field
+      mappings are not, so an `aerie-logs-*` index created before the template
+      keeps `service` as the dynamic text+keyword guess, which shows up in
+      Dashboards as a conflicting field across the index pattern. Here that
+      index held one day of logs and was dropped rather than carried; on an
+      installation where the same window cost a month of them, the alternative
+      is living with the conflict until ISM ages the last of them out.
+
+      6b.15's own assertion was sharpened alongside it, and this failure is the
+      argument for it: the check reported the cluster status and pointed at
+      `apply-index-template.sh`, which was half right, and half a directive to
+      go fix a file that had nothing to do with `.opendistro-ism-config`. It
+      now lists every non-green index by name with its replica count, so the
+      answer to *which* index — and therefore whether this tree owns it at all
+      — is in the failure line.
 
       **Implemented with that second edit deferred, deliberately.** No week of
       `aerie-logs-*` growth against fluent-bit's cluster-wide tail exists yet

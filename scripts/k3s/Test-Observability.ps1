@@ -557,6 +557,8 @@ try {
         "sudo k3s kubectl get --raw '/api/v1/namespaces/observability/services/opensearch-cluster-master:9200/proxy/_cluster/health' 2>/dev/null || echo {}"
         'printf ''\n--- osindices\n'''
         "sudo k3s kubectl get --raw '/api/v1/namespaces/observability/services/opensearch-cluster-master:9200/proxy/_cat/indices/aerie-logs-*?format=json' 2>/dev/null || echo []"
+        'printf ''\n--- osallindices\n'''
+        "sudo k3s kubectl get --raw '/api/v1/namespaces/observability/services/opensearch-cluster-master:9200/proxy/_cat/indices?format=json&h=index,health,status,pri,rep' 2>/dev/null || echo []"
         'printf ''\n--- oslogsample\n'''
         "sudo k3s kubectl get --raw '/api/v1/namespaces/observability/services/opensearch-cluster-master:9200/proxy/aerie-logs-*/_search?size=200&_source=service,kubernetes.container_name' 2>/dev/null || echo {}"
         'printf ''\n--- osismpolicy\n'''
@@ -592,6 +594,7 @@ try {
     $amAlerts = @(ConvertFrom-ProbeJsonArray -Output $probe.StdOut -Name 'amalerts')
     $osHealth = ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'oshealth'
     $osIndices = @(ConvertFrom-ProbeJsonArray -Output $probe.StdOut -Name 'osindices')
+    $osAllIndices = @(ConvertFrom-ProbeJsonArray -Output $probe.StdOut -Name 'osallindices')
     $osLogSample = ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'oslogsample'
     $osIsmPolicyExists = (Get-ProbeSection -Output $probe.StdOut -Name 'osismpolicy').Trim() -eq 'yes'
     $osIndexTemplateExists = (Get-ProbeSection -Output $probe.StdOut -Name 'osindextemplate').Trim() -eq 'yes'
@@ -869,7 +872,25 @@ try {
         Add-Check -Step '6b.15' -Name 'OpenSearch cluster health (6b.9)' -Status 'Pass' -Detail 'green'
     }
     elseif ($osStatus) {
-        Add-Check -Step '6b.15' -Name 'OpenSearch cluster health (6b.9)' -Status 'Fail' -Detail "$osStatus, not green - if yellow, ../config/provisioning/apply-index-template.sh's number_of_replicas: 0 (for singleNode) did not apply to every index"
+        # Name the indices rather than the likely cause. The first version of
+        # this check pointed at apply-index-template.sh and left the operator
+        # to work out which index was holding the cluster down - and when it
+        # did fire, the answer mattered: an aerie-logs-* index means that
+        # script (a template only binds at index-creation time, so anything
+        # created before it landed keeps one replica this cluster can never
+        # allocate, which is why that script now converges the setting onto
+        # existing indices too), while a dot-prefixed plugin index means
+        # something this tree does not own and would have sent the same
+        # operator down the wrong path entirely.
+        $unhealthy = @($osAllIndices | Where-Object { [string](Get-Field $_ 'health') -and [string](Get-Field $_ 'health') -ne 'green' })
+        if ($unhealthy.Count -gt 0) {
+            $named = @($unhealthy | ForEach-Object { "$([string](Get-Field $_ 'index')) ($([string](Get-Field $_ 'health')), rep=$([string](Get-Field $_ 'rep')))" })
+            $detail = "$osStatus, not green - $($named -join '; ')"
+        }
+        else {
+            $detail = "$osStatus, not green - no index reports a non-green health, so the cause is cluster-level (unassigned shards with no index to name, or _cat/indices was unreadable)"
+        }
+        Add-Check -Step '6b.15' -Name 'OpenSearch cluster health (6b.9)' -Status 'Fail' -Detail $detail
     }
     else {
         Add-Check -Step '6b.15' -Name 'OpenSearch cluster health (6b.9)' -Status 'Fail' -Detail 'could not read _cluster/health through the service proxy'

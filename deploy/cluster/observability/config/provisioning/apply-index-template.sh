@@ -2,9 +2,8 @@
 # One-shot: applies the aerie-logs index template so the `service` field
 # (see ../../controllers/fluent-bit/service_tag.lua) is mapped as `keyword`
 # on new daily indices, instead of relying on OpenSearch's dynamic text+
-# keyword guess. Only affects indices created after this runs -- any
-# aerie-logs-* index that already exists keeps whatever mapping it
-# dynamically picked up. Copied from
+# keyword guess, and then converges `number_of_replicas: 0` onto the
+# aerie-logs-* indices that already exist. Copied from
 # ../../../../../containers/opensearch-provision/apply-index-template.sh
 # (which stays in place, unedited, for compose.observability.yml until Phase
 # 7) - see ./kustomization.yaml for why this is a real file rather than a
@@ -18,9 +17,27 @@
 # original has no such setting because compose's OpenSearch was never asked
 # whether it was single-node either way.
 #
+# A composable index template is consulted at index-creation time only, so
+# the template alone converges nothing that already exists - and on this
+# cluster that gap was not hypothetical. 6b.15 found health yellow with the
+# template correctly in place: ../../controllers/opensearch.yaml's
+# opensearch-restrict-ingress NetworkPolicy blocked these provisioning pods
+# for the first stretch of the phase (that file's own comment tells the rest
+# of that story), so fluent-bit created a run of daily indices before any
+# template existed, each with the cluster default of one replica that a
+# one-node cluster can never allocate. Those indices hold the cluster yellow
+# until they are updated in place, which is what the second PUT below does.
+# It is a settings update, not a reindex, and the distinction is the reason
+# the mapping half above cannot be fixed the same way: per-index settings are
+# mutable, field mappings are not, so an older index that already guessed
+# text+keyword for `service` keeps that guess until ISM ages it out
+# (./apply-ism-policy.sh). Only the replica count - the half that costs
+# cluster health - is recoverable after the fact.
+#
 # Safe to run on every deploy: PUT on a composable index template is itself
-# idempotent (re-applying the same body is a no-op), so no existence check
-# is needed before creating/updating it.
+# idempotent (re-applying the same body is a no-op), and so is a settings
+# update that assigns the value an index already holds, so no existence check
+# is needed before either call.
 set -eu
 
 # No `${OPENSEARCH_URL:-...}` fallback - Flux's postBuild envsubst rewrites
@@ -28,6 +45,7 @@ set -eu
 # `http://opensearch:9200` instead of the Service that exists here. The full
 # account is in ./apply-ism-policy.sh, which hit it first.
 TEMPLATE_NAME="aerie-logs"
+INDEX_PATTERN="aerie-logs-*"
 MAX_ATTEMPTS=30
 RETRY_DELAY_SECONDS=5
 
@@ -48,21 +66,51 @@ TEMPLATE_BODY=$(cat <<'JSON'
 JSON
 )
 
-attempt=1
-while [ "$attempt" -le "$MAX_ATTEMPTS" ]; do
-  status=$(curl -s -o /tmp/index-template-response.json -w '%{http_code}' -X PUT \
-    "$OPENSEARCH_URL/_index_template/$TEMPLATE_NAME" \
-    -H 'Content-Type: application/json' -d "$TEMPLATE_BODY" || echo 000)
+REPLICA_BODY='{"index":{"number_of_replicas":0}}'
 
-  if [ "$status" = "200" ]; then
-    echo "applied index template '$TEMPLATE_NAME'"
-    exit 0
-  fi
+# $1 url, $2 request body, $3 what to call it in the log. Both callers want
+# the same thing - PUT this until it takes or the budget runs out - and the
+# budget is what absorbs a cold pod: a brand-new one gets a refused
+# connection or two before the NetworkPolicy starts admitting it by label,
+# the same 150s window ./apply-ism-policy.sh sizes and explains.
+put_with_retry() {
+  url=$1
+  body=$2
+  label=$3
+  attempt=1
 
-  echo "[$attempt/$MAX_ATTEMPTS] failed to apply index template (HTTP $status): $(cat /tmp/index-template-response.json 2>/dev/null || true)"
-  attempt=$((attempt + 1))
-  sleep "$RETRY_DELAY_SECONDS"
-done
+  while [ "$attempt" -le "$MAX_ATTEMPTS" ]; do
+    status=$(curl -s -o /tmp/index-template-response.json -w '%{http_code}' -X PUT \
+      "$url" -H 'Content-Type: application/json' -d "$body" || echo 000)
 
-echo "giving up after $MAX_ATTEMPTS attempts"
-exit 1
+    if [ "$status" = "200" ]; then
+      echo "applied $label"
+      return 0
+    fi
+
+    echo "[$attempt/$MAX_ATTEMPTS] failed to apply $label (HTTP $status): $(cat /tmp/index-template-response.json 2>/dev/null || true)"
+    attempt=$((attempt + 1))
+    sleep "$RETRY_DELAY_SECONDS"
+  done
+
+  echo "giving up on $label after $MAX_ATTEMPTS attempts"
+  return 1
+}
+
+put_with_retry \
+  "$OPENSEARCH_URL/_index_template/$TEMPLATE_NAME" \
+  "$TEMPLATE_BODY" \
+  "index template '$TEMPLATE_NAME'"
+
+# allow_no_indices and ignore_unavailable so the first run on a fresh
+# installation - template applied, fluent-bit not yet through its first
+# flush, so nothing matches the wildcard - is a 200 and not a 404 that fails
+# the `&&` chain in ../opensearch-provision.yaml before
+# ./create-index-pattern.sh ever runs. expand_wildcards covers closed indices
+# too: nothing closes one today (./apply-ism-policy.sh only deletes), but a
+# closed index still reports its replica count into cluster health, so
+# skipping it would leave exactly the yellow this call exists to clear.
+put_with_retry \
+  "$OPENSEARCH_URL/$INDEX_PATTERN/_settings?allow_no_indices=true&ignore_unavailable=true&expand_wildcards=open,closed" \
+  "$REPLICA_BODY" \
+  "number_of_replicas: 0 to existing $INDEX_PATTERN indices"
