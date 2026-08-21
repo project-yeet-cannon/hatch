@@ -1,0 +1,109 @@
+# The cluster plan Phase 7b.6, as something that exits 0 - the same thin
+# wrapper shape verify-cluster-platform.yml, verify-data-tier.yml,
+# verify-app-tier.yml and verify-observability.yml established. It checks out
+# the repo and hands every decision to scripts/k3s/Test-NameResolution.ps1.
+#
+# Not a phase gate, and deliberately not named like one: 7c.11's
+# verify-cutover.yml is Phase 7's gate, and it re-asserts this property among
+# many others. This exists because 7b.6 happens in the middle of the cutover
+# evening, hours before the third node exists, and every other assertion that
+# gate makes would fail for reasons that are correct at that moment.
+#
+# **This run is the LAN half of 7b.6, and only the LAN half.** A self-hosted
+# runner is a client on the house LAN, resolving through the same pfSense
+# Unbound 7b.4 just repointed, which is exactly the vantage point the first
+# half of the step asks about. The second half - the same seven names seen
+# from a tailnet client, where split DNS forwards ${DOMAIN} to that same
+# resolver - cannot be reached from here, so the script says so in its own
+# output rather than letting a green check imply it. Run it by hand from a
+# tailnet client for that half:
+#
+#   pwsh scripts/k3s/Test-NameResolution.ps1 -Domain <domain> -IngressVip <vip>
+#
+# It is a plain PowerShell script with no dependencies beyond PowerShell, and
+# it runs on 5.1 and on macOS/Linux pwsh alike, which is what makes running it
+# from whatever laptop is on the tailnet practical.
+#
+# No secrets, and that is a property rather than an omission: this is the one
+# verification in the repository that holds no cluster credentials at all - no
+# node SSH key, no kubeconfig. "What does an ordinary client see" is the
+# question, so the script is given exactly what an ordinary client has.
+#
+# Billing: `runs-on` pins `self-hosted`, so runs never land on a GitHub-hosted
+# runner and never consume Actions minutes. Here that pin is also the point of
+# the check - a GitHub-hosted runner would resolve these names against public
+# DNS from a datacentre, which answers a question nobody asked.
+name: 'Verify: Name resolution'
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: 'Runner to dispatch from (any host works - it needs the house resolver and a route to the ingress VIP)'
+        required: true
+        type: choice
+        options:
+          - hyperv-host-0
+          - hyperv-host-1
+          - hyperv-host-2
+      resolver:
+        description: 'Optional: a resolver address to query directly (defaults to whatever this runner is configured to use, which on the LAN is pfSense)'
+        required: false
+        type: string
+
+# Read-only, so two concurrent runs cannot corrupt anything - but they would
+# interleave their output in the same summary and prove nothing twice, so a
+# second dispatch waits rather than doubling up.
+concurrency:
+  group: verify-name-resolution
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: 7b.6 name resolution (LAN half)
+    runs-on: [self-hosted, '${{ inputs.host }}']
+
+    # Seven DNS queries per resolver plus seven TLS handshakes, none of which
+    # waits on a reconciliation. 5m failing means something is hanging rather
+    # than being slow - most likely a resolver that is accepting the query and
+    # never answering, which the script reports per name.
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out provisioning scripts
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # ASCII only in this block - no em dashes, no curly quotes, in code OR
+      # in comments. The runner writes it to a temp .ps1 as UTF-8 with no BOM
+      # and Windows PowerShell 5.1 decodes that as CP1252, where an em dash's
+      # third byte is a curly closing quote and PowerShell treats curly quotes
+      # as real string delimiters. See cutover-tag-snapshot.yml for the full
+      # account. Test-NameResolution.ps1 itself is ASCII throughout for the
+      # same reason.
+      - name: Assert 7b.6 from the LAN
+        shell: powershell
+        env:
+          # The same two repository variables provision-4-cluster-config.yml
+          # renders the aerie-cluster-config ConfigMap from, so the cluster
+          # and this check cannot disagree about what the answer should be.
+          DOMAIN: ${{ vars.DOMAIN }}
+          INGRESS_VIP: ${{ vars.INGRESS_VIP }}
+          RESOLVER: ${{ inputs.resolver }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+
+          if (-not $env:DOMAIN) { throw "vars.DOMAIN is not set. It is the same repository variable provision-4-cluster-config.yml already requires." }
+          if (-not $env:INGRESS_VIP) { throw "vars.INGRESS_VIP is not set. It is the same repository variable provision-4-cluster-config.yml already requires." }
+
+          $arguments = @{ Domain = $env:DOMAIN; IngressVip = $env:INGRESS_VIP }
+          if ($env:RESOLVER) { $arguments['Resolver'] = @($env:RESOLVER) }
+
+          & .\scripts\k3s\Test-NameResolution.ps1 @arguments
+
+          # Same reason every other verify-*.yml propagates this explicitly:
+          # `exit` inside a script invoked with & sets $LASTEXITCODE without
+          # ending the caller.
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

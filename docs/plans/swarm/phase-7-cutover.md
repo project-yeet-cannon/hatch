@@ -613,46 +613,71 @@ order the evening runs in — but they are never mixed inside one step:
 
   </details>
 
-- [ ] **6. Verify the seven hostnames without `--resolve`** — *scripted*
+- [x] **6. Verify the seven hostnames without `--resolve`** — *scripted*
 
   <details><summary>The first time in the entire plan this check is possible</summary>
 
-  Resolution first, because it answers a different question than the fetch
-  does:
+  [`Test-NameResolution.ps1`](../../../scripts/k3s/Test-NameResolution.ps1),
+  wrapped by
+  [`verify-name-resolution.yml`](../../../.github/workflows/verify-name-resolution.yml).
+  **Twice, from two places** — the exit condition below is two vantage points
+  and no client is both at once:
 
   ```sh
-  dig +short A home.${DOMAIN} @<pfsense-lan-ip>   # the resolver itself
-  dig +short A home.${DOMAIN}                     # a LAN client, through its cache
+  # the LAN half: dispatch the workflow at any self-hosted runner, or by hand
+  pwsh scripts/k3s/Test-NameResolution.ps1 -Domain "$DOMAIN" -IngressVip "$INGRESS_VIP"
+  # then the same command again, from a client on the tailnet
   ```
 
-  Both return `${INGRESS_VIP}`. From a Tailscale client too — split DNS
-  forwards `${DOMAIN}` to this same resolver
-  ([tailscale-vpn-architecture.md](../../tailscale-vpn-architecture.md)), so it
-  follows automatically, and confirming it is cheaper than assuming it.
+  It holds no cluster credentials — no node SSH key, no kubeconfig, and it is
+  the only verification in the repository that needs none. That is the point
+  rather than a convenience: "what does an ordinary client see" is the
+  question, so it is given exactly what an ordinary client has, which is also
+  what lets it run from whatever laptop is on the tailnet. `-Domain` and
+  `-IngressVip` come from the same two repository variables 3b.1 renders the
+  ConfigMap from, so the expectation still has one source.
 
-  Then the fetch, and this is the reason it is worth more than the
-  identical-looking check in 5b.14:
+  What it asserts, and why each half is there. **Resolution first, because it
+  answers a different question than the fetch does** — the `dig +short A
+  home.${DOMAIN} @<pfsense-lan-ip>` / `dig +short A home.${DOMAIN}` pair, as
+  two checks per name rather than two commands: the resolver itself, queried
+  directly over UDP/53 so neither the client's cache nor its hosts file is in
+  the path, and then the client's own stack, where both are. A disagreement
+  between them localises the fault to the client instead of to pfSense. Both
+  must answer **exactly** `${INGRESS_VIP}` and nothing else — an A record left
+  pointing at the old Docker host alongside the new one round-robins, and half
+  of every client's connections land on a machine 7b.2 stopped. From a
+  Tailscale client the split DNS that forwards `${DOMAIN}` to this same
+  resolver ([tailscale-vpn-architecture.md](../../tailscale-vpn-architecture.md))
+  makes that second run follow automatically, and confirming it is cheaper
+  than assuming it.
 
-  ```sh
-  for h in home kiosk files share status logs metrics; do
-    printf '%-8s ' "$h"
-    curl -s -o /dev/null -w '%{http_code} %{remote_ip}\n' "https://$h.$DOMAIN/"
-  done
-  ```
+  **Then the fetch, and this is the reason it is worth more than the
+  identical-looking check in 5b.14.** One TLS connection per hostname, opened
+  against the *name* so the OS resolves it exactly as a browser would, and
+  then the address the socket actually reached is read back off the connection
+  and asserted. That read is `curl -w '%{remote_ip}'` and it is the whole
+  point: a 200 proves something answered, and only the address proves it was
+  the cluster. Seven names, seven `${INGRESS_VIP}`, each with the wildcard
+  certificate on it (`share` still 401s, which is
+  [correct](../../../charts/aerie/values.yaml) — dufs gates the path, not just
+  writes; `logs`, `status` and `metrics` may answer 302, which is three
+  applications bouncing an anonymous caller to their own login).
 
-  `%{remote_ip}` is the point: a 200 proves something answered, and only the
-  address proves it was the cluster. Seven lines, seven `${INGRESS_VIP}`
-  (`share` still 401s, which is [correct](../../../charts/aerie/values.yaml) —
-  dufs gates the path, not just writes).
+  Plus one negative check that keeps every other one honest: **no hosts-file
+  entry names any of the seven.** Without it, a stale line from a Phase 5
+  spot-check would make the whole run green while proving nothing about DNS at
+  all — the same "a check that supplies the answer cannot see it" property
+  7c.11 is built around, enforced here rather than trusted.
 
-  The loop takes ten seconds. Everything above is the explanation.
+  The run takes ten seconds. Everything above is the explanation.
 
   *Exit:* the seven hostnames resolve to the VIP from the LAN and from the
-  tailnet, and answer from it.
+  tailnet, and answer from it — two runs, both exiting 0.
 
   </details>
 
-- [ ] **7. Inspect the clients that are not a browser** — *manual*
+- [x] **7. Inspect the clients that are not a browser** — *manual*
 
   <details><summary>The devices 7a.2 deliberately deferred to this moment</summary>
 
@@ -1127,7 +1152,11 @@ the third node buys. 10 is the paperwork, 11 is the gate. Same tags as 7b.*
   - **each of the seven hostnames resolves to `${INGRESS_VIP}` through the LAN
     resolver** and answers over TLS with a production certificate — no
     `--resolve`, no `/etc/hosts`, and the resolved address asserted explicitly
-    rather than inferred from a 200
+    rather than inferred from a 200. 7b.6's
+    [`Test-NameResolution.ps1`](../../../scripts/k3s/Test-NameResolution.ps1)
+    already does exactly this and is the thing to lift rather than to write
+    again — its DNS query, its socket-peer read and its hosts-file check are
+    the three pieces this bullet is asking for
   - `aerie-pg` is Ready with 3 instances on 3 distinct nodes, and
     `synchronous.dataDurability` is `required`
   - no Longhorn volume is `Degraded`, and every `longhorn-r3` volume has 3
@@ -1172,6 +1201,8 @@ compose.yaml                # SURVIVES - local dev, untouched by this phase
   cutover-tag-snapshot.yml  # 7b.3, new - and 7b.9, deleted with the compose files
   publish.yml               # 7b.9, minus the aerie-caddy job
   stagger-update-reboots.yml# 7b.9, plan job retargeted off legacy-deployer
+  verify-name-resolution.yml# 7b.6, new - and it survives the phase: the
+                            #   same check answers "did DNS drift" later
   verify-cutover.yml        # 7c.11, new
 
 containers/
@@ -1193,6 +1224,7 @@ deploy/cluster/
   observability/config/alerts/cluster.yaml   # 7c.9, two annotations
 
 scripts/k3s/
+  Test-NameResolution.ps1   # 7b.6
   Test-Cutover.ps1          # 7c.11
 ```
 
