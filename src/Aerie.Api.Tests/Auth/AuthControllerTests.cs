@@ -96,6 +96,20 @@ public class AuthControllerTests
     }
 
     [Fact]
+    public async Task VerifyStillDecidesForRealWhileThePodItselfEnforcesNothing()
+    {
+        // The phase 5 split, stated as a test: EnforceInProcess suspends the
+        // in-process middleware and nothing else. If it ever reached the gate
+        // as well, the canary would answer 204 to every route Traefik asks
+        // about - one flag walling nothing instead of walling one app.
+        var controller = NewController(out var context, enforceInProcess: false);
+        Forwarded(context, "/apps/docs/");
+        context.Request.Headers["Sec-Fetch-Mode"] = "cors";
+
+        Assert.IsType<UnauthorizedResult>(await controller.Verify(CancellationToken.None));
+    }
+
+    [Fact]
     public async Task VerifyReadsTheMethodTraefikForwardedRatherThanItsOwnGet()
     {
         // The proxied request is always a GET, so a POST that must not be
@@ -368,11 +382,13 @@ public class AuthControllerTests
         out HttpContext context,
         IAuthService? auth = null,
         bool enabled = true,
+        bool enforceInProcess = true,
         string[]? exemptHosts = null)
     {
         var options = Options.Create(new AuthOptions
         {
             Enabled = enabled,
+            EnforceInProcess = enforceInProcess,
             CookieName = "aerie_grant",
             CookieDomain = ".example.com",
             ExemptHosts = exemptHosts ?? [],

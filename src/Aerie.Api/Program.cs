@@ -266,6 +266,38 @@ if (builder.Configuration["AERIE_MIGRATE"] == "1")
     var haConnection = scope.ServiceProvider.GetRequiredService<IHomeAssistantConnectionManager>();
     await haConnection.ApplyAsync(CancellationToken.None);
 
+    // The chicken-and-egg: the thing that generates an invite lives behind the
+    // wall. An install with no grant and no live invite has no way in at all,
+    // so the migrate Job mints one - here rather than at replica startup,
+    // because three replicas racing this would mint three invites, and this
+    // branch runs exactly once per deploy ahead of any of them.
+    //
+    // This is the only place in the app a code is ever written to a log, and it
+    // is correct here: it is reachable only when there is nothing to protect
+    // the log from that isn't already reachable. On an install that has grants,
+    // nothing below runs and nothing is printed.
+    //
+    // Deliberately not gated on Auth:Enabled, even though a wall that is off
+    // needs no way through it. Gating it would put the one recovery path
+    // behind a second piece of config reaching this Job correctly, and the
+    // failure mode of getting that wrong - the wall goes up on an install that
+    // minted nothing - is the unrecoverable one this exists to prevent. The
+    // cost of being wrong the other way is one expiring row and one log line
+    // per deploy on an install that has no wall.
+    var authService = scope.ServiceProvider.GetRequiredService<IAuthService>();
+    if (!await authService.HasAnyAccessAsync(CancellationToken.None))
+    {
+        var bootstrap = await authService.CreateInviteAsync("Bootstrap", isBootstrap: true, CancellationToken.None);
+        app.Logger.LogWarning(
+            "\n" +
+            "========================================================\n" +
+            " No enrolled devices and no live invite - minted one.\n" +
+            " Sign in at /auth and enter:  {Code}\n" +
+            " Valid until {ExpiresAt:u}. It can be used once.\n" +
+            "========================================================",
+            bootstrap.FormattedCode, bootstrap.ExpiresAt);
+    }
+
     return;
 }
 

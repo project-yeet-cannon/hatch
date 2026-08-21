@@ -211,6 +211,40 @@ public class AuthMiddlewareTests
         Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
     }
 
+    [Fact]
+    public async Task DuringTheCanaryThePodServesWhatItWouldOtherwiseRefuse()
+    {
+        // Phase 5: Auth:Enabled is on so /api/auth/verify decides for real on
+        // Traefik's behalf, but this pod enforces nothing itself, which is what
+        // confines the wall to the routes carrying the annotation. The honest
+        // consequence is exactly this - a request that reaches the pod without
+        // going through Traefik is served.
+        var auth = new StubAuthService();
+
+        var (context, served) = await Run(Request("/api/zones"), enforceInProcess: false, auth: auth);
+
+        Assert.True(served);
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Empty(auth.Verified);
+    }
+
+    [Fact]
+    public async Task TheCanaryStillStripsAForgedIdentityHeader()
+    {
+        // The one thing that must not be suspended with the rest. Nothing
+        // downstream can distinguish a header Traefik set from one a client
+        // sent, and during the canary a client can reach the pod directly.
+        var request = Request("/api/zones");
+        request.Headers[AuthChallenge.GrantHeader] = Guid.NewGuid().ToString();
+        request.Headers[AuthChallenge.LabelHeader] = "Someone else's iPhone";
+
+        var (context, served) = await Run(request, enforceInProcess: false);
+
+        Assert.True(served);
+        Assert.False(context.Request.Headers.ContainsKey(AuthChallenge.GrantHeader));
+        Assert.False(context.Request.Headers.ContainsKey(AuthChallenge.LabelHeader));
+    }
+
     private static EfAuthGrant Grant() => new()
     {
         Id = Guid.NewGuid(),
@@ -236,12 +270,14 @@ public class AuthMiddlewareTests
     private static async Task<(HttpContext Context, bool Served)> Run(
         HttpRequest request,
         bool enabled = true,
+        bool enforceInProcess = true,
         IAuthService? auth = null,
         DateTimeOffset? at = null)
     {
         var options = Options.Create(new AuthOptions
         {
             Enabled = enabled,
+            EnforceInProcess = enforceInProcess,
             CookieName = "aerie_grant",
             CookieDomain = ".example.com",
         });

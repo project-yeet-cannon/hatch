@@ -86,6 +86,35 @@ spec:
               value: "https://home.{{ .Values.domain }}"
             - name: TZ
               value: {{ .Values.tz | quote }}
+            # The wall (docs/plans/auth.md). auth.mode is the one value, and it
+            # sets both switches: Enabled decides whether the gate decides at
+            # all - it is what /api/auth/verify answers on Traefik's behalf -
+            # and EnforceInProcess decides whether this pod also refuses on its
+            # own. They part company only at "canary", where Traefik is
+            # deliberately the sole enforcer so the wall stands in front of
+            # exactly the routes carrying its annotation.
+            - name: Auth__Enabled
+              value: {{ ne .Values.auth.mode "off" | quote }}
+            {{- if ne .Values.auth.mode "off" }}
+            - name: Auth__EnforceInProcess
+              value: {{ eq .Values.auth.mode "on" | quote }}
+            # The leading dot is the entire single-sign-on story: one
+            # enrollment covers home., kiosk. and share. rather than each
+            # asking separately. Getting this wrong presents as a device that
+            # is challenged again on the next hostname it visits.
+            - name: Auth__CookieDomain
+              value: ".{{ .Values.domain }}"
+            # The hosts whose Ingress never gets the annotation, repeated here
+            # so the in-process gate agrees with the proxy instead of being the
+            # stricter of two. files. serves the kiosk APK and its checksum,
+            # public by design; logs. and status. keep their own logins.
+            - name: Auth__ExemptHosts__0
+              value: "files.{{ .Values.domain }}"
+            - name: Auth__ExemptHosts__1
+              value: "logs.{{ .Values.domain }}"
+            - name: Auth__ExemptHosts__2
+              value: "status.{{ .Values.domain }}"
+            {{- end }}
             # Gates VmConsoleLogsController - see
             # scripts/hyperv/lib/Send-VmConsoleLog.ps1. Phase 3 synced this
             # Secret as proof the store worked; this is it finally consumed.

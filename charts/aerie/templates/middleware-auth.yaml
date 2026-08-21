@@ -1,0 +1,50 @@
+# The outer half of the wall (docs/plans/auth.md phase 5) - Traefik asks the
+# api pod about every request on an annotated route, and serves it only if the
+# answer is 2xx. The inner half is AuthMiddleware in the same pod, calling the
+# same AuthGate, so there is one allow-list rather than two that can disagree.
+#
+# Rendered for both "canary" and "on": what changes between them is which
+# Ingresses carry the annotation (ingress.yaml), not whether the Middleware
+# exists. Absent entirely at "off", which is what makes that value a complete
+# rollback rather than a half-off state - an Ingress annotation pointing at a
+# Middleware that does not exist is a 500 on every request through it, so the
+# guard here and the guards there have to agree, and they key off the same
+# value for that reason.
+#
+# The three legal values are asserted here, outside the guard so it runs on
+# every render of the chart. auth.mode is compared against string literals in
+# four places; a typo, or the bare `off` that YAML 1.1 turns into a boolean,
+# matches none of them and renders as a half-state - Auth__Enabled true, no
+# Ingress annotated, nothing walled and the pod believing otherwise. A failed
+# reconcile says so; a half-state does not.
+{{- if not (has (toString .Values.auth.mode) (list "off" "canary" "on")) }}
+{{- fail (printf "auth.mode must be \"off\", \"canary\" or \"on\" - got %#v. If this is a bool, it was written unquoted: YAML 1.1 reads a bare off as false." .Values.auth.mode) }}
+{{- end }}
+{{- if ne .Values.auth.mode "off" }}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: aerie-auth
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+    app.kubernetes.io/component: auth
+spec:
+  forwardAuth:
+    # The in-cluster Service, plain http and by FQDN: this hop never leaves the
+    # cluster network, and naming the Service through the Ingress instead would
+    # send every request on a round trip back out through Traefik - including
+    # the ones Traefik is asking about.
+    #
+    # AuthController.Verify reads the original request from the X-Forwarded-*
+    # headers Traefik adds here, not from this request's own path, and fails
+    # closed when they are missing - /api/auth/verify is itself on the
+    # allow-list, so falling back to this request's own path would answer 204
+    # to everything.
+    address: http://api.{{ .Release.Namespace }}.svc.cluster.local:8080/api/auth/verify
+    # Traefik copies back only what is named here, which is why cookie re-issue
+    # lives in AuthMiddleware rather than in the verify response: Set-Cookie
+    # cannot be one of these.
+    authResponseHeaders:
+      - X-Aerie-Grant
+      - X-Aerie-Label
+{{- end }}

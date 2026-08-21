@@ -74,6 +74,18 @@ spec:
         tag: ${KIOSK_FILES_IMAGE_TAG}
     domain: ${DOMAIN}
     tz: ${TZ}
+    # The wall (docs/plans/auth.md) - "off" | "canary" | "on", and the whole
+    # rollback. Optional in cluster-config.json with the same `:=` default the
+    # chart carries, so an installation that never sets AUTH_MODE behaves
+    # exactly as it did before auth existed.
+    #
+    # The quotes are load-bearing, not style. Substitution is textual, so
+    # `mode: ${AUTH_MODE}` resolving to `mode: off` is the YAML 1.1 boolean
+    # false by the time Helm reads it, and every `eq .Values.auth.mode "off"`
+    # in the chart then matches nothing - the templates that guard the wall
+    # would render on the value that meant to switch it off.
+    auth:
+      mode: "${AUTH_MODE:=off}"
     # Both optional (scripts/k3s/cluster-config.json) - when unset, the key is
     # genuinely absent from the ConfigMap, not present with an empty value.
     # kustomize-controller substitutes in strict mode (confirmed live: an

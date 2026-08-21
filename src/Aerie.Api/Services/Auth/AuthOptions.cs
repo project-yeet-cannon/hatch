@@ -7,6 +7,11 @@ namespace Aerie.Api.Services.Auth;
 /// exempt hosts are supplied at deploy from the DOMAIN operator variable, per
 /// docs/ethos.md. <see cref="Enabled"/> is the whole rollback: false leaves the
 /// app behaving exactly as it did before auth existed.
+///
+/// Two switches, not one. <see cref="Enabled"/> decides whether the gate
+/// decides at all - it is what /api/auth/verify answers on Traefik's behalf.
+/// <see cref="EnforceInProcess"/> decides whether this pod also refuses on its
+/// own. The chart's one auth.mode value sets both (docs/plans/auth.md).
 /// </summary>
 public class AuthOptions
 {
@@ -18,6 +23,26 @@ public class AuthOptions
     /// frictionless; flip it locally with <c>Auth__Enabled=true dotnet run</c>.
     /// </summary>
     public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Whether the pod refuses on its own, or only answers
+    /// <c>/api/auth/verify</c> on Traefik's behalf. True everywhere except the
+    /// phase 5 canary, where the point is that Traefik enforces on exactly the
+    /// routes carrying the middleware annotation and nothing else - one app,
+    /// rather than the whole pod.
+    ///
+    /// Read only by <see cref="Aerie.Api.Common.AuthMiddleware"/>;
+    /// <see cref="AuthGate"/> never sees it, so <c>verify</c> keeps deciding
+    /// for real whenever <see cref="Enabled"/> is true. Defaults to true, so
+    /// this cannot quietly widen what an existing config means: the canary has
+    /// to ask for it.
+    ///
+    /// Stated honestly: while this is false, anything reaching the Service
+    /// directly - in-cluster, or a <c>kubectl port-forward</c> - is as open as
+    /// it was before auth existed. That is the pre-auth posture, held for one
+    /// phase, deliberately.
+    /// </summary>
+    public bool EnforceInProcess { get; set; } = true;
 
     /// <summary>
     /// The cookie the grant token rides in. The <c>__Secure-</c> prefix is

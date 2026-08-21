@@ -99,3 +99,58 @@ spec:
                 port:
                   # dufs's default listen port, matching share-service.yaml.
                   number: 5000
+{{- if eq .Values.auth.mode "canary" }}
+---
+# The phase 5 canary (docs/plans/auth.md) - the wall in front of one app whose
+# failure costs nothing, before it stands in front of the house. Same host and
+# same backend as `home` above; the only difference is the annotation, and the
+# only reason it is a separate Ingress is that an annotation applies to every
+# path an Ingress carries.
+#
+# Two things decide whether this works at all, and neither is visible in a
+# `helm diff`:
+#
+#   Router priority. `home` already claims / on this host. Traefik ranks
+#   routers by rule length, so PathPrefix(`/apps/docs`) outranks
+#   PathPrefix(`/`) and the annotated route wins. If that ever goes the other
+#   way the request is served *unauthenticated* - a failure that looks exactly
+#   like success. Only an actual 302 from an un-enrolled client proves it.
+#
+#   The <namespace>-<name>@kubernetescrd naming rule, same as the `kiosk`
+#   annotation above warns: a bare name is silently not found and, again, the
+#   route serves unauthenticated.
+#
+# Both prefixes are self-contained. apps/docs sets base: '/apps/docs/' in its
+# vite.config.ts, so every asset the bundle requests is under the gated prefix
+# and none of it leaks out to the ungated / route; /api/docs is the only API
+# the app calls.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: docs-canary
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+    app.kubernetes.io/component: docs-canary
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: "{{ .Release.Namespace }}-aerie-auth@kubernetescrd"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: "home.{{ .Values.domain }}"
+      http:
+        paths:
+          - path: /apps/docs
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8080
+          - path: /api/docs
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8080
+{{- end }}

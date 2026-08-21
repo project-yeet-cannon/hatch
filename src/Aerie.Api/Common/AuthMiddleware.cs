@@ -20,7 +20,9 @@ namespace Aerie.Api.Common;
 ///
 /// Registered after UseForwardedHeaders (it needs the real client IP for the
 /// refusal log) and before the /apps static file handlers (otherwise the SPA
-/// bundles serve to anyone). No-ops entirely when Auth:Enabled is false.
+/// bundles serve to anyone). No-ops entirely when Auth:Enabled is false, and
+/// also when Auth:EnforceInProcess is false - the phase 5 canary, which needs
+/// Traefik to be the only enforcer for exactly one phase.
 /// </summary>
 public class AuthMiddleware(RequestDelegate next, IOptions<AuthOptions> options, ILogger<AuthMiddleware> logger)
 {
@@ -36,7 +38,13 @@ public class AuthMiddleware(RequestDelegate next, IOptions<AuthOptions> options,
         context.Request.Headers.Remove(AuthChallenge.GrantHeader);
         context.Request.Headers.Remove(AuthChallenge.LabelHeader);
 
-        if (!gate.Enabled)
+        // Two conditions, one no-op. Off is the rollback; on-but-not-enforcing
+        // is the phase 5 canary, where Traefik is deliberately the only
+        // enforcer so that the wall stands in front of exactly the routes
+        // carrying its annotation. /api/auth/verify still decides for real in
+        // both cases, because it goes through the gate rather than through
+        // here.
+        if (!gate.Enabled || !options.EnforceInProcess)
         {
             await next(context);
             return;

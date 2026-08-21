@@ -65,6 +65,25 @@ domain: ""
 # ${TZ}, an IANA zone id.
 tz: ""
 
+# The wall (docs/plans/auth.md). One value is the whole rollback, and
+# "canary" is a rung on that ladder rather than a branch off it:
+#
+#   mode      Auth__Enabled  Auth__EnforceInProcess  Middleware  Annotated
+#   "off"     false          -                       no          nothing
+#   "canary"  true           false                   yes         the docs Ingress only
+#   "on"      true           true                    yes         home + kiosk
+#
+# ${AUTH_MODE}, defaulting to "off" so an install that never sets it behaves
+# exactly as it did before auth existed.
+#
+# QUOTE IT, ALWAYS - here, in helmrelease.yaml, and in anything that sets it.
+# Helm parses values as YAML 1.1, where a bare `off` is the boolean false; a
+# template comparing that to the string "off" then matches nothing, silently,
+# and the branch that renders the wall is taken on a value that meant to
+# switch it off.
+auth:
+  mode: "off"
+
 # ${HA_HOST} / ${HA_PORT}, both optional - only read by the api container's
 # one-time SiteSettings import on a fresh install. Empty means unset, not "".
 haHost: ""

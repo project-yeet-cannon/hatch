@@ -215,6 +215,19 @@
       "description": "Subpath of the share served, unauthenticated, as the media library. Optional; see compose.share.yml's own reasoning for why unset means off rather than root."
     },
     {
+      "key": "AUTH_MODE",
+      "env": "AUTH_MODE",
+      "githubSource": "AUTH_MODE",
+      "githubKind": "variable",
+      "required": false,
+      "pattern": "^(off|canary|on)$",
+      "normalize": "lower",
+      "hint": "One of off, canary, on. Unset means off - the pre-auth posture, which is also the rollback.",
+      "example": "canary",
+      "consumedBy": "5b.10 HelmRelease values (auth.mode), which sets api env Auth__Enabled/Auth__EnforceInProcess and decides which Ingresses carry the forwardAuth annotation",
+      "description": "How much of the house sits behind the wall (docs/plans/auth.md). 'off' is the pre-auth behavior and the complete rollback; 'canary' walls apps/docs alone with Traefik as the only enforcer; 'on' walls home and kiosk and the pod refuses on its own as well. One value, one ladder - moving between them is a repository-variable change and a reconcile, not a code change."
+    },
+    {
       "key": "TZ",
       "env": "TZ",
       "githubSource": "TZ",
