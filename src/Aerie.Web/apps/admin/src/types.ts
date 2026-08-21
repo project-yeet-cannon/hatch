@@ -191,3 +191,39 @@ export interface ProvisioningInfo {
   wifiSecurityType: string;
   timeZone: string;
 }
+
+/**
+ * Mirrors of Aerie.Api's auth DTOs (Models/Auth/Dtos.cs). A grant is one
+ * enrolled device: the credential itself is never in here, because it exists
+ * in plaintext exactly once, in the Set-Cookie that minted it.
+ */
+export type AuthGrantKind = 'Interactive' | 'Device';
+
+export interface AuthGrant {
+  id: string;
+  label: string;
+  kind: AuthGrantKind;
+  createdAt: string;
+  lastSeenAt: string | null;
+  lastSeenIp: string | null;
+  userAgent: string | null;
+  /** The device asking. It gets a badge instead of a Delete button - see SessionsPage. */
+  isCurrent: boolean;
+}
+
+export interface AuthInvite {
+  /** The bare eight characters, as the redeem URL carries them. */
+  code: string;
+  /** The same code as a person says it: "AERIE-K3M9-P2QT". */
+  formattedCode: string;
+  /** Rooted path a scanned QR should open; the absolute URL is this against the install's public base. */
+  redeemPath: string;
+  expiresAt: string;
+  label: string | null;
+}
+
+/** `GET /api/apps/config` - the deploy-time values a client can't derive (Modules/AppsController.cs). */
+export interface AppsConfig {
+  /** Absolute base URL of this install, no trailing slash, or null when unset. */
+  publicBaseUrl: string | null;
+}

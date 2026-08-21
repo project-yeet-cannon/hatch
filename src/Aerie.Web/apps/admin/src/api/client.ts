@@ -1,4 +1,7 @@
 import type {
+  AppsConfig,
+  AuthGrant,
+  AuthInvite,
   BackfillRequest,
   ChannelHistory,
   ChannelModeRequest,
@@ -116,3 +119,17 @@ export const getUnmappedDevices = () => fetchJson<UnmappedHaDevice[]>('/api/disc
 // ---- Kiosk provisioning ----
 
 export const getKioskProvisioningInfo = () => fetchJson<ProvisioningInfo>('/api/kiosk/provisioning-info');
+
+// ---- Sessions ----
+
+export const getGrants = () => fetchJson<AuthGrant[]>('/api/auth/grants');
+/** Revocation is deletion; the server refuses the caller's own grant, which signOutDevice is for. */
+export const deleteGrant = (id: string) => fetchJson<void>(`/api/auth/grants/${id}`, { method: 'DELETE' });
+/** The only response in the app that carries a live credential, and it carries it once - it cannot be fetched again. */
+export const createInvite = (label: string | null) =>
+  fetchJson<AuthInvite>('/api/auth/invites', { method: 'POST', ...asJson({ label }) });
+export const signOutDevice = () => fetchJson<void>('/api/auth/sign-out', { method: 'POST' });
+
+// ---- Platform config ----
+
+export const getAppsConfig = () => fetchJson<AppsConfig>('/api/apps/config');

@@ -6,6 +6,7 @@ import { DevicesPage } from './pages/DevicesPage';
 import { DiscoveryPage } from './pages/DiscoveryPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ProvisioningPage } from './pages/ProvisioningPage';
+import { SessionsPage } from './pages/SessionsPage';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) => `admin-nav-link${isActive ? ' active' : ''}`;
 
@@ -30,6 +31,7 @@ export function App() {
           <NavLink to="/discovery" className={navLinkClass}>Discovery</NavLink>
           <NavLink to="/settings" className={navLinkClass}>Settings</NavLink>
           <NavLink to="/provisioning" className={navLinkClass}>Provisioning</NavLink>
+          <NavLink to="/sessions" className={navLinkClass}>Sessions</NavLink>
         </div>
       </nav>
 
@@ -42,6 +44,7 @@ export function App() {
           <Route path="/discovery" element={<DiscoveryPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/provisioning" element={<ProvisioningPage />} />
+          <Route path="/sessions" element={<SessionsPage />} />
           <Route path="*" element={<Navigate to="/zones" replace />} />
         </Routes>
       </main>

@@ -28,7 +28,7 @@ clicking to a human.
 - [x] **1** — Grant + invite schema, token primitives, the gate decision
 - [x] **2** — Auth endpoints and in-process middleware (still off)
 - [x] **3** — The sign-in shell (`apps/auth`)
-- [ ] **4** — Admin Sessions page: view, delete, generate invite
+- [x] **4** — Admin Sessions page: view, delete, generate invite
 - [ ] **5** — Turn the wall on: bootstrap grant, Traefik middleware, Ingress annotations
 - [ ] **6** — *(optional)* Kiosk tablets scan the QR instead of typing the code
 - [ ] **7** — Widen to `share.`, dissipate this plan into `docs/auth-architecture.md`
@@ -332,14 +332,142 @@ demonstrable end to end against a local instance with `Auth__Enabled=true`.
 
 ---
 
-## Phase 5 — Turn the wall on
+## Phase 5 — Canary: the wall on, in front of one app
 
-**Goal:** the cluster actually refuses. One value is the rollback.
+**Goal:** run the entire chain — Traefik `forwardAuth` → `/api/auth/verify` →
+sign-in shell → redeem → return-to — in the cluster, in front of an app whose
+failure costs nothing, before it stands in front of the house.
+
+**Why a canary, and why `docs`.** Phase 6 puts the operator, the tablets, and
+the speakers behind a mechanism that has never once run outside `make run`. Its
+failure mode isn't "auth is broken," it's *"nobody can reach the admin app that
+mints the invite that fixes auth"* — the bootstrap invite in step 3 exists
+precisely because that state is otherwise unrecoverable, and a plan that relies
+on its recovery path on first contact is a plan that tests the recovery path.
+
+[`apps/docs`](../../src/Aerie.Web/apps/docs) is the right sacrifice: nothing in
+the house depends on it, no kiosk loads it, no speaker fetches from it — and it
+still exercises everything that matters. It is a static SPA bundle *and* an API
+caller of its own (`/api/docs`, `/api/docs/{path}`) *and* a deep link
+(`/apps/docs/{slug}`), which is the return-to redirect under load-bearing
+conditions rather than in theory.
+
+What stays untouched is the point: `home` and `kiosk` keep no annotation, and
+the in-process gate stays passive, so **the way back in is never behind the
+thing being tested.**
 
 **Files**
 
+- `src/Aerie.Api/Services/Auth/AuthOptions.cs` — `EnforceInProcess`
+- `src/Aerie.Api/Common/AuthMiddleware.cs` — honour it
 - `src/Aerie.Api/Program.cs` — bootstrap invite in the `AERIE_MIGRATE` branch
 - `charts/aerie/templates/middleware-auth.yaml` *(new)*
+- `charts/aerie/templates/ingress.yaml` — the canary Ingress
+- `charts/aerie/values.yaml`, `deploy/cluster/apps/helmrelease.yaml`,
+  `scripts/k3s/cluster-config.json`
+- `scripts/k3s/Test-AppTier.ps1` — checks
+
+**Steps**
+
+1. **Split the switch, because "on" now means two things.** `Auth:Enabled`
+   short-circuits `AuthGate.EvaluateAsync`
+   ([`AuthGate.cs`](../../src/Aerie.Api/Services/Auth/AuthGate.cs)), and both
+   the middleware and `/api/auth/verify` go through it — so one flag either
+   walls the whole pod or answers every `verify` with `204`. Neither is a
+   canary. Add `Auth:EnforceInProcess` (default **`true`**, so nothing already
+   written changes meaning) and have `AuthMiddleware` no-op when `Enabled &&
+   !EnforceInProcess`. `AuthGate` itself is untouched: `verify` keeps deciding
+   for real whenever `Enabled` is true, which is what lets Traefik enforce on
+   exactly the routes that carry the annotation.
+
+   *Stated honestly:* through this phase the pod enforces nothing on its own,
+   so anything that reaches the Service directly — in-cluster, or a
+   `kubectl port-forward` — is as open as it is today. That is the pre-auth
+   posture, held for one phase, deliberately. Phase 6 ends it.
+
+2. **`auth.mode` replaces `auth.enabled`** in
+   [`values.yaml`](../../charts/aerie/values.yaml): `"off"` | `"canary"` |
+   `"on"`, defaulting to `"off"`. **Quote it, always** — Helm parses values as
+   YAML 1.1, where a bare `off` is the boolean `false`, and a template
+   comparing it to a string then silently matches nothing. One value is still
+   the whole rollback; `"canary"` is a rung on that ladder, not a branch off it.
+
+   | `auth.mode` | `Auth__Enabled` | `Auth__EnforceInProcess` | `Middleware` rendered | Annotated |
+   |---|---|---|---|---|
+   | `"off"` | `false` | — | no | nothing |
+   | `"canary"` | `true` | `false` | yes | the `docs` canary Ingress only |
+   | `"on"` | `true` | `true` | yes | `home` + `kiosk` |
+
+3. In the `AERIE_MIGRATE=1` branch, after the seeders: if `AuthGrants` is empty
+   and no unredeemed bootstrap invite exists, mint one with a longer TTL (an
+   hour) and log it at Warning with a banner. This is the only place a code is
+   ever written to a log, and it is correct there — it is reachable only when
+   the install has no way in at all. It fires on this phase's deploy rather
+   than Phase 6's, which is the point: the first grant is minted while the
+   admin app is still reachable without one.
+
+4. `middleware-auth.yaml` — a Traefik `Middleware` with
+   `forwardAuth.address: http://api.{{ .Release.Namespace }}.svc.cluster.local:8080/api/auth/verify`
+   and `authResponseHeaders: [X-Aerie-Grant, X-Aerie-Label]`. Guard the whole
+   file on `ne .Values.auth.mode "off"`.
+
+5. **The canary Ingress** — a new `docs-canary` Ingress on
+   `home.{{ .Values.domain }}`, backend `api:8080`, two `Prefix` paths
+   (`/apps/docs` and `/api/docs`), carrying
+   `traefik.ingress.kubernetes.io/router.middlewares: "{{ .Release.Namespace }}-aerie-auth@kubernetescrd"`,
+   rendered only when `auth.mode` is `"canary"`. Two things decide whether it
+   works at all:
+   - **Router priority.** The `home` Ingress already claims `/` on this host.
+     Traefik ranks routers by rule length, so `PathPrefix('/apps/docs')`
+     outranks `PathPrefix('/')` and the annotated route wins — but if that ever
+     goes the other way the request is served *unauthenticated*, a failure that
+     looks exactly like success. The 302 check in step 7 is what actually
+     proves it; don't take a clean `helm diff` as evidence.
+   - The `<namespace>-<name>@kubernetescrd` naming rule, same as the existing
+     comment in `ingress.yaml` warns: a bare name is silently not found and,
+     again, the route serves unauthenticated.
+6. `${AUTH_MODE}` in the HelmRelease and the matching entry in
+   `cluster-config.json`.
+7. Deploy with `"off"` first. Confirm nothing changed. Then set `"canary"`.
+
+**Verify by hand, in this order**
+
+- A private window, un-enrolled: `home.${DOMAIN}/apps/docs/` lands on the
+  sign-in shell.
+- Same window, `home.${DOMAIN}/` and `/apps/admin/` still load with no wall.
+  **This is the assertion that matters most** — it is the containment, and it
+  is what makes the phase safe to walk away from.
+- A deep link, `home.${DOMAIN}/apps/docs/{slug}`, un-enrolled → sign-in →
+  redeem a code generated in the admin app → back on that slug, rendered.
+- `curl -H 'Accept: application/json' https://home.${DOMAIN}/api/docs` →
+  `401`, not `302`. A redirect here is invisible to `fetch` and surfaces later
+  as a JSON-parse error somewhere unrelated.
+- Sonos, the kiosks, and the dashboard's `/api/app-version` poll: unchanged.
+  Confirming these is confirming the blast radius, not just habit.
+- `kubectl -n aerie logs job/…-migrate` shows the bootstrap banner exactly once
+  on an install with no grants, and not at all on one that has them.
+- `Test-AppTier.ps1`, with the mode set to canary: `/apps/docs/` unauthenticated
+  → `302`; `/` → `200`; `/health/ready` → `200`; a `/media/...` HEAD → `200`.
+
+**Soak it before Phase 6.** Not for a fixed number of days — for a number of
+*devices*. Read a doc page from each kind of client that will eventually be
+enrolled: a phone, a laptop, one tablet's browser, one non-Chrome browser. "The
+cookie `Domain` is subtly wrong" and "this platform drops it on a redirect" are
+per-platform failures that a single desktop test cannot find, and they are much
+cheaper to find here than one phase later.
+
+**Done when:** `docs` refuses an un-enrolled device and serves an enrolled one,
+everything else in the house is provably unchanged, and the operator's browser
+is holding a grant that Phase 6 will accept. Rollback is `auth.mode: "off"`.
+
+---
+
+## Phase 6 — Widen the wall to the house
+
+**Goal:** the cluster actually refuses. One value is still the rollback.
+
+**Files**
+
 - `charts/aerie/templates/ingress.yaml` — annotations on `home` and `kiosk`
 - `charts/aerie/values.yaml` + `deploy/cluster/apps/helmrelease.yaml`
 - `scripts/k3s/Test-AppTier.ps1` — checks
@@ -347,44 +475,44 @@ demonstrable end to end against a local instance with `Auth__Enabled=true`.
 
 **Steps**
 
-1. In the `AERIE_MIGRATE=1` branch, after the seeders: if `AuthGrants` is empty
-   and no unredeemed bootstrap invite exists, mint one with a longer TTL (an
-   hour) and log it at Warning with a banner. This is the only place a code is
-   ever written to a log, and it is correct there — it is reachable only when
-   the install has no way in at all.
-2. `middleware-auth.yaml` — a Traefik `Middleware` with
-   `forwardAuth.address: http://api.{{ .Release.Namespace }}.svc.cluster.local:8080/api/auth/verify`
-   and `authResponseHeaders: [X-Aerie-Grant, X-Aerie-Label]`. Guard the whole
-   file on `.Values.auth.enabled`.
-3. Annotate the `home` and `kiosk` Ingresses. **The `kiosk` Ingress already
-   carries a middleware annotation** — Traefik takes a comma-separated list and
-   applies it in order, so it becomes
+1. Annotate the `home` and `kiosk` Ingresses, guarded on `auth.mode` being
+   `"on"`. **The `kiosk` Ingress already carries a middleware annotation** —
+   Traefik takes a comma-separated list and applies it in order, so it becomes
    `"{{ ns }}-aerie-auth@kubernetescrd,{{ ns }}-kiosk-root-rewrite@kubernetescrd"`,
-   auth first. Same `<namespace>-<name>@kubernetescrd` rule the existing comment
-   in that file warns about: a bare name is silently not found and the route
-   serves *unauthenticated*, which is a failure that looks like success.
-4. `auth.enabled: false` in `values.yaml`, `${AUTH_ENABLED}` in the HelmRelease,
-   and the matching entry in `cluster-config.json`.
-5. Deploy with it still false. Confirm nothing changed. Then flip it.
-6. Add to `Test-AppTier.ps1`: unauthenticated `home.${DOMAIN}/` → 302 to
+   auth first.
+2. Leave the canary Ingress template in place. It renders only at
+   `"canary"`, so it vanishes on this deploy, and it costs one guarded template
+   to keep the rehearsal rig for the next change to the gate — the allow-list
+   growing, `logs.` joining the wall, a passkey ceremony.
+3. Flip `auth.mode` to `"on"`. That single change annotates the two Ingresses
+   *and* turns `Auth__EnforceInProcess` back to `true`, so from here the pod
+   refuses on its own even if a route ever loses its annotation. Both halves of
+   "defense in depth" arrive together on purpose.
+4. Add to `Test-AppTier.ps1`: unauthenticated `home.${DOMAIN}/` → 302 to
    `/apps/auth/`; `/health/ready` → 200; a `/media/...` HEAD → 200; `files.` and
    `status.` unchanged; with a test grant cookie, `home.${DOMAIN}/` → 200.
+5. `README.md`: how to enroll a device, and the lockout-recovery pointer.
 
 **Verify by hand, in this order, before walking away**
 
 - Sonos plays a track from the media library. *(The `/media` exemption. If this
   fails, nothing else in this list matters.)*
+- The operator's own browser, enrolled back in Phase 5, notices nothing. If it
+  is challenged again here, the cookie's scope is wrong and the canary was
+  narrower than it looked — stop and read `Domain` before enrolling anything
+  else.
 - Every kiosk tablet: shows the wall, accepts a typed code, returns to the
   dashboard, and **survives a reboot still signed in.** Cookie persistence in
   GeckoView is the thing to actually confirm here rather than assume.
 - The dashboard's self-update poll (`/api/app-version`) still works from an
   enrolled tablet.
-- `kubectl -n aerie logs job/…-migrate` shows no bootstrap banner on an install
-  that already has grants.
+- A printed storage-bin QR label, cold-scanned by an un-enrolled phone: sign-in,
+  then the bin. This is the consequence the operator accepted, seen once in
+  reality before a guest finds it.
 
 **Done when:** an un-enrolled device on the LAN cannot reach `home.${DOMAIN}`,
-every enrolled device is unaware anything changed, and `auth.enabled: false`
-plus a Flux reconcile is a complete, tested rollback.
+every enrolled device is unaware anything changed, and `auth.mode: "off"` plus a
+Flux reconcile is a complete, tested rollback.
 
 ---
 

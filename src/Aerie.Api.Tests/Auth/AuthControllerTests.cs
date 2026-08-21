@@ -254,6 +254,97 @@ public class AuthControllerTests
         Assert.StartsWith("aerie_grant=;", context.Response.Headers.SetCookie.ToString());
     }
 
+    [Fact]
+    public async Task TheSessionListMarksTheCallersOwnDeviceAndOnlyThat()
+    {
+        var mine = Grant("This laptop");
+        var theirs = Grant("Kitchen tablet");
+        var auth = new StubAuthService(mine);
+        auth.Grants.AddRange([theirs, mine]);
+        var controller = NewController(out var context, auth);
+        context.Request.Headers.Cookie = "aerie_grant=a-token";
+
+        var result = Assert.IsType<OkObjectResult>(await controller.ListGrants(CancellationToken.None));
+
+        var dtos = Assert.IsType<List<AuthGrantDto>>(result.Value);
+        Assert.Equal(["Kitchen tablet", "This laptop"], dtos.Select(d => d.Label));
+        Assert.Equal([false, true], dtos.Select(d => d.IsCurrent));
+    }
+
+    [Fact]
+    public async Task TheSessionListMarksNothingCurrentWhenTheCallerHoldsNoGrant()
+    {
+        // Every phase before 5 and all of local dev: the wall is down, so the
+        // page is reachable without a grant and no row is "this device".
+        var auth = new StubAuthService(null);
+        auth.Grants.Add(Grant());
+        var controller = NewController(out _, auth, enabled: false);
+
+        var result = Assert.IsType<OkObjectResult>(await controller.ListGrants(CancellationToken.None));
+
+        Assert.False(Assert.Single(Assert.IsType<List<AuthGrantDto>>(result.Value)).IsCurrent);
+    }
+
+    [Fact]
+    public async Task RevokingAnotherDeviceDeletesIt()
+    {
+        var auth = new StubAuthService(Grant());
+        var controller = NewController(out var context, auth);
+        context.Request.Headers.Cookie = "aerie_grant=a-token";
+        var theirs = Guid.NewGuid();
+
+        Assert.IsType<NoContentResult>(await controller.RevokeGrant(theirs, CancellationToken.None));
+        Assert.Equal([theirs], auth.Revoked);
+    }
+
+    [Fact]
+    public async Task RevokingYourOwnDeviceIsRefusedRatherThanLeavingACookieNoRowAnswersTo()
+    {
+        // Not squeamishness about lockout - it is that this path deletes the
+        // row and cannot clear the cookie on the browser it isn't answering,
+        // which is the state that makes "sign out and back in" fail to help.
+        var mine = Grant();
+        var auth = new StubAuthService(mine);
+        var controller = NewController(out var context, auth);
+        context.Request.Headers.Cookie = "aerie_grant=a-token";
+
+        var result = Assert.IsType<BadRequestObjectResult>(await controller.RevokeGrant(mine.Id, CancellationToken.None));
+
+        Assert.Equal(AuthController.OwnGrantError, Assert.IsType<AuthErrorDto>(result.Value).Error);
+        Assert.Empty(auth.Revoked);
+    }
+
+    [Fact]
+    public async Task RevokingAGrantThatIsAlreadyGoneIsA404()
+    {
+        var auth = new StubAuthService(Grant()) { RevokeResult = false };
+        var controller = NewController(out var context, auth);
+        context.Request.Headers.Cookie = "aerie_grant=a-token";
+
+        Assert.IsType<NotFoundResult>(await controller.RevokeGrant(Guid.NewGuid(), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AnInviteComesBackOnceWithEverythingAQrAndAReadingVoiceNeed()
+    {
+        var auth = new StubAuthService(Grant());
+        var controller = NewController(out var context, auth);
+
+        var result = Assert.IsType<OkObjectResult>(
+            await controller.CreateInvite(new CreateInviteRequest("Ada's iPhone"), CancellationToken.None));
+
+        var dto = Assert.IsType<AuthInviteDto>(result.Value);
+        Assert.Equal("K3M9P2QT", dto.Code);
+        Assert.Equal("AERIE-K3M9-P2QT", dto.FormattedCode);
+        // Built from Auth:SignInPath, so an install that mounts the shell
+        // elsewhere moves the QR target with it.
+        Assert.Equal("/apps/auth/r/K3M9P2QT", dto.RedeemPath);
+        Assert.Equal("Ada's iPhone", dto.Label);
+        Assert.Equal([("Ada's iPhone", false)], auth.InvitesCreated);
+        // A live credential has no business in a cache, anyone's.
+        Assert.Equal("no-store", context.Response.Headers.CacheControl.ToString());
+    }
+
     private static EfAuthGrant Grant(string label = "Kitchen tablet") => new()
     {
         Id = Guid.NewGuid(),

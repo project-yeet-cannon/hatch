@@ -9,14 +9,15 @@ using Microsoft.Extensions.Options;
 namespace Aerie.Api.Controllers;
 
 /// <summary>
-/// The four endpoints the wall needs: the one Traefik asks, the one that turns
-/// an invite code into a session, and the two a signed-in device uses to ask
-/// who it is and to stop being anyone.
+/// The endpoints the wall needs: the one Traefik asks, the one that turns an
+/// invite code into a session, the two a signed-in device uses to ask who it is
+/// and to stop being anyone, and the three behind the admin Sessions page that
+/// hand sessions out and take them away.
 ///
-/// Three of them are on the gate's allow-list by necessity - gating the
-/// sign-in path is an infinite redirect loop - which is why nothing here reads
-/// a request header as an identity and everything reads the cookie through the
-/// same <see cref="IAuthGate"/> the middleware uses.
+/// Two of them - verify and redeem - are on the gate's allow-list by necessity,
+/// since gating the sign-in path is an infinite redirect loop. That is why
+/// nothing here reads a request header as an identity, and why everything reads
+/// the cookie through the same <see cref="IAuthGate"/> the middleware uses.
 /// </summary>
 [ApiController]
 [Route("api/auth")]
@@ -28,6 +29,9 @@ public class AuthController(
 {
     /// <summary>Named so Program.cs can configure the partition and this file can apply it, without either restating the numbers.</summary>
     public const string RedeemRateLimitPolicy = "auth-redeem";
+
+    /// <summary>Why a revocation was refused - the caller aimed it at the device it is sitting on. See <see cref="RevokeGrant"/>.</summary>
+    public const string OwnGrantError = "own_grant";
 
     private const string ForwardedMethod = "X-Forwarded-Method";
     private const string ForwardedHost = "X-Forwarded-Host";
@@ -145,6 +149,85 @@ public class AuthController(
         AuthCookie.Clear(Response, options);
         return NoContent();
     }
+
+    /// <summary>
+    /// Every enrolled device, newest first - the whole of the admin Sessions
+    /// page's list.
+    ///
+    /// Behind the wall like everything else, and no further: there are no roles
+    /// yet, so any enrolled device can see and revoke any grant. That is the
+    /// gate-not-permissions call the plan makes deliberately, and a grant is
+    /// already a row with room for an owner when that changes
+    /// (docs/plans/auth.md, "Deferred on purpose").
+    /// </summary>
+    [HttpGet("grants")]
+    public async Task<IActionResult> ListGrants(CancellationToken ct)
+    {
+        // Resolved before the list so the caller's own row can be marked, which
+        // is what keeps the Sessions page from offering someone the button that
+        // ends their own visit to it.
+        var current = await CurrentGrantAsync(ct);
+        var grants = await auth.ListGrantsAsync(ct);
+
+        return Ok(grants.Select(grant => AuthGrantDto.From(grant, grant.Id == current?.Id)).ToList());
+    }
+
+    /// <summary>
+    /// Revokes someone else's device. Deletion is the whole of revocation -
+    /// there is no revoked-but-still-enrolled state to keep consistent.
+    ///
+    /// It refuses the caller's own grant, and that is not squeamishness about
+    /// lockout: an operator can always mint another invite. It is about what
+    /// this path structurally cannot do, which is clear the cookie on a browser
+    /// it is not answering. Deleting your own row here would leave that browser
+    /// presenting a token no row answers to - the exact state that makes "sign
+    /// out and back in" fail to fix anything. <see cref="SignOutDevice"/> does
+    /// both halves, and is what the Sessions page offers on that one row.
+    /// </summary>
+    [HttpDelete("grants/{id:guid}")]
+    public async Task<IActionResult> RevokeGrant(Guid id, CancellationToken ct)
+    {
+        if (await CurrentGrantAsync(ct) is { Id: var currentId } && currentId == id)
+        {
+            return BadRequest(new AuthErrorDto(OwnGrantError));
+        }
+
+        return await auth.RevokeGrantAsync(id, ct) ? NoContent() : NotFound();
+    }
+
+    /// <summary>
+    /// Mints an invite for whoever is standing next to the operator. The
+    /// response body carries the code in plaintext - the only moment it exists
+    /// outside a hash - so it can be drawn as a QR and read aloud, and never
+    /// again after the tab is closed. A lost code is replaced by minting
+    /// another, not by looking this one up.
+    /// </summary>
+    [HttpPost("invites")]
+    public async Task<IActionResult> CreateInvite([FromBody] CreateInviteRequest? request, CancellationToken ct)
+    {
+        var invite = await auth.CreateInviteAsync(request?.Label, isBootstrap: false, ct);
+
+        // A live credential has no business in a cache, anyone's.
+        Response.Headers.CacheControl = "no-store";
+
+        logger.LogInformation("Invite {InviteId} generated for {Label}", invite.Id, invite.Label ?? "an unnamed device");
+
+        return Ok(new AuthInviteDto(
+            invite.Id,
+            invite.Code,
+            invite.FormattedCode,
+            RedeemPath(invite.Code),
+            invite.ExpiresAt,
+            invite.Label));
+    }
+
+    /// <summary>
+    /// Where a scanned QR lands, built from the same Auth:SignInPath the
+    /// refusal redirect uses - so an install that mounts the sign-in shell
+    /// somewhere else moves both at once, and a code can't be handed out
+    /// pointing at a shell that isn't there.
+    /// </summary>
+    private string RedeemPath(string code) => $"{options.SignInPath.TrimEnd('/')}/r/{code}";
 
     /// <summary>
     /// The grant behind this request. The middleware has usually already
