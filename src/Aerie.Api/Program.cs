@@ -418,6 +418,14 @@ if (Directory.Exists(Path.Combine(appsPath, "family")))
 {
     app.MapFallbackToFile("/apps/family/{*path:nonfile}", "apps/family/index.html");
 }
+// Same reasoning for the sign-in shell, twice over: /apps/auth/r/{code} is the
+// URL a scanned invite QR resolves to, and it exists only client-side; and this
+// is the page a gated request is redirected to, so a 404 here is a person
+// locked out with nothing to read (docs/plans/auth.md).
+if (Directory.Exists(Path.Combine(appsPath, "auth")))
+{
+    app.MapFallbackToFile("/apps/auth/{*path:nonfile}", "apps/auth/index.html");
+}
 
 var opt = new RewriteOptions();
 opt.AddRedirect("^$", "apps/");
@@ -428,6 +436,11 @@ opt.AddRedirect("^apps/logo$", "apps/logo/");
 opt.AddRedirect("^apps/modeler$", "apps/modeler/");
 opt.AddRedirect("^apps/docs$", "apps/docs/");
 opt.AddRedirect("^apps/family$", "apps/family/");
+opt.AddRedirect("^apps/auth$", "apps/auth/");
+// Short enough to read out over the phone to someone holding a new tablet -
+// "go to home.<domain> slash auth" - which is the fallback that keeps the QR
+// optional rather than required.
+opt.AddRedirect("^auth/?$", "apps/auth/");
 app.UseRewriter(opt);
 
 app.UseSwagger();

@@ -27,7 +27,7 @@ clicking to a human.
 
 - [x] **1** — Grant + invite schema, token primitives, the gate decision
 - [x] **2** — Auth endpoints and in-process middleware (still off)
-- [ ] **3** — The sign-in shell (`apps/auth`)
+- [x] **3** — The sign-in shell (`apps/auth`)
 - [ ] **4** — Admin Sessions page: view, delete, generate invite
 - [ ] **5** — Turn the wall on: bootstrap grant, Traefik middleware, Ingress annotations
 - [ ] **6** — *(optional)* Kiosk tablets scan the QR instead of typing the code
@@ -108,7 +108,7 @@ and implemented once, in `AuthGate`, shared by the middleware and the
 | `/api/ui-logs` | Browser log shipping, including from the sign-in shell itself. A gated log endpoint means the failures you most want to see are the ones that can't report. |
 | `/api/vm-console-logs` | Server-to-server from Hyper-V scheduled tasks, which hold no cookie — and it already carries its own `X-Vm-Log-Token` gate, which is strictly stronger than the cookie would be. |
 | `/api/kiosk/provisioning-info` | Operator's explicit call: tablet provisioning stays friction-free. Nothing behind it is more sensitive than an APK URL and the Wi-Fi credentials the tablet is about to join with anyway. |
-| `/apps/auth/*`, `/api/auth/verify`, `/api/auth/redeem` | The sign-in shell and its two endpoints. Gating these is an infinite redirect loop. |
+| `/apps/auth/*`, `/auth` (exactly), `/api/auth/verify`, `/api/auth/redeem` | The sign-in shell and its two endpoints. Gating these is an infinite redirect loop. `/auth` is the shell's short alias — a redirect into `/apps/auth/`, exempt *exactly* rather than by prefix so nothing later mounted underneath it inherits the exemption. |
 | `files.${DOMAIN}` (whole host, no middleware) | Operator's explicit call: the APK and its signature checksum are public by design. This host simply never gets the annotation. |
 | `logs.${DOMAIN}`, `status.${DOMAIN}` (whole host, for now) | OpenSearch Dashboards and Uptime Kuma keep their own logins. Revisit in [Deferred](#deferred-on-purpose). |
 
@@ -290,8 +290,13 @@ everything behaves exactly as it does today. `make test-api` green.
    [`apps/admin/src/lib/clientLogger.ts`](../../src/Aerie.Web/apps/admin/src/lib/clientLogger.ts)
    so shell failures reach `logs.${DOMAIN}` — the allow-list already keeps
    `/api/ui-logs` open for exactly this.
-5. Add the `^auth$` → `apps/auth/` rewrite beside the existing ones in
-   `Program.cs`, so `home.${DOMAIN}/auth` works when read aloud.
+5. Add the `^auth/?$` → `apps/auth/` rewrite beside the existing ones in
+   `Program.cs`, so `home.${DOMAIN}/auth` works when read aloud. The alias also
+   has to join the allow-list: the rewrite is a redirect the gate sees *first*,
+   so without an exemption the one URL meant to be read to someone who has no
+   grant is the one URL that refuses them. It goes in `AuthGate` rather than by
+   reordering the rewriter, because in production the decision is Traefik's,
+   asking about the original URI, and never reaches this app's rewrite rules.
 
 **Done when:** `make test-web` green, and with the gate on locally, hitting
 `/apps/admin/devices` bounces to sign-in, redeeming a code minted with `psql`

@@ -31,6 +31,11 @@ public class AuthGateTests
     [InlineData("/apps/auth/assets/index-BGJobmXl.js")]
     [InlineData("/api/auth/verify")]
     [InlineData("/api/auth/redeem")]
+    // The short alias, the form a person is told over the phone. Program.cs
+    // redirects it into the shell, and the caller following it has no grant
+    // yet by definition.
+    [InlineData("/auth")]
+    [InlineData("/auth/")]
     // Casing is the proxy's to normalize, not ours to depend on.
     [InlineData("/Health/Ready")]
     [InlineData("/Media/track.flac")]
@@ -55,6 +60,10 @@ public class AuthGateTests
     [InlineData("/api/auth/verifyer")]
     [InlineData("/api/auth/grants")]
     [InlineData("/apps/authoring/")]
+    // The alias is exempt exactly, so nothing a later phase mounts under it
+    // inherits the exemption.
+    [InlineData("/auth/grants")]
+    [InlineData("/authors")]
     // And the ordinary gated surface.
     [InlineData("/api/zones")]
     [InlineData("/apps/admin/devices")]

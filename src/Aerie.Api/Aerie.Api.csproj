@@ -88,6 +88,21 @@
     <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/family"/>
   </Target>
 
+  <!--
+    The sign-in shell. Nothing else in the build depends on it, but a deploy
+    that ships without it is a deploy where every redirect from the gate lands
+    on a 404 - so it is built like the rest rather than left to a manual step.
+  -->
+  <ItemGroup>
+    <AuthSource Include="../Aerie.Web/apps/auth/src/**/*.*;../Aerie.Web/apps/auth/index.html;../Aerie.Web/apps/auth/package.json;../Aerie.Web/apps/auth/vite.config.ts"/>
+  </ItemGroup>
+
+  <Target Name="BuildAuth" BeforeTargets="Build" Condition="'$(SkipAuthBuild)' != 'true'"
+          Inputs="@(AuthSource)" Outputs="wwwroot/apps/auth/index.html">
+    <Exec Command="npm install" WorkingDirectory="../Aerie.Web/apps/auth" Condition="!Exists('../Aerie.Web/apps/auth/node_modules')"/>
+    <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/auth"/>
+  </Target>
+
   <!-- Apps landing page (../Aerie.Web/index.html) - just a static file, no build step needed. -->
   <Target Name="CopyAppsIndex" BeforeTargets="Build"
           Inputs="../Aerie.Web/index.html" Outputs="wwwroot/apps/index.html">

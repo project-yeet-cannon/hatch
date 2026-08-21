@@ -36,6 +36,13 @@ RUN npm --prefix src/Aerie.Web/apps/family ci
 COPY src/Aerie.Web/apps/family src/Aerie.Web/apps/family
 RUN npm --prefix src/Aerie.Web/apps/family run build
 
+FROM node:22-alpine AS auth-build
+WORKDIR /repo
+COPY src/Aerie.Web/apps/auth/package.json src/Aerie.Web/apps/auth/package-lock.json src/Aerie.Web/apps/auth/
+RUN npm --prefix src/Aerie.Web/apps/auth ci
+COPY src/Aerie.Web/apps/auth src/Aerie.Web/apps/auth
+RUN npm --prefix src/Aerie.Web/apps/auth run build
+
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build-env
 WORKDIR /App
 
@@ -47,13 +54,14 @@ COPY --from=admin-build /repo/src/Aerie.Api/wwwroot/apps/admin ./src/Aerie.Api/w
 COPY --from=modeler-build /repo/src/Aerie.Api/wwwroot/apps/modeler ./src/Aerie.Api/wwwroot/apps/modeler
 COPY --from=docs-build /repo/src/Aerie.Api/wwwroot/apps/docs ./src/Aerie.Api/wwwroot/apps/docs
 COPY --from=family-build /repo/src/Aerie.Api/wwwroot/apps/family ./src/Aerie.Api/wwwroot/apps/family
+COPY --from=auth-build /repo/src/Aerie.Api/wwwroot/apps/auth ./src/Aerie.Api/wwwroot/apps/auth
 
 # Restore as distinct layers
 RUN dotnet restore src/Aerie.Api/Aerie.Api.csproj
 
 # Build and publish a release. The SPAs (from Aerie.Web) were already built above, so skip
 # the MSBuild targets that would otherwise shell out to npm (unavailable here).
-RUN dotnet publish src/Aerie.Api/Aerie.Api.csproj -c Release -o out -p:SkipDashboardBuild=true -p:SkipAdminBuild=true -p:SkipModelerBuild=true -p:SkipDocsBuild=true -p:SkipFamilyBuild=true
+RUN dotnet publish src/Aerie.Api/Aerie.Api.csproj -c Release -o out -p:SkipDashboardBuild=true -p:SkipAdminBuild=true -p:SkipModelerBuild=true -p:SkipDocsBuild=true -p:SkipFamilyBuild=true -p:SkipAuthBuild=true
 
 # Build runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:10.0

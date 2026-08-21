@@ -111,11 +111,27 @@ public class AuthGate(
         "/api/kiosk/provisioning-info",
 
         // The sign-in shell and the two endpoints it calls. Gating these is an
-        // infinite redirect loop.
+        // infinite redirect loop. Its short alias /auth is exempt too, just
+        // below - exactly rather than by prefix.
         "/apps/auth",
         "/api/auth/verify",
         "/api/auth/redeem",
     ];
+
+    /// <summary>
+    /// Exempt exactly, rather than as a prefix. <c>/auth</c> is the short form
+    /// of the sign-in URL - short enough to read out over the phone to someone
+    /// holding a new tablet - and it redirects into <c>/apps/auth/</c>
+    /// (Program.cs). It has to work for a caller who by definition has no
+    /// grant yet, and it has to be exempt *here* rather than by moving the
+    /// rewriter: in production the decision is made by Traefik asking about the
+    /// original URI, which never reaches this app's rewrite rules at all.
+    ///
+    /// Matched exactly because a prefix would silently exempt whatever a later
+    /// phase mounts underneath it. This list opens what it names and nothing
+    /// else.
+    /// </summary>
+    private static readonly PathString[] exemptExactPaths = ["/auth", "/auth/"];
 
     public bool Enabled => options.Enabled;
 
@@ -126,6 +142,11 @@ public class AuthGate(
         foreach (var prefix in exemptPaths)
         {
             if (prefix.HasValue && path.StartsWithSegments(prefix, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        foreach (var exact in exemptExactPaths)
+        {
+            if (path.Equals(exact, StringComparison.OrdinalIgnoreCase)) return true;
         }
 
         return false;

@@ -1,0 +1,182 @@
+/*
+  One screen, so this file is short by construction. Everything here is built
+  out of theme.css tokens and nothing else - see the note at the top of that
+  file for why this app in particular must look exactly like the others.
+*/
+
+.shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  /* Bottom padding beats top so the card sits slightly above centre, which is
+     where the eye expects it and where a phone's soft keyboard is least likely
+     to push it off screen. */
+  padding: 24px 16px 64px;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+  max-width: 400px;
+  padding: 24px;
+}
+
+.panel-centered {
+  align-items: center;
+  text-align: center;
+}
+
+.panel-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.panel-mark {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--primary);
+}
+
+.panel-lede {
+  margin: 0;
+  color: var(--muted);
+}
+
+.panel-link {
+  align-self: center;
+  font-weight: 600;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.field-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/*
+  The wrapper carries the border and the focus ring that the input would
+  normally carry itself, so the fixed AERIE- prefix sits *inside* the field
+  rather than beside a box of its own.
+*/
+.code-field {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.code-field:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-bg);
+}
+
+.code-prefix,
+.code-input {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  /* Never below 16px: iOS Safari zooms the viewport on focus for anything
+     smaller, and this is the field that is hardest to type on a phone. */
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.code-prefix {
+  color: var(--muted);
+  user-select: none;
+}
+
+.code-input {
+  min-height: 52px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: var(--ink);
+  text-transform: uppercase;
+}
+
+.code-input:focus {
+  outline: none;
+  border: none;
+  box-shadow: none;
+}
+
+.code-input::placeholder {
+  color: var(--line);
+  letter-spacing: 0.08em;
+}
+
+.failure {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--danger-bg);
+}
+
+.failure-title {
+  color: var(--danger-ink);
+}
+
+.failure-detail {
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--line);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* A spinner is decoration here - the status text beside it says the same thing
+   - so it simply stops for anyone who asked motion to stop. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
+
+/* The ErrorBoundary's last resort, when even the shell above failed to render. */
+.crash-note {
+  margin: 24px;
+  padding: 16px;
+  border-radius: var(--radius);
+  background: var(--danger-bg);
+  color: var(--danger-ink);
+}
