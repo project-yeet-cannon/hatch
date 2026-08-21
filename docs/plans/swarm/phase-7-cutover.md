@@ -501,7 +501,7 @@ order the evening runs in — but they are never mixed inside one step:
 
   </details>
 
-- [ ] **3. Tag the last old-world snapshot so Phase 8 cannot prune it** — *scripted*
+- [x] **3. Tag the last old-world snapshot so Phase 8 cannot prune it** — *scripted*
 
   <details><summary>No new dump — a label on a snapshot that already exists</summary>
 
@@ -563,7 +563,7 @@ order the evening runs in — but they are never mixed inside one step:
   </details>
 
 
-- [ ] **4. Point pfSense Unbound at the VIP** — *manual*
+- [x] **4. Point pfSense Unbound at the VIP** — *manual*
 
   <details><summary>The one line this phase was originally described as</summary>
 
@@ -590,7 +590,7 @@ order the evening runs in — but they are never mixed inside one step:
 
   </details>
 
-- [ ] **5. Power-cycle the clients** — *manual*
+- [x] **5. Power-cycle the clients** — *manual*
 
   <details><summary>Why there is no TTL pre-step, and which devices actually need it</summary>
 
