@@ -1,201 +1,150 @@
-# Dashboard API Manifest
+# Aerie API surface
 
-A proposed set of controllers / REST actions for `Aerie.Api` to serve the
-dashboard (`Aerie.Dashboard`) from real data, replacing the current
-`MockDashboardDataSource`.
+Every HTTP endpoint `Aerie.Api` serves, what consumes it, and the rules that
+hold across all of them.
 
-Status: **proposal / design doc.** Nothing here is implemented yet.
-
----
-
-## Guiding principle
-
-The TypeScript contract ([`types.ts`](../src/Aerie.Dashboard/src/types.ts)) deliberately
-carries **only raw physical quantities** — temperatures, humidity, timestamps.
-All presentation (badge text, "warming"/"cool" status, comfort classification,
-the outside `note`) is derived on the client in
-[`zonePresentation.ts`](../src/Aerie.Dashboard/src/lib/zonePresentation.ts).
-
-**The API keeps that split.** It is a *data provider*, not a view builder: it
-returns numbers that satisfy `DashboardData`, and the client keeps deriving
-labels. This means the API surface is stable even if we restyle the UI.
+> **History.** This file began as a design proposal for endpoints that did not
+> exist yet, written against a contract-vs-source gap analysis. Everything it
+> proposed shipped, and a good deal it never mentioned shipped alongside. It is
+> now a reference for what is actually there. The reasoning that used to live
+> here — why a BFF aggregate, why comfort ranges need their own table, why
+> weather sits behind an interface — moved to
+> [`device-architecture.md`](device-architecture.md) and
+> [`climate-brain-architecture.md`](climate-brain-architecture.md), which are
+> where those decisions are maintained.
 
 ---
 
-## Endpoint manifest
+## Rules that apply everywhere
 
-Primary endpoint is a **backend-for-frontend (BFF) aggregate** that returns the
-whole `DashboardData` in one call — this is what `App.tsx` consumes. The
-granular sub-resources exist for reuse, debugging, caching, and future screens.
+- **The API is a data provider, not a view builder.** It returns raw physical
+  quantities — temperatures, humidity, timestamps — and the client derives every
+  label, badge and status from them
+  ([`zonePresentation.ts`](../src/Aerie.Web/apps/dashboard/src/lib/zonePresentation.ts)).
+  Restyling the UI does not move the API surface.
+- **Read paths hit Postgres, jobs talk to the outside world.** Nothing in a
+  request path calls Home Assistant, Google, or a weather service on the request's
+  behalf — the sampling and sync jobs fetch, the database caches, the endpoints
+  read. The two deliberate exceptions are noted where they occur
+  (`GET /api/dashboard`'s weather condition note, and the actuation endpoints,
+  which exist to reach HA).
+- **Outbound calls fail soft.** A dead integration degrades one section of one
+  response rather than throwing out of it.
+- **Contract parity.** `Models/Dashboard/DashboardData.cs` and
+  [`types.ts`](../src/Aerie.Web/apps/dashboard/src/types.ts) are two halves of one
+  contract; so are the dashboard's mock and test data sources, which must produce
+  every field the C# side does or `make test-web` fails on the type error.
+- **No authentication.** Every endpoint below is reachable by anyone who can
+  reach the host, which today means anyone on the LAN or the tailnet — the domain
+  has no public DNS ([`reverse-proxy-architecture.md`](reverse-proxy-architecture.md),
+  [`tailscale-vpn-architecture.md`](tailscale-vpn-architecture.md)). The two
+  exceptions carry their own gate:
+  `POST /api/vm-console-logs` (shared-secret header, because it is the one
+  server-to-server caller) and the secret-valued settings, which are redacted on
+  read. Adding auth is worth its own plan; several endpoints below — the OAuth
+  start, the provisioning info, the actuation POSTs — assume it does not exist yet.
+- **Three replicas.** Nothing may sit in process memory that a second replica
+  needs; the OAuth state table is what this rule looks like in practice.
+- **Shape conventions.** camelCase JSON, `DateTimeOffset` for every instant,
+  `Guid` ids constrained in routes as `{id:guid}`.
 
-All under an `/api` prefix to stay clearly separated from the static `/dashboard`
-route and `/swagger`.
+---
 
-| Method & route | Returns | Purpose |
+## Dashboard and climate
+
+The dashboard's primary endpoint is a **backend-for-frontend aggregate**: one
+round trip returns the whole `DashboardData` the kiosk renders. The granular
+sub-resources under it exist for reuse, debugging, and other screens.
+
+| Method & route | Returns | Notes |
 |---|---|---|
-| `GET /api/dashboard` | `DashboardData` | **Primary.** Composes zones + outside into the exact client contract. |
-| `GET /api/zones` | `ZoneClimate[]` | All indoor zones with current snapshot + today's low/high. |
-| `GET /api/zones/{id}` | `ZoneClimate` | One zone, including history + forecast. |
-| `GET /api/zones/{id}/readings?from&to&bucketMinutes` | `TempPoint[]` | Raw/bucketed time series for a zone. |
-| `GET /api/outside` | `OutsideClimate` | Weather + sun for the house location. |
-| `GET /api/zones/{id}/comfort` · `PUT …` | `ComfortRange` | Read/set a zone's comfort band (admin). |
+| `GET /api/dashboard` | `DashboardData` | **Primary.** Composes zones + outside. Query: `historyHours` (9), `forecastHours` (7), `bucketMinutes` (30). |
+| `GET /api/zones` · `GET /api/zones/{id}` | `ZoneDto` | Zone CRUD for the admin app. |
+| `POST /api/zones` · `PUT /api/zones/{id}` · `DELETE /api/zones/{id}` | `ZoneDto` | |
+| `GET /api/zones/climate` · `GET /api/zones/{id}/climate` | `ZoneClimate` | Current snapshot, history, forecast. Same window query params as `/api/dashboard`. |
+| `GET /api/zones/{id}/readings` | `TempPoint[]` | Bucketed series. Query: `from`, `to`, `bucketMinutes`. |
+| `GET /api/zones/{id}/comfort` · `PUT …` | `ComfortRange` | The zone's comfort band. |
+| `GET /api/outside` | `OutsideClimate` | Outside temperature, humidity, sun. |
+| `GET /api/sun-events` | `SunEvents` | Computed locally (`SolarCalculator`), not read from HA. Query: `at`, `lat`, `lon` — all defaulting to now and the site's coordinates, which is what makes it testable against simulated dates. |
 
-Query params on `/api/dashboard` (all optional, sensible defaults):
-`historyHours` (default 9), `forecastHours` (default 7), `bucketMinutes`
-(default 30) — these mirror what `MockDashboardDataSource` produces today.
+## Devices, channels, and actuation
 
-### Proposed controllers & services
+Devices and their channels are the mapping layer over Home Assistant entities
+([`device-architecture.md`](device-architecture.md)). The `POST` endpoints under
+a channel are the ones that reach the house.
 
-```
-Controllers/
-  DashboardController.cs      GET /api/dashboard          -> IDashboardService
-  ZonesController.cs          GET /api/zones[/{id}[/readings]]
-                              GET/PUT /api/zones/{id}/comfort
-  OutsideController.cs        GET /api/outside            -> IWeatherService
-  HomeAssistantController.cs  (existing) ingestion only — see note below
+| Method & route | Purpose |
+|---|---|
+| `GET /api/devices` · `GET /api/devices/{id}` | Devices with their channels. |
+| `POST /api/devices` · `PUT /api/devices/{id}` · `DELETE /api/devices/{id}` | Device CRUD. |
+| `POST /api/devices/{id}/channels` · `PUT …/{channelId}` · `DELETE …/{channelId}` | Channel sub-resource CRUD. |
+| `POST /api/devices/{id}/channels/{channelId}/power` · `/setpoint` · `/mode` | Actuation, through the command ledger. |
+| `POST …/{channelId}/trigger-scene` · `/play-media` | Actuation for scene and media channels. |
+| `POST …/{channelId}/refresh-options` | Re-reads the channel's available options (HVAC modes, sources) from HA. |
+| `POST /api/devices/{id}/backfill` | Backfills channel history from HA. |
+| `GET /api/devices/{id}/history` · `GET …/{channelId}/history` | Stored measurement history. |
+| `GET /api/discovery/unmapped` | HA devices not yet imported, with suggested grouping and channels. |
 
-Services/
-  IDashboardService     composes ZoneClimate[] + OutsideClimate
-  IZoneService          reading queries, bucketing, daily extremes  (extends EnvironmentService)
-  IWeatherService       current + forecast + sun  (HA weather/sun, or NWS)
-  IForecastService      short-horizon temp projection per zone
-  IZoneRegistry         entityId -> {displayName, comfortRange, order, included}
-```
+Every write to HA goes through `IClimateCommandService`, which ledgers it — so
+each of the actuation endpoints above is recorded action by action with a
+`Source` ([`climate-brain-architecture.md`](climate-brain-architecture.md) Phase 1).
 
-The existing `HomeAssistantController` mixes **ingestion** (`POST` pulls from HA
-into the DB — used by the Quartz job's manual trigger) with **ad-hoc reads**.
-Recommend narrowing it to ingestion/admin and moving all dashboard reads to the
-controllers above, so "serve the dashboard" has one clear home.
-
----
-
-## Contract → real-source mapping (the gap analysis)
-
-This is where the real work is. `✓` = data exists today; `⚠` = exists but needs
-a fix; `✗` = **no source yet**.
-
-| Contract field | Real source | Status |
+| Method & route | Returns | Notes |
 |---|---|---|
-| `generatedAt` | server clock | ✓ |
-| `timezone` | config — already `America/New_York` | ✓ |
-| `zones[].id` | `EfEnvironmentReading.EntityId` (`climate.*`) | ✓ |
-| `zones[].name` | Mysa `FriendlyName` — **parsed but not persisted** | ⚠ needs zone registry or persist-on-ingest |
-| `zones[].currentTempF` | latest reading | ⚠ **mapping bug — stores setpoint, drops measured temp** (see prerequisites) |
-| `zones[].history` | `EnvironmentReadings` query, bucketed | ✓ |
-| `zones[].forecast` | — | ✗ no forecasting exists |
-| `zones[].low` / `high` | derived from history (daily min/max) | ✓ computed |
-| `zones[].comfortRange` | — | ✗ not an HA concept; needs config |
-| `outside.currentTempF` / `humidityPct` | — | ✗ `climate.*` are **indoor**; needs weather source |
-| `outside.sunHoursRemaining` / `sunsetTime` | — | ✗ needs `sun.sun` or astronomy calc |
-| `outside.precipitation` / `hourly[].cloudCoverPct` / `precipIn` | — | ✗ needs weather forecast |
-| `outside.note` | derived text | ✓ derivable (keep on client, like today) |
+| `GET /api/commands` | `CommandDto[]` | The ledger, newest first. Query: `deviceId`, `channelId`, `source`, `limit` (100, capped at 500). |
+| `GET /api/commands/overrides` | `ControlOverrideDto[]` | Detected manual overrides. Query: `activeOnly`, `limit`. |
 
-Available-but-unused-by-contract (future enhancements, not gaps): indoor
-`Humidity`, thermostat setpoint (`DesiredTemperature`), and `IsHeating` are all
-already stored — the chart could later show setpoint lines or a "heating now"
-indicator.
+## Routines
 
----
+| Method & route | Purpose |
+|---|---|
+| `GET /api/routines` · `GET /api/routines/{id}` | Routines with their actions. |
+| `POST /api/routines` · `PUT /api/routines/{id}` · `DELETE /api/routines/{id}` | CRUD. A routine's actions are embedded in the write request and replaced wholesale — the action list *is* the routine. |
+| `POST /api/routines/{id}/trigger` | Runs the actions in `SortOrder`, stopping at the first that doesn't succeed. |
+| `POST /api/routines/{id}/turn-off` | The inverse for a toggle routine: `SetPower false` to every `SetPower` action's channel. |
 
-## Tradeoffs & mitigations
+## Family calendar
 
-### 1. Aggregate (BFF) vs. granular REST
-- **Chosen: BFF primary + granular sub-resources.** One round trip for the
-  dashboard, client stays dumb, response maps 1:1 to `DashboardData`.
-- *Tradeoff:* `/api/dashboard` is a bespoke, non-orthogonal endpoint; it can
-  fan out to several slow sources (HA weather) and be as slow as the slowest.
-- *Mitigation:* build it *on top of* the granular services so nothing is
-  duplicated; fetch zones and outside concurrently; short-cache outside (below).
+Google Calendar, connected per-account by an admin, synced on a schedule, read
+from Postgres by the dashboard ([`plans/kiosk.md`](plans/kiosk.md) track A).
 
-### 2. Comfort ranges have no source
-- *Tradeoff:* every option trades config effort against flexibility. Hardcoding
-  in `appsettings` is trivial but static; deriving from the thermostat setpoint
-  is zero-config but wrong (the comfort band would jump every time someone nudges
-  the thermostat).
-- **Recommended: a `ZoneConfig` table** (`entityId, displayName, comfortLowF,
-  comfortHighF, sortOrder, included`). One table simultaneously fixes the
-  **name** gap, comfort band, zone **ordering**, and *which* `climate.*` entities
-  count as dashboard zones.
-- *Mitigation for MVP:* when a zone is unconfigured, fall back to
-  `DesiredTemperature ± 2°F` so the dashboard works before the table is seeded.
+The two OAuth endpoints are **navigated to, not fetched**: the admin page links
+to `start`, Google redirects the browser to `callback`, and both outcomes end as
+a 302 to `/apps/admin/calendars?connected=<email>` or `?error=<code>`.
 
-### 3. No forecast exists
-- *Tradeoff:* the chart's dashed "forecast" line is core to the design. Returning
-  `forecast: []` is honest but leaves the chart visually bare on the right.
-- **Recommended phasing:** v1 returns `forecast: []` (the chart already tolerates
-  it — `TempChart` just draws no dashed segment); then add `IForecastService`
-  with a **naive short-horizon projection** (port the diurnal model already in
-  [`diurnal.ts`](../src/Aerie.Dashboard/src/mock/diurnal.ts) to C#, or extend the
-  last-N-sample slope). A real thermal/weather-coupled model is a later, separate
-  effort.
-- *Mitigation:* mark projected points clearly (they already live in a separate
-  `forecast[]` array, so no ambiguity with measured `history[]`).
+| Method & route | Returns | Notes |
+|---|---|---|
+| `GET /api/calendar/oauth/start` | 302 to Google | 400 with an actionable message when `GoogleClientId`/`GoogleClientSecret` are unset. Records PKCE state in `OAuthStates` — a table, because the callback can land on a different replica. |
+| `GET /api/calendar/oauth/callback` | 302 to the admin app | Query: `code`, `state`, `error`. Single-use state; upserts the account by (`Provider`, `AccountEmail`) and runs calendar discovery before redirecting. |
+| `GET /api/calendar/accounts` | `CalendarAccountDto[]` | Connected accounts, each with its calendars, `NeedsReauth`, `LastSyncedAt`, `LastSyncError`. **Never carries token material** — no field on the DTO can. |
+| `POST /api/calendar/accounts/{id}/refresh-calendars` | `CalendarDiscoveryDto` | Re-runs discovery. 502 when the provider could not be listed; the same message lands on the account's `LastSyncError`. |
+| `PUT /api/calendar/calendars/{id}` | `CalendarDto` | `{ included, colorOverride, sortOrder }` — the admin-owned half. `colorOverride` must be a hex color; discovery never writes these three fields. |
+| `DELETE /api/calendar/accounts/{id}` | 204 | Best-effort revoke with Google, then delete. Calendars and cached events cascade. A revoke failure is logged, not fatal. |
 
-### 4. The entire Outside card needs a weather integration
-- *Tradeoff:* new external dependency. Two realistic sources:
-  - **HA `weather.*` + `sun.sun` entities** — reuses the existing HADotNet
-    plumbing, no new API key, single integration surface. Requires those
-    integrations to be configured in *your* HA. **Recommended primary.**
-  - **NWS `api.weather.gov`** — free, no key, US-only (fine for NY), strong
-    hourly precip/cloud forecast; sunrise/sunset via calc. Good documented
-    fallback if HA has no weather entity.
-- *Mitigation:* put it all behind `IWeatherService` so the source is swappable;
-  `sunHoursRemaining = next_setting − now`, `sunsetTime = next_setting`.
+## Settings
 
-### 5. Time-series volume
-- Minutely samples over 9h ≈ 540 points/zone — small, but noisy for the chart
-  and needless payload.
-- *Mitigation:* **bucket server-side.** Postgres 18 has `date_bin('30 minutes',
-  timestamp, …)` for clean averaged buckets. Note EF Core can't translate
-  `date_bin` — use `FromSqlRaw`/a raw aggregate query in `IZoneService`.
+| Method & route | Returns | Notes |
+|---|---|---|
+| `GET /api/settings` · `GET /api/settings/{key}` | `SiteSettingDto[]` | Secret-valued keys (`HomeAssistantToken`, `KioskWifiPassword`, `GoogleClientSecret`) come back redacted. |
+| `PUT /api/settings/{key}` · `DELETE /api/settings/{key}` | `SiteSettingDto` | Secret-valued keys are obfuscated on write (`SecretObfuscator`). |
 
-### 6. Freshness vs. load
-- Dashboard polls every 60s; the Quartz job also ingests every 60s, so DB reads
-  are ≤1 min stale regardless. Weather calls are the expensive part.
-- *Mitigation:* response-cache `/api/outside` ~5 min (weather doesn't move faster)
-  and leave zone reads uncached. ETag on `/api/dashboard` is a cheap win.
+## Kiosk, apps, and logs
 
-### 7. JSON contract drift
-- The C# DTOs must serialize to *exactly* `types.ts` (camelCase, ISO-8601 dates).
-- *Mitigations:* (a) confirm System.Text.Json camelCase is on (default) and dates
-  are `DateTimeOffset` → ISO; (b) **generate the TS types from OpenAPI** — Swagger
-  is already wired, so `openapi-typescript` against `/swagger/v1/swagger.json`
-  makes the C# side the single source of truth and kills drift.
+| Method & route | Returns | Notes |
+|---|---|---|
+| `GET /api/kiosk/provisioning-info` | `ProvisioningInfoDto` | Everything the admin app needs to build the Android QR provisioning payload — signing-cert checksum, APK URL, Wi-Fi credentials, timezone. The Wi-Fi password is deobfuscated here, by design. |
+| `GET /api/app-version/{app}` | `AppVersionInfo` | Lets a long-lived frontend notice its bundle was superseded. The kiosk is why this exists: it loads once at boot and never navigates again. |
+| `GET /api/docs` · `GET /api/docs/{**slug}` | `DocSummary[]` / `text/markdown` | Backs the docs browser app. Slugs are paths (`plans/swarm/design`). |
+| `POST /api/ui-logs` | 204 | Client-side log events from the frontend apps, written through `ILogger` so they reach the same OpenSearch index as everything else. Same-origin, so no CORS handling. |
+| `POST /api/vm-console-logs` | 204 | Hyper-V serial console lines from the VM log shipper. Server-to-server across the LAN, so gated on the `X-Vm-Log-Token` shared secret rather than same-origin trust. |
 
-### 8. Exposure / auth
-- No auth today; fine on the LAN, and the dashboard is same-origin with the API.
-- *Flag (out of scope):* if this is ever exposed beyond the house, the read
-  endpoints and especially `PUT …/comfort` and the ingestion `POST` need auth.
+## Home Assistant (legacy ingestion)
 
----
+Predates the device/channel model and the sampling job. Narrow it to ingestion,
+or retire it — the dashboard reads none of it.
 
-## Prerequisites (data-quality fixes that block correctness)
-
-1. **`EnvironmentService.MapFromHa` records the wrong temperature.** It sets both
-   `Temperature` and `DesiredTemperature` to the Mysa **setpoint** (`temperature`)
-   and never reads `CurrentTemperature`. The dashboard's `currentTempF` and
-   history would show *setpoints, not measured room temp*. Fix: `Temperature =
-   CurrentTemperature`, keep `DesiredTemperature = temperature`. (Historical rows
-   already stored are similarly affected.)
-2. **Persist the zone display name** (or resolve it via the `ZoneConfig` table) —
-   `FriendlyName` is parsed then dropped.
-3. **Confirm units** — Mysa values are `int`; assume °F (NY house). No conversion
-   needed if so; assert it somewhere so a Celsius device doesn't silently corrupt
-   the chart.
-
----
-
-## Suggested build order
-
-1. **Prereq fix #1** (measured-temp mapping) — nothing downstream is right without it.
-2. `ZoneConfig` table + `IZoneRegistry`; `IZoneService` (bucketed readings, daily
-   extremes). Ship `GET /api/zones` + `/api/zones/{id}/readings`.
-3. `DashboardController` / `IDashboardService` returning zones with
-   `forecast: []` and a real (or setpoint-fallback) comfort band. **At this point
-   the indoor half of the dashboard runs on real data.**
-4. Point the frontend at it: add `ApiDashboardDataSource` in
-   [`dataSource.ts`](../src/Aerie.Dashboard/src/dataSource.ts) as the default,
-   keep mock/test behind `?source=mock|test`.
-5. `IWeatherService` (HA weather/sun) + `OutsideController` → the Outside card.
-6. `IForecastService` — replace the empty forecast with a real projection.
-```
+| Method & route | Purpose |
+|---|---|
+| `GET /api/homeassistant` | Stored environment readings. |
+| `POST /api/homeassistant` | Pulls the last two hours of `climate.*` and `sensor.h5110` history from HA. |
+| `GET /api/homeassistant/currentStates` | Live HA states for those two prefixes. |

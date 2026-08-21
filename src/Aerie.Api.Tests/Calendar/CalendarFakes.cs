@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using Aerie.Api.Common;
+using Aerie.Api.Services.Calendar;
 using Aerie.Api.Services.DeviceMapping;
 
 namespace Aerie.Api.Tests.Calendar;
@@ -34,6 +35,9 @@ internal sealed class StubHttpMessageHandler(params HttpResponseMessage[] respon
 
     public List<(string Url, string Body)> Requests { get; } = [];
 
+    /// <summary>The Authorization header on each request, so a test can assert the token was actually presented.</summary>
+    public List<string> AuthorizationHeaders { get; } = [];
+
     /// <summary>The most recent request's form fields, parsed back out of the encoded body.</summary>
     public IReadOnlyDictionary<string, string> LastForm => ParseForm(Requests[^1].Body);
 
@@ -44,6 +48,7 @@ internal sealed class StubHttpMessageHandler(params HttpResponseMessage[] respon
     {
         var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(ct);
         Requests.Add((request.RequestUri!.ToString(), body));
+        if (request.Headers.Authorization is { } auth) AuthorizationHeaders.Add($"{auth.Scheme} {auth.Parameter}");
         return responses[Math.Min(next++, responses.Length - 1)];
     }
 
@@ -56,6 +61,34 @@ internal sealed class StubHttpMessageHandler(params HttpResponseMessage[] respon
 internal sealed class StubHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
 {
     public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
+}
+
+/// <summary>Hands out a fixed access token, or null to stand for an account whose grant is dead.</summary>
+internal sealed class StubGoogleTokenProvider(string? accessToken = "access-token") : IGoogleTokenProvider
+{
+    public Task<string?> GetAccessTokenAsync(Guid accountId, CancellationToken ct) => Task.FromResult(accessToken);
+}
+
+/// <summary>
+/// Answers with canned provider data instead of calling Google, so a test can
+/// drive the discovery reconciliation - including the failure that must not be
+/// mistaken for an empty account.
+/// </summary>
+internal sealed class StubGoogleCalendarClient(
+    ProviderListResult<ProviderCalendar>? calendars = null,
+    ProviderListResult<ProviderEvent>? events = null) : IGoogleCalendarClient
+{
+    public List<Guid> CalendarListCalls { get; } = [];
+
+    public Task<ProviderListResult<ProviderCalendar>> ListCalendarsAsync(Guid accountId, CancellationToken ct)
+    {
+        CalendarListCalls.Add(accountId);
+        return Task.FromResult(calendars ?? ProviderListResult<ProviderCalendar>.Ok([]));
+    }
+
+    public Task<ProviderListResult<ProviderEvent>> ListEventsAsync(
+        Guid accountId, string providerCalendarId, DateTimeOffset timeMin, DateTimeOffset timeMax, CancellationToken ct) =>
+        Task.FromResult(events ?? ProviderListResult<ProviderEvent>.Ok([]));
 }
 
 internal static class CalendarTestData

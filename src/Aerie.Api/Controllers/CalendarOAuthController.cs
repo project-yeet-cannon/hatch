@@ -24,6 +24,7 @@ public class CalendarOAuthController(
     AerieContext db,
     ISiteSettingsService siteSettings,
     IGoogleOAuthService oauth,
+    ICalendarDiscoveryService discovery,
     TimeProvider time,
     ILogger<CalendarOAuthController> logger) : ControllerBase
 {
@@ -138,9 +139,16 @@ public class CalendarOAuthController(
         account.LastSyncError = null;
         await db.SaveChangesAsync(ct);
 
-        // A3 runs calendar discovery from here, so a connected account reaches
-        // the admin page with its calendar list already filled in. Until then
-        // the page's "Refresh calendars" is what populates it.
+        // Discover the account's calendars now, so it reaches the admin page
+        // with a list to toggle rather than an empty panel and a button to
+        // find. A failure here is recorded on the account and shown there -
+        // it doesn't undo a connection that otherwise succeeded, and
+        // "Refresh calendars" retries it.
+        var discovered = await discovery.SyncCalendarListAsync(account.Id, ct);
+        if (!discovered.Succeeded)
+            logger.LogWarning(
+                "Connected calendar account {AccountId} but could not list its calendars: {Error}",
+                account.Id, discovered.Error);
 
         logger.LogInformation("Connected Google calendar account {AccountId}", account.Id);
         return Redirect(QueryHelpers.AddQueryString(AdminCalendarsPath, "connected", email));

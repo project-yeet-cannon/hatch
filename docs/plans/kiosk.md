@@ -30,7 +30,7 @@ and lint it and leave the clicking to a human.
 
 - [x] **A1** — Calendar schema + settings keys
 - [x] **A2** — Google OAuth connect flow + token refresh
-- [ ] **A3** — Calendar discovery + visibility API
+- [x] **A3** — Calendar discovery + visibility API
 - [ ] **A4** — Admin Calendars page
 - [ ] **A5** — Event sync job
 - [ ] **A6** — Calendar on the dashboard contract + provisional kiosk UI
@@ -283,13 +283,18 @@ can be toggled on or off.
    - `DELETE accounts/{id}` → best-effort `RevokeAsync` on the refresh token,
      then delete the account (calendars and events cascade). A revoke failure
      is logged, not fatal: the operator asked for it gone locally.
-   - `POST sync` → runs A5's sync service immediately, so "I just toggled a
-     calendar on" doesn't mean waiting for the next firing.
-5. Update `docs/dashboard-api-manifest.md` — which is still the stale
-   "nothing here is implemented yet" proposal it was written as, and lists none
+   - `POST sync` — **deferred to A5**, which is where the service it calls is
+     built. Adding the route here would only have shipped an endpoint with
+     nothing behind it.
+5. Update `docs/dashboard-api-manifest.md` — which was still the stale
+   "nothing here is implemented yet" proposal it was written as, listing none
    of the endpoints added since (`/api/routines`, `/api/settings`,
    `/api/kiosk`…). A2 deliberately didn't append two OAuth routes to a document
-   that isn't tracking the surface; either bring it current here or retire it.
+   that wasn't tracking the surface. **Brought current rather than retired**:
+   rewritten as a reference for the whole endpoint surface, with the design
+   reasoning it used to carry pointed at `device-architecture.md` and
+   `climate-brain-architecture.md`, which are where those decisions are
+   maintained. A6, B4 and C2 update it in place from here.
 
 **Tests:** `CalendarDiscoveryServiceTests` against the in-memory provider —
 upsert preserves `Included` and `ColorOverride` across a re-sync, and a
@@ -365,6 +370,9 @@ stay fresh.
    `SampleChannels`/`ReconcileCommands`.
 3. Prune events outside the window on each run, so an account that stops
    syncing doesn't leave last week on the wall.
+4. `POST /api/calendar/sync` on A3's `CalendarsController` — runs `SyncAsync`
+   immediately, so "I just toggled a calendar on" doesn't mean waiting for the
+   next firing. Deferred from A3, where the service didn't exist yet.
 
 **Tests:** `CalendarSyncServiceTests` — an all-day event on a DST-shifting day
 lands on the right `LocalStartDate`; a multi-day all-day event spans the right

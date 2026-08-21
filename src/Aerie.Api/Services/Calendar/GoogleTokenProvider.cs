@@ -52,10 +52,10 @@ public class GoogleTokenProvider(
         if (account.NeedsReauth) return null;
 
         var now = time.GetUtcNow();
-        if (Reveal(account.AccessToken) is { } cached && account.AccessTokenExpiresAt > now + RefreshMargin)
+        if (SecretObfuscator.TryReveal(account.AccessToken) is { } cached && account.AccessTokenExpiresAt > now + RefreshMargin)
             return cached;
 
-        if (Reveal(account.RefreshToken) is not { } refreshToken)
+        if (SecretObfuscator.TryReveal(account.RefreshToken) is not { } refreshToken)
         {
             await NeedsReauthAsync(account, "The stored refresh token is missing or unreadable. Reconnect the account.", ct);
             return null;
@@ -103,24 +103,5 @@ public class GoogleTokenProvider(
         account.AccessToken = null;
         account.AccessTokenExpiresAt = null;
         await db.SaveChangesAsync(ct);
-    }
-
-    /// <summary>
-    /// Deobfuscates a stored token, treating one that won't decode as absent.
-    /// A hand-edited row should cost the account a reconnect, not throw out of
-    /// every sync that touches it.
-    /// </summary>
-    private static string? Reveal(string? stored)
-    {
-        if (string.IsNullOrWhiteSpace(stored)) return null;
-        try
-        {
-            var plaintext = SecretObfuscator.Deobfuscate(stored);
-            return string.IsNullOrWhiteSpace(plaintext) ? null : plaintext;
-        }
-        catch (FormatException)
-        {
-            return null;
-        }
     }
 }

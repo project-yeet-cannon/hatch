@@ -150,6 +150,8 @@ builder.Services.AddScoped<IClimateCommandService, ClimateCommandService>();
 builder.Services.AddHttpClient(GoogleOAuthService.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
 builder.Services.AddScoped<IGoogleOAuthService, GoogleOAuthService>();
 builder.Services.AddScoped<IGoogleTokenProvider, GoogleTokenProvider>();
+builder.Services.AddScoped<IGoogleCalendarClient, GoogleCalendarClient>();
+builder.Services.AddScoped<ICalendarDiscoveryService, CalendarDiscoveryService>();
 
 // Jobs
 builder.Services.AddTransient<IAerieJob, SampleChannels>();
