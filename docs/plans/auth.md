@@ -26,7 +26,7 @@ clicking to a human.
 ## Status
 
 - [x] **1** — Grant + invite schema, token primitives, the gate decision
-- [ ] **2** — Auth endpoints and in-process middleware (still off)
+- [x] **2** — Auth endpoints and in-process middleware (still off)
 - [ ] **3** — The sign-in shell (`apps/auth`)
 - [ ] **4** — Admin Sessions page: view, delete, generate invite
 - [ ] **5** — Turn the wall on: bootstrap grant, Traefik middleware, Ingress annotations
@@ -237,9 +237,19 @@ to the local `db` container, and no request path in the app behaves differently.
    `Program.cs` **after** `UseForwardedHeaders` (it needs the client IP) and
    **before** the `UseStaticFiles` block for `/apps` (otherwise SPA bundles
    serve to anyone). No-ops entirely when `Auth:Enabled` is false.
-5. `Auth:Enabled` — `true` in `appsettings.json`, `false` in
-   `appsettings.Development.json` so `make run` stays frictionless. Document the
-   local flip: `Auth__Enabled=true dotnet run …`.
+5. `Auth:Enabled` — **`false` in `appsettings.json`**, and explicitly `false`
+   in `appsettings.Development.json` so `make run` stays frictionless. The
+   local flip is `Auth__Enabled=true dotnet run …`.
+
+   *This step originally said `true` in `appsettings.json`, which contradicts
+   the invariant stated twice above — "nothing can lock anyone out until Phase
+   5" and "`Auth:Enabled=false` everywhere until Phase 5" — and would have
+   been a live lockout rather than a documentation mismatch. The chart doesn't
+   pass `Auth__Enabled` at all until Phase 5, so a Phase 2–4 deploy would take
+   its value from this file; so would the legacy Windows/Caddy host, which
+   runs `compose.prod.yml` with no override and has no bootstrap invite to
+   recover through. The wall now turns on in exactly one place, which is what
+   Phase 5 step 5 already describes.*
 
 **Done when:** with the local override on, `curl -i localhost:5197/apps/admin/`
 returns `302` to the sign-in shell, `curl -i -H 'Accept: application/json'

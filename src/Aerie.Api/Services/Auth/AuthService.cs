@@ -53,6 +53,15 @@ public interface IAuthService
     /// </summary>
     Task<EfAuthGrant?> VerifyAsync(string? token, string? clientIp, CancellationToken ct);
 
+    /// <summary>
+    /// Records that the browser was just handed a fresh cookie for this grant,
+    /// which is what restarts the sliding window. Separate from VerifyAsync
+    /// because only the in-process middleware can actually issue one - Traefik
+    /// copies only the headers named in authResponseHeaders back from the
+    /// forwardAuth response, and Set-Cookie is not among them.
+    /// </summary>
+    Task MarkCookieIssuedAsync(EfAuthGrant grant, CancellationToken ct);
+
     /// <summary>Every grant, newest first, for the admin Sessions page.</summary>
     Task<IReadOnlyList<EfAuthGrant>> ListGrantsAsync(CancellationToken ct);
 
@@ -202,6 +211,24 @@ public class AuthService(
 
         await TouchAsync(grant, clientIp, now, ct);
         return grant;
+    }
+
+    public async Task MarkCookieIssuedAsync(EfAuthGrant grant, CancellationToken ct)
+    {
+        grant.CookieIssuedAt = time.GetUtcNow();
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex)
+        {
+            // Same reasoning as TouchAsync: the cookie has already been written
+            // to the response by the time this runs, so a lost race here costs
+            // one early re-issue on the next request rather than a 500 on a
+            // request that was authenticated fine.
+            logger.LogDebug(ex, "Could not record cookie re-issue for grant {GrantId}", grant.Id);
+        }
     }
 
     public async Task<IReadOnlyList<EfAuthGrant>> ListGrantsAsync(CancellationToken ct) =>

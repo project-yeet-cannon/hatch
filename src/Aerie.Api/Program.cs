@@ -1,4 +1,5 @@
 using Aerie.Api.Common;
+using Aerie.Api.Controllers;
 using Aerie.Api.Ef;
 using Aerie.Api.Jobs;
 using Aerie.Api.Models.Environment;
@@ -15,6 +16,7 @@ using HADotNet.Core;
 using HADotNet.Core.Clients;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Rewrite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -24,6 +26,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
 using Quartz;
 using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
 
 ////////
 /// DI
@@ -154,12 +157,42 @@ builder.Services.AddScoped<IGoogleTokenProvider, GoogleTokenProvider>();
 builder.Services.AddScoped<IGoogleCalendarClient, GoogleCalendarClient>();
 builder.Services.AddScoped<ICalendarDiscoveryService, CalendarDiscoveryService>();
 
-// Auth (docs/plans/auth.md). Registered but inert: nothing resolves IAuthGate
-// until the middleware and the forwardAuth endpoint arrive in phase 2, and
-// Auth:Enabled is false everywhere until phase 5.
-builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOptions.SectionName));
+// Auth (docs/plans/auth.md). Wired but switched off: AuthMiddleware and
+// AuthController both run, and both no-op or allow, until Auth:Enabled becomes
+// true - which is phase 5, and which is also the whole rollback.
+var authSection = builder.Configuration.GetSection(AuthOptions.SectionName);
+builder.Services.Configure<AuthOptions>(authSection);
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IAuthGate, AuthGate>();
+
+// Redemption is the only endpoint in the app that mints a credential, so it is
+// the only one with a limiter. Bound once at startup rather than per request:
+// AddPolicy's factory runs on the hot path, and the numbers are deploy-time
+// config that cannot change without a restart anyway.
+var authLimits = authSection.Get<AuthOptions>() ?? new AuthOptions();
+builder.Services.AddRateLimiter(limiter =>
+{
+    limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    limiter.AddPolicy(AuthController.RedeemRateLimitPolicy, context =>
+        // Partitioned by client IP, which UseForwardedHeaders has already
+        // resolved from the proxy's X-Forwarded-For by the time this runs.
+        //
+        // Honest caveat: the limiter is per-process, so three replicas means
+        // three times this budget. That is acceptable against a 40-bit code
+        // behind a 15-minute TTL and single use, and it is not the primary
+        // detector anyway - the Warning logged on every refused redemption is,
+        // and those reach logs.<domain> from all three replicas alike.
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = Math.Max(1, authLimits.RedeemAttemptsPerWindow),
+                Window = authLimits.RedeemWindow,
+                // Queueing a guess to run later is not a kindness to anyone; a
+                // 429 the sign-in shell can say out loud is.
+                QueueLimit = 0,
+            }));
+});
 
 // Jobs
 builder.Services.AddTransient<IAerieJob, SampleChannels>();
@@ -283,6 +316,18 @@ forwardedHeadersOptions.KnownProxies.Clear();
 app.UseForwardedHeaders(forwardedHeadersOptions);
 
 app.UseHttpsRedirection();
+
+// The wall. After UseForwardedHeaders because a refusal logs the client IP, and
+// before the /apps static file handlers below because otherwise every SPA
+// bundle serves to anyone who asks. No-ops entirely while Auth:Enabled is false
+// (docs/plans/auth.md).
+app.UseMiddleware<AuthMiddleware>();
+
+// Placed after the wall so an unauthenticated flood is refused before it can
+// consume anyone's budget. Routing is added implicitly at the head of the
+// pipeline by minimal hosting, so the [EnableRateLimiting] metadata on
+// AuthController is already resolved by the time this runs.
+app.UseRateLimiter();
 
 // Apps (static landing page + SPAs living under wwwroot/apps, outside the REST API)
 var appsPath = Path.Combine(app.Environment.WebRootPath, "apps");

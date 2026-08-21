@@ -165,28 +165,3 @@ public class AuthGateTests
             Options.Create(new MediaLibraryOptions { RequestPath = mediaRequestPath }),
             NullLogger<AuthGate>.Instance);
 }
-
-/// <summary>Answers with one grant, or none, and records what it was asked - so a test can prove the gate skipped the lookup entirely.</summary>
-internal sealed class StubAuthService(EfAuthGrant? grant) : IAuthService
-{
-    public List<(string? Token, string? ClientIp)> Verified { get; } = [];
-
-    public Task<EfAuthGrant?> VerifyAsync(string? token, string? clientIp, CancellationToken ct)
-    {
-        Verified.Add((token, clientIp));
-        return Task.FromResult(grant);
-    }
-
-    public Task<AuthInviteCreated> CreateInviteAsync(string? label, bool isBootstrap, CancellationToken ct) =>
-        throw new NotSupportedException();
-
-    public Task<AuthRedemption> RedeemAsync(string? code, string? label, string? userAgent, string? clientIp, CancellationToken ct) =>
-        throw new NotSupportedException();
-
-    public Task<IReadOnlyList<EfAuthGrant>> ListGrantsAsync(CancellationToken ct) =>
-        throw new NotSupportedException();
-
-    public Task<bool> RevokeGrantAsync(Guid id, CancellationToken ct) => throw new NotSupportedException();
-
-    public Task<bool> HasAnyAccessAsync(CancellationToken ct) => throw new NotSupportedException();
-}

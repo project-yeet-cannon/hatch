@@ -72,6 +72,17 @@ public class AuthOptions
     /// <summary>Where a document request is sent when it has no grant. Exempt by construction, or the redirect is a loop.</summary>
     public string SignInPath { get; set; } = "/apps/auth/";
 
+    /// <summary>
+    /// Redemption attempts one client IP may spend per
+    /// <see cref="RedeemWindowSeconds"/>. Bounds the guessing rate against a
+    /// 40-bit code; it is not the only defence, and deliberately not the main
+    /// one - the TTL, single use, and the Warning log per refusal are.
+    /// </summary>
+    public int RedeemAttemptsPerWindow { get; set; } = 10;
+
+    /// <summary>The window <see cref="RedeemAttemptsPerWindow"/> is counted over.</summary>
+    public int RedeemWindowSeconds { get; set; } = 60;
+
     public TimeSpan InviteTtl => TimeSpan.FromMinutes(Math.Max(1, InviteTtlMinutes));
 
     public TimeSpan BootstrapInviteTtl => TimeSpan.FromMinutes(Math.Max(1, BootstrapInviteTtlMinutes));
@@ -79,4 +90,6 @@ public class AuthOptions
     public TimeSpan GrantRenewAfter => TimeSpan.FromDays(Math.Max(1, GrantRenewAfterDays));
 
     public TimeSpan LastSeenThrottle => TimeSpan.FromSeconds(Math.Max(0, LastSeenThrottleSeconds));
+
+    public TimeSpan RedeemWindow => TimeSpan.FromSeconds(Math.Max(1, RedeemWindowSeconds));
 }
