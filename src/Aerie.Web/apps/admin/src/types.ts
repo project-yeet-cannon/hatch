@@ -274,3 +274,12 @@ export interface CalendarDiscovery {
   updated: number;
   removed: number;
 }
+
+/** What an on-demand event sync did. Per-account failures are a count here; the reason lands on that account's `lastSyncError`. */
+export interface CalendarSync {
+  accounts: number;
+  calendars: number;
+  written: number;
+  removed: number;
+  failedAccounts: number;
+}

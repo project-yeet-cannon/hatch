@@ -108,6 +108,11 @@ each of the actuation endpoints above is recorded action by action with a
 Google Calendar, connected per-account by an admin, synced on a schedule, read
 from Postgres by the dashboard ([`plans/kiosk.md`](plans/kiosk.md) track A).
 
+The schedule is `SyncCalendarEvents`, every five minutes, caching only today
+through today + `CalendarAgendaDays` — so nothing in the request path calls
+Google, and an account that stops syncing ages off the wall instead of freezing
+last week onto it.
+
 The two OAuth endpoints are **navigated to, not fetched**: the admin page links
 to `start`, Google redirects the browser to `callback`, and both outcomes end as
 a 302 to `/apps/admin/calendars?connected=<email>` or `?error=<code>`.
@@ -120,6 +125,7 @@ a 302 to `/apps/admin/calendars?connected=<email>` or `?error=<code>`.
 | `POST /api/calendar/accounts/{id}/refresh-calendars` | `CalendarDiscoveryDto` | Re-runs discovery. 502 when the provider could not be listed; the same message lands on the account's `LastSyncError`. |
 | `PUT /api/calendar/calendars/{id}` | `CalendarDto` | `{ included, colorOverride, sortOrder }` — the admin-owned half. `colorOverride` must be a hex color; discovery never writes these three fields. |
 | `DELETE /api/calendar/accounts/{id}` | 204 | Best-effort revoke with Google, then delete. Calendars and cached events cascade. A revoke failure is logged, not fatal. |
+| `POST /api/calendar/sync` | `CalendarSyncDto` | Runs the event sync now instead of at the `SyncCalendarEvents` job's next firing, for the minute after a calendar is included. Always 200 — the service is fail-soft, and per-account reasons come back on the account rows. |
 
 ## Settings
 

@@ -156,6 +156,7 @@ builder.Services.AddScoped<IGoogleOAuthService, GoogleOAuthService>();
 builder.Services.AddScoped<IGoogleTokenProvider, GoogleTokenProvider>();
 builder.Services.AddScoped<IGoogleCalendarClient, GoogleCalendarClient>();
 builder.Services.AddScoped<ICalendarDiscoveryService, CalendarDiscoveryService>();
+builder.Services.AddScoped<ICalendarSyncService, CalendarSyncService>();
 
 // Auth (docs/plans/auth.md). Wired but switched off: AuthMiddleware and
 // AuthController both run, and both no-op or allow, until Auth:Enabled becomes
@@ -197,6 +198,7 @@ builder.Services.AddRateLimiter(limiter =>
 // Jobs
 builder.Services.AddTransient<IAerieJob, SampleChannels>();
 builder.Services.AddTransient<IAerieJob, ReconcileCommands>();
+builder.Services.AddTransient<IAerieJob, SyncCalendarEvents>();
 builder.Services.AddTransient<BackfillChannelHistory>();
 builder.Services.AddTransient<JobsInit>();
 

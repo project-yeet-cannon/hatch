@@ -1,0 +1,35 @@
+using Aerie.Api.Services.Calendar;
+using Quartz;
+
+namespace Aerie.Api.Jobs;
+
+/// <summary>
+/// Keeps the cached agenda fresh (docs/plans/kiosk.md phase A5). All of the
+/// work is CalendarSyncService's; this is the schedule and nothing else, the
+/// same split ReconcileCommands keeps.
+///
+/// Five minutes is the resolution the kiosk actually needs - the panel shows
+/// today and tomorrow, so an event added on a phone appears on the wall within
+/// a glance or two, while three replicas' worth of firings still cost Google
+/// one request per included calendar per five minutes (Quartz clustering means
+/// exactly one replica runs a given firing).
+/// </summary>
+public class SyncCalendarEvents(ICalendarSyncService sync, ILogger<SyncCalendarEvents> logger) : IAerieJob
+{
+    public string Name => "SyncCalendarEvents";
+
+    public string Group => "Aerie.Api";
+
+    public TimeSpan Interval => TimeSpan.FromMinutes(5);
+
+    public async Task Execute(IJobExecutionContext context)
+    {
+        // SyncAsync is fail-soft by contract, so there is nothing to catch
+        // here; the log line is what says a firing happened at all.
+        var result = await sync.SyncAsync(context.CancellationToken);
+
+        logger.LogInformation(
+            "SyncCalendarEvents synced {Accounts} account(s) and {Calendars} calendar(s): {Written} event(s) written, {Removed} removed, {Failed} account(s) failed",
+            result.Accounts, result.Calendars, result.Written, result.Removed, result.FailedAccounts);
+    }
+}

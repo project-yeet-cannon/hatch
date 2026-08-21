@@ -5,6 +5,7 @@ import {
   getCalendarAccounts,
   getSettings,
   refreshCalendars,
+  syncCalendarEvents,
   updateCalendar,
 } from '../api/client';
 import { formatAge } from '../lib/format';
@@ -33,6 +34,7 @@ export function CalendarsPage() {
   // without them, which would be a page of raw JSON where a person expected
   // Google - so the button is replaced by the reason it wouldn't work.
   const [oauthConfigured, setOauthConfigured] = useState(true);
+  const [syncing, setSyncing] = useState(false);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const [outcome] = useState<Outcome | null>(() => outcomeFrom(new URLSearchParams(window.location.search)));
@@ -114,6 +116,30 @@ export function CalendarsPage() {
     await load();
   }
 
+  /**
+   * Pulls events for every included calendar right now. The job does this every
+   * five minutes anyway; this is for the minute after somebody ticks a calendar
+   * on and wants to see it reach the wall.
+   */
+  async function syncEvents() {
+    setSyncing(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await syncCalendarEvents();
+      setNotice(
+        `Synced ${result.calendars} calendar(s): ${result.written} event(s) written, ${result.removed} removed` +
+          (result.failedAccounts > 0 ? `, ${result.failedAccounts} account(s) failed — see the accounts below.` : '.'),
+      );
+    } catch (err) {
+      setError(messageOf(err));
+    }
+    // Even on success: a sync stamps lastSyncedAt and clears or sets
+    // lastSyncError on every account it touched.
+    await load();
+    setSyncing(false);
+  }
+
   async function remove(account: CalendarAccount) {
     if (
       !confirm(
@@ -148,6 +174,9 @@ export function CalendarsPage() {
               Set Google credentials first
             </Link>
           )}
+          <button className="btn-secondary" onClick={syncEvents} disabled={syncing}>
+            {syncing ? 'Syncing…' : 'Sync events now'}
+          </button>
           <button className="btn-secondary" onClick={load}>
             Refresh
           </button>

@@ -6,6 +6,7 @@ import type {
   Calendar,
   CalendarAccount,
   CalendarDiscovery,
+  CalendarSync,
   CalendarVisibilityRequest,
   ChannelHistory,
   ChannelModeRequest,
@@ -119,6 +120,8 @@ export const refreshCalendars = (accountId: string) =>
   fetchJson<CalendarDiscovery>(`/api/calendar/accounts/${accountId}/refresh-calendars`, { method: 'POST' });
 export const updateCalendar = (id: string, request: CalendarVisibilityRequest) =>
   fetchJson<Calendar>(`/api/calendar/calendars/${id}`, { method: 'PUT', ...asJson(request) });
+/** Fetches events for every included calendar now, rather than waiting for the SyncCalendarEvents job's next firing. */
+export const syncCalendarEvents = () => fetchJson<CalendarSync>('/api/calendar/sync', { method: 'POST' });
 /** Revokes the grant with the provider, then deletes the account and its calendars and cached events. */
 export const deleteCalendarAccount = (id: string) =>
   fetchJson<void>(`/api/calendar/accounts/${id}`, { method: 'DELETE' });

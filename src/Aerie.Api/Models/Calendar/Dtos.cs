@@ -42,3 +42,10 @@ public record CalendarVisibilityRequest(bool Included, string? ColorOverride, in
 
 /// <summary>What a "Refresh calendars" run changed, so the admin page can say so rather than just re-rendering.</summary>
 public record CalendarDiscoveryDto(int Added, int Updated, int Removed);
+
+/// <summary>
+/// What an on-demand sync run did. Accounts that failed are a count, not a
+/// list: each one's message is on its own <see cref="CalendarAccountDto"/> as
+/// <c>LastSyncError</c>, which is where the page already reads it from.
+/// </summary>
+public record CalendarSyncDto(int Accounts, int Calendars, int Written, int Removed, int FailedAccounts);

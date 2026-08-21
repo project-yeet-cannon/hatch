@@ -32,7 +32,7 @@ and lint it and leave the clicking to a human.
 - [x] **A2** — Google OAuth connect flow + token refresh
 - [x] **A3** — Calendar discovery + visibility API
 - [x] **A4** — Admin Calendars page
-- [ ] **A5** — Event sync job
+- [x] **A5** — Event sync job
 - [ ] **A6** — Calendar on the dashboard contract + provisional kiosk UI
 - [ ] **B1** — Hazard schema + provider interfaces
 - [ ] **B2** — NWS weather alert provider

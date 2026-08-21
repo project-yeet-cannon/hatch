@@ -24,6 +24,7 @@ namespace Aerie.Api.Controllers;
 public partial class CalendarsController(
     AerieContext db,
     ICalendarDiscoveryService discovery,
+    ICalendarSyncService sync,
     IGoogleOAuthService oauth,
     ILogger<CalendarsController> logger) : ControllerBase
 {
@@ -52,6 +53,22 @@ public partial class CalendarsController(
         // The account row carries the same message (LastSyncError), so a page
         // that just re-fetches instead of reading this body still shows it.
         return StatusCode(StatusCodes.Status502BadGateway, $"Could not list calendars from the provider: {result.Error}");
+    }
+
+    /// <summary>
+    /// Runs the event sync now instead of at the next firing of
+    /// SyncCalendarEvents, which is what makes "I just included this calendar"
+    /// show up on the wall immediately rather than in up to five minutes.
+    ///
+    /// Always 200, even when every account failed: the service is fail-soft by
+    /// contract, and the per-account reasons come back on the account rows.
+    /// The counts are what tell the admin whether anything happened.
+    /// </summary>
+    [HttpPost("sync")]
+    public async Task<CalendarSyncDto> Sync(CancellationToken ct)
+    {
+        var result = await sync.SyncAsync(ct);
+        return new CalendarSyncDto(result.Accounts, result.Calendars, result.Written, result.Removed, result.FailedAccounts);
     }
 
     /// <summary>Sets the admin-owned half of a calendar. The provider-owned half (name, color, timezone) only ever changes through discovery.</summary>

@@ -10,10 +10,12 @@ namespace Aerie.Api.Tests.Calendar;
 internal sealed class StubSiteSettings(
     string? googleClientId = "client-id.apps.googleusercontent.com",
     string? googleClientSecret = "GOCSPX-secret",
-    string? googleOAuthRedirectUri = null) : ISiteSettingsService
+    string? googleOAuthRedirectUri = null,
+    string timeZone = "America/New_York",
+    int calendarAgendaDays = 2) : ISiteSettingsService
 {
     public Task<SiteSettingsSnapshot> GetAsync(CancellationToken ct) => Task.FromResult(new SiteSettingsSnapshot(
-        TimeZone: "America/New_York",
+        TimeZone: timeZone,
         Latitude: 40.7128,
         Longitude: -74.0060,
         WeatherEntity: null,
@@ -25,7 +27,7 @@ internal sealed class StubSiteSettings(
         GoogleClientId: googleClientId,
         GoogleClientSecret: googleClientSecret,
         GoogleOAuthRedirectUri: googleOAuthRedirectUri,
-        CalendarAgendaDays: 2));
+        CalendarAgendaDays: calendarAgendaDays));
 }
 
 /// <summary>Records every request and answers from a queue of canned responses, so a test can assert on the form Google would have received.</summary>
@@ -76,9 +78,13 @@ internal sealed class StubGoogleTokenProvider(string? accessToken = "access-toke
 /// </summary>
 internal sealed class StubGoogleCalendarClient(
     ProviderListResult<ProviderCalendar>? calendars = null,
-    ProviderListResult<ProviderEvent>? events = null) : IGoogleCalendarClient
+    ProviderListResult<ProviderEvent>? events = null,
+    Func<string, ProviderListResult<ProviderEvent>>? eventsFor = null) : IGoogleCalendarClient
 {
     public List<Guid> CalendarListCalls { get; } = [];
+
+    /// <summary>Every event fetch, so a sync test can assert which calendars were asked about and over what window.</summary>
+    public List<(Guid AccountId, string CalendarId, DateTimeOffset TimeMin, DateTimeOffset TimeMax)> EventCalls { get; } = [];
 
     public Task<ProviderListResult<ProviderCalendar>> ListCalendarsAsync(Guid accountId, CancellationToken ct)
     {
@@ -86,9 +92,19 @@ internal sealed class StubGoogleCalendarClient(
         return Task.FromResult(calendars ?? ProviderListResult<ProviderCalendar>.Ok([]));
     }
 
+    /// <summary>
+    /// <paramref name="eventsFor"/> answers per calendar, which is how a sync
+    /// test gives two calendars different days - or lets one of them throw,
+    /// standing for the failure that must not cost the other account its
+    /// agenda.
+    /// </summary>
     public Task<ProviderListResult<ProviderEvent>> ListEventsAsync(
-        Guid accountId, string providerCalendarId, DateTimeOffset timeMin, DateTimeOffset timeMax, CancellationToken ct) =>
-        Task.FromResult(events ?? ProviderListResult<ProviderEvent>.Ok([]));
+        Guid accountId, string providerCalendarId, DateTimeOffset timeMin, DateTimeOffset timeMax, CancellationToken ct)
+    {
+        EventCalls.Add((accountId, providerCalendarId, timeMin, timeMax));
+        return Task.FromResult(
+            eventsFor?.Invoke(providerCalendarId) ?? events ?? ProviderListResult<ProviderEvent>.Ok([]));
+    }
 }
 
 internal static class CalendarTestData
