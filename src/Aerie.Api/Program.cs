@@ -160,10 +160,18 @@ builder.Services.AddScoped<ICalendarDiscoveryService, CalendarDiscoveryService>(
 builder.Services.AddScoped<ICalendarSyncService, CalendarSyncService>();
 builder.Services.AddScoped<ICalendarAgendaService, CalendarAgendaService>();
 
-// Outdoor hazards (docs/plans/kiosk.md track B). The resolver is a singleton
-// with no providers registered behind it yet - it answers null, which is
-// exactly what "no provider" already means to it, so the feature is off rather
-// than broken until B2/B3 add the two classes.
+// Outdoor hazards (docs/plans/kiosk.md track B). Providers are registered
+// against their interface rather than their own type: the resolver takes the
+// whole IEnumerable and picks by Name, so adding a country's provider is one
+// more line here and nothing else. Singletons because the resolver is one, and
+// because a provider holds nothing per-request - only the client factory and
+// the settings snapshot, which is itself a singleton.
+//
+// One 10-second client covers both halves. The explicit timeout is the
+// fail-soft convention: a slow api.weather.gov leaves the hazard panel stale,
+// it never stalls the sync job behind it.
+builder.Services.AddHttpClient(NwsAlertProvider.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
+builder.Services.AddSingleton<IWeatherAlertProvider, NwsAlertProvider>();
 builder.Services.AddSingleton<IHazardProviderResolver, HazardProviderResolver>();
 
 // Auth (docs/plans/auth.md). Wired but switched off: AuthMiddleware and
