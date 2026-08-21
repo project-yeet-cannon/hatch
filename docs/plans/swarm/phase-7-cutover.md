@@ -419,18 +419,34 @@ order the evening runs in — but they are never mixed inside one step:
 
 - [ ] **1. Take the old path out of your own hands** — *scripted*
 
-  <details><summary>One command, and the reason the old plan's second half is gone</summary>
+  <details><summary>One commit, and the reason the old plan's second half is gone</summary>
 
   `cd.yml` fires on `workflow_run` from publish, so a merge to `main` at any
   point tonight redeploys a host you are in the middle of retiring — quietly,
-  and after you have stopped it:
+  and after you have stopped it. Comment the file out — the whole thing, header
+  to last line — and push that commit:
 
   ```sh
-  gh workflow disable "Deploy"
+  # .github/workflows/cd.yml, every line prefixed with `# `
+  git commit -am "Soft-stop the compose deploy for the cutover (7b.1)"
+  git push
   ```
 
-  It is deleted outright in 7b.9; disabling it now is what keeps the next few
-  hours legible.
+  **Commented out rather than `gh workflow disable "Deploy"`, because the stop
+  belongs in the tree.** A disabled workflow is repository state: invisible
+  from a checkout, absent from `git log`, and undone by remembering to re-enable
+  it. A commented-out file says when it was stopped and why in the same place
+  the rest of the cutover is recorded, and `git revert` is the entire rollback —
+  the same one-line-in-a-file shape as the `local-data` revert in 7a.6's table.
+
+  While it is in this state the file parses to an empty document, so GitHub
+  lists it as an invalid workflow. That is the intended condition, not a
+  failure: an invalid workflow has no triggers and produces no runs.
+
+  It is deleted outright in 7b.9 — the commented-out carcass is a soft stop for
+  the length of the soak, not the end state, and the header comment carries that
+  TODO so the file names its own deletion. Stopping it now is what keeps the
+  next few hours legible.
 
   **There are no alerts to silence, and that is a fact about this installation
   rather than an oversight.** The alerting flows are a POC — the routes and the
@@ -682,7 +698,10 @@ order the evening runs in — but they are never mixed inside one step:
     [`compose.backup.yml`](../../../compose.backup.yml)
   - [`.github/workflows/cd.yml`](../../../.github/workflows/cd.yml) — whole
     file, which 5b.13 spent a step making possible by moving the two host
-    installs into Provision 0
+    installs into Provision 0. 7b.1 left it commented out rather than deleted,
+    and its header comment carries the TODO pointing here; this is the step that
+    discharges it, so the tree stops carrying a workflow that only exists to be
+    reverted.
   - [`containers/caddy/`](../../../containers/caddy/) and the `aerie-caddy`
     build/publish job in
     [publish.yml](../../../.github/workflows/publish.yml) — Traefik replaced
@@ -1013,9 +1032,10 @@ the third node buys. 10 is the paperwork, 11 is the gate. Same tags as 7b.*
 
   <details><summary>The unglamorous half, and the half whose omission is discovered during an incident</summary>
 
-  **Re-enable and remove.** The Deploy workflow disabled in 7b.1 needs nothing,
-  because 7b.9 deleted it outright — confirm instead that `gh workflow list` no
-  longer shows it. The DNS record keeps its default TTL, so there is nothing to
+  **Re-enable and remove.** The Deploy workflow commented out in 7b.1 needs
+  nothing, because 7b.9 deleted it outright — confirm instead that
+  `gh workflow list` no longer shows it, and that no commented-out `cd.yml` is
+  still sitting in the tree. The DNS record keeps its default TTL, so there is nothing to
   put back there either. There is no alert silence to expire, because 7b.1
   created none. What is left:
 

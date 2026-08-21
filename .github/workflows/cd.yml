@@ -1,248 +1,272 @@
-name: Deploy
+# ============================================================================
+# SOFT-STOPPED FOR THE k3s CUTOVER — Phase 7b, step 1.
+#
+# This workflow fired on `workflow_run` from publish, so any merge to `main`
+# would redeploy the old Docker host in the middle of retiring it — quietly,
+# and after the stack had already been stopped. The whole file is commented
+# out rather than disabled through `gh workflow disable`, so the stop lives in
+# the tree instead of in repository state nobody can see from a checkout:
+# `git log` says when and why, and `git revert` is the entire rollback.
+#
+# While it is in this state the file parses to an empty document, so GitHub
+# lists it as an invalid workflow. That is the intended condition, not a
+# failure — an invalid workflow has no triggers and produces no runs.
+#
+# TODO (Phase 7b, step 9): delete this file outright once the soak has passed.
+# Commenting it out is the soft stop; the deletion is the real one, and it is
+# what 5b.13 made possible by moving the two host installs (windows_exporter,
+# Tailscale) into provision-0-new-node.yml.
+#
+# To roll back before then: `git revert` the commit that added this header,
+# then re-run publish (or push to `main`) to trigger a deploy.
+# ============================================================================
 
-on:
-  workflow_run:
-    workflows: ["Build and publish containers"]
-    types: [completed]
-    branches: [main]
-
-concurrency:
-  group: deploy-production
-  cancel-in-progress: false
-
-jobs:
-  deploy:
-    if: github.event.workflow_run.conclusion == 'success'
-    # Runs on the self-hosted runner registered on the home server that hosts
-    # the stack. `legacy-deployer` pins this to that one box for as long as the
-    # stack lives there: bare `self-hosted` would match any runner in the repo,
-    # so registering the first hyperv-host-* runner (see provision-0-new-node.yml)
-    # would make production deploys start landing on a fresh, empty node with
-    # no compose state and no Docker daemon on tcp://localhost:2375. Retarget
-    # this when the stack itself moves off the old host, not before.
-    runs-on: [self-hosted, legacy-deployer]
-
-    # Job-level, not step-level: every `docker compose` invocation here
-    # interpolates these into the compose files, and a step that omits them
-    # doesn't fail — it silently resolves them to empty strings (visible only
-    # as "variable is not set" warnings). Declaring them once for the job means
-    # a new compose step can't accidentally run against blank config.
-    env:
-      DOCKER_HOST: tcp://localhost:2375
-      IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
-      # Access key *ids* are repository variables, not secrets: an id names an
-      # identity, it doesn't authenticate one, and leaving it unmasked means a
-      # failed deploy's log shows which IAM user was actually used - the first
-      # thing worth knowing about an AccessDenied. Their secret halves stay
-      # secrets. scripts/secrets/parameters.json records the same split as
-      # `githubKind`, and provision-2-seed-secrets.yml reads the same names.
-      AWS_ACCESS_KEY_ID: ${{ vars.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_REGION: ${{ vars.AWS_REGION }}
-      ACME_EMAIL: ${{ vars.ACME_EMAIL }}
-      DOMAIN: ${{ vars.DOMAIN }}
-      HA_HOST: ${{ vars.HA_HOST }}
-      HA_PORT: ${{ vars.HA_PORT }}
-      HA_TOKEN: ${{ secrets.HA_TOKEN }}
-      # Shared secret VmConsoleLogsController checks against X-Vm-Log-Token -
-      # see scripts/hyperv/lib/Send-VmConsoleLog.ps1, provisioned onto each
-      # Hyper-V host by provision-0-new-node.yml. Nothing issues it; mint one
-      # with scripts/secrets/new-shared-secret.sh. All three consumers of this
-      # secret (here, Provision 0, Provision 2) must hold the same value, so
-      # rotating it means re-running this deploy as well.
-      VM_LOG_SHIPPER_TOKEN: ${{ secrets.VM_LOG_SHIPPER_TOKEN }}
-      # //server/share of the house SMB share. compose.share.yml mounts it
-      # twice: read-write for the browse/upload GUI at share.${DOMAIN}, and
-      # read-only into the api container so a subdirectory of it can be served
-      # to Sonos speakers. A variable, not a secret: it's a LAN path to a share
-      # that already allows guest access. See docs/file-share.md.
-      SHARE_PATH: ${{ vars.SHARE_PATH }}
-      # Which subdirectory of SHARE_PATH holds the music library, e.g. "Music".
-      # Not a mount - just the tail of MediaLibrary__RootPath - so a wrong value
-      # only costs a startup warning, never a failed deploy. Leaving it unset
-      # turns media serving off without disturbing the file GUI, and keeps the
-      # share root off the API's unauthenticated /media endpoint. See
-      # docs/media-library.md.
-      MEDIA_LIBRARY_SUBPATH: ${{ vars.MEDIA_LIBRARY_SUBPATH }}
-      # Dedicated to the `backup` service's aerie-restic IAM user — kept
-      # separate from AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY above (which
-      # are Route53 credentials for caddy) so a leak of one doesn't expose
-      # the other. See compose.backup.yml, which maps these into the
-      # container's own AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY.
-      RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
-      RESTIC_AWS_ACCESS_KEY_ID: ${{ vars.RESTIC_AWS_ACCESS_KEY_ID }}
-      RESTIC_AWS_SECRET_ACCESS_KEY: ${{ secrets.RESTIC_AWS_SECRET_ACCESS_KEY }}
-      RESTIC_S3_REPOSITORY: ${{ vars.RESTIC_S3_REPOSITORY }}
-      RESTIC_AWS_REGION: ${{ vars.RESTIC_AWS_REGION }}
-      TZ: ${{ vars.TZ }}
-
-    steps:
-      # The job-level env block above cannot fail loudly on its own: a name
-      # read from the wrong tab of Settings > Secrets and variables (a
-      # `vars.X` that is stored as a secret, or the reverse) resolves to an
-      # empty string, and compose interpolates that as a warning rather than
-      # an error. The four AWS credential halves are where that matters most -
-      # the ids are variables and the secret halves are secrets, so each pair
-      # straddles both tabs - and an empty one means an expired wildcard
-      # certificate or a backup run writing nowhere, both of which surface
-      # days later rather than here. Deliberately narrow: the genuinely
-      # optional values (SHARE_PATH, MEDIA_LIBRARY_SUBPATH) stay unchecked.
-      - name: Verify AWS credentials resolved
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          $tab = @{
-            AWS_ACCESS_KEY_ID            = 'Variables'
-            AWS_SECRET_ACCESS_KEY        = 'Secrets'
-            RESTIC_AWS_ACCESS_KEY_ID     = 'Variables'
-            RESTIC_AWS_SECRET_ACCESS_KEY = 'Secrets'
-          }
-          foreach ($name in $tab.Keys) {
-            if (-not (Get-Item "env:$name" -ErrorAction SilentlyContinue).Value) {
-              throw "$name resolved to an empty string. It belongs on the $($tab[$name]) tab of Settings > Secrets and variables > Actions; if it is already set, it is on the other tab. See scripts/secrets/README.md."
-            }
-          }
-
-      - name: Checkout compose files
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-          sparse-checkout: |
-            compose.prod.yml
-            compose.share.yml
-            compose.observability.yml
-            compose.metrics.yml
-            compose.backup.yml
-            containers/kuma-provision
-            containers/autokuma
-            containers/fluent-bit
-            containers/opensearch-provision
-            containers/prometheus
-            containers/grafana
-          sparse-checkout-cone-mode: false
-
-      - name: Log in to the Container registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # windows_exporter and Tailscale used to be installed here, on every
-      # deploy — but neither has anything to do with deploying compose, and
-      # this is the only workflow that touches this host, which made it the
-      # only place either got converged. Both moved to
-      # provision-0-new-node.yml (Phase 5, 5b.13), which is what already owns
-      # "make a Windows host ready" and runs against all three Hyper-V hosts,
-      # not just this one. That step stays install-if-missing/converge-state
-      # too, so a deploy no longer re-verifying it costs nothing: the Windows
-      # service, once running, doesn't need a CI step to keep running.
-
-      # The exit-code checks are load-bearing: this runs under PowerShell, where
-      # a multi-line `run:` only surfaces the *last* command's exit code. Without
-      # them a failed `pull` (e.g. "Error manifest unknown" for an image whose
-      # publish job never pushed) is masked by a successful `up -d`, and the
-      # deploy silently proceeds against whatever stale container is already
-      # running - the failure only shows up later, in whichever step first tries
-      # to use the new image.
-      #
-      # compose.share.yml (the house share's CIFS mounts - the browse/upload GUI
-      # and the api container's media serving both live there) is layered in
-      # only when SHARE_PATH is set. Those mounts are resolved by the Docker
-      # daemon before any container starts, so an unresolvable share (DNS
-      # failure, share offline, variable never configured) would otherwise fail
-      # `up` for the whole stack, not just the things that need the share - see
-      # compose.share.yml, docs/file-share.md and docs/media-library.md.
-      - name: Pull and start the stack
-        working-directory: .
-        run: |
-          $shareArgs = @()
-          if (-not [string]::IsNullOrWhiteSpace($env:SHARE_PATH)) {
-            $shareArgs += @("-f", "compose.share.yml")
-          }
-          docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml @shareArgs pull
-          if ($LASTEXITCODE -ne 0) { throw "docker compose pull failed with exit code $LASTEXITCODE" }
-
-          # api-migrate (compose.prod.yml) runs the same api image in
-          # AERIE_MIGRATE=1 mode to completion before the stack serves
-          # traffic - the compose-side counterpart of the k3s chart's
-          # pre-install/pre-upgrade migrate Job. Since 6dc7a0c ("App changes
-          # for k3s app tier"), `api` no longer migrates on its own as a
-          # side effect of starting, on either stack - see api-migrate's
-          # comment in compose.prod.yml for why this isn't just
-          # `docker compose run api` instead. `run` also waits on
-          # api-migrate's `db` dependency per its `depends_on`, so db is
-          # already up for `up -d` below.
-          docker compose -f compose.prod.yml --profile migrate run --rm api-migrate
-          if ($LASTEXITCODE -ne 0) { throw "database migration failed with exit code $LASTEXITCODE" }
-
-          docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml @shareArgs up -d
-          if ($LASTEXITCODE -ne 0) { throw "docker compose up failed with exit code $LASTEXITCODE" }
-
-      # The init logic itself lives in the image, at scripts/init-repos.sh, and
-      # is invoked here by path. Do NOT inline it back into this file: shell
-      # source cannot survive the trip from a Windows runner into a Linux
-      # container. Passed as an argument, Windows PowerShell's Win32
-      # command-line quoting fragments it (`set: line 0: illegal option -`);
-      # piped to `sh`'s stdin, PowerShell encodes the stream as UTF-8 *with a
-      # BOM* and CRLF line endings, which `sh` reports as `﻿set: not found` and
-      # `syntax error: unexpected word (expecting "do")`. A fixed argv of plain
-      # ASCII tokens is the only form with no encoding or quoting surface.
-      #
-      # shell: powershell (not bash) — the runner service on this host runs as
-      # Local System, and `shell: bash` resolves to WSL's bash.exe stub in
-      # System32, which WSL refuses to run under Local System
-      # (WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED).
-      #
-      # `-T` disables pseudo-TTY allocation, which `exec` would otherwise fail
-      # on in a non-interactive runner.
-      - name: Ensure restic repositories are initialized
-        working-directory: .
-        shell: powershell
-        run: |
-          docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml exec -T backup /app/scripts/init-repos.sh
-          if ($LASTEXITCODE -ne 0) { throw "restic init check failed with exit code $LASTEXITCODE" }
-
-      # Compose only recreates a container when its own service definition
-      # changes, not when a bind-mounted file's contents change — so a
-      # prometheus.yml-only edit needs an explicit reload to take effect.
-      #
-      # The POST is made from inside the container over the Docker API, not to
-      # the published 127.0.0.1:9090 that this step used until run 32256191091
-      # failed on it with "The underlying connection was closed: The connection
-      # was closed unexpectedly." That published port (compose.metrics.yml) is
-      # the wrong end of the chain to knock on from here: Docker Desktop's
-      # Windows-side forwarder accepts the TCP connection whether or not it has
-      # anything to relay it to, so a host restart that leaves the forward
-      # pointing at nothing fails identically to Prometheus being down, and
-      # neither is distinguishable from a prometheus.yml Prometheus rejected.
-      # `exec` instead reaches the container the way the restic step above
-      # does, over a daemon connection every other step in this job has already
-      # proven, and its failures name what actually broke.
-      #
-      # promtool runs first because Prometheus answers a rejected reload with
-      # the parse error in the response *body*, which busybox wget (this image
-      # is busybox-based) discards along with any non-2xx response; promtool
-      # reports the same failure on stdout. `--post-data=` is what makes wget
-      # POST at all - the endpoint refuses GET - and the `=` form is deliberate:
-      # `--post-data ''` as two tokens is at the mercy of Windows PowerShell's
-      # habit of dropping empty arguments to native commands.
-      - name: Reload Prometheus config
-        working-directory: .
-        shell: powershell
-        run: |
-          $compose = @(
-            "-f", "compose.prod.yml",
-            "-f", "compose.observability.yml",
-            "-f", "compose.metrics.yml",
-            "-f", "compose.backup.yml"
-          )
-
-          docker compose @compose exec -T prometheus promtool check config /etc/prometheus/prometheus.yml
-          if ($LASTEXITCODE -ne 0) { throw "prometheus.yml failed promtool validation with exit code $LASTEXITCODE; the running config was left alone" }
-
-          docker compose @compose exec -T prometheus wget -q -O - --post-data= http://127.0.0.1:9090/-/reload
-          if ($LASTEXITCODE -ne 0) {
-            docker compose @compose logs --tail=40 prometheus
-            throw "POST /-/reload failed with exit code $LASTEXITCODE (prometheus logs above)"
-          }
+# name: Deploy
+#
+# on:
+#   workflow_run:
+#     workflows: ["Build and publish containers"]
+#     types: [completed]
+#     branches: [main]
+#
+# concurrency:
+#   group: deploy-production
+#   cancel-in-progress: false
+#
+# jobs:
+#   deploy:
+#     if: github.event.workflow_run.conclusion == 'success'
+#     # Runs on the self-hosted runner registered on the home server that hosts
+#     # the stack. `legacy-deployer` pins this to that one box for as long as the
+#     # stack lives there: bare `self-hosted` would match any runner in the repo,
+#     # so registering the first hyperv-host-* runner (see provision-0-new-node.yml)
+#     # would make production deploys start landing on a fresh, empty node with
+#     # no compose state and no Docker daemon on tcp://localhost:2375. Retarget
+#     # this when the stack itself moves off the old host, not before.
+#     runs-on: [self-hosted, legacy-deployer]
+#
+#     # Job-level, not step-level: every `docker compose` invocation here
+#     # interpolates these into the compose files, and a step that omits them
+#     # doesn't fail — it silently resolves them to empty strings (visible only
+#     # as "variable is not set" warnings). Declaring them once for the job means
+#     # a new compose step can't accidentally run against blank config.
+#     env:
+#       DOCKER_HOST: tcp://localhost:2375
+#       IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+#       # Access key *ids* are repository variables, not secrets: an id names an
+#       # identity, it doesn't authenticate one, and leaving it unmasked means a
+#       # failed deploy's log shows which IAM user was actually used - the first
+#       # thing worth knowing about an AccessDenied. Their secret halves stay
+#       # secrets. scripts/secrets/parameters.json records the same split as
+#       # `githubKind`, and provision-2-seed-secrets.yml reads the same names.
+#       AWS_ACCESS_KEY_ID: ${{ vars.AWS_ACCESS_KEY_ID }}
+#       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#       AWS_REGION: ${{ vars.AWS_REGION }}
+#       ACME_EMAIL: ${{ vars.ACME_EMAIL }}
+#       DOMAIN: ${{ vars.DOMAIN }}
+#       HA_HOST: ${{ vars.HA_HOST }}
+#       HA_PORT: ${{ vars.HA_PORT }}
+#       HA_TOKEN: ${{ secrets.HA_TOKEN }}
+#       # Shared secret VmConsoleLogsController checks against X-Vm-Log-Token -
+#       # see scripts/hyperv/lib/Send-VmConsoleLog.ps1, provisioned onto each
+#       # Hyper-V host by provision-0-new-node.yml. Nothing issues it; mint one
+#       # with scripts/secrets/new-shared-secret.sh. All three consumers of this
+#       # secret (here, Provision 0, Provision 2) must hold the same value, so
+#       # rotating it means re-running this deploy as well.
+#       VM_LOG_SHIPPER_TOKEN: ${{ secrets.VM_LOG_SHIPPER_TOKEN }}
+#       # //server/share of the house SMB share. compose.share.yml mounts it
+#       # twice: read-write for the browse/upload GUI at share.${DOMAIN}, and
+#       # read-only into the api container so a subdirectory of it can be served
+#       # to Sonos speakers. A variable, not a secret: it's a LAN path to a share
+#       # that already allows guest access. See docs/file-share.md.
+#       SHARE_PATH: ${{ vars.SHARE_PATH }}
+#       # Which subdirectory of SHARE_PATH holds the music library, e.g. "Music".
+#       # Not a mount - just the tail of MediaLibrary__RootPath - so a wrong value
+#       # only costs a startup warning, never a failed deploy. Leaving it unset
+#       # turns media serving off without disturbing the file GUI, and keeps the
+#       # share root off the API's unauthenticated /media endpoint. See
+#       # docs/media-library.md.
+#       MEDIA_LIBRARY_SUBPATH: ${{ vars.MEDIA_LIBRARY_SUBPATH }}
+#       # Dedicated to the `backup` service's aerie-restic IAM user — kept
+#       # separate from AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY above (which
+#       # are Route53 credentials for caddy) so a leak of one doesn't expose
+#       # the other. See compose.backup.yml, which maps these into the
+#       # container's own AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY.
+#       RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+#       RESTIC_AWS_ACCESS_KEY_ID: ${{ vars.RESTIC_AWS_ACCESS_KEY_ID }}
+#       RESTIC_AWS_SECRET_ACCESS_KEY: ${{ secrets.RESTIC_AWS_SECRET_ACCESS_KEY }}
+#       RESTIC_S3_REPOSITORY: ${{ vars.RESTIC_S3_REPOSITORY }}
+#       RESTIC_AWS_REGION: ${{ vars.RESTIC_AWS_REGION }}
+#       TZ: ${{ vars.TZ }}
+#
+#     steps:
+#       # The job-level env block above cannot fail loudly on its own: a name
+#       # read from the wrong tab of Settings > Secrets and variables (a
+#       # `vars.X` that is stored as a secret, or the reverse) resolves to an
+#       # empty string, and compose interpolates that as a warning rather than
+#       # an error. The four AWS credential halves are where that matters most -
+#       # the ids are variables and the secret halves are secrets, so each pair
+#       # straddles both tabs - and an empty one means an expired wildcard
+#       # certificate or a backup run writing nowhere, both of which surface
+#       # days later rather than here. Deliberately narrow: the genuinely
+#       # optional values (SHARE_PATH, MEDIA_LIBRARY_SUBPATH) stay unchecked.
+#       - name: Verify AWS credentials resolved
+#         shell: powershell
+#         run: |
+#           $ErrorActionPreference = "Stop"
+#           $tab = @{
+#             AWS_ACCESS_KEY_ID            = 'Variables'
+#             AWS_SECRET_ACCESS_KEY        = 'Secrets'
+#             RESTIC_AWS_ACCESS_KEY_ID     = 'Variables'
+#             RESTIC_AWS_SECRET_ACCESS_KEY = 'Secrets'
+#           }
+#           foreach ($name in $tab.Keys) {
+#             if (-not (Get-Item "env:$name" -ErrorAction SilentlyContinue).Value) {
+#               throw "$name resolved to an empty string. It belongs on the $($tab[$name]) tab of Settings > Secrets and variables > Actions; if it is already set, it is on the other tab. See scripts/secrets/README.md."
+#             }
+#           }
+#
+#       - name: Checkout compose files
+#         uses: actions/checkout@v7
+#         with:
+#           ref: ${{ github.event.workflow_run.head_sha }}
+#           sparse-checkout: |
+#             compose.prod.yml
+#             compose.share.yml
+#             compose.observability.yml
+#             compose.metrics.yml
+#             compose.backup.yml
+#             containers/kuma-provision
+#             containers/autokuma
+#             containers/fluent-bit
+#             containers/opensearch-provision
+#             containers/prometheus
+#             containers/grafana
+#           sparse-checkout-cone-mode: false
+#
+#       - name: Log in to the Container registry
+#         uses: docker/login-action@v4
+#         with:
+#           registry: ghcr.io
+#           username: ${{ github.actor }}
+#           password: ${{ secrets.GITHUB_TOKEN }}
+#
+#       # windows_exporter and Tailscale used to be installed here, on every
+#       # deploy — but neither has anything to do with deploying compose, and
+#       # this is the only workflow that touches this host, which made it the
+#       # only place either got converged. Both moved to
+#       # provision-0-new-node.yml (Phase 5, 5b.13), which is what already owns
+#       # "make a Windows host ready" and runs against all three Hyper-V hosts,
+#       # not just this one. That step stays install-if-missing/converge-state
+#       # too, so a deploy no longer re-verifying it costs nothing: the Windows
+#       # service, once running, doesn't need a CI step to keep running.
+#
+#       # The exit-code checks are load-bearing: this runs under PowerShell, where
+#       # a multi-line `run:` only surfaces the *last* command's exit code. Without
+#       # them a failed `pull` (e.g. "Error manifest unknown" for an image whose
+#       # publish job never pushed) is masked by a successful `up -d`, and the
+#       # deploy silently proceeds against whatever stale container is already
+#       # running - the failure only shows up later, in whichever step first tries
+#       # to use the new image.
+#       #
+#       # compose.share.yml (the house share's CIFS mounts - the browse/upload GUI
+#       # and the api container's media serving both live there) is layered in
+#       # only when SHARE_PATH is set. Those mounts are resolved by the Docker
+#       # daemon before any container starts, so an unresolvable share (DNS
+#       # failure, share offline, variable never configured) would otherwise fail
+#       # `up` for the whole stack, not just the things that need the share - see
+#       # compose.share.yml, docs/file-share.md and docs/media-library.md.
+#       - name: Pull and start the stack
+#         working-directory: .
+#         run: |
+#           $shareArgs = @()
+#           if (-not [string]::IsNullOrWhiteSpace($env:SHARE_PATH)) {
+#             $shareArgs += @("-f", "compose.share.yml")
+#           }
+#           docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml @shareArgs pull
+#           if ($LASTEXITCODE -ne 0) { throw "docker compose pull failed with exit code $LASTEXITCODE" }
+#
+#           # api-migrate (compose.prod.yml) runs the same api image in
+#           # AERIE_MIGRATE=1 mode to completion before the stack serves
+#           # traffic - the compose-side counterpart of the k3s chart's
+#           # pre-install/pre-upgrade migrate Job. Since 6dc7a0c ("App changes
+#           # for k3s app tier"), `api` no longer migrates on its own as a
+#           # side effect of starting, on either stack - see api-migrate's
+#           # comment in compose.prod.yml for why this isn't just
+#           # `docker compose run api` instead. `run` also waits on
+#           # api-migrate's `db` dependency per its `depends_on`, so db is
+#           # already up for `up -d` below.
+#           docker compose -f compose.prod.yml --profile migrate run --rm api-migrate
+#           if ($LASTEXITCODE -ne 0) { throw "database migration failed with exit code $LASTEXITCODE" }
+#
+#           docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml @shareArgs up -d
+#           if ($LASTEXITCODE -ne 0) { throw "docker compose up failed with exit code $LASTEXITCODE" }
+#
+#       # The init logic itself lives in the image, at scripts/init-repos.sh, and
+#       # is invoked here by path. Do NOT inline it back into this file: shell
+#       # source cannot survive the trip from a Windows runner into a Linux
+#       # container. Passed as an argument, Windows PowerShell's Win32
+#       # command-line quoting fragments it (`set: line 0: illegal option -`);
+#       # piped to `sh`'s stdin, PowerShell encodes the stream as UTF-8 *with a
+#       # BOM* and CRLF line endings, which `sh` reports as `﻿set: not found` and
+#       # `syntax error: unexpected word (expecting "do")`. A fixed argv of plain
+#       # ASCII tokens is the only form with no encoding or quoting surface.
+#       #
+#       # shell: powershell (not bash) — the runner service on this host runs as
+#       # Local System, and `shell: bash` resolves to WSL's bash.exe stub in
+#       # System32, which WSL refuses to run under Local System
+#       # (WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED).
+#       #
+#       # `-T` disables pseudo-TTY allocation, which `exec` would otherwise fail
+#       # on in a non-interactive runner.
+#       - name: Ensure restic repositories are initialized
+#         working-directory: .
+#         shell: powershell
+#         run: |
+#           docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml exec -T backup /app/scripts/init-repos.sh
+#           if ($LASTEXITCODE -ne 0) { throw "restic init check failed with exit code $LASTEXITCODE" }
+#
+#       # Compose only recreates a container when its own service definition
+#       # changes, not when a bind-mounted file's contents change — so a
+#       # prometheus.yml-only edit needs an explicit reload to take effect.
+#       #
+#       # The POST is made from inside the container over the Docker API, not to
+#       # the published 127.0.0.1:9090 that this step used until run 32256191091
+#       # failed on it with "The underlying connection was closed: The connection
+#       # was closed unexpectedly." That published port (compose.metrics.yml) is
+#       # the wrong end of the chain to knock on from here: Docker Desktop's
+#       # Windows-side forwarder accepts the TCP connection whether or not it has
+#       # anything to relay it to, so a host restart that leaves the forward
+#       # pointing at nothing fails identically to Prometheus being down, and
+#       # neither is distinguishable from a prometheus.yml Prometheus rejected.
+#       # `exec` instead reaches the container the way the restic step above
+#       # does, over a daemon connection every other step in this job has already
+#       # proven, and its failures name what actually broke.
+#       #
+#       # promtool runs first because Prometheus answers a rejected reload with
+#       # the parse error in the response *body*, which busybox wget (this image
+#       # is busybox-based) discards along with any non-2xx response; promtool
+#       # reports the same failure on stdout. `--post-data=` is what makes wget
+#       # POST at all - the endpoint refuses GET - and the `=` form is deliberate:
+#       # `--post-data ''` as two tokens is at the mercy of Windows PowerShell's
+#       # habit of dropping empty arguments to native commands.
+#       - name: Reload Prometheus config
+#         working-directory: .
+#         shell: powershell
+#         run: |
+#           $compose = @(
+#             "-f", "compose.prod.yml",
+#             "-f", "compose.observability.yml",
+#             "-f", "compose.metrics.yml",
+#             "-f", "compose.backup.yml"
+#           )
+#
+#           docker compose @compose exec -T prometheus promtool check config /etc/prometheus/prometheus.yml
+#           if ($LASTEXITCODE -ne 0) { throw "prometheus.yml failed promtool validation with exit code $LASTEXITCODE; the running config was left alone" }
+#
+#           docker compose @compose exec -T prometheus wget -q -O - --post-data= http://127.0.0.1:9090/-/reload
+#           if ($LASTEXITCODE -ne 0) {
+#             docker compose @compose logs --tail=40 prometheus
+#             throw "POST /-/reload failed with exit code $LASTEXITCODE (prometheus logs above)"
+#           }
+#
