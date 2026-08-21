@@ -38,6 +38,30 @@ const FIELDS: FieldDef[] = [
     type: 'password',
     help: 'Stored obfuscated; leave blank to keep the current value.',
   },
+  {
+    key: 'GoogleClientId',
+    label: 'Google client ID',
+    type: 'text',
+    help: 'OAuth client ID from your own Google Cloud project, used to connect family calendars. See the setup note on the Calendars page.',
+  },
+  {
+    key: 'GoogleClientSecret',
+    label: 'Google client secret',
+    type: 'password',
+    help: 'Stored obfuscated; leave blank to keep the current value.',
+  },
+  {
+    key: 'GoogleOAuthRedirectUri',
+    label: 'Google OAuth redirect URI',
+    type: 'text',
+    help: 'Only needed when a proxy rewrites the address this app is served from. Blank derives it from the request, which is usually right. Must match the Cloud console exactly.',
+  },
+  {
+    key: 'CalendarAgendaDays',
+    label: 'Calendar agenda days',
+    type: 'number',
+    help: 'How many days of agenda the kiosk shows, counting today. Defaults to 2 - today and tomorrow.',
+  },
 ];
 
 const PASSWORD_KEYS = new Set(FIELDS.filter((f) => f.type === 'password').map((f) => f.key));

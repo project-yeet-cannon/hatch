@@ -33,8 +33,7 @@ clicking to a human.
 - [x] **4** — Admin Sessions page: view, delete, generate invite
 - [x] **5** — Canary: the wall on in front of `apps/docs` only, nothing else
 - [ ] **6** — Widen the wall to `home` and `kiosk`
-- [ ] **7** — *(optional)* Kiosk tablets scan the QR instead of typing the code
-- [ ] **8** — Widen to `share.`, dissipate this plan into `docs/auth-architecture.md`
+- [ ] **7** — Widen to `share.`, dissipate this plan into `docs/auth-architecture.md`
 
 ## The ask, restated
 

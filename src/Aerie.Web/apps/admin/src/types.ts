@@ -227,3 +227,50 @@ export interface AppsConfig {
   /** Absolute base URL of this install, no trailing slash, or null when unset. */
   publicBaseUrl: string | null;
 }
+
+/**
+ * Mirrors of Aerie.Api's calendar DTOs (Models/Calendar/Dtos.cs). Note what is
+ * absent: no token material is on these records, because none of it leaves the
+ * database — see the note at the top of that file.
+ */
+export interface Calendar {
+  id: string;
+  providerCalendarId: string;
+  name: string;
+  /** The color the provider reports. `colorOverride` wins when set; both are here so a recolor can be undone. */
+  providerColor: string | null;
+  colorOverride: string | null;
+  included: boolean;
+  sortOrder: number;
+  timeZone: string | null;
+  isPrimary: boolean;
+}
+
+export interface CalendarAccount {
+  id: string;
+  provider: string;
+  accountEmail: string;
+  displayName: string | null;
+  connectedAt: string;
+  lastSyncedAt: string | null;
+  lastSyncError: string | null;
+  /** The grant is dead and only re-consent fixes it. The row stays listed so the page can offer "Reconnect". */
+  needsReauth: boolean;
+  enabled: boolean;
+  calendars: Calendar[];
+}
+
+/** The admin-owned half of a calendar — everything a provider refresh deliberately leaves alone. */
+export interface CalendarVisibilityRequest {
+  included: boolean;
+  /** A hex color (`#rgb` or `#rrggbb`), or null to fall back to the provider's. Rejected server-side if it is neither. */
+  colorOverride: string | null;
+  sortOrder: number;
+}
+
+/** What a "Refresh calendars" run changed, so the page can say so rather than just re-rendering. */
+export interface CalendarDiscovery {
+  added: number;
+  updated: number;
+  removed: number;
+}

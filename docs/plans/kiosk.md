@@ -31,7 +31,7 @@ and lint it and leave the clicking to a human.
 - [x] **A1** — Calendar schema + settings keys
 - [x] **A2** — Google OAuth connect flow + token refresh
 - [x] **A3** — Calendar discovery + visibility API
-- [ ] **A4** — Admin Calendars page
+- [x] **A4** — Admin Calendars page
 - [ ] **A5** — Event sync job
 - [ ] **A6** — Calendar on the dashboard contract + provisional kiosk UI
 - [ ] **B1** — Hazard schema + provider interfaces

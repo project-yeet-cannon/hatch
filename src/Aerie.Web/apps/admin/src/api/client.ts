@@ -3,6 +3,10 @@ import type {
   AuthGrant,
   AuthInvite,
   BackfillRequest,
+  Calendar,
+  CalendarAccount,
+  CalendarDiscovery,
+  CalendarVisibilityRequest,
   ChannelHistory,
   ChannelModeRequest,
   ChannelPlayMediaRequest,
@@ -103,6 +107,21 @@ export const updateRoutine = (id: string, request: RoutineWriteRequest) =>
 export const deleteRoutine = (id: string) => fetchJson<void>(`/api/routines/${id}`, { method: 'DELETE' });
 export const triggerRoutine = (id: string) => fetchJson<void>(`/api/routines/${id}/trigger`, { method: 'POST' });
 export const turnOffRoutine = (id: string) => fetchJson<void>(`/api/routines/${id}/turn-off`, { method: 'POST' });
+
+// ---- Calendar ----
+//
+// The connect flow itself is not here: /api/calendar/oauth/start is navigated
+// to, not fetched, so the page links to it rather than calling it.
+
+export const getCalendarAccounts = () => fetchJson<CalendarAccount[]>('/api/calendar/accounts');
+/** Re-lists the account's calendars from the provider, preserving the admin-owned fields on the ones that survive. */
+export const refreshCalendars = (accountId: string) =>
+  fetchJson<CalendarDiscovery>(`/api/calendar/accounts/${accountId}/refresh-calendars`, { method: 'POST' });
+export const updateCalendar = (id: string, request: CalendarVisibilityRequest) =>
+  fetchJson<Calendar>(`/api/calendar/calendars/${id}`, { method: 'PUT', ...asJson(request) });
+/** Revokes the grant with the provider, then deletes the account and its calendars and cached events. */
+export const deleteCalendarAccount = (id: string) =>
+  fetchJson<void>(`/api/calendar/accounts/${id}`, { method: 'DELETE' });
 
 // ---- Settings ----
 
