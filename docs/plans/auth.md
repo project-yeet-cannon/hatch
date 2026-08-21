@@ -14,8 +14,10 @@ deliberately deferred behind a model that has room for it.
 
 **How to use this file:** one phase per commit, each leaving the app working.
 Phases 1–4 build the whole mechanism with the wall **switched off**, so nothing
-can lock anyone out until Phase 5 flips one value. Every phase names its goal,
-its files, its steps, and how to know it's done, so it can be picked up cold.
+can lock anyone out until Phase 5 — and Phase 5 turns it on in front of one app
+nobody depends on, so the first thing the wall ever refuses in production is a
+docs reader rather than the house. Every phase names its goal, its files, its
+steps, and how to know it's done, so it can be picked up cold.
 
 **Verification, everywhere:** `make build` and `make test-api` for backend work,
 `make test-web` for frontend. Migrations via `make ef-migration
@@ -29,9 +31,10 @@ clicking to a human.
 - [x] **2** — Auth endpoints and in-process middleware (still off)
 - [x] **3** — The sign-in shell (`apps/auth`)
 - [x] **4** — Admin Sessions page: view, delete, generate invite
-- [ ] **5** — Turn the wall on: bootstrap grant, Traefik middleware, Ingress annotations
-- [ ] **6** — *(optional)* Kiosk tablets scan the QR instead of typing the code
-- [ ] **7** — Widen to `share.`, dissipate this plan into `docs/auth-architecture.md`
+- [ ] **5** — Canary: the wall on in front of `apps/docs` only, nothing else
+- [ ] **6** — Widen the wall to `home` and `kiosk`
+- [ ] **7** — *(optional)* Kiosk tablets scan the QR instead of typing the code
+- [ ] **8** — Widen to `share.`, dissipate this plan into `docs/auth-architecture.md`
 
 ## The ask, restated
 
@@ -83,16 +86,16 @@ scanned by a phone that has never authenticated, into "one extra tap" instead of
 | Decision | Choice | Why |
 |---|---|---|
 | Where the gate runs | **Traefik `forwardAuth` → an endpoint in Aerie.Api**, plus the same check in-process | One annotation puts any Ingress behind it, including services we didn't write (`share.`, and `logs.`/`status.` later). Sessions stay in our DB and the admin UI stays our admin app. No new container, no second identity system. |
-| Why also in-process | Defense in depth, and local dev | A pod reached directly inside the cluster bypasses Traefik entirely. The in-process middleware is also the *only* gate under `make run`, where there is no proxy at all. Both call the same `AuthGate`, so there is one allow-list, not two. |
+| Why also in-process | Defense in depth, and local dev | A pod reached directly inside the cluster bypasses Traefik entirely. The in-process middleware is also the *only* gate under `make run`, where there is no proxy at all. Both call the same `AuthGate`, so there is one allow-list, not two. Suspended for exactly one phase: the Phase 5 canary needs Traefik to be the only enforcer, so the in-process half comes back on in Phase 6. |
 | Third-party IdP (Authelia, Pocket ID, Keycloak) | **Rejected** | Standards-compliant and self-hosted, but: a new HelmRelease and its secrets, its own admin UI instead of ours, and the invite/approval ceremonies the brief actually asked for don't exist there — they'd get bolted on anyway. Revisit if OIDC is ever needed *for* something rather than as an end. |
 | Credential format | **Opaque 256-bit random token, SHA-256 hashed at rest** | Not a JWT and not an ASP.NET auth cookie. [`Program.cs`](../../src/Aerie.Api/Program.cs) documents that there is no persisted DataProtection key ring across the three replicas — cookie auth would decrypt on one replica and fail on another. A hashed opaque token has no key ring, no clock skew, and is revoked by deleting a row. Follows [`VmConsoleLogsController`](../../src/Aerie.Api/Controllers/VmConsoleLogsController.cs), which already does fixed-time shared-secret comparison. |
 | Where the token rides | Cookie `__Secure-aerie_grant`, `Domain=.${DOMAIN}`, `HttpOnly`, `Secure`, `SameSite=Lax` | The `Domain` attribute is what makes one enrollment cover `home.`, `kiosk.`, `share.` and later `logs.`/`status.` — this is the entire SSO story and it costs one attribute. Note this rules out the `__Host-` prefix, which forbids `Domain`; `__Secure-` is the correct prefix here. |
 | Grant lifetime | **No server-side expiry by default**; cookie re-issued on a sliding window | "Permanent until revoked" is the request. Note the browser-side catch: Chrome caps cookie `Max-Age` at **400 days** regardless of what we send, so a genuinely permanent cookie does not exist — the gate re-issues the cookie whenever it is older than `Auth:GrantRenewAfterDays`, which means an in-use device never lapses and a device untouched for a year re-enrolls. |
-| Invite code shape | 8 chars of Crockford base32 (no I/L/O/U), displayed `AERIE-XXXX-XXXX`, 15-minute TTL, single use | ~40 bits behind a 15-minute window and a rate limiter. Short enough to read aloud across a room or type on a tablet soft keyboard, which is the fallback that makes Phase 6 optional. |
+| Invite code shape | 8 chars of Crockford base32 (no I/L/O/U), displayed `AERIE-XXXX-XXXX`, 15-minute TTL, single use | ~40 bits behind a 15-minute window and a rate limiter. Short enough to read aloud across a room or type on a tablet soft keyboard, which is the fallback that makes Phase 7 optional. |
 | Where the data lives | Core `AerieContext`, `public` schema | Auth is infrastructure for every module, not a family app. A `Modules/` schema would make every module depend on one module — exactly what [`Modules/README.md`](../../src/Aerie.Api/Modules/README.md) forbids. |
 | Bootstrap | The **migrate Job** mints a first invite when the grant table is empty, and logs it | Solves the chicken-and-egg (the invite generator lives behind the wall) without an env-var admin token or a committed credential. The migrate hook runs exactly once per deploy, ahead of any replica — doing this at replica startup would mint three invites and race. Recoverable after a DR restore-to-empty for free. |
 | Legacy Windows/Caddy host | **Not targeted** | Phase 7b of the [cluster cutover](swarm/phase-7-cutover.md) is next and 7c retires the host. Caddy `forward_auth` labels would be written to be deleted. The in-process gate still covers that host if the soak runs long. |
-| Deployment surface | k3s only, behind `auth.enabled` in [`values.yaml`](../../charts/aerie/values.yaml) | Off is the default until Phase 5. One value is the whole rollback. |
+| Deployment surface | k3s only, behind `auth.mode` in [`values.yaml`](../../charts/aerie/values.yaml) | `"off"` is the default until Phase 5, then `"canary"` for one app, then `"on"` in Phase 6. One value is still the whole rollback — the three states and what each renders are in [Phase 5](#phase-5--canary-the-wall-on-in-front-of-one-app). |
 
 ## The allow-list is load-bearing
 
@@ -115,12 +118,13 @@ and implemented once, in `AuthGate`, shared by the middleware and the
 Two consequences worth stating plainly, because they are behavior changes the
 operator chose rather than bugs to discover:
 
-- **Printed storage-bin QR labels now hit the wall.** `/apps/family/storage/c/{code}`
-  is gated, so a cold scan from a phone that isn't enrolled lands on sign-in.
+- **Printed storage-bin QR labels now hit the wall** (Phase 6, not the Phase 5
+  canary). `/apps/family/storage/c/{code}` is gated, so a cold scan from a phone
+  that isn't enrolled lands on sign-in.
   The return-to redirect (Phase 3) makes that one extra step rather than a dead
   end, but a guest holding a labeled bin can no longer scan it. That is the
   intended trade.
-- **`share.${DOMAIN}` gains a second gate** in Phase 7, in front of the dummy
+- **`share.${DOMAIN}` gains a second gate** in Phase 8, in front of the dummy
   dufs credential that [`values.yaml`](../../charts/aerie/values.yaml) documents
   as a placeholder. The dufs credential does not go away; it just stops being
   the only thing there.
@@ -144,6 +148,12 @@ operator chose rather than bugs to discover:
 - **The gate defaults off through Phase 4.** `Auth:Enabled=false` everywhere
   until Phase 5. Every phase before that is provable with a local override and
   a `curl`.
+- **Two switches from Phase 5 on.** `Auth:Enabled` decides whether the gate
+  decides at all — it is what `/api/auth/verify` answers on behalf of Traefik.
+  `Auth:EnforceInProcess` decides whether the pod refuses on its own, and it is
+  false only during the Phase 5 canary, so that the routes Traefik annotates are
+  the only routes walled. Both are `true` from Phase 6 onward, and
+  `auth.mode` in the chart is the one value that sets them.
 
 ---
 
@@ -249,7 +259,7 @@ to the local `db` container, and no request path in the app behaves differently.
    its value from this file; so would the legacy Windows/Caddy host, which
    runs `compose.prod.yml` with no override and has no bootstrap invite to
    recover through. The wall now turns on in exactly one place, which is what
-   Phase 5 step 5 already describes.*
+   Phase 5 step 7 already describes.*
 
 **Done when:** with the local override on, `curl -i localhost:5197/apps/admin/`
 returns `302` to the sign-in shell, `curl -i -H 'Accept: application/json'
@@ -278,7 +288,7 @@ everything behaves exactly as it does today. `make test-api` green.
    pre-filled from the user agent ("Ada's iPhone") so the Sessions list is
    legible instead of a wall of `Mozilla/5.0`. One button.
 2. `/apps/auth/r/:code` — the deep link a scanned QR resolves to. Redeems
-   immediately, no typing. This is the path that makes Phase 6 optional: the
+   immediately, no typing. This is the path that makes Phase 7 optional: the
    admin's QR can be scanned by *any* camera app on any phone, and only the
    kiosk tablets need in-page scanning.
 3. Carry `?r=` through redemption and `location.replace` to it on success,
@@ -359,7 +369,7 @@ thing being tested.**
 **Files**
 
 - `src/Aerie.Api/Services/Auth/AuthOptions.cs` — `EnforceInProcess`
-- `src/Aerie.Api/Common/AuthMiddleware.cs` — honour it
+- `src/Aerie.Api/Common/AuthMiddleware.cs` — honor it
 - `src/Aerie.Api/Program.cs` — bootstrap invite in the `AERIE_MIGRATE` branch
 - `charts/aerie/templates/middleware-auth.yaml` *(new)*
 - `charts/aerie/templates/ingress.yaml` — the canary Ingress
@@ -426,6 +436,13 @@ thing being tested.**
    - The `<namespace>-<name>@kubernetescrd` naming rule, same as the existing
      comment in `ingress.yaml` warns: a bare name is silently not found and,
      again, the route serves unauthenticated.
+
+   Both path prefixes are self-contained: the docs bundle sets
+   `base: '/apps/docs/'` in its
+   [`vite.config.ts`](../../src/Aerie.Web/apps/docs/vite.config.ts), so every
+   asset it requests is under the gated prefix and none of it leaks out to the
+   ungated `/` route.
+
 6. `${AUTH_MODE}` in the HelmRelease and the matching entry in
    `cluster-config.json`.
 7. Deploy with `"off"` first. Confirm nothing changed. Then set `"canary"`.
@@ -516,11 +533,11 @@ Flux reconcile is a complete, tested rollback.
 
 ---
 
-## Phase 6 — *(optional)* Kiosk tablets scan instead of type
+## Phase 7 — *(optional)* Kiosk tablets scan instead of type
 
 **Goal:** the tablet's own camera reads the admin's QR.
 
-**This phase is optional and severable.** Phase 5 already leaves tablets working
+**This phase is optional and severable.** Phase 6 already leaves tablets working
 via a typed code — an eight-character code on a soft keyboard, once, per tablet,
 maybe once a year. Read the cost below before deciding it's worth it; the
 cheaper alternative is to do nothing here at all.
@@ -541,22 +558,22 @@ the session, so `getUserMedia` currently fails closed. Making it work is:
   this is a small JS library over a `<canvas>`, not a platform API
 - a new APK build, signed, published to `files.`, and installed on every tablet
   — and the tablets need to be enrolled to load the dashboard that tells them to
-  update, so **sequence this after Phase 5 has them enrolled**, not before
+  update, so **sequence this after Phase 6 has them enrolled**, not before
 
 **Done when:** a tablet at the wall opens a scanner, reads a QR from the admin's
 screen, and lands on the dashboard without a keyboard appearing.
 
 ---
 
-## Phase 7 — Widen, then dissipate
+## Phase 8 — Widen, then dissipate
 
 **Goal:** finish the "all our apps" half of the brief and retire this file.
 
 **Steps**
 
-1. Annotate the `share` Ingress with the auth middleware. dufs needs no changes
-   — Traefik refuses before it proxies. Its own dummy credential stays as the
-   second gate.
+1. Annotate the `share` Ingress with the auth middleware, guarded on
+   `auth.mode` being `"on"` like the other two. dufs needs no changes — Traefik
+   refuses before it proxies. Its own dummy credential stays as the second gate.
 2. Write `docs/auth-architecture.md`: the grant model, the cookie and its domain
    scope, the allow-list *with the `/media` and probe reasoning intact*, the
    ceremony seam, the bootstrap path, and a lockout-recovery runbook
@@ -574,7 +591,7 @@ screen, and lands on the dashboard without a keyboard appearing.
 ## Deferred on purpose
 
 Each of these is additive against the grant model. None requires revisiting a
-Phase 1–7 decision.
+Phase 1–8 decision.
 
 - **Wait-for-approval ceremony.** A `PendingRequest` row, a polling screen in
   the sign-in shell, a queue on the Sessions page. Wants a notification path so
