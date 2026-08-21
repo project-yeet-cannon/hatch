@@ -69,6 +69,20 @@ jobs:
 
           # Same keypair every provision-*/verify-* workflow uses.
           NODE_SSH_PRIVATE_KEY: ${{ secrets.NODE_SSH_PRIVATE_KEY }}
+
+          # Optional, and the one credential this gate can use but cannot
+          # obtain: a live grant token (docs/plans/auth.md). Every other check
+          # here presents nothing, which proves the wall refuses but says
+          # nothing about whether it still serves - a gate that fell closed on
+          # everyone would pass all of them. A grant is stored only as a hash
+          # and this workflow writes nothing, so the token has to be handed in.
+          #
+          # Unset, the enrolled-device check reports a warning that names
+          # itself and the rest of the gate runs unchanged. Set it by redeeming
+          # an invite from the admin app's Sessions page against a session kept
+          # for this purpose, labelled so it is obvious in the list; revoking
+          # it there is what expires this secret.
+          AERIE_TEST_GRANT_TOKEN: ${{ secrets.AERIE_TEST_GRANT_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
@@ -77,9 +91,13 @@ jobs:
             throw "NODE_SSH_PRIVATE_KEY is not set. It's the same repository secret provision-0-new-node.yml already requires."
           }
 
+          # -GrantToken is passed unconditionally: an unset secret arrives as
+          # an empty string, which the script reads as "not supplied" and
+          # downgrades that one check to a warning.
           & .\scripts\k3s\Test-AppTier.ps1 `
             -IPAddress $env:IP_ADDRESS `
-            -SshPrivateKey $env:NODE_SSH_PRIVATE_KEY
+            -SshPrivateKey $env:NODE_SSH_PRIVATE_KEY `
+            -GrantToken $env:AERIE_TEST_GRANT_TOKEN
 
           # Same reason verify-cluster-platform.yml and verify-data-tier.yml
           # propagate this explicitly: `exit` inside a script invoked with &

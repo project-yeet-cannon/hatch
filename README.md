@@ -37,6 +37,74 @@ Required values:
 - `ha_port`: HA API port (usually 8123)
 - `ha_token`: HA API token
 
+## Enrolling a device
+
+Every app on `home.${DOMAIN}` and `kiosk.${DOMAIN}` sits behind one wall. A
+device is enrolled once, by the operator, and never asks again — there are no
+user accounts, no passwords, and nothing for a family member to remember. See
+[docs/plans/auth.md](docs/plans/auth.md) for the design and what is deliberately
+deferred.
+
+To enroll a device:
+
+1. On the admin app's **Sessions** page
+   (`https://home.${DOMAIN}/apps/admin/sessions`), click **Generate invite**.
+   Label it with the device, not the person — "kitchen tablet" is what you will
+   be reading in the list a year from now when deciding what to revoke.
+2. The invite is shown two ways, and either is enough: a QR code, and an
+   eight-character code like `AERIE-K3M9-P2QT`. Scan it from a phone; type it on
+   a tablet's soft keyboard. The code has no character you can mistake for
+   another — no I, L, O or U — and `I`/`L` typed for `1` and `O` for `0` are
+   folded on the way in.
+3. On the device being enrolled, open `https://home.${DOMAIN}/auth` and enter
+   the code. It is good for **15 minutes and one use**.
+4. The device lands wherever it was heading, and stays signed in. The grant is
+   long-lived and renews itself while the device is in use.
+
+Revoke from the same page: delete the row. The device is refused on its next
+request.
+
+Three things stay reachable without a grant, on purpose:
+`files.${DOMAIN}` (the kiosk APK and its checksum), the media library that Sonos
+speakers fetch from directly, and the health endpoints Kubernetes probes. The
+full list, and why each entry is on it, is in
+[docs/plans/auth.md](docs/plans/auth.md#the-allow-list-is-load-bearing).
+
+One consequence worth knowing before someone reports it as a bug: **a printed
+storage-bin QR label scanned by a phone that isn't enrolled now lands on
+sign-in** rather than on the bin. Redeeming a code carries the phone through to
+the bin it scanned, so it is one extra step rather than a dead end — but a guest
+holding a labeled bin can no longer scan it.
+
+### If nobody can get in
+
+The admin app that mints invites is itself behind the wall, so a house with no
+enrolled device has no way back in through the front door. Two recoveries, in
+order of preference:
+
+- **The bootstrap invite.** On any deploy where no device is enrolled and no
+  invite is live, the migration job mints one and logs it at Warning with a
+  banner. It is valid for an hour and usable once. The Job is kept until the
+  next deploy replaces it, so its log is still there afterwards:
+
+  ```
+  kubectl -n aerie logs job/api-migrate | grep -A4 'No enrolled devices'
+  ```
+
+  This is the only place a code is ever written to a log, and it is reachable
+  only when the install has no way in at all.
+
+- **The whole wall, off.** Set the `AUTH_MODE` repository variable to `off` and
+  let Flux reconcile. That is the complete rollback — the Traefik middleware
+  stops being rendered, the annotations come off `home` and `kiosk`, and the pod
+  stops enforcing on its own — and it returns the deployment to exactly its
+  pre-auth behavior. `canary` is the rung between the two: the wall in front of
+  `/apps/docs` alone, useful for rehearsing a change to the gate against
+  something nothing in the house depends on.
+
+  A tablet that lost its cookie is a physical visit either way; `AUTH_MODE=off`
+  gets the house back, not the tablet's enrollment.
+
 ## Kiosk tablet install
 
 See [docs/kiosk-architecture.md](docs/kiosk-architecture.md) for how the kiosk app, its CI build, and QR provisioning fit together. To put a fresh tablet into service:

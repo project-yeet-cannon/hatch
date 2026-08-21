@@ -31,13 +31,23 @@
     *absent*, because "off" is the documented rollback and a rollback that
     leaves half the wall standing is not one; at "canary" they assert the
     wall stands in front of apps/docs and nowhere else, which is the
-    containment the phase exists to prove. Two of these cannot be answered by
-    reading objects at all - a route whose middleware annotation does not
-    resolve serves unauthenticated, and looks from every angle but an actual
-    request like success - so they are HTTPS checks.
+    containment the phase exists to prove; at "on" they assert home and kiosk
+    refuse an un-enrolled client while the allow-list - /health/ready, /media,
+    and the files. and share. hosts - is still answered. Several of these
+    cannot be answered by reading objects at all - a route whose middleware
+    annotation does not resolve serves unauthenticated, and looks from every
+    angle but an actual request like success - so they are HTTPS checks.
+
+    One direction this cannot assert on its own: that an *enrolled* device is
+    served. A grant is stored as a hash and this script writes nothing, so the
+    credential has to be handed in - see -GrantToken, and the warning that
+    stands in its place when it isn't.
 
     **Expectations come from the cluster and the repository, not from
-    parameters.** DOMAIN, the image registry and the share host come from the
+    parameters.** -GrantToken is not an exception to this: it is a credential
+    to present, not a value to compare against, and what the check does with
+    it still comes from AUTH_MODE. DOMAIN, the image registry and the share
+    host come from the
     live aerie-cluster-config ConfigMap; the expected replica counts come from
     charts/aerie/values.yaml; the "no installation value leaked" and "no
     write-back tag leaked" greps run against the committed tree. Nothing here
@@ -66,6 +76,24 @@
     A k3s server's LAN address. Any server: everything read here over SSH is
     cluster state, the same as Test-DataTier.ps1.
 
+.PARAMETER GrantToken
+    A live grant token (docs/plans/auth.md), which turns the one check here
+    that needs a credential from a warning into a real assertion: at
+    AUTH_MODE=on, an *enrolled* device is served rather than refused.
+
+    It is a parameter, and optional, for a reason each half of which matters.
+    A parameter, because this script writes nothing and a grant cannot be read
+    back out of the database - it is stored only as a SHA-256, so the only way
+    to hold a usable token is to have been issued one. Optional, because a
+    gate that cannot run without a credential is a gate nobody runs; absent,
+    the enrolled-device check is a Warn that names itself, and the refusal
+    half - which needs no credential and is the half that can lock the house
+    out - is asserted either way.
+
+    Read it out of the __Secure-aerie_grant cookie of a browser that is
+    already enrolled, or redeem an invite from the admin app's Sessions page
+    for one issued to this check specifically and revoked afterwards.
+
 .EXAMPLE
     .\Test-AppTier.ps1 -IPAddress 10.0.0.21 -SshPrivateKeyPath ~\.ssh\id_ed25519
 #>
@@ -82,7 +110,9 @@ param(
     [string]$Username = 'aerie',
 
     [string]$SshPrivateKeyPath,
-    [string]$SshPrivateKey
+    [string]$SshPrivateKey,
+
+    [string]$GrantToken
 )
 
 $ErrorActionPreference = 'Stop'
@@ -355,6 +385,14 @@ function Invoke-HttpsGet {
         302 and everything else with a 401, so the two auth checks below reach
         both answers by setting it and not setting it.
 
+        -Cookie sets a raw Cookie header, and exists for exactly one caller:
+        the phase 6 check that an *enrolled* device is served rather than
+        refused. Every other check here is the un-enrolled case, which is the
+        default because it is the one a browser on the LAN presents by
+        accident; proving the other direction needs a credential, and the
+        credential is a parameter to this script rather than something it can
+        mint, because minting one would be a write.
+
         The body is read as ASCII up to -MaxBodyBytes and never decoded for
         Transfer-Encoding: chunked. Every body this script actually inspects
         text from (the dashboard's index.html, files' version.json) is served
@@ -369,6 +407,7 @@ function Invoke-HttpsGet {
         [Parameter(Mandatory)][string]$ServerName,
         [string]$Path = '/',
         [string]$Accept,
+        [string]$Cookie,
         [int]$Port = 443,
         [int]$TimeoutMs = 15000,
         [int]$MaxBodyBytes = 262144
@@ -419,6 +458,7 @@ function Invoke-HttpsGet {
         # 401 a fetch can see rather than the 302 a browser follows. Passing
         # -Accept 'text/html' is how a check asks for the browser's answer.
         if ($Accept) { $writer.WriteLine("Accept: $Accept") }
+        if ($Cookie) { $writer.WriteLine("Cookie: $Cookie") }
         $writer.WriteLine('Connection: close')
         $writer.WriteLine()
 
@@ -1074,15 +1114,24 @@ try {
 
         # home: connected and a 200 on /health/ready is the whole check - the
         # certificate above already covers TLS.
+        #
+        # From phase 6 on this quietly became an auth check as well, and is
+        # left unconditional on purpose. This probe carries no cookie, so at
+        # AUTH_MODE=on a 200 here is AuthGate's /health/ready exemption being
+        # honoured through an annotated route. Gating it instead fails every
+        # pod's readiness probe and the Deployment never becomes available - a
+        # total outage whose cause looks nothing like auth, which is why it is
+        # first on the allow-list in docs/plans/auth.md and asserted here in
+        # every mode rather than only in one.
         $homeResponse = $responses["home.$domain"]
         if (-not $homeResponse.Connected) {
             Add-Check -Step '5b.14' -Name "home.$domain answers" -Status 'Fail' -Detail "$($homeResponse.Error)"
         }
         elseif ($homeResponse.StatusCode -eq 200) {
-            Add-Check -Step '5b.14' -Name "home.$domain answers" -Status 'Pass' -Detail '200 on /health/ready'
+            Add-Check -Step '5b.14' -Name "home.$domain answers" -Status 'Pass' -Detail "200 on /health/ready$(if ($authMode -eq 'on') { ', through the wall - the probe exemption holds' })"
         }
         else {
-            Add-Check -Step '5b.14' -Name "home.$domain answers" -Status 'Fail' -Detail "status=$($homeResponse.StatusCode)"
+            Add-Check -Step '5b.14' -Name "home.$domain answers" -Status 'Fail' -Detail "status=$($homeResponse.StatusCode)$(if ($authMode -eq 'on' -and $homeResponse.StatusCode -in @(401, 302)) { ' - /health/ready is being challenged, which fails every readiness probe in the cluster' })"
         }
 
         # kiosk: the root path, rewritten server-side by middleware-kiosk.yaml
@@ -1090,9 +1139,41 @@ try {
         # rewrite fired, since the unrewritten API landing page also answers
         # 200, so this checks the body for the dashboard SPA's own <title>
         # rather than the status code.
+        #
+        # Two-sided from phase 6 on (docs/plans/auth.md), because at
+        # AUTH_MODE=on this route is walled and this probe carries no cookie:
+        # the correct answer there is a refusal, not the dashboard, and
+        # asserting 200 unconditionally would fail the gate on a deploy that
+        # did exactly what it was asked to. The rewrite still runs for enrolled
+        # tablets - auth is named first in the middleware list so the challenge
+        # is on the / the tablet asked for rather than the rewritten path - and
+        # what that looks like on a tablet is on the hand list, which is where
+        # a GeckoView cookie surviving a reboot has to be confirmed anyway.
         $kioskResponse = $responses["kiosk.$domain"]
+        $kioskWalled = $authMode -eq 'on'
+        $kioskLocation = [string]$kioskResponse.Headers['Location']
         if (-not $kioskResponse.Connected) {
-            Add-Check -Step '5b.14' -Name "kiosk.$domain serves the dashboard" -Status 'Fail' -Detail "$($kioskResponse.Error)"
+            Add-Check -Step '5b.14' -Name "kiosk.$domain answers" -Status 'Fail' -Detail "$($kioskResponse.Error)"
+        }
+        elseif ($kioskWalled) {
+            # No Accept header on this probe, so the refusal is the 401 form.
+            # Either answer proves the annotation resolved; both are recorded
+            # because a 302 to anywhere but the sign-in shell is a different
+            # bug, and the comma-separated middleware list is new here - kiosk
+            # is the one route carrying two, and a list Traefik cannot resolve
+            # in full serves unrewritten, unauthenticated, or 500s.
+            if ($kioskResponse.StatusCode -eq 401) {
+                Add-Check -Step 'auth.6' -Name "kiosk.$domain is behind the wall" -Status 'Pass' -Detail '401 to a request with no grant'
+            }
+            elseif ($kioskResponse.StatusCode -eq 302 -and $kioskLocation -like '/apps/auth/*') {
+                Add-Check -Step 'auth.6' -Name "kiosk.$domain is behind the wall" -Status 'Pass' -Detail "302 to $kioskLocation"
+            }
+            elseif ($kioskResponse.StatusCode -eq 200 -and $kioskResponse.Body -match '<title>\s*Aerie Dashboard') {
+                Add-Check -Step 'auth.6' -Name "kiosk.$domain is behind the wall" -Status 'Fail' -Detail 'AUTH_MODE=on but the dashboard was served to a request with no grant - the aerie-auth half of this route''s middleware list is not resolving, and every tablet-shaped device on the LAN is unwalled'
+            }
+            else {
+                Add-Check -Step 'auth.6' -Name "kiosk.$domain is behind the wall" -Status 'Fail' -Detail "AUTH_MODE=on but this answered $($kioskResponse.StatusCode)$(if ($kioskLocation) { " to $kioskLocation" }) rather than a refusal"
+            }
         }
         elseif ($kioskResponse.StatusCode -eq 200 -and $kioskResponse.Body -match '<title>\s*Aerie Dashboard') {
             Add-Check -Step '5b.14' -Name "kiosk.$domain serves the dashboard" -Status 'Pass' -Detail 'body carries the dashboard SPA title'
@@ -1200,6 +1281,50 @@ try {
         }
         else {
             Add-Check -Step 'auth.5' -Name "home.$domain/ is not behind the wall" -Status 'Fail' -Detail "AUTH_MODE=$authMode but / answered $($homeRootResponse.StatusCode) to $([string]$homeRootResponse.Headers['Location']) - the wall is wider than the canary, and the way back in is behind it"
+        }
+
+        # The other direction, and the one every check above is blind to: an
+        # enrolled device is *served*. Every probe here is credential-free by
+        # default, so a wall that refused everyone equally - a gate that fell
+        # closed on a bad AuthGate lookup, an empty grant table, a cookie name
+        # the pod and the browser disagree about - would pass all of them.
+        # Only a request carrying a live grant separates "the wall works" from
+        # "nothing gets in".
+        #
+        # Nothing to assert below "on": at "off" and "canary" home/ is served
+        # to everyone, which the check above already proved.
+        #
+        # -GrantToken is optional and its absence is a Warn rather than a Fail
+        # (see the parameter's own help): the refusal half is the half that can
+        # lock the house out, and it is asserted either way, so a run without a
+        # credential is still a useful gate - just one that has proven half of
+        # what phase 6 claims.
+        if ($authMode -eq 'on' -and -not $GrantToken) {
+            Add-Check -Step 'auth.6' -Name "home.$domain/ serves an enrolled device" -Status 'Warn' -Detail 'no -GrantToken passed, so only the refusal half of the wall was proven here - the serving half is on the hand list in docs/plans/auth.md phase 6'
+        }
+        elseif ($authMode -eq 'on') {
+            # __Secure-aerie_grant is AuthOptions.CookieName's default and the
+            # chart overrides it nowhere, so it is the name in the cluster. If
+            # that ever stops being true this check starts failing as though
+            # the token were wrong, which is worth knowing when reading it.
+            $enrolledResponse = Invoke-HttpsGet -IPAddress $ingressVip -ServerName "home.$domain" -Path '/' -Accept 'text/html' -Cookie "__Secure-aerie_grant=$GrantToken"
+            $enrolledLocation = [string]$enrolledResponse.Headers['Location']
+            if (-not $enrolledResponse.Connected) {
+                Add-Check -Step 'auth.6' -Name "home.$domain/ serves an enrolled device" -Status 'Fail' -Detail "$($enrolledResponse.Error)"
+            }
+            elseif ($enrolledLocation -like '/apps/auth/*') {
+                Add-Check -Step 'auth.6' -Name "home.$domain/ serves an enrolled device" -Status 'Fail' -Detail "the wall refused a request carrying -GrantToken, redirecting to $enrolledLocation - the grant is revoked or expired, or the cookie name in the pod is not __Secure-aerie_grant"
+            }
+            elseif ($enrolledResponse.StatusCode -in @(200, 302)) {
+                # Same as the unwalled branch above: Program.cs's RewriteOptions
+                # bounce / to /apps/ before the wall is reached, so a 302 that
+                # is not to the sign-in shell is the app answering, not a
+                # refusal.
+                Add-Check -Step 'auth.6' -Name "home.$domain/ serves an enrolled device" -Status 'Pass' -Detail "$($enrolledResponse.StatusCode)$(if ($enrolledLocation) { " to $enrolledLocation" }) - the wall admits a grant as well as refusing without one"
+            }
+            else {
+                Add-Check -Step 'auth.6' -Name "home.$domain/ serves an enrolled device" -Status 'Fail' -Detail "$($enrolledResponse.StatusCode) to a request carrying a grant - not a refusal, but not the app either"
+            }
         }
 
         # No Accept header, so this is what the docs app's own fetch() sees. A

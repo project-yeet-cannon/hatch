@@ -150,6 +150,14 @@ must say in writing which phase adds one.
   direction by exporting the `/aerie/*` tree *into* the restic repos.
 - **The ESO bootstrap credential** — it is the key to the store, so it cannot
   live in the store.
+- **`AERIE_TEST_GRANT_TOKEN`** — optional, and a GitHub Actions secret because
+  it is only ever read by one: `verify-app-tier.yml` passes it to
+  `Test-AppTier.ps1` so the gate can prove the wall still *serves* an enrolled
+  device, not only that it refuses an un-enrolled one
+  ([auth.md](plans/auth.md)). Nothing in the cluster consumes it, so putting it
+  in the parameter tree would add a rotation obligation for a value the cluster
+  never reads. Rotating it is revoking that session on the admin app's Sessions
+  page and redeeming a new invite; leaving it unset costs one warning.
 
 ## The three IAM users
 
