@@ -94,13 +94,19 @@ order of preference:
   This is the only place a code is ever written to a log, and it is reachable
   only when the install has no way in at all.
 
-- **The whole wall, off.** Set the `AUTH_MODE` repository variable to `off` and
-  let Flux reconcile. That is the complete rollback — the Traefik middleware
-  stops being rendered, the annotations come off `home` and `kiosk`, and the pod
-  stops enforcing on its own — and it returns the deployment to exactly its
-  pre-auth behavior. `canary` is the rung between the two: the wall in front of
-  `/apps/docs` alone, useful for rehearsing a change to the gate against
-  something nothing in the house depends on.
+- **The whole wall, off.** Set the `AUTH_MODE` repository variable to `none`,
+  re-run Provision 4, and let Flux reconcile. That is the complete rollback —
+  the Traefik middleware stops being rendered, the annotations come off `home`
+  and `kiosk`, and the pod stops enforcing on its own — and it returns the
+  deployment to exactly its pre-auth behavior. The three values are `none`,
+  `canary` and `full`; `canary` is the rung between the other two, the wall in
+  front of `/apps/docs` alone, useful for rehearsing a change to the gate
+  against something nothing in the house depends on.
+
+  They are deliberately not `off`/`on`. The value is substituted textually into
+  a manifest that is then parsed as YAML 1.1, where `off` and `on` are booleans
+  — no amount of quoting survives the `kustomize build` in between, so the
+  vocabulary avoids the collision instead.
 
   A tablet that lost its cookie is a physical visit either way; `AUTH_MODE=off`
   gets the house back, not the tablet's enrollment.

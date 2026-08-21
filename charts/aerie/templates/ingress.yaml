@@ -14,7 +14,7 @@ metadata:
   labels:
     {{- include "aerie.labels" . | nindent 4 }}
     app.kubernetes.io/component: home
-  {{- if eq .Values.auth.mode "on" }}
+  {{- if eq .Values.auth.mode "full" }}
   annotations:
     # The wall in front of the house (docs/plans/auth.md phase 6). This host is
     # every app the family uses, so the annotation goes on / rather than on any
@@ -57,7 +57,7 @@ metadata:
     # the same reason share-volumes.yaml's nodeStageSecretRef does it that
     # way - this is the one place the middleware's own namespace matters.
     #
-    # At auth.mode "on" the wall joins this route (docs/plans/auth.md phase 6).
+    # At auth.mode full the wall joins this route (docs/plans/auth.md phase 6).
     # Traefik takes a comma-separated list and applies it in order, so auth is
     # named first: the rewrite is what turns / into the dashboard bundle, and
     # rewriting a request that is about to be refused wastes the work and puts
@@ -67,7 +67,7 @@ metadata:
     # Composed as one line rather than an if/else pair of whole annotations so
     # the rewrite - which every mode needs - is written exactly once and cannot
     # drift between the two branches.
-    traefik.ingress.kubernetes.io/router.middlewares: "{{ if eq .Values.auth.mode "on" }}{{ .Release.Namespace }}-aerie-auth@kubernetescrd,{{ end }}{{ .Release.Namespace }}-kiosk-root-rewrite@kubernetescrd"
+    traefik.ingress.kubernetes.io/router.middlewares: "{{ if eq .Values.auth.mode "full" }}{{ .Release.Namespace }}-aerie-auth@kubernetescrd,{{ end }}{{ .Release.Namespace }}-kiosk-root-rewrite@kubernetescrd"
 spec:
   ingressClassName: traefik
   rules:

@@ -136,10 +136,13 @@ jobs:
           SHARE_NAME: ${{ vars.SHARE_NAME }}
           MEDIA_LIBRARY_SUBPATH: ${{ vars.MEDIA_LIBRARY_SUBPATH }}
           TZ: ${{ vars.TZ }}
-          # docs/plans/auth.md - off | canary | on, and unset means off. This
-          # is how the wall moves: set the variable, dispatch this workflow,
-          # and reconcile. Rolling back is the same three steps with "off",
-          # which is why it is a repository variable and not a chart edit.
+          # docs/plans/auth.md - none | canary | full, and unset means none.
+          # This is how the wall moves: set the variable, dispatch this
+          # workflow, and reconcile. Rolling back is the same three steps with
+          # none, which is why it is a repository variable and not a chart
+          # edit. Not off/on: those are YAML 1.1 booleans and this value is
+          # substituted into a manifest that gets re-parsed - see
+          # charts/aerie/values.yaml for the outage that established that.
           AUTH_MODE: ${{ vars.AUTH_MODE }}
           # Required from Phase 6 on - 6b.13's kuma-provision CronJob reads
           # both on every reconcile, not just on a fresh install.

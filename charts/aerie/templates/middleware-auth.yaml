@@ -3,9 +3,9 @@
 # answer is 2xx. The inner half is AuthMiddleware in the same pod, calling the
 # same AuthGate, so there is one allow-list rather than two that can disagree.
 #
-# Rendered for both "canary" and "on": what changes between them is which
+# Rendered for both canary and full: what changes between them is which
 # Ingresses carry the annotation (ingress.yaml), not whether the Middleware
-# exists. Absent entirely at "off", which is what makes that value a complete
+# exists. Absent entirely at none, which is what makes that value a complete
 # rollback rather than a half-off state - an Ingress annotation pointing at a
 # Middleware that does not exist is a 500 on every request through it, so the
 # guard here and the guards there have to agree, and they key off the same
@@ -13,14 +13,22 @@
 #
 # The three legal values are asserted here, outside the guard so it runs on
 # every render of the chart. auth.mode is compared against string literals in
-# four places; a typo, or the bare `off` that YAML 1.1 turns into a boolean,
-# matches none of them and renders as a half-state - Auth__Enabled true, no
-# Ingress annotated, nothing walled and the pod believing otherwise. A failed
-# reconcile says so; a half-state does not.
-{{- if not (has (toString .Values.auth.mode) (list "off" "canary" "on")) }}
-{{- fail (printf "auth.mode must be \"off\", \"canary\" or \"on\" - got %#v. If this is a bool, it was written unquoted: YAML 1.1 reads a bare off as false." .Values.auth.mode) }}
+# four places; a typo matches none of them and would otherwise render as a
+# half-state - Auth__Enabled true, no Ingress annotated, nothing walled and
+# the pod believing otherwise. A failed reconcile says so; a half-state does
+# not, which is the whole reason this is a fail rather than a default.
+#
+# It has earned its keep once already. Found live, 2026-08-21: the vocabulary
+# used to be "off | canary | on", and AUTH_MODE=on reached Helm as the boolean
+# true - kustomize normalizes away the quotes around ${AUTH_MODE} before Flux
+# substitutes into it, so `mode: on` is what got parsed. This guard is what
+# turned that into a named, failed reconcile instead of a cluster that
+# reported Ready with the wall down. The vocabulary changed in response (see
+# values.yaml); the guard stays, because the next bad value will be a typo.
+{{- if not (has (toString .Values.auth.mode) (list "none" "canary" "full")) }}
+{{- fail (printf "auth.mode must be none, canary or full - got %#v. If this is a bool, the value was one of YAML 1.1's boolean words (on/off/yes/no/true/false); those are not this chart's vocabulary precisely so that cannot happen - see charts/aerie/values.yaml." .Values.auth.mode) }}
 {{- end }}
-{{- if ne .Values.auth.mode "off" }}
+{{- if ne .Values.auth.mode "none" }}
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:

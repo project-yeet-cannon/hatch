@@ -26,12 +26,12 @@
 
     **The wall is checked in both directions.** docs/plans/auth.md's
     AUTH_MODE - read from the same live ConfigMap as everything else, absent
-    meaning "off" - decides what the auth checks assert rather than whether
-    they run. At "off" they assert the Middleware and the annotations are
-    *absent*, because "off" is the documented rollback and a rollback that
+    meaning none - decides what the auth checks assert rather than whether
+    they run. At none they assert the Middleware and the annotations are
+    *absent*, because none is the documented rollback and a rollback that
     leaves half the wall standing is not one; at "canary" they assert the
     wall stands in front of apps/docs and nowhere else, which is the
-    containment the phase exists to prove; at "on" they assert home and kiosk
+    containment the phase exists to prove; at full they assert home and kiosk
     refuse an un-enrolled client while the allow-list - /health/ready, /media,
     and the files. and share. hosts - is still answered. Several of these
     cannot be answered by reading objects at all - a route whose middleware
@@ -79,7 +79,7 @@
 .PARAMETER GrantToken
     A live grant token (docs/plans/auth.md), which turns the one check here
     that needs a credential from a warning into a real assertion: at
-    AUTH_MODE=on, an *enrolled* device is served rather than refused.
+    AUTH_MODE=full, an *enrolled* device is served rather than refused.
 
     It is a parameter, and optional, for a reason each half of which matters.
     A parameter, because this script writes nothing and a grant cannot be read
@@ -684,12 +684,12 @@ try {
     $ingressVip = if ($configValues.ContainsKey('INGRESS_VIP')) { $configValues['INGRESS_VIP'] } else { $null }
     $imageRegistry = if ($configValues.ContainsKey('IMAGE_REGISTRY')) { $configValues['IMAGE_REGISTRY'] } else { $null }
     $shareHost = if ($configValues.ContainsKey('SHARE_HOST')) { $configValues['SHARE_HOST'] } else { $null }
-    # docs/plans/auth.md. Absent means 'off' - the same default the HelmRelease
+    # docs/plans/auth.md. Absent means 'none' - the same default the HelmRelease
     # substitutes and the chart carries, so this reads the cluster's actual
     # posture rather than a parameter someone remembered to pass. Every auth
     # check below is written against this value, so a run on an install with no
     # wall asserts that there is no wall, rather than skipping.
-    $authMode = if ($configValues.ContainsKey('AUTH_MODE') -and $configValues['AUTH_MODE']) { $configValues['AUTH_MODE'].Trim().ToLowerInvariant() } else { 'off' }
+    $authMode = if ($configValues.ContainsKey('AUTH_MODE') -and $configValues['AUTH_MODE']) { $configValues['AUTH_MODE'].Trim().ToLowerInvariant() } else { 'none' }
 
     # ---------------------------------------------------------------- #
     Write-Stage 'Checks'
@@ -917,7 +917,7 @@ try {
     }
     else {
         # docs-canary joins the list at auth.mode=canary and leaves again at
-        # "on", where the wall moves onto home and kiosk themselves.
+        # full, where the wall moves onto home and kiosk themselves.
         $expectedIngresses = @('home', 'kiosk', 'files', 'share')
         if ($authMode -eq 'canary') { $expectedIngresses += 'docs-canary' }
         foreach ($name in $expectedIngresses) {
@@ -938,19 +938,19 @@ try {
     }
 
     # --- the wall: one Middleware, and exactly the routes that carry it ---
-    # docs/plans/auth.md phase 5. Every assertion here is two-sided: at "off"
-    # the objects must be *absent*, because "off" is the documented rollback
+    # docs/plans/auth.md phase 5. Every assertion here is two-sided: at none
+    # the objects must be *absent*, because none is the documented rollback
     # and a rollback that leaves half the wall standing is not one. An Ingress
     # annotated onto a Middleware that does not exist is a 500 on every request
     # through it, so the two guards have to agree, and this is where that is
     # checked rather than assumed.
     $authMiddleware = $middlewares | Where-Object { (Get-Path $_ 'metadata.name') -eq 'aerie-auth' } | Select-Object -First 1
-    if ($authMode -eq 'off') {
+    if ($authMode -eq 'none') {
         if ($null -eq $authMiddleware) {
-            Add-Check -Step 'auth.5' -Name 'Middleware aerie-auth absent' -Status 'Pass' -Detail 'AUTH_MODE=off, and nothing of the wall is rendered'
+            Add-Check -Step 'auth.5' -Name 'Middleware aerie-auth absent' -Status 'Pass' -Detail 'AUTH_MODE=none, and nothing of the wall is rendered'
         }
         else {
-            Add-Check -Step 'auth.5' -Name 'Middleware aerie-auth absent' -Status 'Fail' -Detail 'AUTH_MODE=off but the Middleware still exists - the rollback did not take, or Flux has not reconciled it away'
+            Add-Check -Step 'auth.5' -Name 'Middleware aerie-auth absent' -Status 'Fail' -Detail 'AUTH_MODE=none but the Middleware still exists - the rollback did not take, or Flux has not reconciled it away'
         }
     }
     elseif ($null -eq $authMiddleware) {
@@ -981,16 +981,16 @@ try {
     $expectedAnnotation = 'aerie-aerie-auth@kubernetescrd'
     # Assigned inside the branches rather than from the switch's own output:
     # a branch whose value is @() emits nothing into the pipeline, so
-    # `$x = switch (...) { 'off' { @() } }` leaves $x as $null and "off" would
+    # `$x = switch (...) { 'none' { @() } }` leaves $x as $null and none would
     # take the unrecognised-mode path below.
     $shouldCarry = $null
     switch ($authMode) {
-        'off' { $shouldCarry = @() }
+        'none' { $shouldCarry = @() }
         'canary' { $shouldCarry = @('docs-canary') }
-        'on' { $shouldCarry = @('home', 'kiosk') }
+        'full' { $shouldCarry = @('home', 'kiosk') }
     }
     if ($null -eq $shouldCarry) {
-        Add-Check -Step 'auth.5' -Name 'AUTH_MODE is one of off/canary/on' -Status 'Fail' -Detail "AUTH_MODE='$authMode' in aerie-cluster-config is not a mode the chart knows - every guard in it compares against these three strings, so an unrecognised value renders as 'off' with no warning anywhere"
+        Add-Check -Step 'auth.5' -Name 'AUTH_MODE is one of none/canary/full' -Status 'Fail' -Detail "AUTH_MODE='$authMode' in aerie-cluster-config is not a mode the chart knows - the chart fails its render rather than half-applying, so this presents as a stuck HelmRelease. 'off' and 'on' are the retired vocabulary and are the likeliest value to find here: they are YAML 1.1 booleans, which is why they were retired"
         $shouldCarry = @()
     }
     foreach ($ingress in $ingresses) {
@@ -1117,7 +1117,7 @@ try {
         #
         # From phase 6 on this quietly became an auth check as well, and is
         # left unconditional on purpose. This probe carries no cookie, so at
-        # AUTH_MODE=on a 200 here is AuthGate's /health/ready exemption being
+        # AUTH_MODE=full a 200 here is AuthGate's /health/ready exemption being
         # honoured through an annotated route. Gating it instead fails every
         # pod's readiness probe and the Deployment never becomes available - a
         # total outage whose cause looks nothing like auth, which is why it is
@@ -1128,10 +1128,10 @@ try {
             Add-Check -Step '5b.14' -Name "home.$domain answers" -Status 'Fail' -Detail "$($homeResponse.Error)"
         }
         elseif ($homeResponse.StatusCode -eq 200) {
-            Add-Check -Step '5b.14' -Name "home.$domain answers" -Status 'Pass' -Detail "200 on /health/ready$(if ($authMode -eq 'on') { ', through the wall - the probe exemption holds' })"
+            Add-Check -Step '5b.14' -Name "home.$domain answers" -Status 'Pass' -Detail "200 on /health/ready$(if ($authMode -eq 'full') { ', through the wall - the probe exemption holds' })"
         }
         else {
-            Add-Check -Step '5b.14' -Name "home.$domain answers" -Status 'Fail' -Detail "status=$($homeResponse.StatusCode)$(if ($authMode -eq 'on' -and $homeResponse.StatusCode -in @(401, 302)) { ' - /health/ready is being challenged, which fails every readiness probe in the cluster' })"
+            Add-Check -Step '5b.14' -Name "home.$domain answers" -Status 'Fail' -Detail "status=$($homeResponse.StatusCode)$(if ($authMode -eq 'full' -and $homeResponse.StatusCode -in @(401, 302)) { ' - /health/ready is being challenged, which fails every readiness probe in the cluster' })"
         }
 
         # kiosk: the root path, rewritten server-side by middleware-kiosk.yaml
@@ -1141,7 +1141,7 @@ try {
         # rather than the status code.
         #
         # Two-sided from phase 6 on (docs/plans/auth.md), because at
-        # AUTH_MODE=on this route is walled and this probe carries no cookie:
+        # AUTH_MODE=full this route is walled and this probe carries no cookie:
         # the correct answer there is a refusal, not the dashboard, and
         # asserting 200 unconditionally would fail the gate on a deploy that
         # did exactly what it was asked to. The rewrite still runs for enrolled
@@ -1150,7 +1150,7 @@ try {
         # what that looks like on a tablet is on the hand list, which is where
         # a GeckoView cookie surviving a reboot has to be confirmed anyway.
         $kioskResponse = $responses["kiosk.$domain"]
-        $kioskWalled = $authMode -eq 'on'
+        $kioskWalled = $authMode -eq 'full'
         $kioskLocation = [string]$kioskResponse.Headers['Location']
         if (-not $kioskResponse.Connected) {
             Add-Check -Step '5b.14' -Name "kiosk.$domain answers" -Status 'Fail' -Detail "$($kioskResponse.Error)"
@@ -1169,10 +1169,10 @@ try {
                 Add-Check -Step 'auth.6' -Name "kiosk.$domain is behind the wall" -Status 'Pass' -Detail "302 to $kioskLocation"
             }
             elseif ($kioskResponse.StatusCode -eq 200 -and $kioskResponse.Body -match '<title>\s*Aerie Dashboard') {
-                Add-Check -Step 'auth.6' -Name "kiosk.$domain is behind the wall" -Status 'Fail' -Detail 'AUTH_MODE=on but the dashboard was served to a request with no grant - the aerie-auth half of this route''s middleware list is not resolving, and every tablet-shaped device on the LAN is unwalled'
+                Add-Check -Step 'auth.6' -Name "kiosk.$domain is behind the wall" -Status 'Fail' -Detail 'AUTH_MODE=full but the dashboard was served to a request with no grant - the aerie-auth half of this route''s middleware list is not resolving, and every tablet-shaped device on the LAN is unwalled'
             }
             else {
-                Add-Check -Step 'auth.6' -Name "kiosk.$domain is behind the wall" -Status 'Fail' -Detail "AUTH_MODE=on but this answered $($kioskResponse.StatusCode)$(if ($kioskLocation) { " to $kioskLocation" }) rather than a refusal"
+                Add-Check -Step 'auth.6' -Name "kiosk.$domain is behind the wall" -Status 'Fail' -Detail "AUTH_MODE=full but this answered $($kioskResponse.StatusCode)$(if ($kioskLocation) { " to $kioskLocation" }) rather than a refusal"
             }
         }
         elseif ($kioskResponse.StatusCode -eq 200 -and $kioskResponse.Body -match '<title>\s*Aerie Dashboard') {
@@ -1236,7 +1236,7 @@ try {
         # actual 302 from an un-enrolled client is the only thing that proves
         # it, which is why this is here and not only up there.
         $docsResponse = Invoke-HttpsGet -IPAddress $ingressVip -ServerName "home.$domain" -Path '/apps/docs/' -Accept 'text/html'
-        $docsWalled = $authMode -in @('canary', 'on')
+        $docsWalled = $authMode -in @('canary', 'full')
         $docsLocation = [string]$docsResponse.Headers['Location']
         if (-not $docsResponse.Connected) {
             Add-Check -Step 'auth.5' -Name "home.$domain/apps/docs/ is behind the wall" -Status 'Fail' -Detail "$($docsResponse.Error)"
@@ -1251,10 +1251,10 @@ try {
             Add-Check -Step 'auth.5' -Name "home.$domain/apps/docs/ is behind the wall" -Status 'Fail' -Detail "AUTH_MODE=$authMode but this answered $($docsResponse.StatusCode) unauthenticated - either the annotation is not resolving (the <namespace>-<name>@kubernetescrd form) or home's PathPrefix('/') router is outranking the canary's"
         }
         elseif ($docsResponse.StatusCode -eq 200) {
-            Add-Check -Step 'auth.5' -Name "home.$domain/apps/docs/ serves unwalled" -Status 'Pass' -Detail "200, and AUTH_MODE=off"
+            Add-Check -Step 'auth.5' -Name "home.$domain/apps/docs/ serves unwalled" -Status 'Pass' -Detail "200, and AUTH_MODE=none"
         }
         else {
-            Add-Check -Step 'auth.5' -Name "home.$domain/apps/docs/ serves unwalled" -Status 'Fail' -Detail "AUTH_MODE=off but this answered $($docsResponse.StatusCode)"
+            Add-Check -Step 'auth.5' -Name "home.$domain/apps/docs/ serves unwalled" -Status 'Fail' -Detail "AUTH_MODE=none but this answered $($docsResponse.StatusCode)"
         }
 
         # The containment, and through phase 5 the assertion that matters most:
@@ -1262,7 +1262,7 @@ try {
         # AUTH_MODE=canary means the wall is wider than it was asked to be and
         # the operator's own way back in is behind the thing being tested.
         $homeRootResponse = Invoke-HttpsGet -IPAddress $ingressVip -ServerName "home.$domain" -Path '/' -Accept 'text/html'
-        $homeWalled = $authMode -eq 'on'
+        $homeWalled = $authMode -eq 'full'
         if (-not $homeRootResponse.Connected) {
             Add-Check -Step 'auth.5' -Name "home.$domain/ blast radius" -Status 'Fail' -Detail "$($homeRootResponse.Error)"
         }
@@ -1271,7 +1271,7 @@ try {
                 Add-Check -Step 'auth.5' -Name "home.$domain/ is behind the wall" -Status 'Pass' -Detail "302 to $([string]$homeRootResponse.Headers['Location'])"
             }
             else {
-                Add-Check -Step 'auth.5' -Name "home.$domain/ is behind the wall" -Status 'Fail' -Detail "AUTH_MODE=on but / answered $($homeRootResponse.StatusCode) unauthenticated"
+                Add-Check -Step 'auth.5' -Name "home.$domain/ is behind the wall" -Status 'Fail' -Detail "AUTH_MODE=full but / answered $($homeRootResponse.StatusCode) unauthenticated"
             }
         }
         elseif ($homeRootResponse.StatusCode -in @(200, 302) -and ([string]$homeRootResponse.Headers['Location']) -notlike '/apps/auth/*') {
@@ -1291,7 +1291,7 @@ try {
         # Only a request carrying a live grant separates "the wall works" from
         # "nothing gets in".
         #
-        # Nothing to assert below "on": at "off" and "canary" home/ is served
+        # Nothing to assert below full: at none and canary home/ is served
         # to everyone, which the check above already proved.
         #
         # -GrantToken is optional and its absence is a Warn rather than a Fail
@@ -1299,10 +1299,10 @@ try {
         # lock the house out, and it is asserted either way, so a run without a
         # credential is still a useful gate - just one that has proven half of
         # what phase 6 claims.
-        if ($authMode -eq 'on' -and -not $GrantToken) {
+        if ($authMode -eq 'full' -and -not $GrantToken) {
             Add-Check -Step 'auth.6' -Name "home.$domain/ serves an enrolled device" -Status 'Warn' -Detail 'no -GrantToken passed, so only the refusal half of the wall was proven here - the serving half is on the hand list in docs/plans/auth.md phase 6'
         }
-        elseif ($authMode -eq 'on') {
+        elseif ($authMode -eq 'full') {
             # __Secure-aerie_grant is AuthOptions.CookieName's default and the
             # chart overrides it nowhere, so it is the name in the cluster. If
             # that ever stops being true this check starts failing as though
@@ -1345,10 +1345,10 @@ try {
             Add-Check -Step 'auth.5' -Name "home.$domain/api/docs refuses a fetch visibly" -Status 'Fail' -Detail "AUTH_MODE=$authMode but this answered $($docsApiResponse.StatusCode) unauthenticated"
         }
         elseif ($docsApiResponse.StatusCode -eq 200) {
-            Add-Check -Step 'auth.5' -Name "home.$domain/api/docs serves unwalled" -Status 'Pass' -Detail '200, and AUTH_MODE=off'
+            Add-Check -Step 'auth.5' -Name "home.$domain/api/docs serves unwalled" -Status 'Pass' -Detail '200, and AUTH_MODE=none'
         }
         else {
-            Add-Check -Step 'auth.5' -Name "home.$domain/api/docs serves unwalled" -Status 'Fail' -Detail "AUTH_MODE=off but this answered $($docsApiResponse.StatusCode)"
+            Add-Check -Step 'auth.5' -Name "home.$domain/api/docs serves unwalled" -Status 'Fail' -Detail "AUTH_MODE=none but this answered $($docsApiResponse.StatusCode)"
         }
 
         # The exemption that costs the most to get wrong. Sonos speakers fetch

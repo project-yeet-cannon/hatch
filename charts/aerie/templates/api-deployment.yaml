@@ -90,14 +90,14 @@ spec:
             # sets both switches: Enabled decides whether the gate decides at
             # all - it is what /api/auth/verify answers on Traefik's behalf -
             # and EnforceInProcess decides whether this pod also refuses on its
-            # own. They part company only at "canary", where Traefik is
+            # own. They part company only at canary, where Traefik is
             # deliberately the sole enforcer so the wall stands in front of
             # exactly the routes carrying its annotation.
             - name: Auth__Enabled
-              value: {{ ne .Values.auth.mode "off" | quote }}
-            {{- if ne .Values.auth.mode "off" }}
+              value: {{ ne .Values.auth.mode "none" | quote }}
+            {{- if ne .Values.auth.mode "none" }}
             - name: Auth__EnforceInProcess
-              value: {{ eq .Values.auth.mode "on" | quote }}
+              value: {{ eq .Values.auth.mode "full" | quote }}
             # The leading dot is the entire single-sign-on story: one
             # enrollment covers home., kiosk. and share. rather than each
             # asking separately. Getting this wrong presents as a device that

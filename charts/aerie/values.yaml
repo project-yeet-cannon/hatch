@@ -69,20 +69,31 @@ tz: ""
 # "canary" is a rung on that ladder rather than a branch off it:
 #
 #   mode      Auth__Enabled  Auth__EnforceInProcess  Middleware  Annotated
-#   "off"     false          -                       no          nothing
-#   "canary"  true           false                   yes         the docs Ingress only
-#   "on"      true           true                    yes         home + kiosk
+#   none      false          -                       no          nothing
+#   canary    true           false                   yes         the docs Ingress only
+#   full      true           true                    yes         home + kiosk
 #
-# ${AUTH_MODE}, defaulting to "off" so an install that never sets it behaves
+# ${AUTH_MODE}, defaulting to none so an install that never sets it behaves
 # exactly as it did before auth existed.
 #
-# QUOTE IT, ALWAYS - here, in helmrelease.yaml, and in anything that sets it.
-# Helm parses values as YAML 1.1, where a bare `off` is the boolean false; a
-# template comparing that to the string "off" then matches nothing, silently,
-# and the branch that renders the wall is taken on a value that meant to
-# switch it off.
+# The vocabulary is "none | canary | full" and NOT "off | canary | on", and
+# that is the fix for a real outage rather than a matter of taste. This value
+# reaches Helm as ${AUTH_MODE} in ../../deploy/cluster/apps/helmrelease.yaml,
+# which Flux substitutes *after* `kustomize build` has re-serialized the
+# manifest - and kustomize normalizes every quoting style to a plain scalar,
+# double quotes, single quotes and an explicit !!str tag alike. So the quotes
+# an author writes around the token are erased before the value is ever
+# substituted, and `off` and `on` are both YAML 1.1 booleans by the time
+# anything reads them back. Found live, 2026-08-21: AUTH_MODE=on rendered as
+# `mode: on`, parsed as boolean true, and failed the guard in
+# templates/middleware-auth.yaml on every reconcile.
+#
+# Quoting cannot fix that, so the words do: none of these three is a YAML
+# scalar of any other type. Keep it that way when adding a rung - avoid the
+# YAML 1.1 boolean set (y/yes/n/no/true/false/on/off, in any casing), and
+# anything that reads as a number or a null.
 auth:
-  mode: "off"
+  mode: none
 
 # ${HA_HOST} / ${HA_PORT}, both optional - only read by the api container's
 # one-time SiteSettings import on a fresh install. Empty means unset, not "".

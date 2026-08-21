@@ -32,7 +32,7 @@ clicking to a human.
 - [x] **3** — The sign-in shell (`apps/auth`)
 - [x] **4** — Admin Sessions page: view, delete, generate invite
 - [x] **5** — Canary: the wall on in front of `apps/docs` only, nothing else
-- [ ] **6** — Widen the wall to `home` and `kiosk`
+- [x] **6** — Widen the wall to `home` and `kiosk`
 - [ ] **7** — Widen to `share.`, dissipate this plan into `docs/auth-architecture.md`
 
 ## The ask, restated
@@ -94,7 +94,7 @@ scanned by a phone that has never authenticated, into "one extra tap" instead of
 | Where the data lives | Core `AerieContext`, `public` schema | Auth is infrastructure for every module, not a family app. A `Modules/` schema would make every module depend on one module — exactly what [`Modules/README.md`](../../src/Aerie.Api/Modules/README.md) forbids. |
 | Bootstrap | The **migrate Job** mints a first invite when the grant table is empty, and logs it | Solves the chicken-and-egg (the invite generator lives behind the wall) without an env-var admin token or a committed credential. The migrate hook runs exactly once per deploy, ahead of any replica — doing this at replica startup would mint three invites and race. Recoverable after a DR restore-to-empty for free. |
 | Legacy Windows/Caddy host | **Not targeted** | Phase 7b of the [cluster cutover](swarm/phase-7-cutover.md) is next and 7c retires the host. Caddy `forward_auth` labels would be written to be deleted. The in-process gate still covers that host if the soak runs long. |
-| Deployment surface | k3s only, behind `auth.mode` in [`values.yaml`](../../charts/aerie/values.yaml) | `"off"` is the default until Phase 5, then `"canary"` for one app, then `"on"` in Phase 6. One value is still the whole rollback — the three states and what each renders are in [Phase 5](#phase-5--canary-the-wall-on-in-front-of-one-app). |
+| Deployment surface | k3s only, behind `auth.mode` in [`values.yaml`](../../charts/aerie/values.yaml) | `none` is the default until Phase 5, then `canary` for one app, then `full` in Phase 6. One value is still the whole rollback — the three states and what each renders are in [Phase 5](#phase-5--canary-the-wall-on-in-front-of-one-app). |
 
 ## The allow-list is load-bearing
 
@@ -395,17 +395,35 @@ thing being tested.**
    posture, held for one phase, deliberately. Phase 6 ends it.
 
 2. **`auth.mode` replaces `auth.enabled`** in
-   [`values.yaml`](../../charts/aerie/values.yaml): `"off"` | `"canary"` |
-   `"on"`, defaulting to `"off"`. **Quote it, always** — Helm parses values as
-   YAML 1.1, where a bare `off` is the boolean `false`, and a template
-   comparing it to a string then silently matches nothing. One value is still
-   the whole rollback; `"canary"` is a rung on that ladder, not a branch off it.
+   [`values.yaml`](../../charts/aerie/values.yaml): `none` | `canary` | `full`,
+   defaulting to `none`. One value is still the whole rollback; `canary` is a
+   rung on that ladder, not a branch off it.
 
    | `auth.mode` | `Auth__Enabled` | `Auth__EnforceInProcess` | `Middleware` rendered | Annotated |
    |---|---|---|---|---|
-   | `"off"` | `false` | — | no | nothing |
-   | `"canary"` | `true` | `false` | yes | the `docs` canary Ingress only |
-   | `"on"` | `true` | `true` | yes | `home` + `kiosk` |
+   | `none` | `false` | — | no | nothing |
+   | `canary` | `true` | `false` | yes | the `docs` canary Ingress only |
+   | `full` | `true` | `true` | yes | `home` + `kiosk` |
+
+   > **This vocabulary was `"off" | "canary" | "on"`, and that was a bug.** The
+   > advice here used to be *"quote it, always"* — on the theory that Helm reads
+   > YAML 1.1, where a bare `off` is `false`. The theory was right and the
+   > remedy was useless: the value reaches Helm as `${AUTH_MODE}` in
+   > [`helmrelease.yaml`](../../deploy/cluster/apps/helmrelease.yaml), which
+   > Flux substitutes *after* `kustomize build` has already re-serialized the
+   > manifest — and kustomize normalizes double quotes, single quotes and even
+   > an explicit `!!str` tag down to a plain scalar. The quotes an author writes
+   > are erased before substitution happens, so the type is decided entirely by
+   > the word.
+   >
+   > Found live on 2026-08-21, on the Phase 6 deploy: `AUTH_MODE=on` rendered as
+   > `mode: on`, Helm read the boolean `true`, and the release failed its guard
+   > on every reconcile while the cluster went on quietly serving the Phase 5
+   > canary. The guard in `middleware-auth.yaml` is what made that a named
+   > failure rather than a house that believed it was walled — keep it. The
+   > fix is the vocabulary: `none`, `canary` and `full` are not YAML scalars of
+   > any other type, so the token is type-safe by construction. Any rung added
+   > later has to clear the same bar.
 
 3. In the `AERIE_MIGRATE=1` branch, after the seeders: if `AuthGrants` is empty
    and no unredeemed bootstrap invite exists, mint one with a longer TTL (an
@@ -418,13 +436,13 @@ thing being tested.**
 4. `middleware-auth.yaml` — a Traefik `Middleware` with
    `forwardAuth.address: http://api.{{ .Release.Namespace }}.svc.cluster.local:8080/api/auth/verify`
    and `authResponseHeaders: [X-Aerie-Grant, X-Aerie-Label]`. Guard the whole
-   file on `ne .Values.auth.mode "off"`.
+   file on `ne .Values.auth.mode "none"`.
 
 5. **The canary Ingress** — a new `docs-canary` Ingress on
    `home.{{ .Values.domain }}`, backend `api:8080`, two `Prefix` paths
    (`/apps/docs` and `/api/docs`), carrying
    `traefik.ingress.kubernetes.io/router.middlewares: "{{ .Release.Namespace }}-aerie-auth@kubernetescrd"`,
-   rendered only when `auth.mode` is `"canary"`. Two things decide whether it
+   rendered only when `auth.mode` is `canary`. Two things decide whether it
    works at all:
    - **Router priority.** The `home` Ingress already claims `/` on this host.
      Traefik ranks routers by rule length, so `PathPrefix('/apps/docs')`
@@ -444,7 +462,7 @@ thing being tested.**
 
 6. `${AUTH_MODE}` in the HelmRelease and the matching entry in
    `cluster-config.json`.
-7. Deploy with `"off"` first. Confirm nothing changed. Then set `"canary"`.
+7. Deploy with `none` first. Confirm nothing changed. Then set `canary`.
 
 **Verify by hand, in this order**
 
@@ -474,7 +492,7 @@ cheaper to find here than one phase later.
 
 **Done when:** `docs` refuses an un-enrolled device and serves an enrolled one,
 everything else in the house is provably unchanged, and the operator's browser
-is holding a grant that Phase 6 will accept. Rollback is `auth.mode: "off"`.
+is holding a grant that Phase 6 will accept. Rollback is `auth.mode: none`.
 
 ---
 
@@ -492,15 +510,15 @@ is holding a grant that Phase 6 will accept. Rollback is `auth.mode: "off"`.
 **Steps**
 
 1. Annotate the `home` and `kiosk` Ingresses, guarded on `auth.mode` being
-   `"on"`. **The `kiosk` Ingress already carries a middleware annotation** —
+   `full`. **The `kiosk` Ingress already carries a middleware annotation** —
    Traefik takes a comma-separated list and applies it in order, so it becomes
    `"{{ ns }}-aerie-auth@kubernetescrd,{{ ns }}-kiosk-root-rewrite@kubernetescrd"`,
    auth first.
 2. Leave the canary Ingress template in place. It renders only at
-   `"canary"`, so it vanishes on this deploy, and it costs one guarded template
+   `canary`, so it vanishes on this deploy, and it costs one guarded template
    to keep the rehearsal rig for the next change to the gate — the allow-list
    growing, `logs.` joining the wall, a passkey ceremony.
-3. Flip `auth.mode` to `"on"`. That single change annotates the two Ingresses
+3. Flip `auth.mode` to `full`. That single change annotates the two Ingresses
    *and* turns `Auth__EnforceInProcess` back to `true`, so from here the pod
    refuses on its own even if a route ever loses its annotation. Both halves of
    "defense in depth" arrive together on purpose.
@@ -527,7 +545,7 @@ is holding a grant that Phase 6 will accept. Rollback is `auth.mode: "off"`.
   reality before a guest finds it.
 
 **Done when:** an un-enrolled device on the LAN cannot reach `home.${DOMAIN}`,
-every enrolled device is unaware anything changed, and `auth.mode: "off"` plus a
+every enrolled device is unaware anything changed, and `auth.mode: none` plus a
 Flux reconcile is a complete, tested rollback.
 
 ---
@@ -571,7 +589,7 @@ screen, and lands on the dashboard without a keyboard appearing.
 **Steps**
 
 1. Annotate the `share` Ingress with the auth middleware, guarded on
-   `auth.mode` being `"on"` like the other two. dufs needs no changes — Traefik
+   `auth.mode` being `full` like the other two. dufs needs no changes — Traefik
    refuses before it proxies. Its own dummy credential stays as the second gate.
 2. Write `docs/auth-architecture.md`: the grant model, the cookie and its domain
    scope, the allow-list *with the `/media` and probe reasoning intact*, the

@@ -74,18 +74,31 @@ spec:
         tag: ${KIOSK_FILES_IMAGE_TAG}
     domain: ${DOMAIN}
     tz: ${TZ}
-    # The wall (docs/plans/auth.md) - "off" | "canary" | "on", and the whole
+    # The wall (docs/plans/auth.md) - none | canary | full, and the whole
     # rollback. Optional in cluster-config.json with the same `:=` default the
     # chart carries, so an installation that never sets AUTH_MODE behaves
     # exactly as it did before auth existed.
     #
-    # The quotes are load-bearing, not style. Substitution is textual, so
-    # `mode: ${AUTH_MODE}` resolving to `mode: off` is the YAML 1.1 boolean
-    # false by the time Helm reads it, and every `eq .Values.auth.mode "off"`
-    # in the chart then matches nothing - the templates that guard the wall
-    # would render on the value that meant to switch it off.
+    # Deliberately unquoted, because quoting it here would be theatre. This
+    # file is not what Flux substitutes into: `kustomize build` runs first and
+    # re-serializes every scalar, normalizing double quotes, single quotes and
+    # even an explicit !!str tag down to a plain scalar. Substitution is then
+    # textual against that output, and the result is parsed as YAML 1.1 - so
+    # the type of the value is decided entirely by the *word*, and an author
+    # who "just quotes it" gets no protection at all.
+    #
+    # That is not theoretical. Found live, 2026-08-21: the vocabulary was
+    # "off | canary | on" and this line was written `mode: "${AUTH_MODE:=off}"`
+    # exactly as the advice at the time said to. AUTH_MODE=on rendered as
+    # `mode: on`, Helm read the boolean true, and the release failed its guard
+    # on every reconcile while the cluster went on serving the previous one.
+    #
+    # The fix is the vocabulary, in charts/aerie/values.yaml: none, canary and
+    # full are not YAML scalars of any other type, so this token is type-safe
+    # by construction rather than by quoting. Anything added here later has to
+    # clear the same bar - see that file's note.
     auth:
-      mode: "${AUTH_MODE:=off}"
+      mode: ${AUTH_MODE:=none}
     # Both optional (scripts/k3s/cluster-config.json) - when unset, the key is
     # genuinely absent from the ConfigMap, not present with an empty value.
     # kustomize-controller substitutes in strict mode (confirmed live: an
