@@ -112,12 +112,14 @@ export function App() {
                 days - so sitting here costs a calm day no space at all. */}
             <AlertBanner alerts={data.alerts} timeZone={data.timezone} />
             {/* Keyed on resetToken so an idle reset remounts the cards, which is
-                what puts each <details> back to defaultOpen - `open` is
-                uncontrolled DOM state that no re-render would otherwise undo. */}
+                what puts each <details> back to collapsed - `open` is
+                uncontrolled DOM state that no re-render would otherwise undo.
+                Outside is the one card that stays expanded; every zone below it
+                opens only when someone taps it. */}
             <div className="hf-zones" key={resetToken}>
               <OutsideCard outside={data.outside} timeZone={data.timezone} />
-              {data.zones.map((zone, i) => (
-                <ZoneCard key={zone.id} zone={zone} timeZone={data.timezone} defaultOpen={i === 0} />
+              {data.zones.map((zone) => (
+                <ZoneCard key={zone.id} zone={zone} timeZone={data.timezone} />
               ))}
             </div>
             {/* Below the zones, above the routines: the agenda is read, the
