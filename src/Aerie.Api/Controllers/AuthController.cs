@@ -35,6 +35,7 @@ public class AuthController(
 
     private const string ForwardedMethod = "X-Forwarded-Method";
     private const string ForwardedHost = "X-Forwarded-Host";
+    private const string ForwardedProto = "X-Forwarded-Proto";
     private const string ForwardedUri = "X-Forwarded-Uri";
 
     /// <summary>Any relative URI resolves against this and nothing leaves it - it exists only so <see cref="Uri"/> will do a server's path normalization for us.</summary>
@@ -76,10 +77,19 @@ public class AuthController(
 
             if (AuthChallenge.PrefersRedirect(Request.Headers, method))
             {
-                // Relative, so the browser resolves it against whichever host it
-                // was actually going to - kiosk. stays on kiosk. - and so ?r=
-                // never carries an absolute URL anywhere near the sign-in shell.
-                Response.Headers.Location = AuthChallenge.SignInLocation(options, forwardedUri);
+                // Absolute here, and *only* here. Traefik resolves a redirect
+                // from this endpoint against its own request to it, so the
+                // relative form the in-process middleware returns would reach
+                // the browser as http://api.<ns>.svc.cluster.local:8080/apps/auth/
+                // - unreachable from the LAN, and a wall that looks like it is
+                // working right up until the sign-in page fails to load. The
+                // origin is rebuilt from the forwarded headers, so kiosk. still
+                // stays on kiosk.; ?r= stays a relative path regardless.
+                Response.Headers.Location = AuthChallenge.SignInLocation(
+                    options,
+                    forwardedUri,
+                    Request.Headers[ForwardedProto].ToString(),
+                    host);
                 return StatusCode(StatusCodes.Status302Found);
             }
 

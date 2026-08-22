@@ -518,6 +518,31 @@ is holding a grant that Phase 6 will accept. Rollback is `auth.mode: none`.
    `canary`, so it vanishes on this deploy, and it costs one guarded template
    to keep the rehearsal rig for the next change to the gate — the allow-list
    growing, `logs.` joining the wall, a passkey ceremony.
+
+   > **The refusal redirect has to be absolute, and only out of this endpoint.**
+   > `AuthChallenge.SignInLocation` returned a relative `/apps/auth/?r=…` on the
+   > reasoning that the browser resolves it against whichever host it was going
+   > to, so `kiosk.` stays on `kiosk.`. That is exactly right for the in-process
+   > middleware and wrong for `forwardAuth`: Traefik never hands the browser
+   > what `/api/auth/verify` writes. It resolves the auth server's `Location`
+   > against **its own** request to that server, so the header left the cluster
+   > as `http://api.aerie.svc.cluster.local:8080/apps/auth/?r=%2F` — an address
+   > nothing on the LAN can reach.
+   >
+   > Found live on 2026-08-21, minutes after this phase's deploy finally
+   > landed. It is a nasty one to catch because every cheap check passes: the
+   > 302 is on time, it carries the right `?r=`, `curl` with `Accept: */*`
+   > still gets its clean `401`, and the enrolled operator browser sails
+   > through and notices nothing. Only an un-enrolled *browser* sees it, which
+   > is the one client `curl -I` cannot impersonate — send
+   > `Sec-Fetch-Mode: navigate` and read the `Location`, or the check proves
+   > nothing.
+   >
+   > The fix rebuilds the origin from `X-Forwarded-Proto`/`-Host` in `Verify`
+   > alone, so each host still bounces to itself, and trusts that header only
+   > inside `Auth:CookieDomain` — the sign-in page is the one page the house is
+   > trained to trust, and an open redirect through it is the classic own-goal.
+   > `?r=` stays a relative path either way.
 3. Flip `auth.mode` to `full`. That single change annotates the two Ingresses
    *and* turns `Auth__EnforceInProcess` back to `true`, so from here the pod
    refuses on its own even if a route ever loses its annotation. Both halves of

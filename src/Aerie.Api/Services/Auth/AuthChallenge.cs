@@ -59,6 +59,64 @@ public static class AuthChallenge
     }
 
     /// <summary>
+    /// The same location made absolute against the host the caller was actually
+    /// going to - the form the forwardAuth endpoint has to return, and the one
+    /// place the relative rule below does not hold.
+    ///
+    /// Traefik never hands the browser what that endpoint writes. It resolves a
+    /// redirect from the auth server against its *own* request to that server,
+    /// so a relative Location leaves the cluster as
+    /// <c>http://api.&lt;ns&gt;.svc.cluster.local:8080/apps/auth/</c> - an
+    /// in-cluster address nothing on the LAN can reach, which presents as the
+    /// wall working (a 302, on time, carrying the right ?r=) and the sign-in
+    /// page never loading. An absolute Location is passed through untouched.
+    ///
+    /// The origin is rebuilt from X-Forwarded-Proto/-Host so kiosk. still stays
+    /// on kiosk., and it is trusted only inside the cookie's own domain: a Host
+    /// header naming anywhere else falls back to the relative form rather than
+    /// turning the one page everybody is trained to trust into an open
+    /// redirect. Traefik routes by Host rule and would not have asked about a
+    /// host outside the chart's Ingresses, so this is depth, not the only
+    /// check - but it is one header away from being this page's worst bug.
+    /// </summary>
+    public static string SignInLocation(AuthOptions options, string? returnTo, string? forwardedProto, string? forwardedHost)
+    {
+        var relative = SignInLocation(options, returnTo);
+        var origin = TrustedOrigin(options, forwardedProto, forwardedHost);
+        return origin is null ? relative : origin + relative;
+    }
+
+    /// <summary>
+    /// The scheme and authority to hang the sign-in path off, or null when the
+    /// forwarded host is absent, malformed, or outside
+    /// <see cref="AuthOptions.CookieDomain"/> - which includes every local-dev
+    /// config, where that domain is empty and there is no proxy to confuse
+    /// anyway, so `make run` keeps the relative redirect it has always had.
+    /// </summary>
+    private static string? TrustedOrigin(AuthOptions options, string? proto, string? host)
+    {
+        if (string.IsNullOrEmpty(host)) return null;
+
+        var domain = options.CookieDomain.TrimStart('.');
+        if (domain.Length == 0) return null;
+
+        var scheme = string.Equals(proto, "http", StringComparison.OrdinalIgnoreCase) ? "http" : "https";
+
+        // Uri does the validating rather than a hand-rolled check on a header:
+        // anything carrying a path, a userinfo, a fragment or a control
+        // character either fails to parse or stops looking like a bare
+        // authority, and either way we fall back instead of emitting it.
+        if (!Uri.TryCreate($"{scheme}://{host}", UriKind.Absolute, out var origin)) return null;
+        if (origin.PathAndQuery != "/") return null;
+        if (!string.IsNullOrEmpty(origin.Fragment) || !string.IsNullOrEmpty(origin.UserInfo)) return null;
+
+        return origin.Host.Equals(domain, StringComparison.OrdinalIgnoreCase)
+            || origin.Host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase)
+                ? origin.GetLeftPart(UriPartial.Authority)
+                : null;
+    }
+
+    /// <summary>
     /// The return URL stays a rooted, same-origin path and never becomes an
     /// absolute one. The sign-in shell is the page everybody in the house is
     /// trained to trust, which makes an open redirect through it the classic

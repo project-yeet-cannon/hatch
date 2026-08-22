@@ -74,13 +74,68 @@ public class AuthControllerTests
         var result = Assert.IsType<StatusCodeResult>(await controller.Verify(CancellationToken.None));
 
         Assert.Equal(StatusCodes.Status302Found, result.StatusCode);
-        // Relative, so the browser resolves it against whichever host it was
-        // going to - kiosk. stays on kiosk. - and ?r= never carries an
-        // absolute URL anywhere near the sign-in shell.
+        // Absolute, on the host the browser was actually going to. Traefik
+        // resolves a redirect from this endpoint against its own request to it,
+        // so the relative form AuthMiddleware returns would reach the browser
+        // as http://api.<ns>.svc.cluster.local:8080/apps/auth/ - see
+        // AuthChallenge.SignInLocation. ?r= stays a relative path regardless.
         Assert.Equal(
-            "/apps/auth/?r=%2Fapps%2Fadmin%2Fdevices%3Ftab%3Dzones",
+            "https://home.example.com/apps/auth/?r=%2Fapps%2Fadmin%2Fdevices%3Ftab%3Dzones",
             context.Response.Headers.Location.ToString());
         Assert.Equal("no-store", context.Response.Headers.CacheControl.ToString());
+    }
+
+    [Fact]
+    public async Task VerifyBouncesEachHostBackToItself()
+    {
+        // The cookie's Domain attribute covers every subdomain, so the tablet
+        // enrolls on kiosk. and is done. Sending it to home. to sign in would
+        // work and would still be wrong: it is a hostname change mid-flow on a
+        // device whose whole point is that nobody is operating it.
+        var controller = NewController(out var context);
+        Forwarded(context, "/", host: "kiosk.example.com");
+        context.Request.Headers["Sec-Fetch-Mode"] = "navigate";
+
+        Assert.IsType<StatusCodeResult>(await controller.Verify(CancellationToken.None));
+        Assert.Equal(
+            "https://kiosk.example.com/apps/auth/?r=%2F",
+            context.Response.Headers.Location.ToString());
+    }
+
+    [Theory]
+    // Not a host at all, and a host somewhere else entirely.
+    [InlineData("evil.example.com/path")]
+    [InlineData("evil.test")]
+    [InlineData("home.example.com.evil.test")]
+    public async Task VerifyWillNotBuildTheRedirectFromAHostItDoesNotOwn(string host)
+    {
+        // X-Forwarded-Host is a header, and the sign-in page is the one page
+        // everybody in the house is trained to trust - an open redirect through
+        // it is the classic own-goal. Outside the cookie's domain we fall back
+        // to the relative form rather than emitting somebody else's origin.
+        var controller = NewController(out var context);
+        Forwarded(context, "/apps/family/", host: host);
+        context.Request.Headers["Sec-Fetch-Mode"] = "navigate";
+
+        Assert.IsType<StatusCodeResult>(await controller.Verify(CancellationToken.None));
+        Assert.Equal(
+            "/apps/auth/?r=%2Fapps%2Ffamily%2F",
+            context.Response.Headers.Location.ToString());
+    }
+
+    [Fact]
+    public async Task VerifyStaysRelativeWhenThereIsNoCookieDomainToTrust()
+    {
+        // `make run`: no proxy, no cookie domain, and the relative redirect
+        // this endpoint has always returned is the correct one there.
+        var controller = NewController(out var context, cookieDomain: "");
+        Forwarded(context, "/apps/family/", host: "localhost:5080");
+        context.Request.Headers["Sec-Fetch-Mode"] = "navigate";
+
+        Assert.IsType<StatusCodeResult>(await controller.Verify(CancellationToken.None));
+        Assert.Equal(
+            "/apps/auth/?r=%2Fapps%2Ffamily%2F",
+            context.Response.Headers.Location.ToString());
     }
 
     [Fact]
@@ -383,14 +438,15 @@ public class AuthControllerTests
         IAuthService? auth = null,
         bool enabled = true,
         bool enforceInProcess = true,
-        string[]? exemptHosts = null)
+        string[]? exemptHosts = null,
+        string cookieDomain = ".example.com")
     {
         var options = Options.Create(new AuthOptions
         {
             Enabled = enabled,
             EnforceInProcess = enforceInProcess,
             CookieName = "aerie_grant",
-            CookieDomain = ".example.com",
+            CookieDomain = cookieDomain,
             ExemptHosts = exemptHosts ?? [],
         });
 
