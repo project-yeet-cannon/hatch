@@ -5,6 +5,7 @@ import type {
   DailyExtreme,
   DashboardData,
   DashboardDataSource,
+  HazardAlert,
   HourlyOutside,
   OutsideClimate,
   RoutineSummary,
@@ -196,6 +197,35 @@ function buildCalendar(now: Date): CalendarDay[] {
   ];
 }
 
+/**
+ * One of each kind, so the banner's severity treatment and its two-kind layout
+ * are both visible against this source. The weather alert is in effect now and
+ * the air quality one is still climbing, which is the pair of shapes the
+ * component has to render differently.
+ */
+function buildAlerts(now: Date): HazardAlert[] {
+  return [
+    {
+      id: 'mock-alert-1',
+      kind: 'Weather',
+      severity: 'Severe',
+      title: 'Winter Storm Warning',
+      detail: 'Winter Storm Warning issued for the metro area until 6 PM.',
+      startsAt: new Date(now.getTime() - 2 * HOUR_MS).toISOString(),
+      endsAt: new Date(now.getTime() + 6 * HOUR_MS).toISOString(),
+    },
+    {
+      id: 'air-quality',
+      kind: 'AirQuality',
+      severity: 'Moderate',
+      title: 'Unhealthy for Sensitive Groups',
+      detail: 'US AQI 118 now, rising to 143',
+      startsAt: new Date(now.getTime() + 4 * HOUR_MS).toISOString(),
+      endsAt: null,
+    },
+  ];
+}
+
 function deriveOutsideNote(zones: ZoneClimate[], outsideNow: number, outsideForecast: TempPoint[]): string {
   const warmest = [...zones].sort((a, b) => (b.currentTempF ?? -Infinity) - (a.currentTempF ?? -Infinity))[0];
   const later = outsideForecast[outsideForecast.length - 1]?.tempF ?? outsideNow;
@@ -240,6 +270,7 @@ export class MockDashboardDataSource implements DashboardDataSource {
       sunEvents,
       routines: ROUTINES,
       calendar: buildCalendar(now),
+      alerts: buildAlerts(now),
     };
   }
 }

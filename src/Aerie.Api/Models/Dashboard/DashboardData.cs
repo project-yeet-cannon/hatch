@@ -82,6 +82,31 @@ public record CalendarEventSummary(
 /// </summary>
 public record CalendarDay(DateOnly Date, IReadOnlyList<CalendarEventSummary> Events);
 
+/// <summary>Which half of the outdoor hazard feature produced an alert. The kiosk may treat the two differently; nothing else depends on it.</summary>
+public enum HazardKind { Weather, AirQuality }
+
+/// <summary>
+/// One thing outside worth saying out loud, in Aerie's vocabulary rather than
+/// any provider's: a watch/warning/advisory as issued, or the single synthetic
+/// alert bad air produces (see HazardService).
+///
+/// <paramref name="Severity"/> is a string rather than the stored enum because
+/// air quality has no NWS severity to report - both halves are normalized onto
+/// the one vocabulary "Unknown" | "Minor" | "Moderate" | "Severe" | "Extreme",
+/// which is all the client needs to decide how loud to be.
+/// </summary>
+/// <param name="Id">Stable within a snapshot, for keying a list. A weather alert's row id; the constant "air-quality" for the synthetic one, of which there is at most one.</param>
+/// <param name="StartsAt">When it takes effect, or when a forecast peak arrives. Null reads as "already in effect".</param>
+/// <param name="EndsAt">When it stops applying; null when the provider gave no end.</param>
+public record HazardAlert(
+    string Id,
+    HazardKind Kind,
+    string Severity,
+    string Title,
+    string? Detail,
+    DateTimeOffset? StartsAt,
+    DateTimeOffset? EndsAt);
+
 public record DashboardData(
     DateTimeOffset GeneratedAt,
     string Timezone,
@@ -89,4 +114,5 @@ public record DashboardData(
     OutsideClimate Outside,
     SunEvents SunEvents,
     IReadOnlyList<RoutineSummary> Routines,
-    IReadOnlyList<CalendarDay> Calendar);
+    IReadOnlyList<CalendarDay> Calendar,
+    IReadOnlyList<HazardAlert> Alerts);

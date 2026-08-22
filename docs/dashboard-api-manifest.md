@@ -58,7 +58,7 @@ sub-resources under it exist for reuse, debugging, and other screens.
 
 | Method & route | Returns | Notes |
 |---|---|---|
-| `GET /api/dashboard` | `DashboardData` | **Primary.** Composes zones + outside + routines + the calendar agenda. Query: `historyHours` (9), `forecastHours` (7), `bucketMinutes` (30). |
+| `GET /api/dashboard` | `DashboardData` | **Primary.** Composes zones + outside + routines + the calendar agenda + outdoor hazards. Query: `historyHours` (9), `forecastHours` (7), `bucketMinutes` (30). |
 | `GET /api/zones` · `GET /api/zones/{id}` | `ZoneDto` | Zone CRUD for the admin app. |
 | `POST /api/zones` · `PUT /api/zones/{id}` · `DELETE /api/zones/{id}` | `ZoneDto` | |
 | `GET /api/zones/climate` · `GET /api/zones/{id}/climate` | `ZoneClimate` | Current snapshot, history, forecast. Same window query params as `/api/dashboard`. |
@@ -138,6 +138,48 @@ a 302 to `/apps/admin/calendars?connected=<email>` or `?error=<code>`.
 | `PUT /api/calendar/calendars/{id}` | `CalendarDto` | `{ included, colorOverride, sortOrder }` — the admin-owned half. `colorOverride` must be a hex color; discovery never writes these three fields. |
 | `DELETE /api/calendar/accounts/{id}` | 204 | Best-effort revoke with Google, then delete. Calendars and cached events cascade. A revoke failure is logged, not fatal. |
 | `POST /api/calendar/sync` | `CalendarSyncDto` | Runs the event sync now instead of at the `SyncCalendarEvents` job's next firing, for the minute after a calendar is included. Always 200 — the service is fail-soft, and per-account reasons come back on the account rows. |
+
+## Outdoor hazards
+
+Weather watches, warnings, and advisories plus air quality, fetched on a
+schedule and read from Postgres by the dashboard
+([`plans/kiosk.md`](plans/kiosk.md) track B).
+
+Both halves sit behind a provider interface selected by a setting —
+`WeatherAlertProvider` (default `nws`, keyless and **US-only**) and
+`AirQualityProvider` (default `open-meteo`, keyless and global), either of which
+takes `none` to turn that half off. A name nothing answers to disables that half
+with a logged warning rather than failing to boot, since these settings are free
+text an admin types.
+
+The schedule is `SyncOutdoorHazards`, every fifteen minutes, one job for both
+providers. Alerts are upserted on (`Source`, `ProviderAlertId`) and
+**deactivated rather than deleted** when the provider stops returning them — an
+alert ends by disappearing from the feed, and the rows are small enough to keep.
+Air quality is stored as hourly samples, insert-only: the unique index on
+(`Source`, `Timestamp`) makes re-fetching an hour already stored a no-op.
+
+The alert list rides on `GET /api/dashboard` as `alerts`, most severe first, and
+is **empty on a calm, clean-air day** — which is what lets the kiosk banner
+render nothing at all rather than reserve space. Both halves are normalized onto
+one severity vocabulary (`Unknown` | `Minor` | `Moderate` | `Severe` |
+`Extreme`), so the client styles severity once. Two filters are applied on read
+rather than trusted to the sync: rows are limited to the *configured* provider,
+so switching providers clears the wall on the next poll instead of stranding the
+old one's alerts active forever; and expiry is re-checked, so an alert ends on
+the minute it ends rather than at the next firing.
+
+Air quality collapses into **at most one** alert, and only when the current
+reading or the coming day's peak reaches `AirQualityAlertThresholdAqi` (default
+`101`, the bottom of "Unhealthy for Sensitive Groups"). Its title is the band
+name, its detail carries the number, and when a later hour is worse the peak's
+timestamp is `startsAt` — the client formats it, per the rule at the top of this
+file. A newest sample older than three hours produces nothing: stale air quality
+is not the same as clean air.
+
+| Method & route | Returns | Notes |
+|---|---|---|
+| `GET /api/alerts` | `HazardAlert[]` | The same list `GET /api/dashboard` carries, for the admin Settings page's "Active alerts" card. Read-only, DB-only, and empty on a calm day — which is a working configuration, not a broken one. |
 
 ## Settings
 

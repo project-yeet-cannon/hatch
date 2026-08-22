@@ -110,6 +110,21 @@ export interface SiteSetting {
   value: string;
 }
 
+/**
+ * Mirrors Aerie.Api's HazardAlert (Models/Dashboard/DashboardData.cs). Read
+ * here only to verify configuration - the kiosk gets the same list on
+ * GET /api/dashboard.
+ */
+export interface HazardAlert {
+  id: string;
+  kind: 'Weather' | 'AirQuality';
+  severity: 'Unknown' | 'Minor' | 'Moderate' | 'Severe' | 'Extreme';
+  title: string;
+  detail: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+}
+
 export interface UnmappedHaDevice {
   haDeviceId: string;
   suggestedName: string;

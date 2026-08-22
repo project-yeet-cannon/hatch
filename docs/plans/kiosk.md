@@ -36,8 +36,8 @@ and lint it and leave the clicking to a human.
 - [x] **A6** — Calendar on the dashboard contract + provisional kiosk UI
 - [x] **B1** — Hazard schema + provider interfaces
 - [x] **B2** — NWS weather alert provider
-- [ ] **B3** — Open-Meteo air quality provider
-- [ ] **B4** — Hazard sync job + dashboard contract + provisional kiosk UI
+- [x] **B3** — Open-Meteo air quality provider
+- [x] **B4** — Hazard sync job + dashboard contract + provisional kiosk UI
 - [ ] **C1** — Design pass (placement and styling of both new elements)
 - [ ] **C2** — Dissipate this plan into the permanent docs
 

@@ -19,7 +19,9 @@ internal sealed class StubSiteSettings(
     double longitude = -74.0060,
     string? weatherAlertContact = null,
     int airQualityAlertThresholdAqi = 101,
-    int hazardMaxSeverityAgeHours = 48) : ISiteSettingsService
+    int hazardMaxSeverityAgeHours = 48,
+    string weatherAlertProvider = HazardProviders.Nws,
+    string airQualityProvider = HazardProviders.OpenMeteo) : ISiteSettingsService
 {
     public Task<SiteSettingsSnapshot> GetAsync(CancellationToken ct) => Task.FromResult(new SiteSettingsSnapshot(
         TimeZone: timeZone,
@@ -35,8 +37,8 @@ internal sealed class StubSiteSettings(
         GoogleClientSecret: googleClientSecret,
         GoogleOAuthRedirectUri: googleOAuthRedirectUri,
         CalendarAgendaDays: calendarAgendaDays,
-        WeatherAlertProvider: HazardProviders.Nws,
-        AirQualityProvider: HazardProviders.OpenMeteo,
+        WeatherAlertProvider: weatherAlertProvider,
+        AirQualityProvider: airQualityProvider,
         WeatherAlertContact: weatherAlertContact,
         AirQualityAlertThresholdAqi: airQualityAlertThresholdAqi,
         HazardMaxSeverityAgeHours: hazardMaxSeverityAgeHours));

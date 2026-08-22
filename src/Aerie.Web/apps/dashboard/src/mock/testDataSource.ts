@@ -4,6 +4,7 @@ import type {
   DailyExtreme,
   DashboardData,
   DashboardDataSource,
+  HazardAlert,
   HourlyOutside,
   OutsideClimate,
   RoutineSummary,
@@ -80,6 +81,33 @@ function xCalendar(now: Date): CalendarDay[] {
   ];
 }
 
+// One per kind, so a banner that hardcodes either one's wording gives itself
+// away. Severity stays a real value - it is an enum on the wire, not free text,
+// and an X would only prove the component falls back rather than that it reads
+// the field.
+function xAlerts(now: Date): HazardAlert[] {
+  return [
+    {
+      id: `${X}-alert-1`,
+      kind: 'Weather',
+      severity: 'Extreme',
+      title: X_LONG,
+      detail: X_LONG,
+      startsAt: now.toISOString(),
+      endsAt: new Date(now.getTime() + HOUR_MS).toISOString(),
+    },
+    {
+      id: `${X}-alert-2`,
+      kind: 'AirQuality',
+      severity: 'Moderate',
+      title: X_LONG,
+      detail: X_LONG,
+      startsAt: null,
+      endsAt: null,
+    },
+  ];
+}
+
 function xZone(index: number, now: Date): ZoneClimate {
   const { history, forecast } = timeWindow(now);
   return {
@@ -145,6 +173,7 @@ export class TestDataSource implements DashboardDataSource {
       sunEvents: xSunEvents(now),
       routines: [1, 2].map((i) => xRoutine(i)),
       calendar: xCalendar(now),
+      alerts: xAlerts(now),
     };
   }
 }

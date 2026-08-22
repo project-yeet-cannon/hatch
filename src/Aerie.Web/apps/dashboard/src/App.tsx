@@ -10,6 +10,7 @@ import { ZoneCard } from './components/ZoneCard';
 import { OutsideCard } from './components/OutsideCard';
 import { RoutinesSection } from './components/RoutinesSection';
 import { CalendarSection } from './components/CalendarSection';
+import { AlertBanner } from './components/AlertBanner';
 import { DashboardSkeleton } from './components/DashboardSkeleton';
 import { clientLogger } from './lib/clientLogger';
 import { useKioskLifecycle } from './hooks/useKioskLifecycle';
@@ -90,6 +91,12 @@ export function App() {
         </div>
         {data ? (
           <>
+            {/* Provisional placement: the top of the column, above everything.
+                Phase C1 (docs/plans/kiosk.md) owns where a warning actually
+                belongs on the wall and how it reads from across the room. It
+                renders nothing when there is nothing active, which is most
+                days - so sitting here costs a calm day no space at all. */}
+            <AlertBanner alerts={data.alerts} timeZone={data.timezone} />
             {/* Keyed on resetToken so an idle reset remounts the cards, which is
                 what puts each <details> back to defaultOpen - `open` is
                 uncontrolled DOM state that no re-render would otherwise undo. */}

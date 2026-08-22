@@ -124,6 +124,36 @@ export interface CalendarDay {
   events: CalendarEventSummary[];
 }
 
+/** Which half of the outdoor hazard feature produced an alert. */
+export type HazardKind = 'Weather' | 'AirQuality';
+
+/**
+ * How loud to be about a hazard. One vocabulary across both halves - a weather
+ * alert reports its issuing office's severity, and bad air is mapped onto the
+ * same words - so the kiosk styles severity once rather than per kind.
+ */
+export type HazardSeverity = 'Unknown' | 'Minor' | 'Moderate' | 'Severe' | 'Extreme';
+
+/**
+ * One thing outside worth saying out loud: a watch, warning, or advisory as
+ * issued, or the single synthetic alert bad air produces. The list is empty on
+ * a calm, clean-air day, which is most days.
+ */
+export interface HazardAlert {
+  /** Stable within a snapshot, for keying a list. */
+  id: string;
+  kind: HazardKind;
+  severity: HazardSeverity;
+  /** What is being warned about, e.g. "Winter Storm Warning" or an air quality band. */
+  title: string;
+  /** A sentence of detail, when there is one. */
+  detail: string | null;
+  /** ISO 8601. When it takes effect, or when a forecast peak arrives; null reads as "already in effect". */
+  startsAt: string | null;
+  /** ISO 8601. When it stops applying; null when open-ended. */
+  endsAt: string | null;
+}
+
 export interface DashboardData {
   /** ISO 8601 timestamp of when this snapshot was produced. */
   generatedAt: string;
@@ -134,6 +164,7 @@ export interface DashboardData {
   sunEvents: SunEvents;
   routines: RoutineSummary[];
   calendar: CalendarDay[];
+  alerts: HazardAlert[];
 }
 
 /** Anything that can produce a dashboard snapshot — mock today, a live API later. */

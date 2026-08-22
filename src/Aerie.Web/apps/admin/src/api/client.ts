@@ -18,6 +18,7 @@ import type {
   DeviceChannelWriteRequest,
   DeviceHistory,
   DeviceWriteRequest,
+  HazardAlert,
   ProvisioningInfo,
   Routine,
   RoutineWriteRequest,
@@ -125,6 +126,11 @@ export const syncCalendarEvents = () => fetchJson<CalendarSync>('/api/calendar/s
 /** Revokes the grant with the provider, then deletes the account and its calendars and cached events. */
 export const deleteCalendarAccount = (id: string) =>
   fetchJson<void>(`/api/calendar/accounts/${id}`, { method: 'DELETE' });
+
+// ---- Outdoor hazards ----
+
+/** What the kiosk would show right now. Empty is the normal answer - see the Active alerts card on the settings page. */
+export const getAlerts = () => fetchJson<HazardAlert[]>('/api/alerts');
 
 // ---- Settings ----
 

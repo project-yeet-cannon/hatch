@@ -1,6 +1,7 @@
 using Aerie.Api.Models.Dashboard;
 using Aerie.Api.Services.Calendar;
 using Aerie.Api.Services.DeviceMapping;
+using Aerie.Api.Services.Hazards;
 using Aerie.Api.Services.Routines;
 
 namespace Aerie.Api.Services.Dashboard;
@@ -12,9 +13,9 @@ public interface IDashboardService
 
 /// <summary>
 /// The backend-for-frontend aggregate: composes zones + outside + routines +
-/// calendar into the exact shape the dashboard app consumes. Zones, outside,
-/// settings, routines, and the agenda are fetched concurrently so the (slower)
-/// weather call doesn't serialize behind the DB reads.
+/// calendar + outdoor hazards into the exact shape the dashboard app consumes.
+/// Every part is fetched concurrently so the (slower) weather call doesn't
+/// serialize behind the DB reads.
 /// </summary>
 public class DashboardService(
     IZoneService zones,
@@ -22,6 +23,7 @@ public class DashboardService(
     ISiteSettingsService siteSettings,
     IRoutineService routines,
     ICalendarAgendaService calendar,
+    IHazardService hazards,
     TimeProvider time) : IDashboardService
 {
     public async Task<DashboardData> GetDashboardAsync(DashboardWindow window, CancellationToken ct)
@@ -31,7 +33,8 @@ public class DashboardService(
         var settingsTask = siteSettings.GetAsync(ct);
         var routinesTask = routines.GetRoutinesAsync(ct);
         var calendarTask = calendar.GetAgendaAsync(ct);
-        await Task.WhenAll(zonesTask, outsideTask, settingsTask, routinesTask, calendarTask);
+        var alertsTask = hazards.GetAlertsAsync(ct);
+        await Task.WhenAll(zonesTask, outsideTask, settingsTask, routinesTask, calendarTask, alertsTask);
 
         var settings = await settingsTask;
         var now = time.GetUtcNow();
@@ -42,6 +45,7 @@ public class DashboardService(
             Outside: await outsideTask,
             SunEvents: SolarCalculator.EventsForDay(now, settings.Latitude, settings.Longitude),
             Routines: await routinesTask,
-            Calendar: await calendarTask);
+            Calendar: await calendarTask,
+            Alerts: await alertsTask);
     }
 }

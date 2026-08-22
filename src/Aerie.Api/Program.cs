@@ -167,12 +167,20 @@ builder.Services.AddScoped<ICalendarAgendaService, CalendarAgendaService>();
 // because a provider holds nothing per-request - only the client factory and
 // the settings snapshot, which is itself a singleton.
 //
-// One 10-second client covers both halves. The explicit timeout is the
+// One 10-second client per half, each named for its role rather than its
+// vendor so a second country's provider shares it. The explicit timeout is the
 // fail-soft convention: a slow api.weather.gov leaves the hazard panel stale,
 // it never stalls the sync job behind it.
 builder.Services.AddHttpClient(NwsAlertProvider.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
+builder.Services.AddHttpClient(OpenMeteoAirQualityProvider.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
 builder.Services.AddSingleton<IWeatherAlertProvider, NwsAlertProvider>();
+builder.Services.AddSingleton<IAirQualityProvider, OpenMeteoAirQualityProvider>();
 builder.Services.AddSingleton<IHazardProviderResolver, HazardProviderResolver>();
+
+// Scoped, unlike the providers: both of these hold a DbContext for the length
+// of one sync or one request.
+builder.Services.AddScoped<IHazardSyncService, HazardSyncService>();
+builder.Services.AddScoped<IHazardService, HazardService>();
 
 // Auth (docs/plans/auth.md). Wired but switched off: AuthMiddleware and
 // AuthController both run, and both no-op or allow, until Auth:Enabled becomes
@@ -215,6 +223,7 @@ builder.Services.AddRateLimiter(limiter =>
 builder.Services.AddTransient<IAerieJob, SampleChannels>();
 builder.Services.AddTransient<IAerieJob, ReconcileCommands>();
 builder.Services.AddTransient<IAerieJob, SyncCalendarEvents>();
+builder.Services.AddTransient<IAerieJob, SyncOutdoorHazards>();
 builder.Services.AddTransient<BackfillChannelHistory>();
 builder.Services.AddTransient<JobsInit>();
 
