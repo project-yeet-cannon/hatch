@@ -1,16 +1,24 @@
 /**
- * The two things a permanently-open wall display needs that an ordinary browser
- * tab gets for free, both hanging off one idle timer:
+ * The three things a permanently-open wall display needs that an ordinary
+ * browser tab gets for free, all hanging off one notion of "last touch":
  *
  * - **Reset after use.** People scroll or expand a card to look at something and
  *   then walk away, leaving the dashboard parked wherever they left it. A short
  *   while after the last touch, put it back to its base state.
+ * - **Stand by.** Much later, when the room has plainly been empty for a while,
+ *   give up the dashboard entirely for a clock legible from across the room.
+ *   The dashboard is a thing you walk up to; the standby view is what the wall
+ *   is when nobody has.
  * - **Pick up new deploys.** apps/kiosk loads this page once at tablet boot and
  *   never navigates again, so a deploy is invisible to it. Poll for build drift
  *   (see lib/appVersion.ts) and reload when one appears.
  *
  * The reload waits for idle rather than firing the moment drift is noticed, so
  * the page never blanks out from under someone mid-interaction.
+ *
+ * This is the page's half of the idle ladder in lib/kioskIdleTimings.ts. The
+ * rung between the reset and the standby - dimming the backlight - belongs to
+ * the native shell, because CSS cannot reach a backlight.
  *
  * ## Why this is a plain factory rather than the body of the hook
  *
@@ -24,8 +32,7 @@
  * taking on jsdom and a renderer to assert on a `setTimeout`.
  */
 
-/** How long after the last touch the display goes back to base state. */
-export const IDLE_TIMEOUT_MS = 30_000;
+import { IDLE_TIMEOUT_MS, STANDBY_AFTER_MS } from './kioskIdleTimings';
 
 const VERSION_POLL_INTERVAL_MS = 5 * 60_000;
 
@@ -46,6 +53,12 @@ const RELOAD_GUARD_KEY = 'aerie-dashboard-reload-target';
  * kiosk with its own idle timeout - GatherOverlay's, for one - has to agree with
  * this list, or a screen stays alive under one definition and closes under the
  * other.
+ *
+ * `input` is in the list rather than bolted on by the one component that has a
+ * text field, because the reason it belongs is not about Gather: soft keyboards
+ * do not reliably produce `keydown` (docs/kiosk-architecture.md, "Text entry on
+ * the wall"), so without it a run of typing looks exactly like an empty room to
+ * every timer here.
  */
 export const ACTIVITY_EVENTS = [
   'pointerdown',
@@ -55,6 +68,7 @@ export const ACTIVITY_EVENTS = [
   'wheel',
   'scroll',
   'keydown',
+  'input',
 ] as const;
 
 export interface KioskLifecycleDeps {
@@ -67,6 +81,11 @@ export interface KioskLifecycleDeps {
   fetchDeployedVersion: () => Promise<string | null>;
   /** Put the page back to base state. Called after the self-inflicted-activity window opens. */
   onReset: () => void;
+  /**
+   * Show or hide the standby view. Called only on a change, so a caller can
+   * drive React state with it directly.
+   */
+  onStandbyChange: (standby: boolean) => void;
   reload: () => void;
   /** Session storage for the reload loop guard, or null where it isn't available. */
   storage: Storage | null;
@@ -77,8 +96,9 @@ export interface KioskLifecycle {
   /** Someone touched the screen. Throttled; re-arms the idle timer unless held. */
   markActivity: () => void;
   /**
-   * Suspend both behaviours. Idempotent. Anything already armed is cancelled,
-   * and a deploy noticed while held is remembered rather than acted on.
+   * Suspend all three behaviours. Idempotent. Anything already armed is
+   * cancelled, a standby already showing is lifted, and a deploy noticed while
+   * held is remembered rather than acted on.
    */
   hold: () => void;
   /**
@@ -99,6 +119,8 @@ export function createKioskLifecycle(deps: KioskLifecycleDeps): KioskLifecycle {
   let lastActivityAt = 0; // 0 = untouched since load
   let ignoreActivityUntil = 0;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  let standbyTimer: ReturnType<typeof setTimeout> | null = null;
+  let standby = false;
   let pendingTarget: string | null = null;
   let abandonedTarget: string | null = null;
   let held = false;
@@ -147,14 +169,41 @@ export function createKioskLifecycle(deps: KioskLifecycleDeps): KioskLifecycle {
     log.info('Idle reset to base state', { idleTimeoutMs: IDLE_TIMEOUT_MS });
   };
 
+  const onStandby = () => {
+    standbyTimer = null;
+    if (standby) return;
+    standby = true;
+    deps.onStandbyChange(true);
+    log.info('Standby: nobody has touched the wall in a while', { standbyAfterMs: STANDBY_AFTER_MS });
+  };
+
+  const exitStandby = () => {
+    if (!standby) return;
+    standby = false;
+    deps.onStandbyChange(false);
+    log.info('Standby lifted');
+  };
+
+  const armStandby = () => {
+    if (standbyTimer !== null) clearTimeout(standbyTimer);
+    standbyTimer = setTimeout(onStandby, STANDBY_AFTER_MS);
+  };
+
   const arm = () => {
     if (idleTimer !== null) clearTimeout(idleTimer);
     idleTimer = setTimeout(onIdle, IDLE_TIMEOUT_MS);
+    armStandby();
   };
 
   const markActivity = () => {
     const now = Date.now();
     if (now < ignoreActivityUntil) return;
+
+    // Ahead of the throttle, and ahead of everything else here: standby is a
+    // full-screen takeover, so the very first event of a touch has to lift it.
+    // Throttling this would leave someone tapping at a clock.
+    exitStandby();
+
     if (now - lastActivityAt < ACTIVITY_THROTTLE_MS) return;
 
     lastActivityAt = now;
@@ -208,6 +257,13 @@ export function createKioskLifecycle(deps: KioskLifecycleDeps): KioskLifecycle {
     log.info('Dashboard lifecycle started', { loadedVersion });
   }
 
+  // Armed at construction, unlike the idle reset, and the asymmetry is the
+  // point: a freshly-loaded page is already in base state, so there is nothing
+  // for a reset to undo until someone touches it - but it is emphatically not
+  // in standby. A tablet that boots at 3am, or reloads itself for a deploy at
+  // 3am, would otherwise sit on a full dashboard until morning.
+  armStandby();
+
   void pollVersion();
   const poll = setInterval(() => void pollVersion(), VERSION_POLL_INTERVAL_MS);
 
@@ -221,7 +277,16 @@ export function createKioskLifecycle(deps: KioskLifecycleDeps): KioskLifecycle {
         clearTimeout(idleTimer);
         idleTimer = null;
       }
-      log.info('Kiosk lifecycle held; idle reset and deploy reload suspended');
+      if (standbyTimer !== null) {
+        clearTimeout(standbyTimer);
+        standbyTimer = null;
+      }
+      // Nothing holds without someone having opened it, so this is defensive
+      // rather than reachable - but "held" and "showing a standby clock" is a
+      // state with no sensible reading, and it costs one line to make it
+      // unrepresentable.
+      exitStandby();
+      log.info('Kiosk lifecycle held; idle reset, standby and deploy reload suspended');
     },
 
     release: () => {
@@ -242,6 +307,8 @@ export function createKioskLifecycle(deps: KioskLifecycleDeps): KioskLifecycle {
       clearInterval(poll);
       if (idleTimer !== null) clearTimeout(idleTimer);
       idleTimer = null;
+      if (standbyTimer !== null) clearTimeout(standbyTimer);
+      standbyTimer = null;
     },
   };
 }

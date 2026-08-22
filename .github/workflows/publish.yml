@@ -416,8 +416,15 @@ jobs:
       actions: read
 
     steps:
+      # fetch-depth: 0 is load-bearing, not hygiene: "Compute app version"
+      # below derives versionCode from `git rev-list --count HEAD`, and on the
+      # default shallow clone that counts exactly one commit. Every publish
+      # then ships versionCode 1, UpdateManager's `latest > installed` check is
+      # never true, and the tablets silently never self-update.
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Setup Java
         uses: actions/setup-java@v5

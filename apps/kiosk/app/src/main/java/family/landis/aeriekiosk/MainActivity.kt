@@ -4,15 +4,18 @@ import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import org.mozilla.geckoview.AllowOrDeny
@@ -62,7 +65,9 @@ class MainActivity : AppCompatActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
 
-        setContentView(buildContentView())
+        val content = buildContentView()
+        setContentView(content)
+        observeImePresence(content)
         loadDashboard()
 
         enterLockTaskIfDeviceOwner()
@@ -110,6 +115,43 @@ class MainActivity : AppCompatActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) hideSystemBars()
+    }
+
+    /**
+     * The shell's view of presence, and the reason DisplayController needs no
+     * bridge into the page: every touch passes through here on its way to
+     * GeckoView, whatever the document does with it afterwards. Returns
+     * `super` unconditionally - this observes, it never consumes.
+     */
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        displayController.noteActivity()
+        return super.dispatchTouchEvent(event)
+    }
+
+    /**
+     * The other half of presence: a raised soft keyboard means someone is
+     * standing here, even though [dispatchTouchEvent] sees nothing while they
+     * type. IME touches go to the IME's own window, so without this a run of
+     * Gather entries would dim the panel mid-sentence - the same bug the page's
+     * `kioskLifecycle.hold()` exists to prevent, arriving by a different route.
+     *
+     * API 30+ only, because `Type.ime()` visibility is only dependable from
+     * there; below it the value is inferred from system-window insets, which
+     * this app's immersive mode already suppresses. Nothing breaks on an older
+     * tablet - it simply falls back to touch alone, which is where every kiosk
+     * was before this.
+     *
+     * Returns the insets through `ViewCompat.onApplyWindowInsets` rather than
+     * as-is: a listener that returns them directly ends the dispatch, and
+     * GeckoView is a child of this view.
+     */
+    private fun observeImePresence(root: View) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            displayController.setPresenceHold(insets.isVisible(WindowInsetsCompat.Type.ime()))
+            ViewCompat.onApplyWindowInsets(view, insets)
+        }
     }
 
     private fun hideSystemBars() {

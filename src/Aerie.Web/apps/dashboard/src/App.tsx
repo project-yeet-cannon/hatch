@@ -14,6 +14,7 @@ import { AlertBanner } from './components/AlertBanner';
 import { DashboardSkeleton } from './components/DashboardSkeleton';
 import { GatherTile } from './components/GatherTile';
 import { GatherOverlay } from './components/GatherOverlay';
+import { StandbyView } from './components/StandbyView';
 import { clientLogger } from './lib/clientLogger';
 import { useKioskLifecycle } from './hooks/useKioskLifecycle';
 import { useGatherLists } from './hooks/useGatherLists';
@@ -27,12 +28,14 @@ export function App() {
   // null when the overlay is closed; the id of the list it is showing otherwise.
   const [gatherListId, setGatherListId] = useState<string | null>(null);
   const { lists: gatherLists, refresh: refreshGather } = useGatherLists();
-  // Bumps ~30s after the last touch; see hooks/useKioskLifecycle.ts. Also owns
-  // the reload-on-new-deploy side of the kiosk's lifecycle, which needs nothing
-  // from this component. Both are suspended while Gather is open - a reset would
-  // take a half-typed item with it and a reload would take the whole page.
+  // resetToken bumps ~30s after the last touch and standby turns on minutes
+  // later; see hooks/useKioskLifecycle.ts and lib/kioskIdleTimings.ts. The hook
+  // also owns the reload-on-new-deploy side of the kiosk's lifecycle, which
+  // needs nothing from this component. All three are suspended while Gather is
+  // open - a reset would take a half-typed item with it, a reload would take the
+  // whole page, and standby would cover both.
   const gatherOpen = gatherListId !== null;
-  const resetToken = useKioskLifecycle(gatherOpen);
+  const { resetToken, standby } = useKioskLifecycle(gatherOpen);
 
   const closeGather = useCallback(() => {
     setGatherListId(null);
@@ -148,6 +151,11 @@ export function App() {
           custom properties on that element, and an overlay mounted anywhere
           else would resolve none of them. */}
       {gatherOpen && <GatherOverlay listId={gatherListId} lists={gatherLists} onClose={closeGather} />}
+      {/* Over the dashboard, not instead of it - the snapshot below stays
+          mounted and polling, so the first touch shows live data rather than a
+          skeleton. Any touch lifts it: the lifecycle's window listeners see the
+          event before this element does, so it needs no handler of its own. */}
+      {standby && <StandbyView now={now} timeZone={timeZone} zones={data?.zones ?? []} />}
     </div>
   );
 }

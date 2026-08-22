@@ -49,9 +49,6 @@ const CONFIRM_WINDOW_MS = 4_000;
  */
 const OPTIMISTIC_TTL_MS = 30_000;
 
-/** Soft keyboards don't reliably produce keydown; typing still counts as presence. */
-const OVERLAY_ACTIVITY_EVENTS = [...ACTIVITY_EVENTS, 'input'] as const;
-
 export function GatherOverlay({
   listId,
   lists,
@@ -87,12 +84,12 @@ export function GatherOverlay({
     };
 
     arm();
-    for (const event of OVERLAY_ACTIVITY_EVENTS) {
+    for (const event of ACTIVITY_EVENTS) {
       window.addEventListener(event, arm, { passive: true, capture: true });
     }
     return () => {
       if (timer !== null) clearTimeout(timer);
-      for (const event of OVERLAY_ACTIVITY_EVENTS) {
+      for (const event of ACTIVITY_EVENTS) {
         window.removeEventListener(event, arm, { capture: true });
       }
     };

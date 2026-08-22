@@ -1,9 +1,10 @@
 # Kiosk Display Control
 
-**Status:** Phase 1 implemented in the tree, pending the hardware check below.
-Phases 2–4 unstarted. Four phases, ordered by dependency for once — each one is
-usable on its own, but Phase 3 is what unlocks the per-room variation that
-motivated the whole thing, and Phase 4 is only worth building on top of Phase 3.
+**Status:** Phases 1 and 2 implemented in the tree, both pending the hardware
+checks below. Phases 3–4 unstarted. Four phases, ordered by dependency for once
+— each one is usable on its own, but Phase 3 is what unlocks the per-room
+variation that motivated the whole thing, and Phase 4 is only worth building on
+top of Phase 3.
 
 A wall tablet is a light fixture that happens to show information. Right now
 Aerie controls the information and not the fixture, and the gap between those
@@ -69,6 +70,15 @@ setting, for a kiosk whose panel makes it worth it (an OLED, where black pixels
 are genuinely dark and the backlight isn't the story) or one that has a presence
 sensor to wake it without a finger.
 
+**Phase 2 shipped only the first half of that** — `0.0`, no black view — on
+purpose. `0.0` is `BRIGHTNESS_OVERRIDE_OFF`, documented as the panel's *lowest*
+backlight rather than a powered-off display, so the screen stays lit-but-minimal
+and stays touch-responsive on its own; the black view exists to hide whatever
+the panel still leaks at that minimum, and nobody has yet stood in the hallway to
+see whether it leaks anything worth hiding. A few nights of watching answers
+that, and answers the clamp question below with it. Build the overlay if and
+when the answer is "yes".
+
 Doze is a non-issue as long as the tablets are wall-mounted on chargers — a
 plugged-in device does not enter Doze, so a dark screen won't stall
 [`UpdateManager`](../../apps/kiosk/app/src/main/java/family/landis/aeriekiosk/UpdateManager.kt)'s
@@ -86,6 +96,8 @@ poll. Worth re-checking if a kiosk ever runs on battery.
 | How presence reaches Aerie | Home Assistant **pushes** on state change (automation → `rest_command`) | [`SampleChannels`](../../src/Aerie.Api/Jobs/SampleChannels.cs) polls at 1-minute intervals — right for temperature, useless for motion. Polling HA fast enough for presence means polling it ~30× more often for one binary |
 | Where presence is stored | In memory, per zone, last-changed timestamp. Not ledgered | Every other reading in Aerie is history worth keeping. A presence sensor tripping forty times an evening is not — it's ephemeral state whose only consumer is "right now." A Postgres row per trip buys nothing and costs writes forever |
 | Unregistered tablets | Self-register on first poll, get a default profile, appear in admin as unassigned | The provisioning story is already "no cable, one QR scan." Making an operator hand-enter an `ANDROID_ID` to finish setup would be the only manual step left in it |
+| What the idle floor is | A second three-keyframe curve, not one number | `IdleBrightness` as a scalar is either too dark at noon or too bright at midnight. Sampling the same phase function means "dimmer than now" is always relative to now, and it costs three profile columns instead of one |
+| How the panel knows someone is typing | `ime()` inset visibility, held like the page's `hold()` | IME touches go to the IME's own window and never reach `dispatchTouchEvent`, so the shell's only presence signal goes silent during exactly the interaction that most needs the light on. Two independent holds rather than a bridge, for the same reason the two halves don't talk anywhere else |
 | Blackout window, comfort floors, all times | Profile values, never constants | [`ethos.md`](../ethos.md) — "2am to 5am" is true of exactly one household |
 
 ## Identity: the thing that has to exist first
@@ -111,8 +123,13 @@ and assigns a zone in the admin app.
   mirroring `CircadianTokenSets`' `day`/`amber`/`night` exactly, so the backlight
   interpolates on the same phase function and through the same midpoint as the
   palette. The panel and the pixels move together or the effect falls apart.
-- `IdleDimAfterSeconds`, `IdleBrightness` — the "nobody's here" step.
-- `StandbyAfterSeconds` — when the page swaps to the standby view.
+- `IdleDimAfterSeconds`, and `IdleDay`/`IdleAmber`/`IdleNightBrightness` — the
+  "nobody's here" step. Three keyframes rather than one number, for the reason
+  in the decisions table: Phase 2 built it that way and a scalar cannot express
+  it.
+- `StandbyAfterSeconds` — when the page swaps to the standby view. Phase 2's
+  `IdleResetSeconds` belongs here too; the ladder is only correct read as a
+  whole, so it should arrive as a whole.
 - `BlackoutStart`, `BlackoutEnd` (nullable — null means never),
   `BlackoutMode` (`Dim` | `ScreenOff`), `BlackoutBrightness`.
 - `WakeOnPresence` — whether a zone presence signal lifts the display.
@@ -212,32 +229,71 @@ with the rest of the list.
       above `0.0` and where — the clamp point decides what "night" can mean,
       and whether Phase 4's real screen-off is load-bearing or a nicety. The
       `night = 0.05` default is a guess until someone stands in the hallway.
+      Phase 2's idle floor of `0.0` at night is the cheapest way to answer it:
+      an untouched tablet drives the panel to its clamp every night, so the
+      question stops being "what does 0 do" and becomes "what did it look
+      like.
 
 Kills the 3am lamp on its own. Everything after this makes it adjustable.
 
-### [] Phase 2 — Idle dim and standby
+### [x] Phase 2 — Idle dim and standby
 
-- [ ] Native idle timer off `dispatchTouchEvent`; dim to an idle floor, restore
-      instantly on touch. Ramp the dim, snap the restore — a slow brighten reads
-      as an unresponsive screen.
-- [ ] Standby view in the dashboard on a longer timeout: time, date, indoor
-      temp, at across-the-room scale.
-- [ ] Both timeouts come from one place so the panel and the page cannot
-      disagree about whether anyone is there.
-- [ ] Respect [`kioskLifecycle`](../../src/Aerie.Web/apps/dashboard/src/lib/kioskLifecycle.ts)'s
+- [x] Native idle timer off `dispatchTouchEvent`; dim to an idle floor, restore
+      instantly on touch. Ramp the dim (4s, 10 steps a second), snap the restore
+      — a slow brighten reads as an unresponsive screen. The idle floor is a
+      second `BrightnessCurve` rather than one number
+      ([`DisplayController.kt`](../../apps/kiosk/app/src/main/java/family/landis/aeriekiosk/DisplayController.kt)),
+      sampled on the same phase function as the active one, so "dimmer than
+      now" tracks the day instead of being too dark at noon and too bright at
+      midnight. Its night keyframe is `0.0`; see the fake-off note above for
+      why the black overlay that usually accompanies that is deliberately absent.
+- [x] Standby view in the dashboard on a longer timeout: time, date, indoor
+      temp, at across-the-room scale
+      ([`StandbyView.tsx`](../../src/Aerie.Web/apps/dashboard/src/components/StandbyView.tsx)).
+      It covers the dashboard rather than replacing it — the snapshot stays
+      mounted and polling, so lifting standby shows live data rather than a
+      skeleton, and a fixed overlay moves no scroll position, which would
+      otherwise arrive back at the lifecycle as activity and lift the standby it
+      just entered. Indoor temp is the first zone with a reading, which is the
+      operator's own ordering (`ZoneService` sorts by `SortOrder`) rather than a
+      new setting invented for one view.
+- [x] Both timeouts come from one place —
+      [`kioskIdleTimings.ts`](../../src/Aerie.Web/apps/dashboard/src/lib/kioskIdleTimings.ts),
+      holding the whole ladder (reset 30s, dim 2m, standby 5m) with the
+      reasoning for why each is only correct relative to the others. **One
+      caveat, stated rather than papered over:** the shell cannot import a TS
+      module, so the dim rung is a mirrored Kotlin constant on the same terms as
+      `CircadianBrightness.kt`'s transition constants. Phase 3 is what makes it
+      literally one place, by making both sides fetch it.
+- [x] Respect [`kioskLifecycle`](../../src/Aerie.Web/apps/dashboard/src/lib/kioskLifecycle.ts)'s
       `hold()` — standby must not swallow a half-typed Gather entry, which is
-      the same bug the existing idle reset already guards against. `input`
-      belongs in `ACTIVITY_EVENTS` for the reason
+      the same bug the existing idle reset already guards against. `input` is
+      now in `ACTIVITY_EVENTS` itself rather than bolted on by `GatherOverlay`,
+      for the reason
       [kiosk-architecture.md](../kiosk-architecture.md#text-entry-on-the-wall)
       gives: soft keyboards don't reliably fire `keydown`.
+- [x] **The panel needs its own version of `hold()`, which wasn't in the
+      original sketch.** IME touches go to the IME's window, never to the
+      activity's `dispatchTouchEvent`, so a long run of typing looks to the
+      shell exactly like an empty room and would dim the backlight mid-entry.
+      `MainActivity` watches `ime()` inset visibility (API 30+, where that
+      signal is dependable) and holds the display lit while the keyboard is up.
+- [ ] **Confirm on hardware**: that the IME hold actually fires under immersive
+      mode with GeckoView focused — it degrades to touch-only if it doesn't, so
+      the failure is a dim mid-typing rather than anything broken — and that two
+      minutes is the right dim timeout for someone reading the wall with their
+      hands in their pockets.
 
 ### [] Phase 3 — Registry, profiles, per-room curves
 
 - [ ] `KioskDevices` + `KioskDisplayProfiles` tables and migration.
 - [ ] `GET /api/kiosk/display-profile`, self-registering, AuthGate allow-listed.
-- [ ] Shell polls it; the hardcoded Phase 1 constants become its fallback for a
-      tablet that has never reached the server.
-- [ ] Dashboard fetches the same profile for its standby timings.
+- [ ] Shell polls it; the hardcoded Phase 1 and 2 constants become its fallback
+      for a tablet that has never reached the server.
+- [ ] Dashboard fetches the same profile for its standby timings. This is what
+      retires `kioskIdleTimings.ts`'s mirrored Kotlin constant — until then the
+      idle ladder is one file plus one copy, which Phase 2 flagged rather than
+      pretended away.
 - [ ] Admin UI: name a kiosk, assign a zone, pick a profile; edit profiles.
 - [ ] Blackout window, `Dim` mode.
 
@@ -263,7 +319,10 @@ what's unconfirmed rather than assuming it:
   settles whether ambient light is available as an input at all.
 - Where does `screenBrightness` clamp at the low end, and is the minimum dark
   enough to live with in an unlit hallway? This decides whether `Dim` blackout
-  mode is sufficient or whether Phase 4's real screen-off is load-bearing.
+  mode is sufficient, whether the black overlay is worth building, and whether
+  Phase 4's real screen-off is load-bearing. Phase 2's `0.0` idle floor at night
+  puts this in front of anyone walking past at 3am, which is the only way it was
+  ever going to get answered.
 - Does `screenBrightness` survive the IME being raised, and the immersive-mode
   re-entry on `onWindowFocusChanged`?
 - Are the tablets permanently on chargers in every mount? The Doze reasoning
