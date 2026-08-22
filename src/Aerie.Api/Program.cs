@@ -251,6 +251,9 @@ builder.Services.AddHealthChecks()
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
+    // Module DTOs carry their module's name, so two modules can each have an
+    // ItemDto without the document failing to generate - see SwaggerSchemaIds.
+    c.CustomSchemaIds(SwaggerSchemaIds.For);
     c.SwaggerDoc("v1", new OpenApiInfo
     {
         Title = "Aerie API",

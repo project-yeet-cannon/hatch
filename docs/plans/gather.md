@@ -1,8 +1,10 @@
 # Gather
 
-**Status:** not started. The kiosk text-entry risk that used to gate this plan is
-**resolved** (Finding 4) — no blocking gates remain, and the design fork it
-carried is closed.
+**Status:** Phase 1 done — the `gather` module is in and exercised end to end
+against Postgres and Swagger. Phases 2 and 3 are unstarted and independent of
+each other. The kiosk text-entry risk that used to gate this plan is **resolved**
+(Finding 4) — no blocking gates remain, and the design fork it carried is
+closed.
 
 Shared shopping lists for the family, reachable from the kitchen wall and from a
 phone, backed by one source of truth in `Aerie.Api`. Groceries are the use case
@@ -117,28 +119,28 @@ Read before starting; each one changes an estimate.
 Backend, complete and independently verifiable through Swagger before any UI
 exists.
 
-- [ ] `Modules/Gather/Entities.cs` — `GatherList` (Id, Name, Icon, Color,
+- [x] `Modules/Gather/Entities.cs` — `GatherList` (Id, Name, Icon, Color,
       CreatedAt, UpdatedAt) and `GatherItem` (Id, ListId, Name, NameNormalized,
       Quantity, Note, IsChecked, CheckedAt, CreatedAt, UpdatedAt).
       `Quantity` free text, max 32. `Note` max 200.
-- [ ] Unique index on `(ListId, NameNormalized)` — this is what makes the
+- [x] Unique index on `(ListId, NameNormalized)` — this is what makes the
       re-add upsert atomic rather than a check-then-insert race between the
       kiosk and a phone.
-- [ ] `Modules/Gather/GatherContext.cs` — `const string Schema = "gather"`,
+- [x] `Modules/Gather/GatherContext.cs` — `const string Schema = "gather"`,
       `IModuleContext`, `HasDefaultSchema(Schema)`.
-- [ ] `Modules/Gather/GatherDesignTimeFactory.cs` extending
+- [x] `Modules/Gather/GatherDesignTimeFactory.cs` extending
       `ModuleDesignTimeFactory<GatherContext>`.
-- [ ] `Modules/Gather/GatherModule.cs` — `AddGatherModule` registering the
+- [x] `Modules/Gather/GatherModule.cs` — `AddGatherModule` registering the
       context and `IGatherService`.
-- [ ] One line in `AddAerieModules`: `services.AddGatherModule(configuration);`
-- [ ] `Modules/Gather/Dtos.cs` — `ListSummaryDto` (id, name, icon, color,
+- [x] One line in `AddAerieModules`: `services.AddGatherModule(configuration);`
+- [x] `Modules/Gather/Dtos.cs` — `ListSummaryDto` (id, name, icon, color,
       openCount, checkedCount, updatedAt), `ListDto` (summary + items),
       `ItemDto`, and the write requests.
-- [ ] `Modules/Gather/GatherService.cs` — the two operations with behavior worth
+- [x] `Modules/Gather/GatherService.cs` — the two operations with behavior worth
       isolating: `AddItem` (normalize, upsert, un-check on re-add) and
       `ClearChecked`. Plain CRUD stays on the context in the controller, as
       Storage does.
-- [ ] `Modules/Gather/GatherController.cs` at `[Route("api/gather")]`:
+- [x] `Modules/Gather/GatherController.cs` at `[Route("api/gather")]`:
 
       GET    lists                          -> ListSummaryDto[]
       POST   lists                          -> create
@@ -152,18 +154,55 @@ exists.
       DELETE lists/{id}/items/{itemId}
       POST   lists/{id}/clear-checked       -> { deleted: n }
 
-- [ ] Item ordering is server-side and stable: unchecked first by `CreatedAt`,
+- [x] Item ordering is server-side and stable: unchecked first by `CreatedAt`,
       then checked by `CheckedAt` descending. The client should not be deciding
       this independently in two apps.
-- [ ] Scaffold the migration into the module folder:
+- [x] Scaffold the migration into the module folder:
       `dotnet ef migrations add Init --context GatherContext --project ./src/Aerie.Api/Aerie.Api.csproj -o Modules/Gather/Migrations`
-- [ ] Verify the migration landed in `gather.__EFMigrationsHistory` and that
+- [x] Verify the migration landed in `gather.__EFMigrationsHistory` and that
       **nothing** appeared in `Migrations/` or `public.__EFMigrationsHistory`.
-- [ ] Tests in `src/Aerie.Api.Tests/Gather/`: the upsert (new / existing-open /
+- [x] Tests in `src/Aerie.Api.Tests/Gather/`: the upsert (new / existing-open /
       existing-checked), normalization (case, whitespace, trailing plural left
       alone), clear-checked count, cascade delete, and that check/uncheck does
       not touch name/quantity/note.
-- [ ] `make build` and the test suite green. Exercise the surface in Swagger.
+- [x] `make build` and the test suite green. Exercise the surface in Swagger.
+- [x] **Not in the original plan:** Swashbuckle keys schemas on the bare type
+      name, so Gather's `ItemDto` landing next to Storage's threw and served a
+      stack trace at `/swagger` for the *whole* API. Fixed at the platform level
+      rather than by renaming Gather's DTO —
+      [`Common/SwaggerSchemaIds.cs`](../../src/Aerie.Api/Common/SwaggerSchemaIds.cs)
+      qualifies a module's schemas with its folder name (`GatherItemDto`,
+      `StorageItemDto`) and leaves everything outside `Modules/` alone. Renaming
+      would have handed the same failure to whoever adds module three. Noted in
+      [`Modules/README.md`](../../src/Aerie.Api/Modules/README.md).
+
+### What the contract turned out to be
+
+Four things Phase 1 had to decide that the plan left open. Phase 2 and 3 build
+against these, and they belong in `docs/gather.md` when Phase 4 writes it.
+
+- **A re-add merges; an edit overwrites.** `POST items` applies a quantity or
+  note only when the request carries one, so re-adding a bare "milk" can't erase
+  the "2 gal" someone else put on it. `PUT items/{id}` writes exactly what it is
+  given, nulls included — it is how a wrong quantity gets taken off at all. A
+  re-add also keeps the spelling already on the list: a second person typing
+  MILK is not a rename, and the row shouldn't flicker between capitalisations.
+- **Renaming onto an existing item is a `409`, not a merge.** Silently folding
+  two rows into one loses whatever was on the other. The client should say so
+  and leave the text in the field.
+- **A list's `updatedAt` moves on item activity too**, not just a rename — it is
+  the "last used" a lists screen wants, and one that froze at creation would be
+  a lie. `createdAt` is on the summary as well.
+- **Lengths are validated, not truncated**: name 120, quantity 32, note 200,
+  list name 60, icon 32, colour 32. Over-long text comes back `400` naming the
+  field rather than `500` out of the column.
+
+Item names normalize on case and whitespace only —
+[`GatherItem.Normalize`](../../src/Aerie.Api/Modules/Gather/Entities.cs).
+Deliberately not a stemmer: "apple" and "apples" stay two rows, because a stray
+duplicate is a line someone crosses off while a silent merge loses a quantity.
+Setting `Name` recomputes `NameNormalized`, so no write path can drift from the
+unique index.
 
 ## Phase 2 — Gather in the family PWA
 

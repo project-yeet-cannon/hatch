@@ -97,3 +97,8 @@ the boundary. Both layouts are intentional; don't migrate one to the other.
 `Ef/AerieContext.cs` and its `public` schema belong to home automation. A module
 migration must never appear in `Migrations/` or in
 `public.__EFMigrationsHistory`.
+
+DTO names are yours to reuse: Storage and Gather both have an `ItemDto`, and the
+OpenAPI document qualifies a module's schemas with its folder name so the second
+one doesn't take Swagger down for the whole app - see
+[`Common/SwaggerSchemaIds.cs`](../Common/SwaggerSchemaIds.cs).
