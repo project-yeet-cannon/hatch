@@ -298,6 +298,30 @@
       "example": "aerie-alerts",
       "consumedBy": "6b.8 Alertmanager receiver",
       "description": "Webhook id for the Home Assistant automation 6a.3 creates. Alertmanager posts to http://${HA_HOST}:${HA_PORT}/api/webhook/${HA_ALERT_WEBHOOK_ID}. An opaque per-installation string, and a repository variable rather than a secret: see 6a.3 for why."
+    },
+    {
+      "key": "AERIE_REPO_OWNER",
+      "env": "AERIE_REPO_OWNER",
+      "githubSource": "AERIE_REPO_OWNER",
+      "githubKind": "variable",
+      "required": false,
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$",
+      "hint": "The user or organization alone - the first path segment of the repository URL, with no slash and no repository name after it. Deliberately not named GITHUB_OWNER: GitHub refuses to store a repository variable whose name starts with GITHUB_.",
+      "example": "example-owner",
+      "consumedBy": "docs/plans/deploy-observability.md 1.2, the Delivery dashboard's GitHub panels",
+      "description": "Owner of the *Aerie* repository - the one CI runs in. Not the site repo, which SITE_REPO_URL already names, and not derivable from it: an installation may keep the two under different owners. Optional, and the manifest that reads it carries a `:=` empty default, so an installation that never sets it gets a Delivery dashboard whose CI row is empty rather than a Kustomization that fails strict substitution. Set it and the CI row fills in on the next reconcile - no commit."
+    },
+    {
+      "key": "AERIE_REPO_NAME",
+      "env": "AERIE_REPO_NAME",
+      "githubSource": "AERIE_REPO_NAME",
+      "githubKind": "variable",
+      "required": false,
+      "pattern": "^[A-Za-z0-9._-]{1,100}$",
+      "hint": "The repository name alone - the second path segment, with no owner prefix and no .git suffix.",
+      "example": "Aerie",
+      "consumedBy": "docs/plans/deploy-observability.md 1.2, the Delivery dashboard's GitHub panels",
+      "description": "Name of the Aerie repository, paired with AERIE_REPO_OWNER. Two keys rather than one owner/name string because the grafana-github-datasource query model takes `owner` and `repository` as separate fields and Flux's substitution cannot split one value across two."
     }
   ]
 }

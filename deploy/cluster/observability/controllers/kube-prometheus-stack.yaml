@@ -287,6 +287,55 @@ spec:
       # 6b.14's PriorityClass - covers the dashboard sidecar and the
       # datasources sidecar below too, both in this same pod.
       priorityClassName: aerie-observability
+
+      # docs/plans/deploy-observability.md 1.1 - the GitHub datasource the
+      # Delivery dashboard's CI row reads from.
+      #
+      # This is the one thing in this phase that makes a Grafana pod's start
+      # depend on the internet: the plugin binary is fetched from grafana.com
+      # at startup. That is the dependency
+      # ../config/dashboards/kustomization.yaml deliberately avoided for
+      # dashboards by committing their JSON instead - a dashboard is data and
+      # can be, a datasource backend is a binary and cannot. The failure mode
+      # is a Grafana that will not start while grafana.com is unreachable,
+      # which is worth knowing before a rebuild during an outage.
+      #
+      # Verified against this pinned chart (88.3.0, grafana subchart 12.10.4,
+      # Grafana 13.1.3) rather than assumed, because the mechanism moved and
+      # every older write-up names the one that is gone: `plugins` renders
+      # into the `plugins` key of the `kube-prometheus-stack-grafana`
+      # ConfigMap, which the grafana container reads as
+      # **GF_PLUGINS_PREINSTALL_SYNC** - Grafana's own synchronous preinstall,
+      # not the GF_INSTALL_PLUGINS/grafana-cli path it replaced. Anything
+      # checking that this took effect has to look at the ConfigMap key, not
+      # for an env var holding the list.
+      #
+      # Changing this list changes that ConfigMap and the pod's config hash, so
+      # the pod rolls - which is also what makes the datasource below get read:
+      # provisioning files are parsed at startup, and the datasources sidecar's
+      # own reload call (REQ_URL .../api/admin/provisioning/datasources/reload)
+      # covers the case where only that ConfigMap changed.
+      plugins:
+        - grafana-github-datasource
+
+      # The PAT the datasource authenticates with, bound as an env var rather
+      # than written into the provisioning ConfigMap below - that ConfigMap is
+      # rendered by this chart in the clear and would put a credential in
+      # `kubectl get cm -o yaml`. Grafana interpolates $__env{NAME} when it
+      # reads a provisioning file, which is the supported way in.
+      #
+      # Not prefixed GF_: an env var of the shape GF_<SECTION>_<KEY> is read by
+      # Grafana as a grafana.ini override, and GF_GITHUB_TOKEN would silently
+      # invent a [github] section rather than staying an ordinary variable.
+      #
+      # github-datasource is 3b.6's ExternalSecret (parameters.json,
+      # github/read-token). A missing Secret is a Grafana pod stuck in
+      # CreateContainerConfigError, not a datasource that quietly 401s.
+      envValueFrom:
+        GITHUB_DATASOURCE_TOKEN:
+          secretKeyRef:
+            name: github-datasource
+            key: token
       admin:
         # admin/password until changed from Grafana's own UI - 6a.4 and
         # 6b.4's admin-secrets.yaml carry the full reasoning. userKey and
@@ -336,14 +385,59 @@ spec:
             memory: 64Mi
           limits:
             memory: 128Mi
-      # No datasource values here, deliberately: sidecar.datasources.enabled
-      # and its uid: prometheus are already the chart's own defaults, and
-      # uid: prometheus is exactly the fixed uid 6b.7's windows-exporter
-      # dashboard was pinned against - carried across unchanged rather than
-      # rewritten. Do not port
+      # No *Prometheus* datasource values here, deliberately:
+      # sidecar.datasources.enabled and its uid: prometheus are already the
+      # chart's own defaults, and uid: prometheus is exactly the fixed uid
+      # 6b.7's windows-exporter dashboard was pinned against - carried across
+      # unchanged rather than rewritten. Do not port
       # containers/grafana/provisioning/datasources/prometheus.yml, which
       # points at a compose service name and would install a second, broken
       # datasource beside the working one.
+      #
+      # additionalDataSources is that same mechanism rather than a second one,
+      # which is the whole reason the GitHub datasource is declared here and
+      # not as a hand-written ConfigMap in ../config: the chart renders this
+      # list into the same `grafana_datasource: "1"` ConfigMap the Prometheus
+      # entry above lands in, and the sidecar that already watches for it
+      # picks both up together. Two provisioning mechanisms for one Grafana is
+      # how a datasource ends up defined twice with different uids.
+      #
+      # uid is pinned, not generated: ../config/dashboards/delivery.json
+      # references `github` by uid the same way every other dashboard here
+      # references `prometheus`, and a generated uid would make that dashboard
+      # unloadable on a rebuild.
+      #
+      # $__env{} is Grafana's own interpolation, not Flux's, and it survives
+      # postBuild untouched because Flux only substitutes ${...} - a bare
+      # `$name` is plain text to it (fluxcd/pkg/envsubst's scanner only enters
+      # a substitution when `$` is immediately followed by `{`). No escaping,
+      # and deliberately none: `$$__env` would reach Grafana as a literal
+      # `$__env` only by accident of two mechanisms cancelling out.
+      #
+      # No `owner`/`repository` here, because the plugin's settings have no
+      # such fields - every query carries its own, which is why
+      # ../config/dashboards/delivery.json takes them as dashboard variables
+      # fed from AERIE_REPO_OWNER/AERIE_REPO_NAME. An Explore query against
+      # this datasource has to name them by hand.
+      additionalDataSources:
+        - name: GitHub
+          uid: github
+          type: grafana-github-datasource
+          # A backend datasource: Grafana proxies every request itself, so
+          # there is no `access` or `url` to set and the browser never talks
+          # to api.github.com.
+          jsonData:
+            # Set explicitly even though the plugin infers it from the
+            # presence of accessToken - the inference is a compatibility
+            # path for datasources created before GitHub App auth existed,
+            # and relying on it makes this file's meaning depend on the
+            # plugin keeping that path.
+            selectedAuthType: personal-access-token
+          secureJsonData:
+            accessToken: $__env{GITHUB_DATASOURCE_TOKEN}
+          # Provisioned, so the UI must not let it be edited into something
+          # this file no longer describes.
+          editable: false
       resources:
         requests:
           cpu: 10m
@@ -387,6 +481,79 @@ spec:
             memory: 64Mi
     kube-state-metrics:
       priorityClassName: aerie-observability
+
+      # docs/plans/deploy-observability.md 1.2 - the one hop of the delivery
+      # chain Prometheus could not otherwise see.
+      #
+      # `kubectl get imagepolicy` shows the tag image-reflector-controller
+      # selected; nothing exports it. Flux's own controllers publish
+      # gotk_reconcile_condition (Ready/not Ready) and nothing about the
+      # *value* an object settled on, so a dashboard can say the ImagePolicy
+      # is healthy and still not say which tag it picked - which is exactly
+      # the question "has my commit been selected yet" asks. CustomResourceState
+      # is kube-state-metrics' supported answer: a dynamic informer over a
+      # named GVK, rendering chosen JSON paths as labels.
+      #
+      # Scoped as tightly as it goes: one GVK, two objects
+      # (../../apps/automation/image-policies.yaml), one Info metric each. No
+      # ConfigMap entry beside it, though the `aerie-image-tags` hop is the
+      # other half of the same question - CustomResourceState has no field or
+      # name selector, so watching ConfigMaps means emitting a `tag` label for
+      # every ConfigMap in the cluster and dropping all but one in
+      # metricRelabelings. docs/plans/deploy-observability.md 3.3's
+      # Show-Delivery.ps1 reads that ConfigMap directly, which is the right
+      # tool for a hop nobody needs a time series of.
+      #
+      # No `namespace` label: both ImagePolicies live in flux-system and
+      # `name` alone identifies them, which also sidesteps the
+      # namespace/exported_namespace collision Finding 6 documents for the
+      # Flux PodMonitor. This chart's ServiceMonitor sets honorLabels: true,
+      # so a `namespace` label here would have won rather than been renamed -
+      # the opposite convention to ../config/scrape/flux.yaml's, and a
+      # difference worth not having.
+      #
+      # Ordering: the image.toolkit.fluxcd.io CRDs are installed by
+      # scripts/flux/Bootstrap-Flux.ps1's --components-extra at Provision 3,
+      # so they are registered long before this release installs. A CRS entry
+      # naming a GVK that does not exist is a kube-state-metrics that logs and
+      # keeps running rather than one that crashes, but it is also a panel
+      # that is silently empty - so if these metrics are missing, check the
+      # CRD before the dashboard.
+      rbac:
+        extraRules:
+          - apiGroups: ["image.toolkit.fluxcd.io"]
+            resources: ["imagepolicies"]
+            verbs: ["get", "list", "watch"]
+      customResourceState:
+        enabled: true
+        config:
+          spec:
+            resources:
+              - groupVersionKind:
+                  group: image.toolkit.fluxcd.io
+                  version: v1
+                  kind: ImagePolicy
+                # Replaces the kube_customresource_ default, so the series
+                # reads as this repository's rather than as a generic one:
+                # aerie_flux_image_policy_latest_tag.
+                metricNamePrefix: aerie_flux
+                labelsFromPath:
+                  name: [metadata, name]
+                metrics:
+                  - name: image_policy_latest_tag
+                    help: "Tag this ImagePolicy currently selects, as a label on a constant 1."
+                    each:
+                      type: Info
+                      info:
+                        labelsFromPath:
+                          # status.latestRef is the image API v1 shape
+                          # (../../apps/automation/image-policies.yaml pins
+                          # image.toolkit.fluxcd.io/v1). The v1beta2 spelling
+                          # was a single status.latestImage string; if these
+                          # labels come back empty after a Flux upgrade, that
+                          # field moving is the first thing to check.
+                          tag: [status, latestRef, tag]
+                          image: [status, latestRef, name]
       resources:
         requests:
           cpu: 10m

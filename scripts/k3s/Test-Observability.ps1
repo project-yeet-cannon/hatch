@@ -3,7 +3,9 @@
     Asserts 6b.15's checklist in one run, the same shape
     scripts/k3s/Test-ClusterPlatform.ps1 (3b.13), scripts/k3s/Test-DataTier.ps1
     (4b.11) and scripts/k3s/Test-AppTier.ps1 (5b.14) established. "Phase 6 is
-    done" as a command rather than as a memory.
+    done" as a command rather than as a memory. The D1.x checks are
+    docs/plans/deploy-observability.md Phase 1's, which builds on this
+    phase's Grafana and lands in the same tree.
 
 .DESCRIPTION
     Steps 6b.1-6b.14 each did their own work; this is 6b.15 itself - the gate,
@@ -26,7 +28,11 @@
     script would rather ask twice than guess once. A third, per-node loop
     (Nodes) checks vm.max_map_count and etcd's :2381, the same shape
     Test-ClusterPlatform.ps1's own Nodes stage established for a check that is
-    about each machine rather than about the cluster as a whole.
+    about each machine rather than about the cluster as a whole. A fourth
+    (Delivery) covers the Delivery dashboard and its GitHub datasource,
+    ImagePolicy metric and Grafana-annotation Provider - a separate round trip
+    because it belongs to a separate plan, so either can be removed without
+    unpicking the other's section markers.
 
     Same three properties every phase gate here states and relies on:
 
@@ -1062,6 +1068,172 @@ try {
     }
 
     # ---------------------------------------------------------------- #
+    Write-Stage 'Delivery'
+    # ---------------------------------------------------------------- #
+
+    # docs/plans/deploy-observability.md Phase 1 - the Delivery dashboard and
+    # the three pieces it cannot work without. Its own round trip rather than
+    # extra sections on the Probe above, for the same reason the Series stage
+    # takes one: this stage belongs to a later plan than 6b, and keeping the
+    # two separable is what lets either be deleted without unpicking the
+    # other's markers.
+    #
+    # Nothing here talks to Grafana's own API. Every question below is asked of
+    # a Kubernetes object or of Prometheus, both of which this script already
+    # reaches read-only through the API server - reading a datasource back out
+    # of Grafana would need its admin password, which would make a read-only
+    # gate hold a credential it has no other use for. The cost is that "the
+    # datasource is provisioned" is checked as "the ConfigMap the sidecar
+    # provisions it from names the plugin, the plugin is installed, and the
+    # token is bound" - every input to it, but not the result.
+    $policyCountPath = ConvertTo-PromQlRawPath -Query 'count(aerie_flux_image_policy_latest_tag)'
+    $deliveryScript = @(
+        'printf ''\n--- grafanadeploy\n'''
+        'sudo k3s kubectl -n observability get deployment kube-prometheus-stack-grafana -o json 2>/dev/null || echo {}'
+        'printf ''\n--- grafanaconfigcm\n'''
+        'sudo k3s kubectl -n observability get configmap kube-prometheus-stack-grafana -o json 2>/dev/null || echo {}'
+        'printf ''\n--- grafanadatasourcecm\n'''
+        'sudo k3s kubectl -n observability get configmap kube-prometheus-stack-grafana-datasource -o json 2>/dev/null || echo {}'
+        'printf ''\n--- githubsecret\n'''
+        'sudo k3s kubectl -n observability get secret github-datasource -o jsonpath={.metadata.name} 2>/dev/null || true'
+        'printf ''\n--- deliverydashboard\n'''
+        'sudo k3s kubectl -n observability get configmap dashboard-delivery -o json 2>/dev/null || echo {}'
+        'printf ''\n--- fluxprovider\n'''
+        'sudo k3s kubectl -n flux-system get providers.notification.toolkit.fluxcd.io grafana -o json 2>/dev/null || echo {}'
+        'printf ''\n--- fluxalert\n'''
+        'sudo k3s kubectl -n flux-system get alerts.notification.toolkit.fluxcd.io grafana-annotations -o json 2>/dev/null || echo {}'
+        'printf ''\n--- annotationssecret\n'''
+        'sudo k3s kubectl -n flux-system get secret grafana-annotations -o jsonpath={.metadata.name} 2>/dev/null || true'
+        'printf ''\n--- policymetric\n'''
+        "sudo k3s kubectl get --raw '$policyCountPath' 2>/dev/null || echo {}"
+        'printf ''\n--- end\n'''
+    ) -join '; '
+
+    $deliveryProbe = Invoke-NodeSsh @ssh -Command $deliveryScript -ConnectTimeoutSec 30
+    if ($deliveryProbe.ExitCode -ne 0 -or $deliveryProbe.StdOut -notmatch '--- end') {
+        Add-Check -Step 'D1' -Name 'Delivery observability checks' -Status 'Fail' -Detail 'the Delivery round trip failed as a whole - nothing below was checked'
+    }
+    else {
+        $grafanaDeploy = ConvertFrom-ProbeJson -Output $deliveryProbe.StdOut -Name 'grafanadeploy'
+        $grafanaConfigCm = ConvertFrom-ProbeJson -Output $deliveryProbe.StdOut -Name 'grafanaconfigcm'
+        $datasourceCm = ConvertFrom-ProbeJson -Output $deliveryProbe.StdOut -Name 'grafanadatasourcecm'
+        $githubSecretName = (Get-ProbeSection -Output $deliveryProbe.StdOut -Name 'githubsecret').Trim()
+        $deliveryDashboard = ConvertFrom-ProbeJson -Output $deliveryProbe.StdOut -Name 'deliverydashboard'
+        $fluxProvider = ConvertFrom-ProbeJson -Output $deliveryProbe.StdOut -Name 'fluxprovider'
+        $fluxAlert = ConvertFrom-ProbeJson -Output $deliveryProbe.StdOut -Name 'fluxalert'
+        $annotationsSecretName = (Get-ProbeSection -Output $deliveryProbe.StdOut -Name 'annotationssecret').Trim()
+        $policyMetric = ConvertFrom-ProbeJson -Output $deliveryProbe.StdOut -Name 'policymetric'
+
+        # --- 1.1 the plugin is installed on the pod that has to serve it -----
+        # Read from the ConfigMap, not from an env var holding the list. Under
+        # this chart (grafana subchart 12.10.4, Grafana 13.x) `grafana.plugins`
+        # renders to the `plugins` key of the kube-prometheus-stack-grafana
+        # ConfigMap, which the container reads as GF_PLUGINS_PREINSTALL_SYNC -
+        # Grafana's own preinstall, not the GF_INSTALL_PLUGINS/grafana-cli path
+        # every older write-up names. Checking for the retired env var would
+        # fail on a working cluster, which is the worst kind of check.
+        #
+        # This proves the instruction reached the pod, not that grafana.com
+        # answered: a plugin whose download failed leaves this key set and the
+        # datasource broken. The datasource ConfigMap check below is the other
+        # half.
+        $grafanaConfigData = Get-Field $grafanaConfigCm 'data'
+        $pluginList = if ($grafanaConfigData) { [string](Get-Field $grafanaConfigData 'plugins') } else { '' }
+        if ($pluginList -like '*grafana-github-datasource*') {
+            Add-Check -Step 'D1.1' -Name 'Grafana preinstalls grafana-github-datasource (1.1)' -Status 'Pass' -Detail "plugins=$pluginList"
+        }
+        else {
+            Add-Check -Step 'D1.1' -Name 'Grafana preinstalls grafana-github-datasource (1.1)' -Status 'Fail' -Detail "configmap kube-prometheus-stack-grafana data.plugins='$pluginList' - grafana.plugins in controllers/kube-prometheus-stack.yaml did not reach the pod"
+        }
+
+        $grafanaContainers = @(Get-Path $grafanaDeploy 'spec.template.spec.containers' | Where-Object { $_ })
+        $grafanaContainer = @($grafanaContainers | Where-Object { (Get-Field $_ 'name') -eq 'grafana' }) | Select-Object -First 1
+        if (-not $grafanaContainer) {
+            Add-Check -Step 'D1.1' -Name 'Grafana binds GITHUB_DATASOURCE_TOKEN (1.1)' -Status 'Fail' -Detail 'deployment kube-prometheus-stack-grafana has no container named grafana - the release may not be installed'
+        }
+        else {
+            $grafanaEnv = @(Get-Field $grafanaContainer 'env' | Where-Object { $_ })
+            $tokenEnv = @($grafanaEnv | Where-Object { (Get-Field $_ 'name') -eq 'GITHUB_DATASOURCE_TOKEN' }) | Select-Object -First 1
+            $tokenSecret = if ($tokenEnv) { [string](Get-Path $tokenEnv 'valueFrom.secretKeyRef.name') } else { '' }
+            if ($tokenSecret -eq 'github-datasource') {
+                Add-Check -Step 'D1.1' -Name 'Grafana binds GITHUB_DATASOURCE_TOKEN (1.1)' -Status 'Pass' -Detail 'from Secret github-datasource'
+            }
+            else {
+                Add-Check -Step 'D1.1' -Name 'Grafana binds GITHUB_DATASOURCE_TOKEN (1.1)' -Status 'Fail' -Detail "valueFrom.secretKeyRef.name='$tokenSecret', expected github-datasource - without it the datasource authenticates as nobody and every GitHub panel 401s"
+            }
+        }
+
+        # --- 1.1 the datasource itself, as the sidecar will find it ----------
+        # Searched across every key rather than by name: the chart calls it
+        # datasource.yaml today and that is the chart's business, not this
+        # check's.
+        $datasourceData = Get-Field $datasourceCm 'data'
+        $datasourceText = ''
+        if ($datasourceData) { foreach ($property in $datasourceData.PSObject.Properties) { $datasourceText += [string]$property.Value } }
+        if ($datasourceText -like '*grafana-github-datasource*' -and $datasourceText -like '*uid: github*') {
+            Add-Check -Step 'D1.1' -Name 'GitHub datasource provisioned with uid github (1.1)' -Status 'Pass' -Detail 'in configmap kube-prometheus-stack-grafana-datasource'
+        }
+        else {
+            Add-Check -Step 'D1.1' -Name 'GitHub datasource provisioned with uid github (1.1)' -Status 'Fail' -Detail 'the chart-rendered datasource ConfigMap carries no grafana-github-datasource entry - config/dashboards/delivery.json references uid github and its GitHub panels will not load without it'
+        }
+
+        if ($githubSecretName -eq 'github-datasource') {
+            Add-Check -Step 'D1.1' -Name 'Secret github-datasource exists (1.1)' -Status 'Pass' -Detail 'in observability'
+        }
+        else {
+            Add-Check -Step 'D1.1' -Name 'Secret github-datasource exists (1.1)' -Status 'Fail' -Detail 'not found - its ExternalSecret has not synced, which also holds the Grafana pod in CreateContainerConfigError. Seed github/read-token and re-run Provision 2.'
+        }
+
+        # --- 1.2 the dashboard ConfigMap, and the label that makes it one ----
+        $dashboardLabels = Get-Path $deliveryDashboard 'metadata.labels'
+        $dashboardLabel = if ($dashboardLabels) { [string](Get-Field $dashboardLabels 'grafana_dashboard') } else { '' }
+        if (-not (Get-Path $deliveryDashboard 'metadata.name')) {
+            Add-Check -Step 'D1.2' -Name 'ConfigMap dashboard-delivery loaded (1.2)' -Status 'Fail' -Detail 'not found in observability - config/dashboards/kustomization.yaml has not applied, or observability-config is NotReady'
+        }
+        elseif ($dashboardLabel -ne '1') {
+            Add-Check -Step 'D1.2' -Name 'ConfigMap dashboard-delivery loaded (1.2)' -Status 'Fail' -Detail "grafana_dashboard='$dashboardLabel', expected '1' - without the label the sidecar never picks it up and Grafana reports no error at all"
+        }
+        else {
+            Add-Check -Step 'D1.2' -Name 'ConfigMap dashboard-delivery loaded (1.2)' -Status 'Pass' -Detail 'grafana_dashboard=1'
+        }
+
+        # --- 1.2 the one metric the dashboard cannot get anywhere else -------
+        # count() over the CustomResourceState series. Zero is the interesting
+        # answer: it means kube-state-metrics is running without that config,
+        # or with a config naming a GVK it cannot list - both of which present
+        # as an empty panel and nothing else.
+        $policyResult = @(Get-Path $policyMetric 'data.result' | Where-Object { $_ })
+        $policyCount = 0
+        if ($policyResult.Count -gt 0) {
+            $policyPair = @(Get-Field $policyResult[0] 'value')
+            if ($policyPair.Count -ge 2) { [void][int]::TryParse([string]$policyPair[1], [ref]$policyCount) }
+        }
+        if ((Get-Field $policyMetric 'status') -ne 'success') {
+            Add-Check -Step 'D1.2' -Name 'ImagePolicy tags exported to Prometheus (1.2)' -Status 'Fail' -Detail 'the aerie_flux_image_policy_latest_tag query did not succeed'
+        }
+        elseif ($policyCount -ge 2) {
+            Add-Check -Step 'D1.2' -Name 'ImagePolicy tags exported to Prometheus (1.2)' -Status 'Pass' -Detail "$policyCount series (one per ImagePolicy)"
+        }
+        elseif ($policyCount -eq 1) {
+            Add-Check -Step 'D1.2' -Name 'ImagePolicy tags exported to Prometheus (1.2)' -Status 'Warn' -Detail '1 series, expected 2 - one ImagePolicy has selected no tag yet, or apps/automation/image-policies.yaml lost one'
+        }
+        else {
+            Add-Check -Step 'D1.2' -Name 'ImagePolicy tags exported to Prometheus (1.2)' -Status 'Fail' -Detail 'no series - kube-state-metrics is not running the customResourceState config in controllers/kube-prometheus-stack.yaml, or cannot list imagepolicies (check rbac.extraRules)'
+        }
+
+        # --- 1.3 the annotation path ----------------------------------------
+        if ($annotationsSecretName -eq 'grafana-annotations') {
+            Add-Check -Step 'D1.3' -Name 'Secret grafana-annotations exists (1.3)' -Status 'Pass' -Detail 'in flux-system'
+        }
+        else {
+            Add-Check -Step 'D1.3' -Name 'Secret grafana-annotations exists (1.3)' -Status 'Fail' -Detail 'not found - seed grafana/annotations-token from a Grafana service-account token and re-run Provision 2'
+        }
+
+        [void](Add-ObjectReadyCheck -Step 'D1.3' -Name 'Provider grafana Ready (1.3)' -Object $fluxProvider -MissingDetail 'not found in flux-system - config/notification/ has not applied')
+        [void](Add-ObjectReadyCheck -Step 'D1.3' -Name 'Alert grafana-annotations Ready (1.3)' -Object $fluxAlert -MissingDetail 'not found in flux-system - config/notification/ has not applied')
+    }
+
+    # ---------------------------------------------------------------- #
     Write-Stage 'HTTPS'
     # ---------------------------------------------------------------- #
 
@@ -1136,7 +1308,7 @@ if ($env:GITHUB_STEP_SUMMARY) {
     }
     $lines += @(
         ''
-        '_The cluster plan, Phase 6b.15. Read-only: `kubectl get` and `kubectl get --raw` GETs proxied to in-cluster services, plus direct TLS handshakes against the VIP._'
+        '_The cluster plan, Phase 6b.15, plus the D1.x rows from docs/plans/deploy-observability.md Phase 1. Read-only: `kubectl get` and `kubectl get --raw` GETs proxied to in-cluster services, plus direct TLS handshakes against the VIP._'
     )
     Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ($lines -join "`n")
 }
@@ -1144,7 +1316,7 @@ if ($env:GITHUB_STEP_SUMMARY) {
 Write-Host ''
 if ($failed -gt 0) {
     Write-Host "Phase 6 observability gate FAILED: $failed check(s) of $($script:Checks.Count) in ${elapsed} min." -ForegroundColor Red
-    Write-Host 'Nothing was changed. Every failure above names its check; docs/plans/swarm/phase-6-observability.md 6b.15 has the reasoning for each.'
+    Write-Host 'Nothing was changed. Every failure above names its check; docs/plans/swarm/phase-6-observability.md 6b.15 has the reasoning for each, and the D1.x rows are docs/plans/deploy-observability.md Phase 1.'
     exit 1
 }
 

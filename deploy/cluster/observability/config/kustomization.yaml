@@ -30,6 +30,15 @@
 # dashboards/ lives here rather than in ../controllers: they are content
 # this layer applies once ../controllers has registered what it needs to,
 # not plumbing a HelmRelease mounts.
+#
+# notification/ (docs/plans/deploy-observability.md 1.3) is the sixth tenant
+# and the one exception to the sentence this file opens with: its Provider and
+# Alert are instances of CRDs *scripts/flux/Bootstrap-Flux.ps1* registered at
+# Provision 3, not of anything ../controllers installs, so `wait: true` on
+# observability-controllers is not what makes them applicable. It lives here
+# because it writes to Grafana and is read alongside dashboards/, which is the
+# same content-not-plumbing test the three directories above pass - see its own
+# kustomization.yaml.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
@@ -37,5 +46,6 @@ resources:
   - dashboards/
   - alerts/
   - provisioning/
+  - notification/
   - ingress-logs.yaml
   - ingress-status.yaml

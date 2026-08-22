@@ -1,0 +1,99 @@
+# docs/plans/deploy-observability.md 1.3 - every Flux reconcile that matters to
+# a deploy, as a vertical line on every Grafana dashboard in the instance.
+#
+# The point is correlation, not notification. "Longhorn started rebuilding at
+# 4:02" and "we deployed at 4:01" is a question the Longhorn dashboard cannot
+# answer on its own and never will, because nothing on it knows what a deploy
+# is. A Grafana annotation is global to the instance and rendered by every
+# time-series panel by default, so one Alert object buys that correlation on
+# ../dashboards/delivery.json, ../dashboards/longhorn.json,
+# ../dashboards/cloudnative-pg.json and everything added after.
+#
+# **This is the first use of notification-controller in this repository, and
+# the controller has been running unused since Provision 3.**
+# scripts/flux/Bootstrap-Flux.ps1 installs the default component set, which
+# includes it - so nothing here installs anything, and the Provider/Alert CRDs
+# these objects instantiate were registered at bootstrap rather than by
+# ../../controllers. That is why this directory lives under config/ but,
+# unlike every other tenant of ../kustomization.yaml, does not actually depend
+# on ../../controllers having registered its type. It is here because it is
+# content pointed at Grafana, not because of the layer boundary.
+#
+# API versions are not uniform across this group and the mismatch is upstream's,
+# not a typo: Alert and Provider are v1beta3, while Receiver (Phase 2 of the
+# plan, not yet written) is v1.
+#
+# Namespace flux-system for all three objects: an Alert can only name a
+# Provider in its own namespace, and every object in eventSources below is
+# itself a flux-system object - including the `aerie` HelmRelease, which
+# reconciles *into* the aerie namespace (targetNamespace) but lives here. No
+# cross-namespace reference is involved anywhere, which also means none of
+# this is affected if notification-controller is ever run with
+# --no-cross-namespace-refs.
+---
+apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Provider
+metadata:
+  name: grafana
+  namespace: flux-system
+spec:
+  type: grafana
+  # The annotations API, not Grafana's root: the grafana provider POSTs an
+  # annotation per event and the path is part of the address rather than
+  # something the controller appends.
+  #
+  # In-cluster Service DNS, so this never leaves the node and never touches
+  # the ingress, the VIP or the wildcard certificate - metrics.${DOMAIN} is
+  # for browsers. The name is the grafana subchart's own fullname under this
+  # release: `<release>-grafana`, and the release is `kube-prometheus-stack`
+  # (../../controllers/kube-prometheus-stack.yaml). Port omitted because the
+  # chart's Service listens on 80.
+  address: http://kube-prometheus-stack-grafana.observability/api/annotations
+  secretRef:
+    # 3b.6's ExternalSecret, from parameters.json's grafana/annotations-token.
+    # The key inside it must be `token` - with `username`/`password` the
+    # provider does basic auth instead, and a Grafana service-account token is
+    # not a password, so the failure is a 401 on every event and a Provider
+    # that still reports Ready.
+    name: grafana-annotations
+---
+apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Alert
+metadata:
+  name: grafana-annotations
+  namespace: flux-system
+spec:
+  providerRef:
+    name: grafana
+  # info, not the error default. A failed reconcile is the *less* interesting
+  # half here: an annotation exists to mark when something changed, and a
+  # successful deploy is the change a timeline needs marked. Errors still
+  # arrive - `info` means info and above, not info only.
+  eventSeverity: info
+  # The four Kustomizations whose reconcile can change what is running, plus
+  # the HelmRelease that actually rolls the pods. Deliberately not `name: '*'`
+  # over every Kustomization: infra-controllers, observability-controllers and
+  # the rest reconcile on their own intervals for reasons that have nothing to
+  # do with a deploy, and an annotation stream that marks everything marks
+  # nothing.
+  #
+  # ../../../site.yaml's site-source and ../../../data.yaml's data-cluster are
+  # left out for the same reason - a GitRepository fetching a new revision is
+  # not yet a deploy, and data-cluster is the Postgres cluster itself rather
+  # than a schema change.
+  eventSources:
+    - kind: Kustomization
+      name: apps
+      namespace: flux-system
+    - kind: Kustomization
+      name: site-config
+      namespace: flux-system
+    - kind: Kustomization
+      name: data-schema
+      namespace: flux-system
+    - kind: Kustomization
+      name: infra-config
+      namespace: flux-system
+    - kind: HelmRelease
+      name: aerie
+      namespace: flux-system

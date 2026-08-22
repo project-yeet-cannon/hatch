@@ -2,7 +2,7 @@
 # as its own labelled ConfigMap. ../kustomization.yaml's sidecar.dashboards
 # (grafana_dashboard: "1", searchNamespace: ALL) is what turns a ConfigMap
 # carrying that label into a dashboard Grafana shows, with no volume and no
-# restart - the four generators below exist only to attach that label
+# restart - the generators below exist only to attach that label
 # consistently, not to transform the JSON.
 #
 # disableNameSuffixHash: true, matching ../../../data/schema/kustomization.yaml's
@@ -45,6 +45,24 @@
 #   - cloudnative-pg.json: github.com/cloudnative-pg/grafana-dashboards,
 #     charts/cluster/grafana-dashboard.json - the project's own maintained
 #     dashboard, replication lag and instance count among its panels.
+#   - delivery.json: not upstream's - written for this repository
+#     (docs/plans/deploy-observability.md 1.2) and the only dashboard here
+#     that is not a copy of somebody else's. Four rows answering one question:
+#     the commit on main, the tag the ImagePolicy selected, the tag the pods
+#     are running, the CI runs behind them, the Flux objects in between, and
+#     the rollout at the end. It is also the only dashboard here that reads a
+#     second datasource (uid `github`, provisioned by
+#     ../../controllers/kube-prometheus-stack.yaml's additionalDataSources)
+#     and the only one that deliberately *wants* postBuild substitution:
+#     ${AERIE_REPO_OWNER:=unset} and ${AERIE_REPO_NAME:=unset} reach its two
+#     textbox variables, which is how the GitHub half stays per-installation
+#     without a per-installation commit. Both carry a `:=` default on
+#     purpose - that is the operator spelling of an optional key, and it is
+#     also what keeps the strict substitution described below from failing on
+#     an installation that never sets them. Everything else in that file
+#     addresses Grafana variables as bare $owner/$repo/$__rate_interval,
+#     which Flux never touches: its substitution only fires when `$` is
+#     immediately followed by `{`.
 #   - flux.json: github.com/fluxcd/flux2-monitoring-example,
 #     monitoring/configs/dashboards/control-plane.json ("Flux Control Plane")
 #     - the project's own example, already cited by ../scrape/flux.yaml for
@@ -61,22 +79,26 @@
 #     this file was written. logs.json needs Loki, which this phase does not
 #     run.
 #
-# **Every dashboard's own template-variable/macro tokens collide textually
-# with ../../../observability.yaml's postBuild.substituteFrom, and this repo
+# **Every upstream dashboard's own template-variable/macro tokens collide
+# textually with ../../../observability.yaml's postBuild.substituteFrom, and this repo
 # runs with the StrictPostBuildSubstitutions feature gate on** - found live,
 # 2026-08-19, as observability-config failing to reconcile with "variable
 # substitution failed: variable not set (strict mode)" on
 # dashboard-windows-exporter (its legacy Table-panel \${__cell_4}/\${__cell_5}
 # drill-down macros), then again with "missing closing brace" on
 # dashboard-longhorn (its \${__field.labels.*} display-name macros, whose
-# dotted contents aren't a bare identifier). Every \${TOKEN} in all four JSON
-# files here - datasource variables and Grafana macros alike - is escaped to
+# dotted contents aren't a bare identifier). Every \${TOKEN} in the four
+# upstream JSON files here - datasource variables and Grafana macros alike - is escaped to
 # \$\${TOKEN}, which Flux renders as the literal \${TOKEN} Grafana expects
 # instead of trying to resolve TOKEN against aerie-cluster-config. **If you
 # update or replace one of these dashboards, grep the new JSON for \${ and
 # escape every hit before committing** - kubectl kustomize does not catch
 # this, since kustomize itself never touches postBuild tokens; only Flux's
-# own reconcile does, on the live cluster.
+# own reconcile does, on the live cluster. delivery.json is the exception
+# that proves the rule rather than a counter-example: it holds exactly two
+# distinct ${...} tokens, both deliberate, both carrying a `:=` default, and
+# no Grafana macros at all - `grep -o '\${[^}]*}' delivery.json` printing
+# anything other than AERIE_REPO_OWNER and AERIE_REPO_NAME is the bug.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 configMapGenerator:
@@ -108,6 +130,14 @@ configMapGenerator:
     namespace: observability
     files:
       - flux.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
+  - name: dashboard-delivery
+    namespace: observability
+    files:
+      - delivery.json
     options:
       disableNameSuffixHash: true
       labels:

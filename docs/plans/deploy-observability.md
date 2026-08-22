@@ -1,8 +1,15 @@
 # Delivery Observability
 
-**Status:** Plan, unstarted. Phases are independent and ordered by priority —
-transparency first, then latency, then alerting — not by dependency. Phase 1 is
-worth doing on its own even if nothing after it happens.
+**Status:** Phase 1 implemented in the tree; Phases 2–4 unstarted. Phases are
+independent and ordered by priority — transparency first, then latency, then
+alerting — not by dependency. Phase 1 is worth doing on its own even if nothing
+after it happens.
+
+Phase 1's manifests are in the tree and will reconcile on their own, but three
+operator actions have to happen for them to be anything but red — a Grafana
+service-account token, a GitHub PAT, and two repository variables naming this
+installation's Aerie repo. They are listed under **Phase 1 — operator steps**
+below, and nothing in Phase 1 works until they are done.
 
 The cutover traded a green checkmark for a reconciliation loop.
 [`delivery-architecture.md`](../delivery-architecture.md) predicted this in as
@@ -105,17 +112,30 @@ Verified before writing; each one changes a step below.
    label wins the collision. Every panel query in Phase 1 has to use the
    exported name.
 
-7. **Dashboard JSON must have `${` escaped to `$${`.** `observability-config`
+7. **Flux only substitutes `${...}`, never a bare `$VAR`.** Verified in
+   `fluxcd/pkg/envsubst`'s scanner rather than assumed: `scanLbrack` returns a
+   substitution token only when `$` is *immediately* followed by `{`, so
+   `$labels` in [`alerts/flux.yaml`](../../deploy/cluster/observability/config/alerts/flux.yaml),
+   `$__rate_interval` in a PromQL expression, `$1` in a `label_replace`, and
+   Grafana's own `$__env{...}` and `$owner` are all plain text to it. This is
+   why those have never needed escaping and why Finding 8 is specifically about
+   the braced form. Strict mode is enforced in `evalFunc`, which only ever sees
+   braced tokens, and it exempts the default-providing operators — so
+   `${VAR:=default}` is safe on an installation that never sets `VAR`, which is
+   what makes an *optional* cluster-config key usable inside a strictly
+   substituted manifest at all.
+
+8. **Dashboard JSON must have `${` escaped to `$${`.** `observability-config`
    runs under `StrictPostBuildSubstitutions`, and an unescaped Grafana macro or
    datasource variable fails the whole Kustomization — twice, live, on
    2026-08-19. See the header of
    [`dashboards/kustomization.yaml`](../../deploy/cluster/observability/config/dashboards/kustomization.yaml),
    which carries the full account. `kubectl kustomize` does not catch it.
 
-8. **Secrets have exactly one path in.** `scripts/secrets/parameters.json` →
+9. **Secrets have exactly one path in.** `scripts/secrets/parameters.json` →
    SSM → External Secrets → a Kubernetes Secret, seeded by
-   `provision-2-seed-secrets.yml`. Three new parameters below follow it
-   unchanged; none of them is a new *kind* of credential.
+   `provision-2-seed-secrets.yml`. The two new parameters Phase 1 adds follow it
+   unchanged, as does Phase 2's; none of them is a new *kind* of credential.
 
 ## Phase 1 — The dashboard
 
@@ -123,7 +143,7 @@ The one-stop shop, and the thing that actually answers the question. Depends on
 nothing else here — 1.3 is what turns it from a status board into a timeline,
 and it lives inside this phase for exactly that reason.
 
-- [ ] **1.1 The GitHub datasource.** Add `grafana-github-datasource` to
+- [x] **1.1 The GitHub datasource.** Add `grafana-github-datasource` to
       `grafana.plugins` in
       [`kube-prometheus-stack.yaml`](../../deploy/cluster/observability/controllers/kube-prometheus-stack.yaml)
       and provision the datasource with a read-only PAT (new parameter
@@ -137,12 +157,26 @@ and it lives inside this phase for exactly that reason.
       live half of the dashboard reads Prometheus, not GitHub.
 
       *Exit:* a Grafana Explore query against the datasource returns recent
-      workflow runs.
+      workflow runs. Note that the plugin's settings carry no default
+      owner/repository — verified against its `models.Settings`, which holds
+      only `githubUrl`, `cachingEnabled`, the auth type and the token — so an
+      Explore query has to name both by hand. The dashboard takes them as
+      variables instead (1.2).
 
-- [ ] **1.2 The `Delivery` dashboard**, as
+      *Done.* The plugin, the `GITHUB_DATASOURCE_TOKEN` binding and the
+      `additionalDataSources` entry (fixed `uid: github`) are in
+      [`kube-prometheus-stack.yaml`](../../deploy/cluster/observability/controllers/kube-prometheus-stack.yaml);
+      the parameter and its generated `ExternalSecret` follow Finding 9's path
+      unchanged. The token reaches the datasource as `$__env{...}`, which needs
+      no escaping: Flux's substitution only fires when `$` is immediately
+      followed by `{` (`fluxcd/pkg/envsubst`'s scanner, `scanLbrack`), which is
+      also why `$labels` in [`alerts/flux.yaml`](../../deploy/cluster/observability/config/alerts/flux.yaml)
+      has always been safe.
+
+- [x] **1.2 The `Delivery` dashboard**, as
       `deploy/cluster/observability/config/dashboards/delivery.json` plus one
       generator entry in that directory's `kustomization.yaml`. **Escape every
-      `${` to `$${` before committing** (Finding 7).
+      `${` to `$${` before committing** (Finding 8).
 
       Four rows, top to bottom, reading as one story:
 
@@ -159,7 +193,43 @@ and it lives inside this phase for exactly that reason.
       *Exit:* `metrics.${DOMAIN}` answers "did my last push ship, and when"
       without opening GitHub, `flux`, or `kubectl`.
 
-- [ ] **1.3 Deploy events as annotations.** A `Provider` type `grafana` and an
+      *Done, with two changes to the table above, both forced by what is
+      actually available:*
+
+      **The ImagePolicy's tag needed a metric that did not exist.** Flux
+      publishes `gotk_reconcile_condition` — whether an object is Ready — and
+      nothing about the *value* it settled on, so a dashboard could say the
+      `ImagePolicy` was healthy and not say which tag it picked. That is the
+      question. It now comes from a kube-state-metrics `CustomResourceState`
+      entry over `ImagePolicy`, as
+      `aerie_flux_image_policy_latest_tag{name, tag, image}`, scoped to that
+      one GVK.
+
+      **The `aerie-image-tags` panel is not there.** `CustomResourceState` has
+      no field or name selector, so watching `ConfigMap` means emitting a `tag`
+      label for every ConfigMap in the cluster and dropping all but one in
+      `metricRelabelings` — cardinality controlled by a filter rather than by
+      scope, for one panel. 3.3's `Show-Delivery.ps1` reads that ConfigMap
+      directly and is the right tool for a hop nobody needs a time series of.
+      The row still names the stalled side: policy tag ≠ commit means the stall
+      is before the cluster, policy tag ≠ running tag means it is inside.
+
+      Two other things worth knowing. The workflow-runs frame carries no
+      `actor` and no `duration` field — verified against the plugin's
+      `WorkflowRunsWrapper.Frames()`, which emits `id`, `name`, `head_branch`,
+      `head_sha`, `created_at`, `updated_at`, `run_started_at`, `html_url`,
+      `url`, `status`, `conclusion`, `event`, `workflow_id`, `run_number` —
+      so duration is a `calculateField` transformation over
+      `updated_at - run_started_at`, and actor is simply absent. And the CI
+      row needs two new **optional** keys in
+      [`cluster-config.json`](../../scripts/k3s/cluster-config.json),
+      `AERIE_REPO_OWNER` and `AERIE_REPO_NAME`, which reach the dashboard's two
+      textbox variables as `${AERIE_REPO_OWNER:=unset}`. Named `AERIE_REPO_*`
+      rather than `GITHUB_*` because GitHub refuses to store a repository
+      variable or secret with that prefix — the same collision the Route53 pair
+      is already renamed around.
+
+- [x] **1.3 Deploy events as annotations.** A `Provider` type `grafana` and an
       `Alert` whose `eventSources` name the `apps`, `infra-config`,
       `data-schema` and `site-config` Kustomizations and the `aerie`
       HelmRelease, at `eventSeverity: info` so successes annotate too, using a
@@ -170,6 +240,53 @@ and it lives inside this phase for exactly that reason.
 
       *Exit:* an annotation appears within a minute of a reconcile and hovering
       it names the object and revision.
+
+      *Done*, in
+      [`config/notification/`](../../deploy/cluster/observability/config/notification/grafana-annotations.yaml).
+      `Provider` and `Alert` are `v1beta3` (`Receiver`, which Phase 2 needs, is
+      `v1` — the mismatch is upstream's). Both live in `flux-system` beside the
+      Secret and the objects they name, so no cross-namespace reference is
+      involved anywhere; the directory sits under `observability/config`
+      because what it is *for* is Grafana. The `aerie` HelmRelease is a
+      `flux-system` object despite reconciling into the `aerie` namespace, which
+      is what keeps that true.
+
+      The token has no issuer and no CLI that mints it — it is created once from
+      Grafana's own UI. That is the one operator step in this phase that cannot
+      be automated away, and it is why 1.3 is last.
+
+## Phase 1 — operator steps
+
+Nothing above works until these are done, and each one fails visibly rather
+than quietly. Run [`Test-Observability.ps1`](../../scripts/k3s/Test-Observability.ps1)
+afterwards — its `D1.x` rows are exactly this list.
+
+1. **Mint a Grafana service-account token.** `metrics.${DOMAIN}` →
+   Administration → Users and access → Service accounts → add a service account
+   with the **Editor** role (the least that can `POST /api/annotations`), then
+   add a token on it. Copy the value once; Grafana never shows it again.
+
+2. **Mint a fine-grained GitHub PAT** scoped to the Aerie repository alone,
+   with **Actions: read** and **Contents: read** and nothing else. Read-only,
+   and cluster → GitHub: it grants nothing inbound.
+
+3. **Add both as repository secrets** — Settings → Secrets and variables →
+   Actions, **Secrets** tab — as `GRAFANA_ANNOTATIONS_TOKEN` and
+   `GH_READ_TOKEN`. Then dispatch **Provision 2** with `stage=parameters-only`.
+   Until this runs, the two new `ExternalSecret`s sit in `SecretSyncError`,
+   which takes `infra-config` NotReady with them — so do it in the same sitting
+   as merging this phase, not after.
+
+4. **Add `AERIE_REPO_OWNER` and `AERIE_REPO_NAME`** as repository **variables**
+   (the Variables tab — read through `secrets.` they resolve to empty rather
+   than erroring), then dispatch **Provision 4**. These two are optional: skip
+   them and everything works except the dashboard's CI row, which shows `unset`
+   in its variable boxes and empty panels.
+
+5. **Restart the Grafana pod** if it has not already rolled. Adding
+   `grafana.plugins` changes the Deployment's env, so Helm rolls it on its own;
+   if the datasource is present but the plugin is not, that roll is what is
+   missing.
 
 ## Phase 2 — Kill the poll
 

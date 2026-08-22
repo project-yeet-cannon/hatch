@@ -164,6 +164,16 @@ jobs:
           # dispatch before the 6b.5 HelmRelease commit reaches the cluster.
           K3S_SERVER_ADDRESSES: ${{ vars.K3S_SERVER_ADDRESSES }}
 
+          # docs/plans/deploy-observability.md 1.2 - the owner and name of the
+          # *Aerie* repository, which is what the Delivery dashboard's GitHub
+          # panels query. Optional in cluster-config.json: leave them unset and
+          # that dashboard's CI row is empty, which is the only thing that
+          # breaks. Named AERIE_REPO_* rather than GITHUB_* because GitHub
+          # refuses to store a repository variable whose name starts with
+          # GITHUB_.
+          AERIE_REPO_OWNER: ${{ vars.AERIE_REPO_OWNER }}
+          AERIE_REPO_NAME: ${{ vars.AERIE_REPO_NAME }}
+
           # Same keypair provision-0/1/2/3 used.
           NODE_SSH_PRIVATE_KEY: ${{ secrets.NODE_SSH_PRIVATE_KEY }}
         run: |
