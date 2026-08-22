@@ -148,6 +148,20 @@ must say in writing which phase adds one.
   trust: a backup password that only exists in the account you're trying to
   recover from is not a recovery plan. Phase 8 closes the loop from the other
   direction by exporting the `/aerie/*` tree *into* the restic repos.
+- **The Google OAuth client secret, and the calendar refresh tokens behind
+  it** — they are `SiteSettings` rows in Postgres, obfuscated at rest with
+  `SecretObfuscator` and redacted on read, alongside `HomeAssistantToken` and
+  `KioskWifiPassword`. Said explicitly here so nobody goes looking for a
+  `/aerie/google/*` path that was never meant to exist. The refresh tokens
+  could not live in the tree in any case: they are minted at runtime by an
+  admin completing a consent screen, so a store an operator seeds by hand is
+  the wrong shape for them, and the client secret follows the credential it
+  belongs with. Obfuscation is not encryption, and it is a deliberate parity
+  with the existing store rather than a claim about strength — the upgrade
+  path, if it is ever wanted, is ASP.NET DataProtection with a Postgres-backed
+  key ring (the ring is deliberately ephemeral today, which is exactly what
+  would have to change). Backups cover them: they are ordinary rows in the
+  database restic already snapshots.
 - **The ESO bootstrap credential** — it is the key to the store, so it cannot
   live in the store.
 - **`AERIE_TEST_GRANT_TOKEN`** — optional, and a GitHub Actions secret because

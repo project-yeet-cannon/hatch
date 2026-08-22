@@ -35,7 +35,7 @@ public enum WeatherAlertSeverity { Unknown, Minor, Moderate, Severe, Extreme }
 /// <summary>
 /// One weather advisory, watch, or warning as some IWeatherAlertProvider
 /// reported it. Written by the hazard sync job, read by the dashboard BFF -
-/// nothing in the request path calls the provider (docs/plans/kiosk.md).
+/// nothing in the request path calls the provider (docs/kiosk-architecture.md).
 ///
 /// Every column here is provider-neutral by design. NWS is US-only, so the
 /// day a second provider exists this table has to already fit it: no `event`,

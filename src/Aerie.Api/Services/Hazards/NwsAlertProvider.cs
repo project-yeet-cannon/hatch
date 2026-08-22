@@ -10,7 +10,7 @@ namespace Aerie.Api.Services.Hazards;
 /// <summary>
 /// Watches, warnings, and advisories from api.weather.gov - keyless, and
 /// US-only, which is the whole reason IWeatherAlertProvider exists
-/// (docs/plans/kiosk.md, accepted risk 4). Every NWS-shaped idea stops here:
+/// (docs/kiosk-architecture.md). Every NWS-shaped idea stops here:
 /// the GeoJSON envelope, `status`, `messageType`, and its severity spellings
 /// are all resolved into WeatherAlertRecord and go no further.
 ///

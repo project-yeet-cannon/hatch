@@ -10,6 +10,8 @@ Three things had to come together to make this work end-to-end without ever plug
 - **Distribution**: CI builds and signs the release APK and publishes it as a static file over the same reverse proxy every other app uses, rather than as a manual local build.
 - **Provisioning**: Android's QR-code "no-touch" provisioning flow installs the app, sets Wi-Fi, and grants Device Owner in one scan at first boot — no `adb`/USB required, unless the tablet's setup wizard doesn't offer a QR scanner.
 
+The shell is only half of it. [What the wall shows](#what-the-wall-shows) covers the two feeds that reach the tablet from outside the house — the family calendar and outdoor hazards — including the setup an operator does once and the display rules that keep a lit display from becoming a lamp at 3am.
+
 ## Runtime (`apps/kiosk/app`)
 
 Three components, no ViewModel/state layer — the app is a single full-screen browser pinned to one origin:
@@ -52,6 +54,73 @@ Zoom is the one piece of state JS cannot restore — Gecko exposes no API for th
 ### Rolling out a lifecycle change to already-deployed tablets
 
 Tablets running a build from *before* layer 2 shipped have no drift check, so they can't be told to reload — the update has to arrive through a layer they already run. Touching anything under `apps/kiosk/` makes CI build and publish a new APK (`detect-kiosk-changes` path-filters on exactly that), and `UpdateManager`'s steady 6-hour poll then installs it silently and `PackageReplacedReceiver` relaunches into a fresh page load. Zero-touch, bounded by that poll interval. Power-cycling a tablet does the same thing immediately.
+
+## What the wall shows
+
+`GET /api/dashboard` is a backend-for-frontend: one round trip returns zones, outside conditions, routines, the calendar agenda, and outdoor hazards, and the page re-polls it every 60 seconds. Two of those five come from outside the house — Google Calendar, and a weather/air-quality provider — and both follow the rule the climate sampling already followed: **jobs fetch, Postgres caches, the endpoint reads.** Nothing in a request path calls a third party.
+
+That split is not an optimisation. A kiosk polls forever, from three API replicas, and a display that blanks because Google is slow is worse than one showing an agenda five minutes stale. A read path cannot fail on a dependency it never calls. The endpoint-level contract is in [dashboard-api-manifest.md](dashboard-api-manifest.md); what follows is why each half is shaped the way it is, and how it reads from across the room.
+
+One rule spans both, and it is the one most easily lost in a restyle: **every color on this page is mixed into the current circadian token, never stated absolutely.** The dashboard dims from a daylight palette through amber to near-black over the course of a night ([`circadianTheme.ts`](../src/Aerie.Web/apps/dashboard/src/lib/circadianTheme.ts), [`tokens.ts`](../src/Aerie.Web/apps/dashboard/src/theme/tokens.ts)). A calendar color from Google, or a red that means "warning", is a *hue* — it is allowed to survive the night unchanged. Its *luminance* is not. Both components express this the same way, `color-mix(in srgb, <the color> N%, var(--card))`, which keeps the hue and lets the phase supply the brightness without either component knowing which phase it is in. A fixed red banner would otherwise be the brightest thing in the house at 3am.
+
+## Family calendar
+
+An admin connects any number of Google accounts; every calendar those accounts can see becomes individually toggleable; the included ones render as a today-and-tomorrow agenda. The window is `CalendarAgendaDays` (default 2), which is what keeps the panel a fixed, glanceable height rather than an inbox.
+
+**The OAuth flow lives in Aerie**, not in Home Assistant. Aerie owns the client, stores the refresh tokens, and discovers the calendars, because the requirement was "any number of accounts, per-calendar toggles, all from the admin app" — routing through HA's integration would have moved "add an account" into HA's config-entry flow and left the toggles somewhere Aerie could not reach. The Google client ID and secret are operator-supplied `SiteSettings`, the same shape as `HomeAssistantToken` and `KioskWifiPassword`; nothing operator-specific enters the repo ([ethos.md](ethos.md)).
+
+Three endpoints and a revoke are the whole of Google's API surface here, so [`GoogleOAuthService`](../src/Aerie.Api/Services/Calendar/GoogleOAuthService.cs) and [`GoogleCalendarClient`](../src/Aerie.Api/Services/Calendar/GoogleCalendarClient.cs) call them with a named `HttpClient` rather than taking `Google.Apis.Calendar.v3`. The SDK's value is its credential store, which would have needed a custom EF-backed `IDataStore` anyway — comparable code, much larger dependency tree.
+
+Details that are load-bearing rather than incidental:
+
+- **`access_type=offline` and `prompt=consent`.** Without the second, a re-consent returns no refresh token at all, and the failure surfaces weeks later as an account that cannot refresh.
+- **PKCE state is a table, not a dictionary.** `OAuthStates` exists because three replicas sit behind one ingress: the callback can land on a different replica than the one that started the flow. Rows are single-use and swept opportunistically on the next `start`, which is less machinery than a job for the same effect.
+- **The account email is read from the `id_token` without validating its signature.** The token came straight from Google's token endpoint over TLS in the same request — there is no untrusted hop to defend against. This is written in a comment at the call site too, because it is exactly the kind of thing a later reader "fixes".
+- **The redirect URI is derived from the request** (`UseForwardedHeaders` is configured, so the scheme and host are the ones the browser saw), with `GoogleOAuthRedirectUri` as an exact-match override. The override exists because Google compares the URI byte-for-byte and a proxy can rewrite what the app believes its own host to be.
+- **`Included` defaults to false.** Connecting an account must not dump a work calendar onto a kitchen wall; the admin opts each calendar in. Discovery re-runs freely because it never writes `Included`, `ColorOverride`, or `SortOrder` — those three are the admin's half of the row, and everything else is Google's.
+- **`singleEvents=true` on the events call.** Without it the response is recurrence *rules*, not instances, and the expansion becomes Aerie's problem.
+- **All-day events are date math, not timezone math.** Google sends `start.date`/`end.date` with an **exclusive** end. `LocalStartDate` comes from that date verbatim, `LocalEndDate` from the exclusive end minus a day, and only the derived UTC instants go through the site timezone. Resolving the local dates once at sync time — rather than at render, in the browser — is why an all-day event doesn't drift a day for half the year. It is covered by tests for the same reason.
+
+[`SyncCalendarEvents`](../src/Aerie.Api/Jobs/SyncCalendarEvents.cs) runs every five minutes and caches only the agenda window, pruning anything that falls out of it, so an account that stops syncing ages off the wall instead of freezing last week onto it. Each account syncs inside its own try/catch: one broken account writes `LastSyncError` and does not stop the others, and an `invalid_grant` on refresh sets `NeedsReauth` and leaves the row in place so the admin page can offer **Reconnect** rather than have the account silently vanish.
+
+**On the wall** ([`CalendarSection.tsx`](../src/Aerie.Web/apps/dashboard/src/components/CalendarSection.tsx)), the agenda sits below the zones and above the routines: the agenda is read and the routines are touched, so the reachable half of the screen stays the tappable one. Each event is a calendar block — a rounded card tinted with its calendar's color, a solid rail down its left edge, times in a narrow gutter beside it. Three things carry the time of day, all of them only on today:
+
+1. **A now line** — an accent rule with a dot, between the last event that has started and the first that hasn't, falling to the bottom of the day once everything has. It uses `--warm` rather than a calendar's usual red, for the circadian reason above.
+2. **The in-progress block takes a ring in its own calendar color**, so "what is happening right now" is findable without reading a single time.
+3. **Anything already over is faded, not dropped.** Dropping makes the column jump as the day passes and erases the evidence that the morning was busy; fading keeps the day's shape while pushing it behind what is still ahead.
+
+The agenda renders nothing at all when every day in the window is empty — an empty day is only worth saying when some other day isn't.
+
+### Connecting an account
+
+Setup is on the admin app's **Calendars** page, and the page says most of this next to the button. What an operator needs, once:
+
+1. A Google Cloud project with the **Calendar API** enabled.
+2. An OAuth client (Web application) whose authorized redirect URI is exactly `https://home.${DOMAIN}/api/calendar/oauth/callback`.
+3. **Google client ID** and **Google client secret** set on the admin **Settings** page.
+4. **The consent screen published to Production.** This is the one that bites: while the app sits in *Testing*, Google expires refresh tokens after **seven days**, which presents as the calendar silently going stale every week rather than as an error. Unverified is fine at family scale — Google allows it behind a warning screen, capped at 100 users.
+
+Then **Connect a Google account** on the Calendars page, include the calendars that belong on the wall, and either wait five minutes or press **Sync events now**.
+
+## Outdoor hazards
+
+Weather watches, warnings and advisories, plus bad air, for today and tomorrow — surfaced only when something is actually active, which on most days is nothing.
+
+Both halves sit behind a provider interface selected by a setting: `WeatherAlertProvider` (default `nws`) and `AirQualityProvider` (default `open-meteo`), either of which takes `none` to turn that half off. Both defaults are **keyless**, which is what suits a product that gets redeployed — an operator gets hazards with no account to open anywhere. The seam exists because [NWS is US-only](https://api.weather.gov): a non-US operator adds a class and flips a setting, with no schema, contract, or UI change. That is also why no NWS-shaped idea (`event`, `headline`, `messageType`) is allowed past [`NwsAlertProvider`](../src/Aerie.Api/Services/Hazards/NwsAlertProvider.cs) into the entity or the contract. A provider name nothing answers to disables that half with a logged warning rather than failing to boot — these settings are free text an admin types.
+
+- **NWS requires a `User-Agent`** and returns 403 without one. It is built from `WeatherAlertContact` when the operator has set one, and falls back to an anonymous string plus a warning logged once, because NWS documents that anonymous traffic may be throttled.
+- **Alerts are deactivated, not deleted**, when the provider stops returning them. An alert ends by disappearing from the feed, "what was the house warned about last night" is worth being able to answer, and the rows are tiny.
+- **Air quality is stored as hourly samples, insert-only.** The unique index on (`Source`, `Timestamp`) makes re-fetching an hour already stored a no-op, and keeping the series means a chart later needs no second migration.
+- **Two filters are applied on read rather than trusted to the sync**: rows are limited to the *currently configured* provider, so switching providers clears the wall on the next poll instead of stranding the old one's alerts active forever; and expiry is re-checked, so an alert ends on the minute it ends rather than at the next firing.
+- **Stale is not clean.** A newest air quality sample older than three hours produces no alert rather than an optimistic one.
+
+[`SyncOutdoorHazards`](../src/Aerie.Api/Jobs/SyncOutdoorHazards.cs) runs every fifteen minutes and covers both providers. One job, not two: their natural cadences differ, but a second job to save a keyless HTTP call every half hour is machinery for its own sake.
+
+Air quality collapses into **at most one** alert, and only when the current reading or the coming day's peak reaches `AirQualityAlertThresholdAqi` (default `101`, the bottom of "Unhealthy for Sensitive Groups"). Below that, air quality is not news. Its title is the band name, its detail carries the number, and when a later hour is worse, the peak's timestamp rides along as `startsAt` — the client formats it, because the API returns quantities and the client derives labels.
+
+Both halves are normalized onto one severity vocabulary — `Unknown` | `Minor` | `Moderate` | `Severe` | `Extreme` — so the kiosk styles severity once rather than per kind.
+
+**On the wall** ([`AlertBanner.tsx`](../src/Aerie.Web/apps/dashboard/src/components/AlertBanner.tsx)), hazards sit at the very top of the column, above everything: a hazard is the one thing here that changes what you do on the way out the door. Severity is a **ladder of presence** — an Extreme alert takes a wider rail, a heavier tint and a larger title than an advisory — rather than a change of hue alone, because at across-the-room distance the difference between orange and amber does not survive the trip. None of the steps raise absolute brightness; every tint is still mixed into `--card`. The banner renders nothing when the list is empty, so a calm day costs the layout no space at all.
 
 ## Build & signing
 

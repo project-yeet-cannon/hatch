@@ -6,7 +6,7 @@ namespace Aerie.Api.Tests.Hazards;
 
 /// <summary>
 /// Covers the seam that keeps a US-only alert provider from being a decision
-/// baked into the app (docs/plans/kiosk.md, accepted risk 4): a name nothing
+/// baked into the app (docs/kiosk-architecture.md): a name nothing
 /// answers to disables that half of the feature instead of throwing.
 /// </summary>
 public class HazardProviderResolverTests

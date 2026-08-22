@@ -49,7 +49,7 @@ public interface IGoogleOAuthService
 /// Google's OAuth 2.0 endpoints, called directly rather than through
 /// Google.Apis.Auth - three endpoints and a revoke, against an SDK whose main
 /// value here would be a credential store Aerie already has in Postgres (see
-/// docs/plans/kiosk.md).
+/// docs/kiosk-architecture.md).
 ///
 /// Fail-soft like WeatherService: every method returns a result, never throws
 /// a transport failure at its caller. A dead or throttling Google leaves the

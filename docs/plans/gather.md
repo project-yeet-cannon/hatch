@@ -1,7 +1,8 @@
 # Gather
 
-**Status:** not started. Phase 3 is a gate on Phase 4 — read it before scheduling
-kiosk work.
+**Status:** not started. The kiosk text-entry risk that used to gate this plan is
+**resolved** (Finding 4) — no blocking gates remain, and the design fork it
+carried is closed.
 
 Shared shopping lists for the family, reachable from the kitchen wall and from a
 phone, backed by one source of truth in `Aerie.Api`. Groceries are the use case
@@ -32,6 +33,7 @@ Everything below is spelled `Gather` / `gather` consistently: C# namespace
 | Freshness | Polling, no realtime | Matches every other read path in the product. The aisle case wants seconds, not milliseconds; SSE is a second transport to operate for a list of eight items |
 | Kiosk surface | A full-screen overlay over the dashboard, launched from a tile | The dashboard has no router and its idle/reload lifecycle is tuned to a screen nobody types into. An overlay adds one suspension seam instead of making every existing lifecycle rule route-aware |
 | Seeded lists | No migration seed; the empty state offers one-tap starters | A redeployable product shouldn't ship rows that assume a household ([`ethos.md`](../ethos.md)). "Grocery / Hardware / Pharmacy" as tappable suggestions gets the same first-run experience without baking them into the schema |
+| Kiosk orientation | Portrait, assumed throughout | The wall tablets are mounted portrait. A tall narrow column suits a checklist, and it keeps the ~20% the keyboard occupies from crowding the list. Landscape is not designed for and not tested |
 | Offline writes | Out of scope | The family shell's service worker already declares this: reads fall back to cache, writes fail as they would with no worker. An offline add needs conflict resolution nothing here justifies |
 
 ## Findings from the repo
@@ -62,24 +64,43 @@ Read before starting; each one changes an estimate.
    Both need a suspension seam while the overlay is open. The reset is also
    *keyed* remounting, so a half-typed item would vanish without a trace.
 
-4. **Nobody has ever typed into the kiosk, and there are two concrete reasons
-   it may not work.** This is the gate.
-   - [`MainActivity.kt:129`](../../apps/kiosk/app/src/main/java/family/landis/aeriekiosk/MainActivity.kt#L129)
-     sets `LOCK_TASK_FEATURE_NONE` and calls `startLockTask()`. IMEs are
-     normally exempt from lock-task allowlists, but this has never been
-     exercised on these tablets, and a non-GMS budget tablet may not have a
-     usable IME at all.
-   - The activity runs immersive (`hideSystemBars()`, re-applied on every
-     `onWindowFocusChanged`) and its manifest entry declares **no**
-     `android:windowSoftInputMode`. `adjustResize` is historically ignored under
-     fullscreen flags — the standard failure is a keyboard that covers the input
-     it was raised for. Add to that: the renderer is **GeckoView**, not WebView,
-     and the session registers only a no-op `ContentDelegate`. Gecko's IME path
-     here is entirely untested.
+4. **Kiosk text entry works — observed on the wall tablet, 2026-08-21.**
+   Redeeming an invite code at `/auth` inside the kiosk's GeckoView raised an
+   ordinary tablet soft keyboard: bottom ~20% of the screen, split left/right
+   for thumb reach. The tablets are **portrait** (see Decisions). That one
+   observation kills the three risks this plan was originally built around:
+   - IMEs *are* exempt from the lock-task allowlist in practice, under
+     [`MainActivity.kt:129`](../../apps/kiosk/app/src/main/java/family/landis/aeriekiosk/MainActivity.kt#L129)'s
+     `LOCK_TASK_FEATURE_NONE` + `startLockTask()`.
+   - The tablet has a usable IME, so the non-GMS worry doesn't apply to this
+     hardware.
+   - GeckoView's IME path delivers characters with only a no-op
+     `ContentDelegate` registered, and the auth form's `onSubmit` fired, so the
+     enter key reaches the page.
 
-   If text entry can't be made to work on the tablet, the kiosk story changes
-   shape (checkbox-only + speed-dial tiles, phone for adding). That's a design
-   fork, so it gets spiked before the overlay is built, not during.
+   **What it does not prove, and why it matters here.** The auth page is a
+   vertically centered card
+   ([`App.css:9`](../../src/Aerie.Web/apps/auth/src/App.css#L9) —
+   `align-items: center; justify-content: center`), so its input sits at roughly
+   half height — comfortably clear of a keyboard occupying the bottom fifth. The
+   overlap case was never exercised. The activity still declares no
+   `android:windowSoftInputMode` and still runs immersive, so whether the
+   viewport resizes for the IME is genuinely unknown.
+
+   This is now a **layout constraint rather than an open question**: keep every
+   input in the Gather overlay in the top half and the answer stops mattering.
+   Portrait makes that cheap rather than cramped — a tall narrow column is the
+   natural shape for a shopping list anyway, so the add field at the top with
+   the items running below it is what you'd draw regardless. Note that a
+   bottom-pinned add field — the right design on a *phone*, where the browser
+   lifts it above the keyboard — is precisely the wrong one here. The two
+   clients diverge on this deliberately.
+
+   One more inherited detail worth copying: the auth input sets
+   `autoCorrect="off"` (`SignInPage.tsx:90-91`). Free-text item entry has not
+   been tried, and autocorrect mangling a brand name is worse than a lowercase
+   one — so Gather's field should carry `autoCorrect="off"` and
+   `spellCheck={false}` too, with `autoCapitalize="words"`.
 
 5. **Tests go in `src/Aerie.Api.Tests/Gather/`.** Note that Storage's tests live
    at `Tests/Storage/`, *not* `Tests/Modules/Storage/` — `Tests/Modules/` holds
@@ -146,7 +167,7 @@ exists.
 
 ## Phase 2 — Gather in the family PWA
 
-Independent of Phase 3/4 — can proceed in parallel.
+Independent of Phase 3 — can proceed in parallel.
 
 - [ ] `src/Aerie.Web/apps/family/src/modules/gather/`: `GatherApp.tsx`,
       `routes.ts`, `api.ts`, `types.ts`, `components.tsx`, `gather.css`.
@@ -173,34 +194,24 @@ Independent of Phase 3/4 — can proceed in parallel.
       (per standing preference); the build and lint are the bar for handing it
       over.
 
-## Phase 3 — Kiosk text-entry spike (gate)
+## Phase 3 — Kiosk overlay
 
-Timeboxed. The only deliverable is an answer, and it decides what Phase 4 is.
+No longer gated — see Finding 4. Independent of Phase 2.
 
-- [ ] Put a bare `<input type="text">` on the dashboard behind a query param and
-      deploy it to the actual wall tablet.
-- [ ] Answer, on-device: does tapping it raise a soft keyboard at all under
-      `startLockTask()` + `LOCK_TASK_FEATURE_NONE`?
-- [ ] Does the keyboard **cover** the input? (Expected failure: no
-      `android:windowSoftInputMode` on the activity, immersive flags set. Try
-      `adjustResize`, and if immersive defeats it, drive the layout off
-      `WindowInsetsCompat` IME insets instead.)
-- [ ] Does dismissing the keyboard leave immersive mode intact, or does
-      `hideSystemBars()` in `onWindowFocusChanged` fight it?
-- [ ] Does GeckoView's IME path deliver characters correctly — including
-      backspace, autocorrect, and the enter key — with only a no-op
-      `ContentDelegate` registered?
-- [ ] Record the outcome here, and if kiosk-side APK changes are needed, note
-      that they ship on the kiosk's own update channel (`files.${DOMAIN}`
-      + `UpdateManager`), which is a slower loop than a web deploy.
-- [ ] **Fork:** if text entry can't be made to work, Phase 4 becomes
-      check-off-and-clear plus speed-dial tiles for common items, with adding
-      done from a phone. Say so explicitly rather than shipping a broken field.
-
-## Phase 4 — Kiosk overlay
-
-Gated on Phase 3.
-
+- [ ] **Portrait-first, and every input lives in the top half of the overlay.**
+      The keyboard owns the bottom ~20% and whether the viewport resizes for it
+      is untested; this one rule makes that not matter. The add field goes at
+      the *top*, with the items running down the column beneath it — never
+      pinned to the bottom.
+- [ ] The add field carries `autoCorrect="off"`, `spellCheck={false}`,
+      `autoCapitalize="words"`, and an `onSubmit` that adds the item and keeps
+      focus, so a run of items goes in without re-tapping the field.
+- [ ] First time on the tablet, confirm the three things the auth page couldn't:
+      that the list still scrolls with the keyboard up, that dismissing the
+      keyboard leaves immersive mode intact (`hideSystemBars()` re-fires on
+      `onWindowFocusChanged`), and that the split keyboard doesn't sit on top of
+      anything that needs tapping. All three are cheap to check and none of them
+      block starting.
 - [ ] `src/Aerie.Web/apps/dashboard/src/api/gatherClient.ts`, following
       `routinesClient.ts` — including its `handledUnauthorized` handling, which
       is not optional now that the wall is up.
@@ -213,8 +224,9 @@ Gated on Phase 3.
 - [ ] `components/GatherTile.tsx` — compact, readable across the kitchen: list
       names with open counts. Renders nothing when there are no lists.
 - [ ] `components/GatherOverlay.tsx` — full-screen over the dashboard: pick a
-      list, check items, add an item, clear checked. Touch targets sized for a
-      wall tablet, not a phone.
+      list, check items, add an item, clear checked. One portrait column, touch
+      targets sized for a wall tablet read at arm's length, not a phone held at
+      reading distance.
 - [ ] The overlay carries its **own** longer idle timeout (~90s) that closes it
       and hands control back to the normal lifecycle, so the wall always returns
       to the dashboard on its own. A tablet left on the grocery list is a
@@ -223,15 +235,16 @@ Gated on Phase 3.
       `?source=test` still render the whole screen.
 - [ ] `npm run build`, `npm run lint`, `npm run test` clean.
 
-## Phase 5 — Docs and dissipation
+## Phase 4 — Docs and dissipation
 
 - [ ] `docs/gather.md`, modeled on `docs/storage-helper.md`.
 - [ ] Add the Gather endpoints to
       [`dashboard-api-manifest.md`](../dashboard-api-manifest.md).
-- [ ] Note the kiosk keyboard outcome in
-      [`kiosk-architecture.md`](../kiosk-architecture.md) — whatever Phase 3
-      found is a durable fact about these tablets and belongs where the next
-      person will look.
+- [ ] Move Finding 4 into
+      [`kiosk-architecture.md`](../kiosk-architecture.md). That these tablets
+      take text input at all, and where the keyboard sits, is a durable fact
+      about the hardware that outlives this plan — and the next person to put a
+      field on the wall will look there, not here.
 - [ ] Delete this plan. Per [`plans/README.md`](README.md), a finished plan is
       not an archive.
 
@@ -240,7 +253,7 @@ Gated on Phase 3.
 - **Voice entry** and **speed dials / shortcuts** on the kiosk. Both are named
   as the eventual goal in the original brief; both need the dumb version in
   daily use first, because which items deserve a speed dial is an observation,
-  not a guess. (If Phase 3 fails, speed dials get promoted out of here.)
+  not a guess.
 - **Attribution** — who added an item. Blocked on the person-vs-device seam, not
   on effort.
 - **Offline writes** in the PWA.
@@ -251,8 +264,8 @@ Gated on Phase 3.
 
 | Risk | Handling |
 |---|---|
-| Kiosk keyboard doesn't work | Phase 3 is a gate before any overlay work, with an explicit design fork |
+| ~~Kiosk keyboard doesn't work~~ | **Retired** — observed working on the tablet, Finding 4 |
+| Keyboard covers a bottom-anchored input | Design around it: inputs stay in the upper half. Never becomes a question |
 | Idle reset eats an in-progress entry | The suspension seam is unit-tested, not eyeballed |
-| Kiosk APK change needed for the keyboard | Shipped on `UpdateManager`'s polling channel — slower than a web deploy; sequence it early |
 | Two devices editing one list | Check/uncheck is a separate endpoint from edit, so the common collision can't clobber text |
 | Access from outside the house | TailScale, per the brief. No new exposure |

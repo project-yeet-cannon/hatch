@@ -6,7 +6,7 @@ namespace Aerie.Api.Services.Hazards;
 /// One weather alert in Aerie's vocabulary rather than any provider's.
 ///
 /// This record is the mitigation for the fact that the only provider that
-/// exists is US-only (docs/plans/kiosk.md, accepted risk 4): everything
+/// exists is US-only (docs/kiosk-architecture.md): everything
 /// NWS-shaped - `messageType`, `status`, its severity spellings, its GeoJSON
 /// envelope - is translated here and goes no further. A provider for another
 /// country is a new class producing these, and nothing downstream changes.

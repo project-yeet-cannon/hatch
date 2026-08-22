@@ -15,8 +15,9 @@ namespace Aerie.Api.Controllers;
 /// <c>start</c>, Google redirects the browser back to <c>callback</c>, and both
 /// outcomes end on the admin Calendars page rather than in a JSON body.
 ///
-/// Nothing here is authenticated, because nothing in this API is - see the
-/// accepted risks in docs/plans/kiosk.md.
+/// Every route here sits behind the house wall (docs/auth-architecture.md),
+/// which is a gate rather than permissions: any enrolled device can start the
+/// connect flow or delete an account.
 /// </summary>
 [ApiController]
 [Route("api/calendar/oauth")]

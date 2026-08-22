@@ -68,7 +68,7 @@ public class GoogleTokenProvider(
             {
                 // Revoked, or - while the operator's consent screen is still in
                 // Testing - simply older than Google's seven-day cap on refresh
-                // tokens (docs/plans/kiosk.md, accepted risks).
+                // tokens (docs/kiosk-architecture.md, Connecting an account).
                 await NeedsReauthAsync(account, "Google rejected the stored authorization (invalid_grant). Reconnect the account.", ct);
                 return null;
             }

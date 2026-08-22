@@ -111,7 +111,9 @@ each of the actuation endpoints above is recorded action by action with a
 ## Family calendar
 
 Google Calendar, connected per-account by an admin, synced on a schedule, read
-from Postgres by the dashboard ([`plans/kiosk.md`](plans/kiosk.md) track A).
+from Postgres by the dashboard. Design, token handling, and the Google Cloud
+setup an operator needs are in
+[`kiosk-architecture.md`](kiosk-architecture.md#family-calendar).
 
 The schedule is `SyncCalendarEvents`, every five minutes, caching only today
 through today + `CalendarAgendaDays` — so nothing in the request path calls
@@ -148,7 +150,7 @@ a 302 to `/apps/admin/calendars?connected=<email>` or `?error=<code>`.
 
 Weather watches, warnings, and advisories plus air quality, fetched on a
 schedule and read from Postgres by the dashboard
-([`plans/kiosk.md`](plans/kiosk.md) track B).
+([`kiosk-architecture.md`](kiosk-architecture.md#outdoor-hazards)).
 
 Both halves sit behind a provider interface selected by a setting —
 `WeatherAlertProvider` (default `nws`, keyless and **US-only**) and

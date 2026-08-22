@@ -111,6 +111,39 @@ order of preference:
   A tablet that lost its cookie is a physical visit either way; `AUTH_MODE=off`
   gets the house back, not the tablet's enrollment.
 
+## Connecting a family calendar
+
+The kiosk shows a today-and-tomorrow agenda from any number of Google accounts,
+with each calendar behind those accounts toggled on or off individually. Aerie
+owns the OAuth client, so this is operator setup done once, not a per-family-
+member sign-in. The design is in
+[docs/kiosk-architecture.md](docs/kiosk-architecture.md#family-calendar).
+
+1. In a Google Cloud project, enable the **Calendar API** and create an OAuth
+   client of type *Web application* whose authorized redirect URI is exactly
+   `https://home.${DOMAIN}/api/calendar/oauth/callback`.
+2. Publish the consent screen to **Production**. In *Testing*, Google expires
+   refresh tokens after seven days — which shows up as the calendar quietly
+   going stale every week rather than as an error. Unverified is fine at family
+   scale; Google allows it behind a warning screen, capped at 100 users.
+3. On the admin app's Settings page, set **Google client ID** and **Google
+   client secret**. The secret is stored obfuscated and redacted on read, the
+   same as the Home Assistant token and the kiosk Wi-Fi password. Set **Google
+   OAuth redirect URI** only if a proxy makes Aerie derive a URI that doesn't
+   match what you registered — it is an exact-match override, normally left
+   blank.
+4. On the admin app's **Calendars** page, click **Connect a Google account** and
+   complete Google's consent screen. Repeat for as many accounts as you like.
+5. Include the calendars that belong on the wall. Nothing is included by
+   default — connecting an account should not put a work calendar in the
+   kitchen. Events appear within five minutes, or immediately via **Sync events now**.
+
+Outdoor hazards need no setup at all: weather alerts and air quality both
+default to keyless providers. What they do need is the site's latitude and
+longitude on the Settings page, and the **Active alerts** card at the bottom of
+that page is there to confirm the configuration produced something. An empty
+card on a calm, clean-air day is a working configuration, not a broken one.
+
 ## Kiosk tablet install
 
 See [docs/kiosk-architecture.md](docs/kiosk-architecture.md) for how the kiosk app, its CI build, and QR provisioning fit together. To put a fresh tablet into service:

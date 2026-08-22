@@ -51,7 +51,7 @@ public interface IGoogleCalendarClient
 
 /// <summary>
 /// The two Calendar v3 endpoints Aerie reads, called directly rather than
-/// through Google.Apis.Calendar.v3 for the reason in docs/plans/kiosk.md: the
+/// through Google.Apis.Calendar.v3 for the reason in docs/kiosk-architecture.md: the
 /// SDK's value is a credential store, and Aerie's credentials live in Postgres.
 ///
 /// Fail-soft like GoogleOAuthService and WeatherService: every path returns a

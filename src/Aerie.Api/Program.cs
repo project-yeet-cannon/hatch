@@ -146,7 +146,7 @@ builder.Services.AddTransient<IHomeAssistantCommandService, HomeAssistantCommand
 // docs/climate-brain-architecture.md Phase 1).
 builder.Services.AddScoped<IClimateCommandService, ClimateCommandService>();
 
-// Family calendar (docs/plans/kiosk.md track A). One named client covers every
+// Family calendar (docs/kiosk-architecture.md). One named client covers every
 // host Google answers on - accounts.google.com and oauth2.googleapis.com for
 // OAuth, www.googleapis.com for the Calendar API - so it carries no
 // BaseAddress and the services call absolute URLs. The explicit timeout is the
@@ -160,7 +160,7 @@ builder.Services.AddScoped<ICalendarDiscoveryService, CalendarDiscoveryService>(
 builder.Services.AddScoped<ICalendarSyncService, CalendarSyncService>();
 builder.Services.AddScoped<ICalendarAgendaService, CalendarAgendaService>();
 
-// Outdoor hazards (docs/plans/kiosk.md track B). Providers are registered
+// Outdoor hazards (docs/kiosk-architecture.md). Providers are registered
 // against their interface rather than their own type: the resolver takes the
 // whole IEnumerable and picks by Name, so adding a country's provider is one
 // more line here and nothing else. Singletons because the resolver is one, and

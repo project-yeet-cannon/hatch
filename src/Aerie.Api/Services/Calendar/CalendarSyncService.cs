@@ -24,7 +24,7 @@ public interface ICalendarSyncService
 
 /// <summary>
 /// The fetch half of the calendar's fetch/cache/read split
-/// (docs/plans/kiosk.md): this talks to Google and writes Postgres, and
+/// (docs/kiosk-architecture.md): this talks to Google and writes Postgres, and
 /// GET /api/dashboard reads Postgres and never talks to Google.
 ///
 /// It caches a *window*, not a calendar. Only today through

@@ -25,7 +25,7 @@ public interface IHazardSyncService
 }
 
 /// <summary>
-/// The fetch half of the hazard fetch/cache/read split (docs/plans/kiosk.md
+/// The fetch half of the hazard fetch/cache/read split (docs/kiosk-architecture.md
 /// track B): this talks to the providers and writes Postgres, and
 /// GET /api/dashboard reads Postgres and never talks to a provider.
 ///

@@ -4,7 +4,7 @@ using Quartz;
 namespace Aerie.Api.Jobs;
 
 /// <summary>
-/// Keeps the cached agenda fresh (docs/plans/kiosk.md phase A5). All of the
+/// Keeps the cached agenda fresh (docs/kiosk-architecture.md). All of the
 /// work is CalendarSyncService's; this is the schedule and nothing else, the
 /// same split ReconcileCommands keeps.
 ///

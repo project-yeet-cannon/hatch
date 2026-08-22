@@ -30,10 +30,8 @@ full of active work, which is how a plan directory stops being read.
 | Plan | What it covers |
 |---|---|
 | [`swarm/`](swarm/design.md) | Moving from one Windows Docker host to a 3-node k3s cluster. Split per phase; phases 0–3 complete |
-| [`brain.md`](brain.md) | The climate brain — CFD-informed control |
 | [`cameras.md`](cameras.md) | Camera integration |
 | [`video.md`](video.md) | Video capture and streaming |
-| [`kiosk.md`](kiosk.md) | Kiosk upgrades — Google Calendar agenda and outdoor hazard alerts |
 | [`gather.md`](gather.md) | Gather — shared family shopping lists, on the kiosk and in the family PWA |
 
 ## Conventions

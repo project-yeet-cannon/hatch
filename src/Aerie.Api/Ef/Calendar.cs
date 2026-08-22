@@ -39,7 +39,7 @@ public class EfCalendarAccount
     /// <summary>Optional friendlier label for the admin list ("Work", "Nathan"). Null falls back to AccountEmail.</summary>
     public string? DisplayName { get; set; }
 
-    /// <summary>The long-lived OAuth refresh token, stored obfuscated (SecretObfuscator, not encryption - see docs/plans/kiosk.md's accepted risks).</summary>
+    /// <summary>The long-lived OAuth refresh token, stored obfuscated (SecretObfuscator, not encryption - see docs/secrets-architecture.md).</summary>
     public required string RefreshToken { get; set; }
 
     /// <summary>The current access token, stored obfuscated. Null until GoogleTokenProvider first mints one.</summary>
@@ -115,7 +115,7 @@ public class EfCalendar
 
 /// <summary>
 /// A cached event from one calendar. Written by the sync job, read by the
-/// dashboard BFF - nothing in the request path talks to Google (docs/plans/kiosk.md).
+/// dashboard BFF - nothing in the request path talks to Google (docs/kiosk-architecture.md).
 /// </summary>
 [Table("CalendarEvents")]
 [Index(nameof(CalendarId), nameof(ProviderEventId), IsUnique = true)]

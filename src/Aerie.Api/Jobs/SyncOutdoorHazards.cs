@@ -5,7 +5,7 @@ namespace Aerie.Api.Jobs;
 
 /// <summary>
 /// Keeps the cached weather alerts and air quality samples fresh
-/// (docs/plans/kiosk.md phase B4). All of the work is HazardSyncService's;
+/// (docs/kiosk-architecture.md). All of the work is HazardSyncService's;
 /// this is the schedule and nothing else, the same split SyncCalendarEvents
 /// keeps.
 ///

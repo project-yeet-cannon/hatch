@@ -370,7 +370,7 @@ body {
   margin-top: 7px;
 }
 
-/* ---- Family agenda (docs/plans/kiosk.md phase C1) ----------------------- */
+/* ---- Family agenda (docs/kiosk-architecture.md) ----------------------- */
 
 .hf-cal {
   display: flex;
@@ -519,7 +519,7 @@ body {
   background: var(--warm);
 }
 
-/* ---- Outdoor hazards (docs/plans/kiosk.md phase C1) --------------------- */
+/* ---- Outdoor hazards (docs/kiosk-architecture.md) --------------------- */
 
 .hf-alerts {
   display: flex;
