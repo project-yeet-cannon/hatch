@@ -224,6 +224,9 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Lint and build
+      # testDebugUnitTest covers CircadianBrightness.kt, which is a deliberate
+      # port of the dashboard's circadianTheme.ts - the two drifting apart is
+      # only detectable as a test failure, never as a build one.
+      - name: Lint, test and build
         working-directory: apps/kiosk
-        run: ./gradlew lint assembleDebug
+        run: ./gradlew lint testDebugUnitTest assembleDebug

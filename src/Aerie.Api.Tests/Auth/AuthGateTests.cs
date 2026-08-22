@@ -26,6 +26,7 @@ public class AuthGateTests
     [InlineData("/api/ui-logs")]
     [InlineData("/api/vm-console-logs")]
     [InlineData("/api/kiosk/provisioning-info")]
+    [InlineData("/api/sun-events")]
     [InlineData("/apps/auth/")]
     [InlineData("/apps/auth/r/K3M9P2QT")]
     [InlineData("/apps/auth/assets/index-BGJobmXl.js")]

@@ -197,7 +197,7 @@ export function ListPage() {
  * Deliberately the opposite of the kiosk overlay, which puts its field at the
  * top: a phone browser lifts a focused input above the keyboard, and on the
  * wall tablet whether the viewport resizes at all is untested
- * (docs/plans/gather.md, Finding 4). Same field, two right answers.
+ * (docs/kiosk-architecture.md, "Text entry on the wall"). Same field, two right answers.
  */
 function AddItemForm({ listId, onAdded }: { listId: string; onAdded: () => void }) {
   const [name, setName] = useState('');

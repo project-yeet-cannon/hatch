@@ -44,10 +44,11 @@ jobs:
     name: Phase 6 gate
     runs-on: [self-hosted, '${{ inputs.host }}']
 
-    # Three SSH round trips against the primary node, one extra connection
-    # per node for the vm.max_map_count/etcd checks, plus three direct HTTPS
-    # connections to the VIP. Nothing here waits on a reconciliation, so 10m
-    # failing means something is hanging rather than being slow.
+    # Four SSH round trips against the primary node (Probe, Series, Delivery
+    # and the per-node loop's first connection), one extra connection per node
+    # for the vm.max_map_count/etcd checks, plus three direct HTTPS connections
+    # to the VIP. Nothing here waits on a reconciliation, so 10m failing means
+    # something is hanging rather than being slow.
     timeout-minutes: 10
 
     steps:

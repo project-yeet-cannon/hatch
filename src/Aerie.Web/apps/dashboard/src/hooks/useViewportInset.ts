@@ -9,7 +9,7 @@ const MEANINGFUL_INSET_PX = 40;
  *
  * The kiosk activity declares no `android:windowSoftInputMode` and runs
  * immersive, so whether GeckoView resizes the viewport for the IME is untested
- * (docs/plans/gather.md, Finding 4). This is deliberately written so the answer
+ * (docs/kiosk-architecture.md, "Text entry on the wall"). This is deliberately written so the answer
  * doesn't matter: if the visual viewport shrinks, callers pad by that much and
  * the bottom of a scrolling list stays reachable; if it never shrinks - or the
  * API isn't there at all - the value stays 0 and nothing changes. It is a hedge

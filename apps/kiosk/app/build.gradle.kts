@@ -78,6 +78,11 @@ android {
 }
 
 dependencies {
+    // CircadianBrightness.kt is deliberately Android-free so the curve can be
+    // tested on the JVM - the phase boundaries and the amber blend are the one
+    // part of this app whose correctness isn't obvious by looking at a tablet.
+    testImplementation("junit:junit:4.13.2")
+
     // Newer androidx.core releases require compileSdk 37 / AGP 9.1+; staying on
     // compileSdk 34 (max recommended for AGP 8.5.2) pins these accordingly.
     implementation("androidx.core:core-ktx:1.13.1")

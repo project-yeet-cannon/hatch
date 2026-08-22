@@ -188,6 +188,31 @@ is not the same as clean air.
 |---|---|---|
 | `GET /api/alerts` | `HazardAlert[]` | The same list `GET /api/dashboard` carries, for the admin Settings page's "Active alerts" card. Read-only, DB-only, and empty on a calm day — which is a working configuration, not a broken one. |
 
+## Gather
+
+Shared shopping lists, read and written by both the family shell PWA and the
+kiosk overlay. Design and reasoning in [`gather.md`](gather.md); the module
+seam it sits behind is in
+[`family-apps-architecture.md`](family-apps-architecture.md). Storage Helper's
+surface is documented with the app instead, in
+[`storage-helper.md`](storage-helper.md).
+
+| Method & route | Returns | Notes |
+|---|---|---|
+| `GET /api/gather/lists` | `ListSummaryDto[]` | Name, icon, colour and **both** counts — open and checked. A lists screen draws from this alone. Alphabetical. |
+| `POST /api/gather/lists` | `ListSummaryDto` | `201`. Icon is an emoji and colour is a palette *name* the client resolves; the server never interprets either. |
+| `GET /api/gather/lists/{id:guid}` | `ListDto` | The list and its items in one response, in server-decided display order: unchecked oldest-first, then checked most-recently-checked first. Both clients poll this. |
+| `PUT /api/gather/lists/{id:guid}` · `DELETE …` | `ListSummaryDto` / 204 | Delete cascades to the items — a list is an item's only address. |
+| `POST /api/gather/lists/{id:guid}/items` | `ItemDto` | **An upsert on the normalized name**, not an insert: re-adding something already on the list brings it back *un-checked*, merging a quantity or note only when the request carries one. `200`, not `201` — on a re-add nothing was created. Enforced by a unique index on `(ListId, NameNormalized)`, so two devices adding "milk" at once produce one row. |
+| `PUT /api/gather/lists/{id:guid}/items/{itemId:guid}` | `ItemDto` | Overwrites exactly what it is given, nulls included; that is how a wrong quantity comes off. Renaming onto a name already on the list is a `409`, never a silent merge. Never touches the checkbox. |
+| `POST …/items/{itemId:guid}/check` · `…/uncheck` | `ItemDto` | Its own endpoint rather than a field on the edit, so the collision that actually happens — a phone checking things off in an aisle against a rename typed at the wall a second earlier — structurally cannot clobber text. |
+| `DELETE …/items/{itemId:guid}` | 204 | Scoped by list id, so an item id from another list is a `404` rather than a cross-list edit. |
+| `POST /api/gather/lists/{id:guid}/clear-checked` | `ClearCheckedResult` | Sweeps everything already in the cart and reports the count, so the client can say what it removed rather than diffing a re-fetch. |
+
+Text lengths are validated rather than truncated — item name 120, quantity 32,
+note 200, list name 60 — so over-long input is a `400` naming the field, not a
+`500` out of the column.
+
 ## Settings
 
 | Method & route | Returns | Notes |

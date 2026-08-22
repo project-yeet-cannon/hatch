@@ -32,7 +32,7 @@ full of active work, which is how a plan directory stops being read.
 | [`swarm/`](swarm/design.md) | Moving from one Windows Docker host to a 3-node k3s cluster. Split per phase; phases 0–3 complete |
 | [`cameras.md`](cameras.md) | Camera integration |
 | [`video.md`](video.md) | Video capture and streaming |
-| [`gather.md`](gather.md) | Gather — shared family shopping lists, on the kiosk and in the family PWA |
+| [`kiosk_brightness.md`](kiosk_brightness.md) | Backlight, standby and presence control for the wall tablets |
 
 ## Conventions
 

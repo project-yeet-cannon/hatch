@@ -45,7 +45,7 @@ const CONFIRM_WINDOW_MS = 4_000;
  * It has to expire: another device un-checking the same item is a disagreement
  * the server has to win, and without a deadline the wall would hold a tick that
  * is no longer on the list until someone closed the overlay. The family shell
- * settled on the same 30s for the same reason (docs/plans/gather.md, Phase 2).
+ * settled on the same 30s for the same reason (docs/gather.md, "Freshness").
  */
 const OPTIMISTIC_TTL_MS = 30_000;
 
@@ -347,7 +347,7 @@ function ListScreen({
           aria-label="Add an item"
           type="text"
           // Autocorrect mangling a brand name is worse than a lowercase one, and
-          // a shopping list is exactly where it would (see docs/plans/gather.md).
+          // a shopping list is exactly where it would (see docs/kiosk-architecture.md).
           autoCorrect="off"
           autoCapitalize="words"
           autoComplete="off"

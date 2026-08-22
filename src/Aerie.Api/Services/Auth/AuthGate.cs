@@ -111,6 +111,16 @@ public class AuthGate(
         // about to join with anyway.
         "/api/kiosk/provisioning-info",
 
+        // The kiosk *shell* drives the tablet backlight from the day's sun
+        // events (DisplayController.kt) and calls this over plain
+        // HttpURLConnection, which shares no cookie jar with the GeckoView the
+        // page runs in - the page's grant cannot cover it. Exposed: sunrise and
+        // sunset times, from which the site's approximate latitude is
+        // inferable. That is strictly less than the line above already hands
+        // out, and the endpoint takes lat/lon overrides, so it is a solar
+        // calculator far more than it is a location.
+        "/api/sun-events",
+
         // The sign-in shell and the two endpoints it calls. Gating these is an
         // infinite redirect loop. Its short alias /auth is exempt too, just
         // below - exactly rather than by prefix.

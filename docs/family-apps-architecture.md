@@ -2,15 +2,22 @@
 
 ## Summary
 
-Aerie hosts a suite of small household apps — the first is
-[Storage Helper](storage-helper.md) — as **modules inside the existing
-`Aerie.Api` process**, surfaced through **one shell PWA** at `/apps/family/`.
+Aerie hosts a suite of small household apps — [Storage Helper](storage-helper.md)
+and [Gather](gather.md) so far — as **modules inside the existing `Aerie.Api`
+process**, surfaced through **one shell PWA** at `/apps/family/`.
 
 The design goal is not any individual app. It is that app #2 costs a folder and
 an afternoon: one folder under `src/Aerie.Api/Modules/`, one folder under the
 shell's `src/modules/`, one line in each registry. No container, no database, no
 ingress, no backup entry, no uptime monitor, no CI job, and no edit to
 `Program.cs`, the Dockerfile, or any deployment manifest.
+
+App #2 is [Gather](gather.md), and it is the evidence rather than the claim: a
+module folder, a shell module folder, one line in each registry, and nothing on
+[What must stay untouched](#what-must-stay-untouched) was edited. The two things
+it *did* cost the platform are both named below — four pieces of shell plumbing
+that moved up out of Storage, and an OpenAPI schema-id collision that only a
+second module could have found.
 
 Everything below is the reasoning behind that property, and the tripwires that
 would invalidate it. The step-by-step mechanics of adding an app live next to the
@@ -138,19 +145,21 @@ tailnet in the first place.
 Aerie.Api (one process, one deploy)
 ├── Controllers/, Services/, Ef/        home-automation domain, layer-first
 ├── Modules/
-│   └── Storage/                        ← the whole app, one folder
-│       ├── StorageContext.cs           schema "storage", own migration history
-│       ├── Entities.cs
-│       ├── StorageController.cs        /api/storage/*
-│       ├── StorageService.cs
-│       └── Migrations/
+│   ├── Storage/                        ← the whole app, one folder
+│   │   ├── StorageContext.cs           schema "storage", own migration history
+│   │   ├── Entities.cs
+│   │   ├── StorageController.cs        /api/storage/*
+│   │   ├── StorageService.cs
+│   │   └── Migrations/
+│   └── Gather/                         ← app #2, same shape, schema "gather"
 └── wwwroot/apps/
     ├── dashboard/ admin/ docs/ modeler/    standalone SPAs, separate builds
     └── family/                             ← the shell PWA
 
 Postgres (one database, one backup)
 ├── public.*      home-automation tables
-└── storage.*     locations, crates, items
+├── storage.*     locations, crates, items
+└── gather.*      lists, items
 ```
 
 ### The seams that make an app cheap
@@ -180,7 +189,8 @@ that app #2 edits nothing outside its own two folders:
   learns a module's internal screens: a module renders its own `<Routes>` under
   `/apps/family/<id>/`.
 
-Two smaller conventions belong with those, because both have already bitten:
+Three smaller conventions belong with those, because all three have already
+bitten:
 
 - **Style modules out of `src/theme.css` tokens and nothing else.** That is the
   entire mechanism keeping the suite looking like one product; a module with its
@@ -189,6 +199,29 @@ Two smaller conventions belong with those, because both have already bitten:
   paths.** `..` resolves against the *route* hierarchy, and a module that renders
   links from an index route, a splat route, and ordinary routes alike means three
   different things by it.
+- **DTO names are a module's own, and the OpenAPI document has to agree.**
+  Swashbuckle keys schemas on the bare type name, so Storage and Gather both
+  having an `ItemDto` served a stack trace at `/swagger` for the *whole* API.
+  Fixed at the platform level rather than by renaming the newcomer —
+  [`Common/SwaggerSchemaIds.cs`](../src/Aerie.Api/Common/SwaggerSchemaIds.cs)
+  qualifies a module's schemas with its folder name and leaves everything
+  outside `Modules/` alone. Renaming would have handed the identical failure to
+  whoever adds module three.
+
+### What app #2 moved up into the shell
+
+Gather wanted four pieces of Storage's plumbing *verbatim*, which is the bar for
+promoting anything into the shell — shared when a second app needs it unchanged,
+not in anticipation. `HttpError` and `createClient` are now
+[`lib/http.ts`](../src/Aerie.Web/apps/family/src/lib/http.ts), `useResource`
+generalized for polling is `lib/useResource.ts`, `lib/usePolling.ts` is new, and
+the notice components are `components/Notices.tsx`. Storage's side of it was
+imports, one class name, and 278 deleted lines; its module-prefixed notice
+classes became shell-level ones in `App.css`.
+
+The shape of that move is the point: the second app is what tells you which
+abstractions were real, and a module that finds itself importing from a sibling
+module's folder is the signal to promote rather than to reach across.
 
 ### Deep links are load-bearing
 

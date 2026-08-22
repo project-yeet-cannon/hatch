@@ -24,6 +24,11 @@ import org.mozilla.geckoview.WebRequestError
 
 private const val DASHBOARD_URL = "https://kiosk.landis.family/"
 private const val DASHBOARD_HOST = "kiosk.landis.family"
+
+// Derived from DASHBOARD_URL rather than written out again: the host already
+// appears here and in KioskLogger, and a third literal is a third thing to
+// miss when this app is built for a different installation.
+private const val SUN_EVENTS_URL = DASHBOARD_URL + "api/sun-events"
 private const val RETRY_DELAY_MS_INITIAL = 2_000L
 private const val RETRY_DELAY_MS_MAX = 30_000L
 
@@ -49,6 +54,7 @@ class MainActivity : AppCompatActivity() {
     private val reloadHandler = Handler(Looper.getMainLooper())
     private var currentRetryDelayMs = RETRY_DELAY_MS_INITIAL
     private val updateManager = UpdateManager(this)
+    private val displayController by lazy { DisplayController(this, SUN_EVENTS_URL) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -61,6 +67,7 @@ class MainActivity : AppCompatActivity() {
 
         enterLockTaskIfDeviceOwner()
         updateManager.start()
+        displayController.start()
         reloadHandler.postDelayed(periodicReload, PERIODIC_RELOAD_MS)
 
         KioskLogger.info(
@@ -204,6 +211,7 @@ class MainActivity : AppCompatActivity() {
         retryHandler.removeCallbacksAndMessages(null)
         reloadHandler.removeCallbacksAndMessages(null)
         updateManager.stop()
+        displayController.stop()
         super.onDestroy()
     }
 }

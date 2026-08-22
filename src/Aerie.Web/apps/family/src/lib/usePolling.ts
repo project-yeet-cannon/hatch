@@ -5,7 +5,7 @@ import { useEffect, useRef } from 'react';
  * it has a network.
  *
  * Polling is how two devices converge here - the kitchen and the aisle - and
- * per docs/plans/gather.md it is deliberately not a realtime transport. Which
+ * per docs/gather.md it is deliberately not a realtime transport. Which
  * makes *when not to poll* the interesting half:
  *
  * - Hidden pages don't tick. A phone in a pocket asking every ten seconds is
