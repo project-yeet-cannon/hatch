@@ -87,6 +87,35 @@
   font-weight: 600;
 }
 
+/* ---- Notices ---- */
+
+/*
+  The three states any screen in any module can be in, plus the inline write
+  failure. Shell chrome rather than a module's business - see
+  src/components/Notices.tsx.
+*/
+
+.note {
+  padding: 32px 0;
+  color: var(--muted);
+  text-align: center;
+}
+
+.note p {
+  margin: 0 0 8px;
+}
+
+.note-error {
+  color: var(--danger);
+}
+
+.inline-error {
+  margin: 8px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+
 /* ---- Bottom tab bar ---- */
 
 .shell-tabs {

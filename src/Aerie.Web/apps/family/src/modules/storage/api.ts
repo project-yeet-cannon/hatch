@@ -1,4 +1,4 @@
-import { handledUnauthorized } from '../../lib/signIn';
+import { asJson, createClient } from '../../lib/http';
 import type {
   Crate,
   CrateDetail,
@@ -11,71 +11,13 @@ import type {
 } from './types';
 
 /**
- * Storage Helper's client. Same shape as apps/admin's api/client.ts, with two
- * differences that matter for a phone in a garage:
- *
- * - Reads take an AbortSignal, so a screen that unmounts mid-request (tap a
- *   crate, tap back) doesn't land its response on a dead component.
- * - Failures carry the server's own message and status. `HttpError.status` is
- *   what lets the crate screen tell "no crate with that code" apart from "the
- *   API is unreachable", which are the same red box otherwise and want
- *   completely different words.
+ * Storage Helper's routes. Everything underneath the routes - the abort signal,
+ * the sign-in redirect, the server's own error message - is the shell's
+ * createClient (src/lib/http.ts), which this file used to own before Gather
+ * became the second module needing it.
  */
 
-const BASE = '/api/storage';
-
-export class HttpError extends Error {
-  // A field and an assignment rather than a constructor parameter property:
-  // tsconfig sets erasableSyntaxOnly, so no TypeScript here may emit runtime code.
-  readonly status: number;
-
-  constructor(status: number, message: string) {
-    super(message);
-    this.name = 'HttpError';
-    this.status = status;
-  }
-}
-
-/**
- * ASP.NET returns `BadRequest("name is required")` as a bare JSON string and
- * unhandled failures as a ProblemDetails object. Both are worth showing - these
- * messages ("quantity must be at least 1") are the actual explanation, and
- * "400 Bad Request" is not.
- */
-function messageFrom(body: string, res: Response): string {
-  const fallback = `${res.status} ${res.statusText}`.trim();
-  if (!body) return fallback;
-
-  try {
-    const parsed: unknown = JSON.parse(body);
-    if (typeof parsed === 'string') return parsed;
-    if (parsed && typeof parsed === 'object') {
-      const problem = parsed as { detail?: string; title?: string };
-      return problem.detail ?? problem.title ?? fallback;
-    }
-  } catch {
-    // Not JSON - plain text is already the message.
-    return body;
-  }
-  return fallback;
-}
-
-async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { Accept: 'application/json', ...(init?.body ? { 'Content-Type': 'application/json' } : {}) },
-    ...init,
-  });
-
-  // A cold-scanned bin label lands here un-enrolled: sign in, then the bin.
-  if (handledUnauthorized(res)) return await new Promise<T>(() => {});
-
-  // 204 responses (every DELETE here) have no body, and res.json() throws on empty input.
-  const text = await res.text();
-  if (!res.ok) throw new HttpError(res.status, messageFrom(text, res));
-  return (text ? JSON.parse(text) : undefined) as T;
-}
-
-const asJson = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
+const { fetchJson } = createClient('/api/storage');
 
 // ---- Locations ----
 

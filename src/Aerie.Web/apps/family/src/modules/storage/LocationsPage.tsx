@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
+import { EmptyNote, ErrorNote, InlineError, Loading } from '../../components/Notices';
+import { useMutation, useResource } from '../../lib/useResource';
 import { createLocation, deleteLocation, getLocations, updateLocation } from './api';
-import { EmptyNote, ErrorNote, InlineError, Loading } from './components';
 import type { Location } from './types';
-import { useMutation, useResource } from './useResource';
 
 /**
  * Where crates live. Flat by design - nesting is a guess until someone actually

@@ -40,29 +40,6 @@
   color: #ffffff;
 }
 
-/* ---- Notices: the three states any screen here can be in ---- */
-
-.storage-note {
-  padding: 32px 0;
-  color: var(--muted);
-  text-align: center;
-}
-
-.storage-note p {
-  margin: 0 0 8px;
-}
-
-.storage-error {
-  color: var(--danger);
-}
-
-.storage-inline-error {
-  margin: 8px 0 0;
-  color: var(--danger);
-  font-size: 13px;
-  font-weight: 600;
-}
-
 .storage-count {
   margin: 0 0 8px;
   font-size: 13px;

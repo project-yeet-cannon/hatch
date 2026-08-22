@@ -1,10 +1,11 @@
 # Gather
 
-**Status:** Phase 1 done — the `gather` module is in and exercised end to end
-against Postgres and Swagger. Phases 2 and 3 are unstarted and independent of
-each other. The kiosk text-entry risk that used to gate this plan is **resolved**
-(Finding 4) — no blocking gates remain, and the design fork it carried is
-closed.
+**Status:** Phases 1 and 2 done — the `gather` module is in and exercised end to
+end against Postgres and Swagger, and the family PWA is built and linting clean
+(UI verification pending). Phase 3 is unstarted; it depends on nothing in Phase
+2 except the two inherited contracts noted at the end of it. The kiosk
+text-entry risk that used to gate this plan is **resolved** (Finding 4) — no
+blocking gates remain, and the design fork it carried is closed.
 
 Shared shopping lists for the family, reachable from the kitchen wall and from a
 phone, backed by one source of truth in `Aerie.Api`. Groceries are the use case
@@ -114,7 +115,7 @@ Read before starting; each one changes an estimate.
 
 ---
 
-## Phase 1 — The `gather` module
+## [x] Phase 1 — The `gather` module
 
 Backend, complete and independently verifiable through Swagger before any UI
 exists.
@@ -204,36 +205,63 @@ duplicate is a line someone crosses off while a silent merge loses a quantity.
 Setting `Name` recomputes `NameNormalized`, so no write path can drift from the
 unique index.
 
-## Phase 2 — Gather in the family PWA
+## [x] Phase 2 — Gather in the family PWA
 
 Independent of Phase 3 — can proceed in parallel.
 
-- [ ] `src/Aerie.Web/apps/family/src/modules/gather/`: `GatherApp.tsx`,
-      `routes.ts`, `api.ts`, `types.ts`, `components.tsx`, `gather.css`.
-- [ ] Registry entry — id `gather`, title `Gather`, icon, and a tagline in the
-      voice of Storage's ("Crates, labels, and where the drill went").
-- [ ] Reuse `modules/storage/useResource.ts` as the fetch/refresh pattern rather
-      than inventing a second one. If it needs generalizing, move it up to
-      `src/lib/` in the same change.
-- [ ] **Lists screen** — cards per list showing open count, tap to open, plus
-      the empty state offering one-tap starters (Grocery, Hardware, Pharmacy,
-      Warehouse).
-- [ ] **List screen** — checkbox rows, checked items sunk to the bottom and
-      struck through, an add field pinned above the keyboard, and a
-      **Clear checked** action showing the count it will remove.
-- [ ] Optimistic check/uncheck, reconciling against the next poll. This is the
-      one interaction that happens while walking, and it must not wait on a
-      round trip.
-- [ ] **List settings** — rename, icon, color, delete (with a confirm that names
-      the list and its item count).
-- [ ] Poll the open list on an interval so the kitchen and the aisle converge;
-      pause polling when the document is hidden.
-- [ ] Style exclusively from `src/theme.css` tokens — no module palette.
-- [ ] `npm run build` and `npm run lint` clean. **UI verification is the user's**
-      (per standing preference); the build and lint are the bar for handing it
-      over.
+- [x] `src/Aerie.Web/apps/family/src/modules/gather/`: `GatherApp.tsx`,
+      `routes.ts`, `api.ts`, `types.ts`, `components.tsx`, `gather.css`, plus
+      `ListsPage.tsx`, `ListPage.tsx` and `palette.ts`.
+- [x] Registry entry — id `gather`, title `Gather`, icon 🧺, tagline
+      "Milk, batteries, and what we're out of".
+- [x] **The plumbing moved up to the shell rather than being reused in place.**
+      `useResource` needed generalizing for polling, and it imported `HttpError`
+      from Storage's `api.ts`, so the two travelled together:
+      [`lib/http.ts`](../../src/Aerie.Web/apps/family/src/lib/http.ts)
+      (`HttpError`, `createClient(base)`),
+      [`lib/useResource.ts`](../../src/Aerie.Web/apps/family/src/lib/useResource.ts),
+      [`lib/usePolling.ts`](../../src/Aerie.Web/apps/family/src/lib/usePolling.ts)
+      (new), and
+      [`components/Notices.tsx`](../../src/Aerie.Web/apps/family/src/components/Notices.tsx)
+      — all four wanted verbatim by module two, which is the bar `App.css` sets.
+      Storage's side of it is imports, one class name, and 278 deleted lines.
+      `.storage-note` / `.storage-error` / `.storage-inline-error` are now
+      `.note` / `.note-error` / `.inline-error` in `App.css`.
+- [x] **Lists screen** — cards per list showing open count (and what's already in
+      the cart, when there is any), tap to open, plus the empty state offering
+      one-tap starters (Grocery, Hardware, Pharmacy, Warehouse).
+- [x] **List screen** — checkbox rows, checked items struck through, an add field
+      pinned above the keyboard, and a **Clear checked** action showing the count
+      it will remove.
+- [x] Optimistic check/uncheck, reconciling against the next poll.
+- [x] **List settings** — rename, icon, color, delete (with a confirm that names
+      the list and its item count). One `ListForm` serves creation and settings
+      both.
+- [x] Poll the open list every 10s; paused when the document is hidden, and
+      fired immediately on becoming visible again.
+- [x] Style exclusively from `src/theme.css` tokens — no module palette.
+- [x] `npm run build` and `npm run lint` clean. **UI verification is the user's**
+      (per standing preference).
 
-## Phase 3 — Kiosk overlay
+### Two things Phase 3 inherits
+
+- **A list's colour is a palette *name*, not a hex.** Six of them — `sky`,
+  `moss`, `clay`, `plum`, `sun`, `slate` — defined in
+  [`palette.ts`](../../src/Aerie.Web/apps/family/src/modules/gather/palette.ts)
+  and resolved to light/dark pairs in `gather.css`. A hex chosen in daylight is
+  wrong in dark mode forever, and the kiosk would have had to re-derive a
+  readable version of whatever a phone picked. **The overlay must ship the same
+  six names**, and an unrecognised value falls back to the first rather than
+  rendering untinted.
+- **Optimistic state, server-owned order.** Tapping a row flips it instantly but
+  does *not* re-sort; a debounced refresh (500ms after the last tap) brings back
+  the server's ordering, so no comparator is written twice. The optimistic value
+  is defended against incoming reads for 30s and then abandoned — it has to
+  expire, because the service worker serves the last good body when a fetch
+  fails (`sw.js`), so a read can arrive stale, and because another device
+  un-checking the same item is a disagreement the server has to win.
+
+## [] Phase 3 — Kiosk overlay
 
 No longer gated — see Finding 4. Independent of Phase 2.
 
@@ -274,7 +302,7 @@ No longer gated — see Finding 4. Independent of Phase 2.
       `?source=test` still render the whole screen.
 - [ ] `npm run build`, `npm run lint`, `npm run test` clean.
 
-## Phase 4 — Docs and dissipation
+## [] Phase 4 — Docs and dissipation
 
 - [ ] `docs/gather.md`, modeled on `docs/storage-helper.md`.
 - [ ] Add the Gather endpoints to

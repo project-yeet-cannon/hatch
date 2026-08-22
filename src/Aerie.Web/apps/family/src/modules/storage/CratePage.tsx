@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { EmptyNote, ErrorNote, InlineError, Loading } from '../../components/Notices';
+import { useMutation, useResource } from '../../lib/useResource';
 import { createItem, deleteCrate, deleteItem, getCrate, getCrateByCode, getLocations, updateCrate, updateItem } from './api';
-import { CodeChip, EmptyNote, ErrorNote, InlineError, Loading } from './components';
+import { CodeChip } from './components';
 import { cratesPath, reprintPath } from './routes';
 import type { CrateDetail, Item, Location } from './types';
-import { useMutation, useResource } from './useResource';
 
 /**
  * The scan destination, and the screen that has to be instant: everything it
@@ -30,7 +31,7 @@ export function CratePage() {
   // is "check the characters", not "request failed".
   if (crate.status === 404) {
     return (
-      <div className="storage-note">
+      <div className="note">
         <p>
           No crate {code ? <CodeChip code={code.toUpperCase()} /> : 'here'}.
         </p>

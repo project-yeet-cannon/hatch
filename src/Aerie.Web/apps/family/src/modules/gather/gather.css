@@ -1,0 +1,367 @@
+/*
+  Gather's styles, built entirely out of the shell's theme tokens (src/theme.css)
+  and nothing else - no module palette, which is the whole mechanism keeping ten
+  apps looking like one product.
+
+  Sized for a phone held one-handed while walking: the check target is the row,
+  and every secondary control is a deliberate, smaller aim.
+*/
+
+/* ---- List colours ----
+
+   A list stores a colour *name* (see palette.ts), and this is where a name
+   becomes a colour - twice, so dark mode is answered by the theme rather than
+   by whoever picked the swatch. Phase 3's kiosk overlay ships the same six.
+*/
+
+.gather-tint-sky {
+  --tint: #2f6f9e;
+  --tint-bg: rgba(47, 111, 158, 0.12);
+}
+
+.gather-tint-moss {
+  --tint: #4f9a78;
+  --tint-bg: rgba(79, 154, 120, 0.14);
+}
+
+.gather-tint-clay {
+  --tint: #c2734a;
+  --tint-bg: rgba(194, 115, 74, 0.14);
+}
+
+.gather-tint-plum {
+  --tint: #8b5f9e;
+  --tint-bg: rgba(139, 95, 158, 0.14);
+}
+
+.gather-tint-sun {
+  --tint: #b8902f;
+  --tint-bg: rgba(184, 144, 47, 0.16);
+}
+
+.gather-tint-slate {
+  --tint: #6b7f8c;
+  --tint-bg: rgba(107, 127, 140, 0.14);
+}
+
+@media (prefers-color-scheme: dark) {
+  .gather-tint-sky {
+    --tint: #6fb3dd;
+  }
+
+  .gather-tint-moss {
+    --tint: #74c3a0;
+  }
+
+  .gather-tint-clay {
+    --tint: #e0a077;
+  }
+
+  .gather-tint-plum {
+    --tint: #c19bd4;
+  }
+
+  .gather-tint-sun {
+    --tint: #ddba63;
+  }
+
+  .gather-tint-slate {
+    --tint: #a3b6c2;
+  }
+}
+
+.gather-icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: var(--tint-bg);
+  font-size: 22px;
+}
+
+/* ---- Lists screen ---- */
+
+.gather-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.gather-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: inherit;
+}
+
+.gather-card-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.gather-card-title {
+  font-weight: 700;
+}
+
+.gather-card-sub {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.gather-card-chevron {
+  margin-left: auto;
+  flex: none;
+  color: var(--muted);
+}
+
+.gather-new {
+  width: 100%;
+  margin-top: 12px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px dashed var(--line);
+}
+
+/* ---- Empty state ---- */
+
+.gather-empty {
+  padding-top: 24px;
+  text-align: center;
+}
+
+.gather-empty p {
+  margin: 4px 0 20px;
+}
+
+.gather-starters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.gather-starter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  height: auto;
+  padding: 16px;
+  font-weight: 600;
+}
+
+/* ---- List screen ---- */
+
+.gather-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.gather-head h2 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gather-back {
+  flex: none;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* A text button that reads as a link but keeps a real button's tap target. */
+.gather-link-btn {
+  margin-left: auto;
+  flex: none;
+  padding: 10px 4px;
+  color: var(--primary);
+  background: none;
+}
+
+.gather-stale {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* ---- Items ---- */
+
+.gather-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gather-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* The whole row is the check target - it is tapped one-handed while walking. */
+.gather-item-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 12px 4px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.gather-check {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.gather-item-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.gather-item-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.gather-item-note {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.gather-qty {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--primary-bg);
+  color: var(--primary-ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.gather-item.checked .gather-item-name {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+/* A write still in flight. Just enough to notice, not enough to distract. */
+.gather-item.pending {
+  opacity: 0.6;
+}
+
+.gather-item-more {
+  flex: none;
+  width: 44px;
+  padding: 0;
+  color: var(--muted);
+  background: none;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.gather-clear {
+  margin-top: 16px;
+}
+
+.gather-clear button {
+  width: 100%;
+}
+
+/* ---- Add bar ---- */
+
+/*
+  Pinned to the bottom, above the shell's tab bar - the opposite of the kiosk
+  overlay, which puts its field at the top. A phone browser lifts a focused
+  input above the keyboard; the wall tablet's behaviour is untested, so the
+  overlay is designed never to need it. Same field, two right answers.
+*/
+.gather-add {
+  position: sticky;
+  /* Above the shell's fixed tab bar, which owns the bottom of the viewport. */
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 8px);
+  z-index: 5;
+  padding: 12px 0 8px;
+  margin-top: 16px;
+  background: var(--bg);
+}
+
+.gather-add-row {
+  display: flex;
+  gap: 8px;
+}
+
+.gather-add-row button {
+  flex: none;
+}
+
+/* ---- Forms and pickers ---- */
+
+.gather-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.gather-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.gather-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Destructive action pushed to the far edge, away from Save - these are one-
+   handed taps, and the two must never be neighbours. */
+.gather-form-delete {
+  margin-left: auto;
+}
+
+.gather-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gather-swatch {
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 2px solid transparent;
+  background: var(--line);
+  font-size: 20px;
+}
+
+.gather-swatch-color {
+  background: var(--tint);
+}
+
+.gather-swatch.selected {
+  border-color: var(--primary);
+}

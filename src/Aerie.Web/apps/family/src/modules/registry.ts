@@ -31,4 +31,11 @@ export const modules: FamilyModule[] = [
     icon: '📦',
     Component: lazy(() => import('./storage/StorageApp')),
   },
+  {
+    id: 'gather',
+    title: 'Gather',
+    tagline: "Milk, batteries, and what we're out of",
+    icon: '🧺',
+    Component: lazy(() => import('./gather/GatherApp')),
+  },
 ];

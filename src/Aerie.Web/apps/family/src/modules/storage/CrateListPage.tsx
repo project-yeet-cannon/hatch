@@ -1,10 +1,11 @@
 import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { EmptyNote, ErrorNote, InlineError, Loading } from '../../components/Notices';
+import { useMutation, useResource } from '../../lib/useResource';
 import { createCrate, getCrates } from './api';
-import { CodeChip, EmptyNote, ErrorNote, InlineError, Loading } from './components';
+import { CodeChip } from './components';
 import { cratePath, labelsPath } from './routes';
 import type { Crate } from './types';
-import { useMutation, useResource } from './useResource';
 
 /**
  * Every crate, grouped by where it is - the "what's in the attic" question,

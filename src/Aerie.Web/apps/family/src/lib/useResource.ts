@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { HttpError } from './api';
+import { HttpError } from './http';
 
 /*
-  The module's data-loading plumbing: one hook for reads, one for writes, and
-  the one place that turns a thrown anything into a sentence a person can read.
+  The shell's data-loading plumbing: one hook for reads, one for writes, and the
+  one place that turns a thrown anything into a sentence a person can read.
 
-  It lives in the module rather than the shell because it's the only module so
-  far - per src/App.css, a thing moves up to the shell when a second module
-  wants it, not in anticipation of one.
+  It lived in modules/storage/ while Storage was the only module. Gather is the
+  second one that wants it, which per App.css is exactly when a thing moves up
+  here.
 */
 
 /**
@@ -26,10 +26,28 @@ export interface Resource<T> {
   error: string | null;
   status: number | null;
   loading: boolean;
-  /** Re-runs the loader - what a write calls once the server has the change. */
+  /**
+   * True when a background refresh failed but there is still data on screen.
+   * The list is out of date, not gone - which is worth saying quietly and is
+   * not worth replacing the screen over.
+   */
+  stale: boolean;
+  /** Re-runs the loader in the foreground - what a write calls once the server has the change. */
   reload: () => void;
+  /**
+   * Re-runs the loader in the background: no spinner, and a failure leaves the
+   * data alone and sets `stale` instead. This is the poll path - a list that
+   * blanks itself every time a phone walks past a thick wall is worse than a
+   * list that is ten seconds old.
+   */
+  refresh: () => void;
   /** Drops in a value the caller already has, so a write doesn't cost a round trip. */
   set: (value: T) => void;
+}
+
+interface Run {
+  n: number;
+  background: boolean;
 }
 
 /**
@@ -44,46 +62,67 @@ export interface Resource<T> {
  * actually re-run it.
  */
 export function useResource<T>(key: string, load: (signal: AbortSignal) => Promise<T>): Resource<T> {
-  const [state, setState] = useState<Omit<Resource<T>, 'reload' | 'set'>>({
+  const [state, setState] = useState<Omit<Resource<T>, 'reload' | 'refresh' | 'set'>>({
     data: null,
     error: null,
     status: null,
     loading: true,
+    stale: false,
   });
-  const [nonce, setNonce] = useState(0);
+  const [run, setRun] = useState<Run>({ n: 0, background: false });
 
   // Always call the newest closure, without the effect restarting because a
   // re-render produced a new one.
   const latest = useRef(load);
   latest.current = load;
 
+  // A new key is a different resource, never a background refresh of this one -
+  // whatever is on screen belongs to the old key and has to go.
+  const loadedKey = useRef<string | null>(null);
+
   useEffect(() => {
     const controller = new AbortController();
-    setState((prev) => ({ ...prev, loading: true }));
+    const background = run.background && loadedKey.current === key;
+    loadedKey.current = key;
+
+    if (!background) setState((prev) => ({ ...prev, loading: true }));
 
     latest.current(controller.signal).then(
       (data) => {
-        if (!controller.signal.aborted) setState({ data, error: null, status: null, loading: false });
+        if (!controller.signal.aborted) setState({ data, error: null, status: null, loading: false, stale: false });
       },
       (err: unknown) => {
         // An abort is this component going away, not a failure to report.
         if (controller.signal.aborted) return;
-        setState({
-          data: null,
-          error: errorMessage(err),
-          status: err instanceof HttpError ? err.status : null,
-          loading: false,
+
+        setState((prev) => {
+          // A background failure with something already drawn keeps it, and says
+          // so quietly. With nothing drawn there is no "stale" to offer, so it
+          // reports like any other failed read.
+          if (background && prev.data !== null) return { ...prev, loading: false, stale: true };
+
+          return {
+            data: null,
+            error: errorMessage(err),
+            status: err instanceof HttpError ? err.status : null,
+            loading: false,
+            stale: false,
+          };
         });
       },
     );
 
     return () => controller.abort();
-  }, [key, nonce]);
+  }, [key, run]);
 
   return {
     ...state,
-    reload: useCallback(() => setNonce((n) => n + 1), []),
-    set: useCallback((value: T) => setState({ data: value, error: null, status: null, loading: false }), []),
+    reload: useCallback(() => setRun((prev) => ({ n: prev.n + 1, background: false })), []),
+    refresh: useCallback(() => setRun((prev) => ({ n: prev.n + 1, background: true })), []),
+    set: useCallback(
+      (value: T) => setState({ data: value, error: null, status: null, loading: false, stale: false }),
+      [],
+    ),
   };
 }
 

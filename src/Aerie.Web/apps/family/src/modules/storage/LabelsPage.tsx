@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppConfig } from '../../lib/appConfig';
+import { EmptyNote, ErrorNote, InlineError, Loading } from '../../components/Notices';
+import { useMutation, useResource } from '../../lib/useResource';
 import { createCrateBatch, getCrates, MAX_BATCH_COUNT } from './api';
-import { EmptyNote, ErrorNote, InlineError, Loading } from './components';
 import { LabelSheet } from './LabelSheet';
 import {
   COLUMN_RANGE,
@@ -18,7 +19,6 @@ import type { LabelLayout } from './labelLayout';
 import { useQrCodes } from './qr';
 import { crateLabelUrl, cratesPath, labelsPath, reprintPath } from './routes';
 import type { Crate } from './types';
-import { useMutation, useResource } from './useResource';
 import './labels.css';
 
 /**

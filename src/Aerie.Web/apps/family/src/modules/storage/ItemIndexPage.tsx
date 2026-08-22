@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { EmptyNote, ErrorNote, Loading } from '../../components/Notices';
+import { useDebounced, useResource } from '../../lib/useResource';
 import { getItems, searchItems } from './api';
-import { CodeChip, EmptyNote, ErrorNote, Loading } from './components';
+import { CodeChip } from './components';
 import { cratePath, cratesPath } from './routes';
 import type { ItemIndexRow } from './types';
-import { useDebounced, useResource } from './useResource';
 
 /** Long enough to collapse a thumbed word into one query, short enough to feel like typing. */
 const SEARCH_DEBOUNCE_MS = 200;
