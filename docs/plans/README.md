@@ -34,7 +34,6 @@ full of active work, which is how a plan directory stops being read.
 | [`cameras.md`](cameras.md) | Camera integration |
 | [`video.md`](video.md) | Video capture and streaming |
 | [`kiosk.md`](kiosk.md) | Kiosk upgrades — Google Calendar agenda and outdoor hazard alerts |
-| [`auth.md`](auth.md) | Device-grant auth — QR enrollment, one wall in front of every app |
 
 ## Conventions
 

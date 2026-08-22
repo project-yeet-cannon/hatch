@@ -40,7 +40,7 @@ code, in [`src/Aerie.Api/Modules/README.md`](../src/Aerie.Api/Modules/README.md)
 | Frontend shape | **One shell SPA**, micro-apps as lazily-loaded route modules |
 | Client platform | **PWA** (installed to home screen). Native iOS deferred, not rejected |
 | Access | **Tailnet only** — no public DNS, no public ingress |
-| Auth | **None for now.** Seam preserved; tripwire below |
+| Auth | **One wall, device grants** — [`auth-architecture.md`](auth-architecture.md). Was deferred; the tripwire below is what tripped |
 | Search | **Postgres full-text**, not OpenSearch |
 | Blobs / photos | **Deferred** until after the k3s cutover — see [Deferred](#deferred) |
 
@@ -111,21 +111,26 @@ There is one free UX win the design already banks: because a QR encodes a URL,
 the stock iOS camera opens a crate page directly. No app required to look
 something up.
 
-### Auth: none now, and the tripwire
+### Auth: the tripwire, and what it built
 
-Two trusted adults, tailnet-only access, no sensitive data. Building auth today
-is speculative work against goal 4, so it's out of scope.
+Auth was deliberately deferred here — two trusted adults, tailnet-only access,
+no sensitive data — with a tripwire: **build real auth before any of these
+land:** chat, documents or anything scanned, anything with financial data, or
+the first non-adult account. Two things the deferral owed itself were that the
+tailnet boundary is doing security work rather than just saving a login screen
+(a full index of what's in your house and where is a burglary aid), and that
+adding auth later be middleware plus a `Person` table rather than a refactor.
 
-What the design does owe is *not painting into a corner*. Adding auth later
-should be middleware plus a `Person` table, not a refactor — which holds as long
-as no module invents its own notion of a user in the meantime.
+**That tripwire has since been tripped, and the wall exists** —
+[`auth-architecture.md`](auth-architecture.md). It landed as predicted: one
+middleware, no refactor. What it did *not* build is the `Person` table. A grant
+belongs to a device, not a person, so the rule below survives the wall intact —
+a module still does not invent its own notion of a user, and identity attaches
+to a grant when there is something that needs it.
 
-**Tripwire — build real auth before any of these land:** chat, documents or
-anything scanned, anything with financial data, or the first non-adult account.
-
-Noted for honesty rather than alarm: a full index of what's in your house and
-where is a burglary aid, so the tailnet boundary is doing real security work
-here, not just saving a login screen.
+The tailnet boundary has not gone away either. It is now the outer of two, and
+the wall is what covers the devices on the house LAN that were never on the
+tailnet in the first place.
 
 ## Target architecture
 
@@ -231,7 +236,9 @@ Named so they're decisions rather than oversights.
   most of the point. Deferred on *timing*, not value: blob storage should land on
   Longhorn after the k3s cutover rather than on the current host's disk and then
   get migrated. Revisit at [the cluster plan](plans/swarm/phase-7-cutover.md) Phase 7.
-- **Auth / identity** — see the tripwire above.
+- **Identity** — people, roles and scopes. The wall (see above) authenticates
+  devices, not people; a grant is a row with room for an owner when one is
+  needed.
 - **Offline writes** — offline reads ship with the shell; write sync needs
   conflict resolution that no current use case justifies.
 - **Notifications, domain events, shared attachments, OpenSearch indexing** — all

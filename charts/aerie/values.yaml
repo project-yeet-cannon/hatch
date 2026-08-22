@@ -65,7 +65,7 @@ domain: ""
 # ${TZ}, an IANA zone id.
 tz: ""
 
-# The wall (docs/plans/auth.md). One value is the whole rollback, and
+# The wall (docs/auth-architecture.md). One value is the whole rollback, and
 # "canary" is a rung on that ladder rather than a branch off it:
 #
 #   mode      Auth__Enabled  Auth__EnforceInProcess  Middleware  Annotated

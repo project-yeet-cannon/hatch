@@ -39,10 +39,10 @@ public static class AuthCookie
     /// the dead one and the request is refused `unknown_grant` while a
     /// perfectly good grant sits in the same header, unread.
     ///
-    /// Found live on 2026-08-22 (docs/plans/auth.md, phase 6). The wall had
-    /// just gone up; a phone that had signed in during phases 1-4, when
-    /// Auth:CookieDomain was not yet supplied and the cookie was therefore
-    /// host-only, held exactly that pair. It authenticated on kiosk. and
+    /// Found live on 2026-08-22 (docs/auth-architecture.md), the day after the
+    /// wall went up: a phone that had signed in while Auth:CookieDomain was not
+    /// yet supplied, and whose cookie was therefore host-only, held exactly
+    /// that pair. It authenticated on kiosk. and
     /// bounced forever on home. - the sign-in loop that has no exit, because
     /// every successful redemption added a cookie that was then ignored.
     /// </summary>

@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 namespace Aerie.Api.Common;
 
 /// <summary>
-/// The wall, in-process. Traefik's forwardAuth (phase 5) is the outer gate and
+/// The wall, in-process. Traefik's forwardAuth is the outer gate and
 /// this is the inner one, both calling the same <see cref="IAuthGate"/> so
 /// there is one allow-list rather than two that can disagree.
 ///
@@ -21,8 +21,9 @@ namespace Aerie.Api.Common;
 /// Registered after UseForwardedHeaders (it needs the real client IP for the
 /// refusal log) and before the /apps static file handlers (otherwise the SPA
 /// bundles serve to anyone). No-ops entirely when Auth:Enabled is false, and
-/// also when Auth:EnforceInProcess is false - the phase 5 canary, which needs
-/// Traefik to be the only enforcer for exactly one phase.
+/// also when Auth:EnforceInProcess is false - the canary, which needs Traefik
+/// to be the only enforcer so the wall stands in front of exactly the routes
+/// carrying its annotation.
 /// </summary>
 public class AuthMiddleware(RequestDelegate next, IOptions<AuthOptions> options, ILogger<AuthMiddleware> logger)
 {
@@ -39,7 +40,7 @@ public class AuthMiddleware(RequestDelegate next, IOptions<AuthOptions> options,
         context.Request.Headers.Remove(AuthChallenge.LabelHeader);
 
         // Two conditions, one no-op. Off is the rollback; on-but-not-enforcing
-        // is the phase 5 canary, where Traefik is deliberately the only
+        // is the canary, where Traefik is deliberately the only
         // enforcer so that the wall stands in front of exactly the routes
         // carrying its annotation. /api/auth/verify still decides for real in
         // both cases, because it goes through the gate rather than through

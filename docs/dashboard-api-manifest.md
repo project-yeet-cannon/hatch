@@ -34,15 +34,20 @@ hold across all of them.
   [`types.ts`](../src/Aerie.Web/apps/dashboard/src/types.ts) are two halves of one
   contract; so are the dashboard's mock and test data sources, which must produce
   every field the C# side does or `make test-web` fails on the type error.
-- **No authentication.** Every endpoint below is reachable by anyone who can
-  reach the host, which today means anyone on the LAN or the tailnet — the domain
-  has no public DNS ([`reverse-proxy-architecture.md`](reverse-proxy-architecture.md),
-  [`tailscale-vpn-architecture.md`](tailscale-vpn-architecture.md)). The two
-  exceptions carry their own gate:
-  `POST /api/vm-console-logs` (shared-secret header, because it is the one
-  server-to-server caller) and the secret-valued settings, which are redacted on
-  read. Adding auth is worth its own plan; several endpoints below — the OAuth
-  start, the provisioning info, the actuation POSTs — assume it does not exist yet.
+- **One gate, not per-endpoint permissions.** Every endpoint below sits behind
+  the house wall ([`auth-architecture.md`](auth-architecture.md)): a request
+  carries a device grant or it is refused, and nothing here checks anything finer
+  than that. A refusal is a `302` to the sign-in shell for a document request and
+  a bare `401` for a `fetch` — which is a response shape every caller has to
+  handle, and for a while did not. Outside the wall are the allow-listed paths,
+  each there for a stated reason — the health probes, `/media/*`,
+  `/api/ui-logs`, `/api/vm-console-logs` (which carries its own shared-secret
+  header, strictly stronger than a cookie), `/api/kiosk/provisioning-info`, and
+  the sign-in endpoints themselves. The tailnet boundary is still the outer
+  layer: the domain has no public DNS
+  ([`reverse-proxy-architecture.md`](reverse-proxy-architecture.md),
+  [`tailscale-vpn-architecture.md`](tailscale-vpn-architecture.md)).
+- **Secret-valued settings are redacted on read**, wall or no wall.
 - **Three replicas.** Nothing may sit in process memory that a second replica
   needs; the OAuth state table is what this rule looks like in practice.
 - **Shape conventions.** camelCase JSON, `DateTimeOffset` for every instant,
@@ -187,6 +192,21 @@ is not the same as clean air.
 |---|---|---|
 | `GET /api/settings` · `GET /api/settings/{key}` | `SiteSettingDto[]` | Secret-valued keys (`HomeAssistantToken`, `KioskWifiPassword`, `GoogleClientSecret`) come back redacted. |
 | `PUT /api/settings/{key}` · `DELETE /api/settings/{key}` | `SiteSettingDto` | Secret-valued keys are obfuscated on write (`SecretObfuscator`). |
+
+## Auth
+
+The wall's own endpoints, and the only ones in the app that mint a credential.
+Design and reasoning in [`auth-architecture.md`](auth-architecture.md).
+
+| Method & route | Returns | Notes |
+|---|---|---|
+| `GET /api/auth/verify` | 204 / 302 / 401 | Traefik's `forwardAuth` target, not called by any app. Reads the original request from `X-Forwarded-Method`/`-Proto`/`-Host`/`-Uri` and **fails closed** when they are absent — its own path is allow-listed, so falling back to it would answer 204 to everything. Echoes `X-Aerie-Grant` / `X-Aerie-Label`. Its 302 is the one `Location` in the app that must be absolute. |
+| `POST /api/auth/redeem` | `AuthGrantDto` | Turns an invite code into a grant and sets the cookie. Rate-limited per client IP (per-process, so three replicas is three times the budget — the Warning log per refusal is the real detector). **Not gated by `Auth:Enabled`**, and cannot be: there would be no way to enroll the first device. |
+| `GET /api/auth/me` | `AuthGrantDto` | Who this device is. Answers the same way with the wall down, which is why it resolves the grant itself rather than relying on the middleware. |
+| `POST /api/auth/sign-out` | 204 | Deletes the grant and expires the cookie. |
+| `GET /api/auth/grants` | `AuthGrantDto[]` | The admin app's Sessions list, newest first. Never carries token material. |
+| `DELETE /api/auth/grants/{id:guid}` | 204 | Revocation is a row delete. Refuses to revoke the caller's own grant, so nobody revokes their way out of the room. |
+| `POST /api/auth/invites` | `AuthInviteDto` | Mints an invite. The plaintext code exists exactly once, in this response — only its hash is stored. |
 
 ## Kiosk, apps, and logs
 

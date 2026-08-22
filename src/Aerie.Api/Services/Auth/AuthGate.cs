@@ -63,7 +63,7 @@ public interface IAuthGate
 /// an auth bug from the outside.
 ///
 /// The allow-list below is load-bearing and every entry is there for a stated
-/// reason - see docs/plans/auth.md, "The allow-list is load-bearing". Two of
+/// reason - see docs/auth-architecture.md, "The allow-list is load-bearing". Two of
 /// them fail silently and confusingly if they are ever dropped: the health
 /// probes (gating them fails readiness on every pod, and the Deployment never
 /// becomes available) and the media library (Sonos speakers fetch the stream
@@ -128,8 +128,8 @@ public class AuthGate(
     /// rewriter: in production the decision is made by Traefik asking about the
     /// original URI, which never reaches this app's rewrite rules at all.
     ///
-    /// Matched exactly because a prefix would silently exempt whatever a later
-    /// phase mounts underneath it. This list opens what it names and nothing
+    /// Matched exactly because a prefix would silently exempt whatever is
+    /// mounted underneath it later. This list opens what it names and nothing
     /// else.
     /// </summary>
     private static readonly PathString[] exemptExactPaths = ["/auth", "/auth/"];

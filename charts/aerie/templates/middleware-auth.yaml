@@ -1,4 +1,4 @@
-# The outer half of the wall (docs/plans/auth.md phase 5) - Traefik asks the
+# The outer half of the wall (docs/auth-architecture.md) - Traefik asks the
 # api pod about every request on an annotated route, and serves it only if the
 # answer is 2xx. The inner half is AuthMiddleware in the same pod, calling the
 # same AuthGate, so there is one allow-list rather than two that can disagree.

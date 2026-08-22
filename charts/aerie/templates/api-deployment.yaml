@@ -86,7 +86,7 @@ spec:
               value: "https://home.{{ .Values.domain }}"
             - name: TZ
               value: {{ .Values.tz | quote }}
-            # The wall (docs/plans/auth.md). auth.mode is the one value, and it
+            # The wall (docs/auth-architecture.md). auth.mode is the one value, and it
             # sets both switches: Enabled decides whether the gate decides at
             # all - it is what /api/auth/verify answers on Traefik's behalf -
             # and EnforceInProcess decides whether this pod also refuses on its
@@ -108,10 +108,10 @@ spec:
             # browser for the 400-day life of the cookie and shadows the
             # domain-wide cookie every later sign-in issues, on that one host,
             # so the device authenticates everywhere except the host it first
-            # signed in on. Found live on 2026-08-22 (docs/plans/auth.md, phase
-            # 6) on a phone that had signed in during phases 1-4, when this was
-            # inside the guard. AuthCookie now reads past a stale duplicate and
-            # expires it, and this renders unconditionally so none are made.
+            # signed in on. Found live on 2026-08-22 (docs/auth-architecture.md),
+            # on a phone that had signed in while this was inside the guard.
+            # AuthCookie now reads past a stale duplicate and expires it, and
+            # this renders unconditionally so no more are made.
             - name: Auth__CookieDomain
               value: ".{{ .Values.domain }}"
             {{- if ne .Values.auth.mode "none" }}

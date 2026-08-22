@@ -11,23 +11,24 @@ namespace Aerie.Api.Services.Auth;
 /// Two switches, not one. <see cref="Enabled"/> decides whether the gate
 /// decides at all - it is what /api/auth/verify answers on Traefik's behalf.
 /// <see cref="EnforceInProcess"/> decides whether this pod also refuses on its
-/// own. The chart's one auth.mode value sets both (docs/plans/auth.md).
+/// own. The chart's one auth.mode value sets both (docs/auth-architecture.md).
 /// </summary>
 public class AuthOptions
 {
     public const string SectionName = "Auth";
 
     /// <summary>
-    /// Whether the gate refuses anything. False through phase 4 of
-    /// docs/plans/auth.md, and false in Development so `make run` stays
-    /// frictionless; flip it locally with <c>Auth__Enabled=true dotnet run</c>.
+    /// Whether the gate refuses anything at all - false is the whole rollback
+    /// (docs/auth-architecture.md), and it is false in Development so `make run`
+    /// stays frictionless; flip it locally with
+    /// <c>Auth__Enabled=true dotnet run</c>.
     /// </summary>
     public bool Enabled { get; set; }
 
     /// <summary>
     /// Whether the pod refuses on its own, or only answers
     /// <c>/api/auth/verify</c> on Traefik's behalf. True everywhere except the
-    /// phase 5 canary, where the point is that Traefik enforces on exactly the
+    /// canary, where the point is that Traefik enforces on exactly the
     /// routes carrying the middleware annotation and nothing else - one app,
     /// rather than the whole pod.
     ///
@@ -39,8 +40,8 @@ public class AuthOptions
     ///
     /// Stated honestly: while this is false, anything reaching the Service
     /// directly - in-cluster, or a <c>kubectl port-forward</c> - is as open as
-    /// it was before auth existed. That is the pre-auth posture, held for one
-    /// phase, deliberately.
+    /// it was before auth existed. That is the pre-auth posture, held
+    /// deliberately for as long as the canary is the mode.
     /// </summary>
     public bool EnforceInProcess { get; set; } = true;
 

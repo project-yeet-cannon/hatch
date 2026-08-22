@@ -154,9 +154,9 @@ must say in writing which phase adds one.
   it is only ever read by one: `verify-app-tier.yml` passes it to
   `Test-AppTier.ps1` so the gate can prove the wall still *serves* an enrolled
   device, not only that it refuses an un-enrolled one
-  ([auth.md](plans/auth.md)). Nothing in the cluster consumes it, so putting it
-  in the parameter tree would add a rotation obligation for a value the cluster
-  never reads. Rotating it is revoking that session on the admin app's Sessions
+  ([auth-architecture.md](auth-architecture.md)). Nothing in the cluster
+  consumes it, so putting it in the parameter tree would add a rotation
+  obligation for a value the cluster never reads. Rotating it is revoking that session on the admin app's Sessions
   page and redeeming a new invite; leaving it unset costs one warning.
 
 ## The three IAM users

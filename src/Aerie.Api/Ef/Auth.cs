@@ -20,7 +20,7 @@ public enum AuthGrantKind { Interactive, Device }
 /// Only the SHA-256 of the token is here: the token itself is shown once, at
 /// redemption, and lives after that only in the holder's cookie jar. A stolen
 /// database therefore yields no usable credential, and revocation is a DELETE
-/// rather than a key rotation - see docs/plans/auth.md's credential-format
+/// rather than a key rotation - see docs/auth-architecture.md's credential-format
 /// decision for why this is an opaque token and not a JWT or an auth cookie.
 ///
 /// PersonId is deliberately absent. Grants become people when people exist;

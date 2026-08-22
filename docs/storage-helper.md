@@ -18,11 +18,12 @@ Two things follow from that and shape everything below:
 - **One process, one database.** The backend is a module in `Aerie.Api` with its
   own `storage` Postgres schema and its own migration history. Splitting it out
   later is a connection string, not a rewrite.
-- **Tailnet only, no auth.** Two trusted adults, no public ingress. Worth being
-  plain about: a full index of what's in your house and where is a burglary aid,
-  so the tailnet boundary is doing real security work here, not just saving a
-  login screen. The tripwire for building real auth is in
-  [`family-apps-architecture.md`](family-apps-architecture.md#auth-none-now-and-the-tripwire).
+- **Behind the house wall, and behind the tailnet.** Every route here is gated
+  by a device grant ([`auth-architecture.md`](auth-architecture.md)) on top of
+  the tailnet boundary that was, for a while, the only thing protecting it.
+  Worth being plain about why that mattered: a full index of what's in your
+  house and where is a burglary aid. One consequence to know about is
+  [printed crate labels](#a-cold-scan-hits-the-wall).
 
 ## Data model
 
@@ -138,6 +139,21 @@ because the expected conditions are dust, scuffs and a photocopier. The encoder
 is a dynamic `import()`, so the ~30 kB of it never loads on the path that
 matters — pointing a camera at a box.
 
+#### A cold scan hits the wall
+
+The stock-camera property above survived the arrival of auth, but it costs one
+tap now. `/apps/family/storage/c/{code}` is behind the house wall
+([`auth-architecture.md`](auth-architecture.md)), so a label scanned by a phone
+that is not enrolled lands on sign-in rather than on the crate. The gate carries
+the original URL through redemption, so the phone arrives at the crate it
+scanned — but a *guest* holding a labeled box can no longer scan it at all.
+
+That is the trade the operator accepted rather than a bug to fix, and it is
+worth knowing before someone reports it as one. It is also the reason the
+printed code beside the QR matters more than it used to: reading a code aloud to
+someone whose phone will never be enrolled is the only remaining path from a box
+to its contents.
+
 ### Configuration
 
 | Key | Default | What it does |
@@ -211,5 +227,6 @@ Named so they're decisions rather than oversights. Full reasoning in
 - **Photos of crate contents** — the most valuable v2 feature for an app of this
   kind, deferred on timing: blob storage should land on Longhorn after the k3s
   cutover rather than on the current host's disk and then get migrated.
-- **Auth** — see the tripwire in
-  [`family-apps-architecture.md`](family-apps-architecture.md#auth-none-now-and-the-tripwire).
+- **Identity** — the wall authenticates the device, not the person, so there is
+  still no notion of *who* filed a crate. See
+  [`auth-architecture.md`](auth-architecture.md#deferred-on-purpose).

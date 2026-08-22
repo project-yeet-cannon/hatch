@@ -21,7 +21,7 @@ public static class AuthChallenge
     /// <summary>The grant behind a request, echoed by the forwardAuth endpoint for Traefik's authResponseHeaders.</summary>
     public const string GrantHeader = "X-Aerie-Grant";
 
-    /// <summary>The grant's label, same path. Eventually what logs./status. read as a proxy-authenticated user (docs/plans/auth.md, Deferred).</summary>
+    /// <summary>The grant's label, same path. Eventually what logs./status. read as a proxy-authenticated user (docs/auth-architecture.md, Deferred).</summary>
     public const string LabelHeader = "X-Aerie-Label";
 
     private const string SecFetchMode = "Sec-Fetch-Mode";

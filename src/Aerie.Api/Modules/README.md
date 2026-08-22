@@ -76,10 +76,12 @@ wire.
   a module ends up with its history table in the wrong schema.
 - **A module registers its own services**, via one `Add<Name>Module` extension.
   `AddAerieModules` gains exactly one line per app and never grows a section.
-- **No module invents a user.** Auth is deliberately absent (tailnet-only, two
-  trusted adults); it stays a middleware-plus-`Person`-table change later only as
-  long as that holds. See the tripwire in
-  [`docs/family-apps-architecture.md`](../../../docs/family-apps-architecture.md#auth-none-now-and-the-tripwire).
+- **No module invents a user.** The wall
+  ([`docs/auth-architecture.md`](../../../docs/auth-architecture.md)) authenticates
+  a *device*, not a person: a grant is a row with room for an owner, and there is
+  no `Person` table yet. Read identity from `AuthService` when you need it and
+  leave the seam where it is — a module growing its own notion of a user is what
+  turns adding people into a refactor rather than a column.
 - **Nothing operator-specific in module code** — domains, hostnames, and paths
   come from config, per [`docs/ethos.md`](../../../docs/ethos.md). The install's
   own public URL is already solved: [`AppsOptions`](AppsOptions.cs)

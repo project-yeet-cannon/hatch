@@ -74,7 +74,7 @@ spec:
         tag: ${KIOSK_FILES_IMAGE_TAG}
     domain: ${DOMAIN}
     tz: ${TZ}
-    # The wall (docs/plans/auth.md) - none | canary | full, and the whole
+    # The wall (docs/auth-architecture.md) - none | canary | full, and the whole
     # rollback. Optional in cluster-config.json with the same `:=` default the
     # chart carries, so an installation that never sets AUTH_MODE behaves
     # exactly as it did before auth existed.

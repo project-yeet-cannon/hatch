@@ -83,7 +83,7 @@ public interface IAuthService
 /// <summary>
 /// Everything that reads or writes a grant. The ceremony that hands one out is
 /// deliberately not in here - an invite code today, a pending-approval queue or
-/// a passkey later, all producing the same row (docs/plans/auth.md).
+/// a passkey later, all producing the same row (docs/auth-architecture.md).
 /// </summary>
 public class AuthService(
     AerieContext db,

@@ -84,16 +84,19 @@ and lint it and leave the clicking to a human.
 
 Read these before A2 — they are decisions, not open questions.
 
-1. **The API has no authentication.** Anyone who can reach `home.${DOMAIN}` —
-   which means anyone on the LAN or the tailnet, since the domain has no public
-   DNS at all ([`reverse-proxy-architecture.md`](../reverse-proxy-architecture.md),
-   [`tailscale-vpn-architecture.md`](../tailscale-vpn-architecture.md)) — can
-   start the OAuth flow, read every synced event, and delete a connected
-   account. This is the existing posture (`SettingsController` hands out the
-   HA connection settings, `KioskProvisioningController` hands out the Wi-Fi
-   password in plaintext), so calendar data does not introduce the exposure —
-   but it does raise what's behind it. Adding auth is out of scope here and
-   worth its own plan.
+1. ~~**The API has no authentication.**~~ **Superseded:** every route here is
+   now behind the house wall
+   ([`auth-architecture.md`](../auth-architecture.md)) — a request carries a
+   device grant or it is refused, on top of the tailnet boundary that was the
+   only protection when this risk was written. What the wall does *not* do is
+   distinguish callers: it is a gate, not permissions, so any enrolled device
+   can still start the OAuth flow, read every synced event, and delete a
+   connected account. The original wording, kept because the reasoning still
+   holds for anything added here: this was the existing posture
+   (`SettingsController` hands out the HA connection settings,
+   `KioskProvisioningController` hands out the Wi-Fi password in plaintext), so
+   calendar data did not introduce the exposure — but it did raise what was
+   behind it, and it is part of why the wall got built.
 2. **Refresh tokens get `SecretObfuscator`, not encryption.** XOR against a
    fixed key, same as `HomeAssistantToken`. Consistency with the existing store
    beats a one-off scheme. The upgrade path, if it's ever wanted, is ASP.NET

@@ -71,7 +71,7 @@ jobs:
           NODE_SSH_PRIVATE_KEY: ${{ secrets.NODE_SSH_PRIVATE_KEY }}
 
           # Optional, and the one credential this gate can use but cannot
-          # obtain: a live grant token (docs/plans/auth.md). Every other check
+          # obtain: a live grant token (docs/auth-architecture.md). Every other check
           # here presents nothing, which proves the wall refuses but says
           # nothing about whether it still serves - a gate that fell closed on
           # everyone would pass all of them. A grant is stored only as a hash

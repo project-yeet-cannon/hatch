@@ -168,7 +168,7 @@ public class AuthController(
     /// yet, so any enrolled device can see and revoke any grant. That is the
     /// gate-not-permissions call the plan makes deliberately, and a grant is
     /// already a row with room for an owner when that changes
-    /// (docs/plans/auth.md, "Deferred on purpose").
+    /// (docs/auth-architecture.md, "Deferred on purpose").
     /// </summary>
     [HttpGet("grants")]
     public async Task<IActionResult> ListGrants(CancellationToken ct)
@@ -242,8 +242,8 @@ public class AuthController(
     /// <summary>
     /// The grant behind this request. The middleware has usually already
     /// resolved it, but it only runs when Auth:Enabled is true - and "who am I"
-    /// has to answer the same way with the wall down, which is every phase
-    /// before 5 and all of local dev.
+    /// has to answer the same way with the wall down, which is AUTH_MODE=none
+    /// and all of local dev.
     /// </summary>
     private async Task<EfAuthGrant?> CurrentGrantAsync(CancellationToken ct) =>
         HttpContext.GetAuthGrant()

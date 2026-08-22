@@ -42,8 +42,8 @@ Required values:
 Every app on `home.${DOMAIN}` and `kiosk.${DOMAIN}` sits behind one wall. A
 device is enrolled once, by the operator, and never asks again — there are no
 user accounts, no passwords, and nothing for a family member to remember. See
-[docs/plans/auth.md](docs/plans/auth.md) for the design and what is deliberately
-deferred.
+[docs/auth-architecture.md](docs/auth-architecture.md) for the design and what
+is deliberately deferred.
 
 To enroll a device:
 
@@ -68,7 +68,7 @@ Three things stay reachable without a grant, on purpose:
 `files.${DOMAIN}` (the kiosk APK and its checksum), the media library that Sonos
 speakers fetch from directly, and the health endpoints Kubernetes probes. The
 full list, and why each entry is on it, is in
-[docs/plans/auth.md](docs/plans/auth.md#the-allow-list-is-load-bearing).
+[docs/auth-architecture.md](docs/auth-architecture.md#the-allow-list-is-load-bearing).
 
 One consequence worth knowing before someone reports it as a bug: **a printed
 storage-bin QR label scanned by a phone that isn't enrolled now lands on

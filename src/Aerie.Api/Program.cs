@@ -182,9 +182,9 @@ builder.Services.AddSingleton<IHazardProviderResolver, HazardProviderResolver>()
 builder.Services.AddScoped<IHazardSyncService, HazardSyncService>();
 builder.Services.AddScoped<IHazardService, HazardService>();
 
-// Auth (docs/plans/auth.md). Wired but switched off: AuthMiddleware and
-// AuthController both run, and both no-op or allow, until Auth:Enabled becomes
-// true - which is phase 5, and which is also the whole rollback.
+// Auth (docs/auth-architecture.md). AuthMiddleware and AuthController both run
+// unconditionally, and both no-op or allow until Auth:Enabled becomes true -
+// which is why false is the whole rollback.
 var authSection = builder.Configuration.GetSection(AuthOptions.SectionName);
 builder.Services.Configure<AuthOptions>(authSection);
 builder.Services.AddScoped<IAuthService, AuthService>();
@@ -379,7 +379,7 @@ app.UseHttpsRedirection();
 // The wall. After UseForwardedHeaders because a refusal logs the client IP, and
 // before the /apps static file handlers below because otherwise every SPA
 // bundle serves to anyone who asks. No-ops entirely while Auth:Enabled is false
-// (docs/plans/auth.md).
+// (docs/auth-architecture.md).
 app.UseMiddleware<AuthMiddleware>();
 
 // Placed after the wall so an unauthenticated flood is refused before it can
@@ -480,7 +480,7 @@ if (Directory.Exists(Path.Combine(appsPath, "family")))
 // Same reasoning for the sign-in shell, twice over: /apps/auth/r/{code} is the
 // URL a scanned invite QR resolves to, and it exists only client-side; and this
 // is the page a gated request is redirected to, so a 404 here is a person
-// locked out with nothing to read (docs/plans/auth.md).
+// locked out with nothing to read (docs/auth-architecture.md).
 if (Directory.Exists(Path.Combine(appsPath, "auth")))
 {
     app.MapFallbackToFile("/apps/auth/{*path:nonfile}", "apps/auth/index.html");

@@ -218,7 +218,7 @@ public class AuthMiddlewareTests
     [Fact]
     public async Task DuringTheCanaryThePodServesWhatItWouldOtherwiseRefuse()
     {
-        // Phase 5: Auth:Enabled is on so /api/auth/verify decides for real on
+        // The canary: Auth:Enabled is on so /api/auth/verify decides for real on
         // Traefik's behalf, but this pod enforces nothing itself, which is what
         // confines the wall to the routes carrying the annotation. The honest
         // consequence is exactly this - a request that reaches the pod without

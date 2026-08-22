@@ -136,7 +136,7 @@ jobs:
           SHARE_NAME: ${{ vars.SHARE_NAME }}
           MEDIA_LIBRARY_SUBPATH: ${{ vars.MEDIA_LIBRARY_SUBPATH }}
           TZ: ${{ vars.TZ }}
-          # docs/plans/auth.md - none | canary | full, and unset means none.
+          # docs/auth-architecture.md - none | canary | full, and unset means none.
           # This is how the wall moves: set the variable, dispatch this
           # workflow, and reconcile. Rolling back is the same three steps with
           # none, which is why it is a repository variable and not a chart

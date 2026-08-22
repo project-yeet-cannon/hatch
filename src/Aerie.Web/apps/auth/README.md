@@ -4,7 +4,7 @@ The sign-in shell. One screen that turns an invite code into a session cookie
 and sends the browser back where it was going. Served by `Aerie.Api` at
 `/apps/auth/`; the backend is `AuthController` and `AuthService`
 (`src/Aerie.Api/Services/Auth/`), and the design it implements is
-`docs/plans/auth.md`.
+`docs/auth-architecture.md`.
 
 It is the one app in the suite that is reached involuntarily: a gated request
 with no cookie is redirected here by `AuthChallenge`, carrying where it was

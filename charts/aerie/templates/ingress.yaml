@@ -16,8 +16,8 @@ metadata:
     app.kubernetes.io/component: home
   {{- if eq .Values.auth.mode "full" }}
   annotations:
-    # The wall in front of the house (docs/plans/auth.md phase 6). This host is
-    # every app the family uses, so the annotation goes on / rather than on any
+    # The wall in front of the house (docs/auth-architecture.md). This host
+    # is every app the family uses, so the annotation goes on / rather than on any
     # prefix - what stays reachable through it is AuthGate's allow-list, in one
     # place, shared with the in-process middleware, rather than a second list
     # of unannotated paths here that could disagree with it.
@@ -57,7 +57,7 @@ metadata:
     # the same reason share-volumes.yaml's nodeStageSecretRef does it that
     # way - this is the one place the middleware's own namespace matters.
     #
-    # At auth.mode full the wall joins this route (docs/plans/auth.md phase 6).
+    # At auth.mode full the wall joins this route (docs/auth-architecture.md).
     # Traefik takes a comma-separated list and applies it in order, so auth is
     # named first: the rewrite is what turns / into the dashboard bundle, and
     # rewriting a request that is about to be refused wastes the work and puts
@@ -126,8 +126,9 @@ spec:
                   number: 5000
 {{- if eq .Values.auth.mode "canary" }}
 ---
-# The phase 5 canary (docs/plans/auth.md) - the wall in front of one app whose
-# failure costs nothing, before it stands in front of the house. Same host and
+# The canary (docs/auth-architecture.md) - the wall in front of one app whose
+# failure costs nothing, which is how it first went up in front of the house
+# and how the next change to the gate should be rehearsed. Same host and
 # same backend as `home` above; the only difference is the annotation, and the
 # only reason it is a separate Ingress is that an annotation applies to every
 # path an Ingress carries.

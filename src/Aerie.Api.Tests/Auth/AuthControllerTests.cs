@@ -153,7 +153,7 @@ public class AuthControllerTests
     [Fact]
     public async Task VerifyStillDecidesForRealWhileThePodItselfEnforcesNothing()
     {
-        // The phase 5 split, stated as a test: EnforceInProcess suspends the
+        // The canary split, stated as a test: EnforceInProcess suspends the
         // in-process middleware and nothing else. If it ever reached the gate
         // as well, the canary would answer 204 to every route Traefik asks
         // about - one flag walling nothing instead of walling one app.
@@ -235,8 +235,8 @@ public class AuthControllerTests
         Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
 
         // The second header is the tombstone for a host-only cookie of the same
-        // name - the landmine phases 1-4 left in any browser that signed in
-        // before Auth:CookieDomain was supplied. It carries no Domain, so it
+        // name - the landmine left in any browser that signed in before
+        // Auth:CookieDomain was supplied. It carries no Domain, so it
         // matches only that cookie and never the one just issued.
         var tombstone = headers[1]!;
         Assert.StartsWith("aerie_grant=;", tombstone);

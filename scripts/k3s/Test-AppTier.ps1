@@ -24,7 +24,7 @@
     proven", and a gate that reports that as anything but failure can be
     satisfied by a cluster that is off.
 
-    **The wall is checked in both directions.** docs/plans/auth.md's
+    **The wall is checked in both directions.** docs/auth-architecture.md's
     AUTH_MODE - read from the same live ConfigMap as everything else, absent
     meaning none - decides what the auth checks assert rather than whether
     they run. At none they assert the Middleware and the annotations are
@@ -77,7 +77,7 @@
     cluster state, the same as Test-DataTier.ps1.
 
 .PARAMETER GrantToken
-    A live grant token (docs/plans/auth.md), which turns the one check here
+    A live grant token (docs/auth-architecture.md), which turns the one check here
     that needs a credential from a warning into a real assertion: at
     AUTH_MODE=full, an *enrolled* device is served rather than refused.
 
@@ -684,7 +684,7 @@ try {
     $ingressVip = if ($configValues.ContainsKey('INGRESS_VIP')) { $configValues['INGRESS_VIP'] } else { $null }
     $imageRegistry = if ($configValues.ContainsKey('IMAGE_REGISTRY')) { $configValues['IMAGE_REGISTRY'] } else { $null }
     $shareHost = if ($configValues.ContainsKey('SHARE_HOST')) { $configValues['SHARE_HOST'] } else { $null }
-    # docs/plans/auth.md. Absent means 'none' - the same default the HelmRelease
+    # docs/auth-architecture.md. Absent means 'none' - the same default the HelmRelease
     # substitutes and the chart carries, so this reads the cluster's actual
     # posture rather than a parameter someone remembered to pass. Every auth
     # check below is written against this value, so a run on an install with no
@@ -938,7 +938,7 @@ try {
     }
 
     # --- the wall: one Middleware, and exactly the routes that carry it ---
-    # docs/plans/auth.md phase 5. Every assertion here is two-sided: at none
+    # docs/auth-architecture.md. Every assertion here is two-sided: at none
     # the objects must be *absent*, because none is the documented rollback
     # and a rollback that leaves half the wall standing is not one. An Ingress
     # annotated onto a Middleware that does not exist is a 500 on every request
@@ -1115,13 +1115,13 @@ try {
         # home: connected and a 200 on /health/ready is the whole check - the
         # certificate above already covers TLS.
         #
-        # From phase 6 on this quietly became an auth check as well, and is
-        # left unconditional on purpose. This probe carries no cookie, so at
+        # This is quietly an auth check as well, and is left unconditional on
+        # purpose. This probe carries no cookie, so at
         # AUTH_MODE=full a 200 here is AuthGate's /health/ready exemption being
         # honoured through an annotated route. Gating it instead fails every
         # pod's readiness probe and the Deployment never becomes available - a
         # total outage whose cause looks nothing like auth, which is why it is
-        # first on the allow-list in docs/plans/auth.md and asserted here in
+        # first on the allow-list in docs/auth-architecture.md and asserted here in
         # every mode rather than only in one.
         $homeResponse = $responses["home.$domain"]
         if (-not $homeResponse.Connected) {
@@ -1140,7 +1140,7 @@ try {
         # 200, so this checks the body for the dashboard SPA's own <title>
         # rather than the status code.
         #
-        # Two-sided from phase 6 on (docs/plans/auth.md), because at
+        # Two-sided (docs/auth-architecture.md), because at
         # AUTH_MODE=full this route is walled and this probe carries no cookie:
         # the correct answer there is a refusal, not the dashboard, and
         # asserting 200 unconditionally would fail the gate on a deploy that
@@ -1226,7 +1226,7 @@ try {
             Add-Check -Step '5b.14' -Name "share.$domain challenges for authentication" -Status 'Fail' -Detail "status=$($shareResponse.StatusCode), expected 401"
         }
 
-        # --- the wall, from outside (docs/plans/auth.md phase 5) --------
+        # --- the wall, from outside (docs/auth-architecture.md) ---------------
         # The checks above prove the objects exist and say the right thing.
         # These prove Traefik acts on them, which is not the same claim: the
         # canary route wins over home's PathPrefix('/') only because Traefik
@@ -1298,9 +1298,9 @@ try {
         # (see the parameter's own help): the refusal half is the half that can
         # lock the house out, and it is asserted either way, so a run without a
         # credential is still a useful gate - just one that has proven half of
-        # what phase 6 claims.
+        # what the wall claims.
         if ($authMode -eq 'full' -and -not $GrantToken) {
-            Add-Check -Step 'auth.6' -Name "home.$domain/ serves an enrolled device" -Status 'Warn' -Detail 'no -GrantToken passed, so only the refusal half of the wall was proven here - the serving half is on the hand list in docs/plans/auth.md phase 6'
+            Add-Check -Step 'auth.6' -Name "home.$domain/ serves an enrolled device" -Status 'Warn' -Detail 'no -GrantToken passed, so only the refusal half of the wall was proven here - the serving half is on the hand list in docs/auth-architecture.md'
         }
         elseif ($authMode -eq 'full') {
             # __Secure-aerie_grant is AuthOptions.CookieName's default and the
