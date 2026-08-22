@@ -1,43 +1,43 @@
+import type { CSSProperties } from 'react';
 import type { HazardAlert, HazardSeverity } from '../types';
 import { formatShortTime } from '../lib/format';
 
 /**
- * Outdoor hazards: one line per active alert, colored by severity.
+ * Outdoor hazards: one card per active alert, in the same shape as everything
+ * else in the column - card radius, a solid rail in the severity color, and
+ * the rest of the card that color mixed into the current circadian --card.
  *
- * Provisional by design (docs/plans/kiosk.md phase B4) - it exists to prove the
- * data arrives, and phase C1 owns what a warning should actually look like from
- * across the room and how it behaves under the circadian theme, which is the
- * part that matters most here: a red banner that ignores the night palette
- * becomes the brightest thing in the house at 3am.
+ * That mix is the point. A fixed red banner would be the brightest thing in
+ * the house at 3am; mixing into --card means the hue survives and the
+ * luminance follows whatever phase the page is in, without this component
+ * knowing which phase that is.
  *
- * Renders nothing when there is nothing to say, which is most days - and is why
- * this can sit anywhere in the layout until C1 decides where.
+ * Severity is a ladder of presence rather than a change of hue alone - an
+ * Extreme alert takes a wider rail, a heavier tint and a larger title, so it
+ * separates from an advisory at across-the-room distance, where the difference
+ * between orange and amber does not survive the trip.
+ *
+ * Renders nothing when there is nothing to say, which is most days.
  */
 export function AlertBanner({ alerts, timeZone }: { alerts: HazardAlert[]; timeZone: string }) {
   if (alerts.length === 0) return null;
 
   return (
-    <div style={{ display: 'grid', gap: '0.5rem', margin: '1rem 0' }} role="status">
+    <div className="hf-alerts" role="status">
       {alerts.map((alert) => (
         <div
           key={alert.id}
-          style={{
-            display: 'flex',
-            alignItems: 'baseline',
-            gap: '0.5rem',
-            padding: '0.5rem 0.75rem',
-            borderLeft: `3px solid ${severityColor(alert.severity)}`,
-            background: 'color-mix(in srgb, currentColor 6%, transparent)',
-          }}
+          className={`hf-alert sev-${alert.severity.toLowerCase()}`}
+          style={{ '--sev-color': severityColor(alert.severity) } as CSSProperties}
         >
-          <span style={{ fontWeight: 600 }}>{alert.title}</span>
-          {alert.detail && <span style={{ opacity: 0.7 }}>{alert.detail}</span>}
+          <span className="hf-alert-title">{alert.title}</span>
+          {alert.detail && <span className="hf-alert-detail">{alert.detail}</span>}
           {/* An air quality peak has a startsAt and no endsAt; a weather alert
               in effect has both, and its end is the more useful of the two. */}
           {alert.endsAt ? (
-            <span style={{ opacity: 0.5, marginLeft: 'auto' }}>until {formatShortTime(alert.endsAt, timeZone)}</span>
+            <span className="hf-alert-when">until {formatShortTime(alert.endsAt, timeZone)}</span>
           ) : alert.startsAt ? (
-            <span style={{ opacity: 0.5, marginLeft: 'auto' }}>by {formatShortTime(alert.startsAt, timeZone)}</span>
+            <span className="hf-alert-when">by {formatShortTime(alert.startsAt, timeZone)}</span>
           ) : null}
         </div>
       ))}
@@ -46,10 +46,11 @@ export function AlertBanner({ alerts, timeZone }: { alerts: HazardAlert[]; timeZ
 }
 
 /**
- * Severity to a color, provisionally. Hardcoded hexes rather than theme tokens
- * because C1 owns this decision entirely - including whether color is the right
- * carrier at all - and inventing token names now would only mean renaming them
- * then.
+ * Severity to a hue. Hardcoded rather than drawn from theme/tokens.ts because
+ * these are the only colors on the page that must mean the same thing at every
+ * hour - a warning that shifted hue with the circadian phase would be reporting
+ * the time of day, not the weather. Only their luminance moves, and that
+ * happens in .hf-alert's color-mix against --card.
  */
 function severityColor(severity: HazardSeverity): string {
   switch (severity) {

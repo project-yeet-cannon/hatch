@@ -34,6 +34,7 @@ full of active work, which is how a plan directory stops being read.
 | [`cameras.md`](cameras.md) | Camera integration |
 | [`video.md`](video.md) | Video capture and streaming |
 | [`kiosk.md`](kiosk.md) | Kiosk upgrades — Google Calendar agenda and outdoor hazard alerts |
+| [`gather.md`](gather.md) | Gather — shared family shopping lists, on the kiosk and in the family PWA |
 
 ## Conventions
 

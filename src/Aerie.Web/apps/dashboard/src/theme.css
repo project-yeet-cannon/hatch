@@ -369,3 +369,205 @@ body {
   width: 55%;
   margin-top: 7px;
 }
+
+/* ---- Family agenda (docs/plans/kiosk.md phase C1) ----------------------- */
+
+.hf-cal {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+.hf-cal-day {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hf-cal-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 4px;
+}
+.hf-cal-label {
+  font: 700 12px/1 var(--ui);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+  flex: none;
+}
+.hf-cal-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.hf-cal-empty {
+  font: 500 13px/1 var(--ui);
+  color: var(--muted);
+  /* Aligned with the event titles, not the gutter, so an empty day reads as a
+     missing block rather than a stray label. */
+  padding-left: 66px;
+}
+.hf-cal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* A row is the time gutter plus the block. `--cal-color` is set per row from
+   the event's calendar color; every tint below mixes it into the current
+   circadian --card, so a saturated Google palette color stays a saturated hue
+   at noon and a dim one at 3am without the component knowing which phase it's
+   in. */
+.hf-cal-row {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  transition: opacity 0.4s;
+}
+.hf-cal-row.past {
+  opacity: 0.4;
+}
+.hf-cal-time {
+  flex: 0 0 54px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  padding-top: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.hf-cal-start {
+  font: 700 15px/1 var(--num);
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+.hf-cal-end,
+.hf-cal-allday {
+  font: 600 11px/1 var(--ui);
+  color: var(--muted);
+}
+.hf-cal-allday {
+  padding-top: 2px;
+  letter-spacing: 0.03em;
+}
+.hf-cal-block {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 14px;
+  border-radius: 14px;
+  border-left: 4px solid var(--cal-color);
+  background: color-mix(in srgb, var(--cal-color) 14%, var(--card));
+}
+/* The one thing happening right now: a ring in its own calendar color, so it
+   is findable without reading a time. */
+.hf-cal-block.now {
+  background: color-mix(in srgb, var(--cal-color) 24%, var(--card));
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--cal-color) 55%, transparent);
+}
+.hf-cal-title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 17px;
+  line-height: 1.15;
+  color: var(--ink);
+}
+.hf-cal-meta {
+  font: 500 12px/1.2 var(--ui);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The now line, on today only. --warm is the accent that already tracks the
+   circadian palette, which is the whole reason it isn't the usual calendar
+   red: a fixed red would be the brightest thing in the house at 3am. */
+.hf-cal-now {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  /* Overlaps the 6px list gap on both sides so the line sits between two
+     blocks without pushing them apart. */
+  margin: -3px 0;
+}
+.hf-cal-now-time {
+  flex: 0 0 54px;
+  text-align: right;
+  font: 700 12px/1 var(--num);
+  color: var(--warm);
+  font-variant-numeric: tabular-nums;
+}
+.hf-cal-now-rule {
+  flex: 1;
+  height: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--warm) 70%, transparent);
+  position: relative;
+}
+.hf-cal-now-rule::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--warm);
+}
+
+/* ---- Outdoor hazards (docs/plans/kiosk.md phase C1) --------------------- */
+
+.hf-alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hf-alert {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 11px 16px;
+  border-radius: var(--r);
+  border-left: 4px solid var(--sev-color);
+  background: color-mix(in srgb, var(--sev-color) 16%, var(--card));
+}
+.hf-alert-title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 17px;
+  color: var(--ink);
+}
+.hf-alert-detail {
+  font: 500 13px/1.25 var(--ui);
+  color: var(--ink);
+  opacity: 0.75;
+  min-width: 0;
+}
+.hf-alert-when {
+  font: 600 12px/1 var(--ui);
+  color: var(--muted);
+  margin-left: auto;
+  white-space: nowrap;
+  flex: none;
+}
+
+/* The severity ladder. Each step raises how much of the card the severity
+   color owns; none of them raise absolute brightness, because every tint is
+   still mixed into the current circadian --card. */
+.hf-alert.sev-severe {
+  background: color-mix(in srgb, var(--sev-color) 24%, var(--card));
+}
+.hf-alert.sev-extreme {
+  border-left-width: 7px;
+  padding: 14px 18px;
+  background: color-mix(in srgb, var(--sev-color) 34%, var(--card));
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--sev-color) 45%, transparent);
+}
+.hf-alert.sev-extreme .hf-alert-title {
+  font-size: 21px;
+  letter-spacing: -0.01em;
+}

@@ -91,9 +91,8 @@ export function App() {
         </div>
         {data ? (
           <>
-            {/* Provisional placement: the top of the column, above everything.
-                Phase C1 (docs/plans/kiosk.md) owns where a warning actually
-                belongs on the wall and how it reads from across the room. It
+            {/* The top of the column, above everything: a hazard is the one
+                thing here that changes what you do on the way out the door. It
                 renders nothing when there is nothing active, which is most
                 days - so sitting here costs a calm day no space at all. */}
             <AlertBanner alerts={data.alerts} timeZone={data.timezone} />
@@ -106,13 +105,13 @@ export function App() {
                 <ZoneCard key={zone.id} zone={zone} timeZone={data.timezone} defaultOpen={i === 0} />
               ))}
             </div>
-            {/* Provisional placement: below the zones, above the routines.
-                Phase C1 (docs/plans/kiosk.md) owns where the agenda actually
-                belongs on the wall and what it looks like there. An agenda
-                whose every day is empty renders nothing at all - an empty day
-                is only worth saying when some other day isn't. */}
+            {/* Below the zones, above the routines: the agenda is read, the
+                routines are touched, so the reachable half of the screen stays
+                the tappable one. An agenda whose every day is empty renders
+                nothing at all - an empty day is only worth saying when some
+                other day isn't. */}
             {data.calendar.some((day) => day.events.length > 0) && (
-              <CalendarSection calendar={data.calendar} timeZone={data.timezone} />
+              <CalendarSection calendar={data.calendar} timeZone={data.timezone} now={now} />
             )}
             {data.routines.length > 0 && <RoutinesSection routines={data.routines} resetToken={resetToken} />}
           </>

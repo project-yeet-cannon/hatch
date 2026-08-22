@@ -56,3 +56,22 @@ export function formatAgendaDate(date: string): string {
     new Date(year, month - 1, day),
   );
 }
+
+/**
+ * An agenda gutter time, as compact as it can be and still be unambiguous:
+ * "9a", "9:30a", "12p". The same shorthand the chart axis uses
+ * (formatAxisHour), because the agenda's time column is narrow for the same
+ * reason the axis is - it sits beside the thing it labels, not in place of it.
+ */
+export function formatAgendaTime(iso: string, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone,
+  }).formatToParts(new Date(iso));
+  const hour = parts.find((p) => p.type === 'hour')?.value ?? '';
+  const minute = parts.find((p) => p.type === 'minute')?.value ?? '';
+  const period = (parts.find((p) => p.type === 'dayPeriod')?.value ?? '').toLowerCase().slice(0, 1);
+  return minute === '00' ? `${hour}${period}` : `${hour}:${minute}${period}`;
+}
