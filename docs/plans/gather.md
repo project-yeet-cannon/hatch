@@ -1,11 +1,11 @@
 # Gather
 
-**Status:** Phases 1 and 2 done — the `gather` module is in and exercised end to
-end against Postgres and Swagger, and the family PWA is built and linting clean
-(UI verification pending). Phase 3 is unstarted; it depends on nothing in Phase
-2 except the two inherited contracts noted at the end of it. The kiosk
-text-entry risk that used to gate this plan is **resolved** (Finding 4) — no
-blocking gates remain, and the design fork it carried is closed.
+**Status:** Phases 1, 2 and 3 are done — the `gather` module is in and exercised
+end to end against Postgres and Swagger, the family PWA is built and linting
+clean, and the kiosk tile and overlay build, lint and test clean. UI
+verification of both clients is pending, along with the three on-tablet
+confirmations under Phase 3; none of them block Phase 4. The kiosk text-entry
+risk that used to gate this plan is **resolved** (Finding 4).
 
 Shared shopping lists for the family, reachable from the kitchen wall and from a
 phone, backed by one source of truth in `Aerie.Api`. Groceries are the use case
@@ -253,6 +253,11 @@ Independent of Phase 3 — can proceed in parallel.
   readable version of whatever a phone picked. **The overlay must ship the same
   six names**, and an unrecognised value falls back to the first rather than
   rendering untinted.
+- **A list's icon is an emoji**, not an icon-pack name — `LIST_ICONS` in the
+  same file, defaulting to `🧺`. Worth stating because the kiosk renders
+  Routine icons through Font Awesome and reaching for `iconFor()` here gives
+  every list on the wall the same fallback bolt. The overlay renders the
+  character as text, in a square tinted with the list's colour.
 - **Optimistic state, server-owned order.** Tapping a row flips it instantly but
   does *not* re-sort; a debounced refresh (500ms after the last tap) brings back
   the server's ordering, so no comparator is written twice. The optimistic value
@@ -261,46 +266,90 @@ Independent of Phase 3 — can proceed in parallel.
   fails (`sw.js`), so a read can arrive stale, and because another device
   un-checking the same item is a disagreement the server has to win.
 
-## [] Phase 3 — Kiosk overlay
+## [x] Phase 3 — Kiosk overlay
 
 No longer gated — see Finding 4. Independent of Phase 2.
 
-- [ ] **Portrait-first, and every input lives in the top half of the overlay.**
+- [x] **Portrait-first, and every input lives in the top half of the overlay.**
       The keyboard owns the bottom ~20% and whether the viewport resizes for it
       is untested; this one rule makes that not matter. The add field goes at
       the *top*, with the items running down the column beneath it — never
-      pinned to the bottom.
-- [ ] The add field carries `autoCorrect="off"`, `spellCheck={false}`,
+      pinned to the bottom. **Clear checked** moved up into the same band for
+      the same reason: a button under the keyboard is the same bug as an input
+      under it.
+- [x] The add field carries `autoCorrect="off"`, `spellCheck={false}`,
       `autoCapitalize="words"`, and an `onSubmit` that adds the item and keeps
-      focus, so a run of items goes in without re-tapping the field.
+      focus, so a run of items goes in without re-tapping the field. The field
+      is never `disabled` on submit — disabling drops focus and takes the IME
+      down with it — and `enterKeyHint` is `send`, not `done`, which is the
+      hint that tells an IME *not* to dismiss after the action.
 - [ ] First time on the tablet, confirm the three things the auth page couldn't:
       that the list still scrolls with the keyboard up, that dismissing the
       keyboard leaves immersive mode intact (`hideSystemBars()` re-fires on
       `onWindowFocusChanged`), and that the split keyboard doesn't sit on top of
       anything that needs tapping. All three are cheap to check and none of them
       block starting.
-- [ ] `src/Aerie.Web/apps/dashboard/src/api/gatherClient.ts`, following
+- [x] `src/Aerie.Web/apps/dashboard/src/api/gatherClient.ts`, following
       `routinesClient.ts` — including its `handledUnauthorized` handling, which
       is not optional now that the wall is up.
-- [ ] Extend `useKioskLifecycle` with a suspension seam (a `hold` registration,
+- [x] Extend `useKioskLifecycle` with a suspension seam (a `hold` registration,
       or an argument) that pauses **both** the idle reset and the deploy reload.
       Deliberately one seam covering both — a reload that fires mid-entry is the
-      same bug as a reset that does.
-- [ ] Unit-test the suspension in `vitest`: held → no reset, released → timer
+      same bug as a reset that does. Shipped as a `hold: boolean` argument;
+      see "What Phase 3 changed structurally" below.
+- [x] Unit-test the suspension in `vitest`: held → no reset, released → timer
       re-arms, held-then-deploy-drift → reload deferred until release.
-- [ ] `components/GatherTile.tsx` — compact, readable across the kitchen: list
+- [x] `components/GatherTile.tsx` — compact, readable across the kitchen: list
       names with open counts. Renders nothing when there are no lists.
-- [ ] `components/GatherOverlay.tsx` — full-screen over the dashboard: pick a
+- [x] `components/GatherOverlay.tsx` — full-screen over the dashboard: pick a
       list, check items, add an item, clear checked. One portrait column, touch
       targets sized for a wall tablet read at arm's length, not a phone held at
       reading distance.
-- [ ] The overlay carries its **own** longer idle timeout (~90s) that closes it
+- [x] The overlay carries its **own** longer idle timeout (~90s) that closes it
       and hands control back to the normal lifecycle, so the wall always returns
       to the dashboard on its own. A tablet left on the grocery list is a
       regression in what the wall is for.
-- [ ] Wire Gather into the mock and test data sources so `?source=mock` and
+- [x] Wire Gather into the mock and test data sources so `?source=mock` and
       `?source=test` still render the whole screen.
-- [ ] `npm run build`, `npm run lint`, `npm run test` clean.
+- [x] `npm run build`, `npm run lint`, `npm run test` clean.
+
+### What Phase 3 changed structurally
+
+- **The lifecycle state machine moved to
+  [`lib/kioskLifecycle.ts`](../../src/Aerie.Web/apps/dashboard/src/lib/kioskLifecycle.ts).**
+  It was the body of a `useEffect` closure, which meant testing "the timer
+  really did not fire" would have cost the dashboard jsdom and a renderer to
+  assert on a `setTimeout`. `createKioskLifecycle(deps)` takes its DOM edges
+  (`reload`, `onReset`, `storage`, `fetchDeployedVersion`) as arguments and the
+  hook is now wiring only. The risk table's "unit-tested, not eyeballed" is what
+  forced this, and the tests were mutation-checked: dropping either `held` guard
+  fails them.
+- **`release()` counts as a touch, not as idleness.** Closing the overlay
+  re-arms the 30s timer rather than firing a deferred reload immediately —
+  someone is standing right there. A deploy that drifted while held lands on
+  that timer instead.
+- **A poll updates values but not row order while someone is mid-tap** (4s
+  settle). The server sinks a checked item to the bottom, and a list that
+  re-sorts under a finger is how you check off the wrong thing.
+- **Adds refetch rather than splice.** The server decides where a new item sits
+  and whether it merged onto one already there, and it is 10ms away.
+- **`useViewportInset()` hedges the untested IME-resize question** without
+  depending on the answer: if the visual viewport shrinks, the item list pads by
+  that much; if it never does, the value stays 0 and nothing changes.
+- **The six colour names answer per circadian phase, not per light/dark.** The
+  phone resolves a name twice, for light and dark. The wall has no two modes to
+  resolve into, so the six landed in
+  [`theme/tokens.ts`](../../src/Aerie.Web/apps/dashboard/src/theme/tokens.ts) as
+  tokens and blend through the day like `--ink` and `--card` do. Phase 2's light
+  values became the day palette and its dark values the amber and night ones, so
+  a `moss` list is recognisably the same list on both clients at both ends of
+  the day.
+- **An optimistic tick expires after 30s**, the same deadline the phone uses and
+  for the same reason: another device un-checking the same item is a
+  disagreement the server has to win.
+- **Two lists screens, not one.** The dashboard tile is the usual picker; the
+  overlay's own picker is only reachable via the back button and only when there
+  is more than one list.
 
 ## [] Phase 4 — Docs and dissipation
 

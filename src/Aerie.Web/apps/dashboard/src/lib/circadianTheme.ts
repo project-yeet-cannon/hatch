@@ -54,6 +54,19 @@ export interface ThemeTokens {
   coolInk: string;
   skel: string;
   shadowTint: string;
+  /**
+   * A Gather list's colour. Stored as one of six *names* rather than a hex
+   * (src/Aerie.Web/apps/family/src/modules/gather/palette.ts), precisely so
+   * each client can answer the name in its own light - the phone answers it
+   * twice for light and dark, and the kiosk answers it continuously, here,
+   * blended through the day like every other token in this file.
+   */
+  tintSky: string;
+  tintMoss: string;
+  tintClay: string;
+  tintPlum: string;
+  tintSun: string;
+  tintSlate: string;
 }
 
 export interface CircadianTokenSets {
@@ -132,6 +145,12 @@ function cssVars(t: ThemeTokens): Record<string, string> {
     '--cool-bg': t.coolBg,
     '--cool-ink': t.coolInk,
     '--skel': t.skel,
+    '--tint-sky': t.tintSky,
+    '--tint-moss': t.tintMoss,
+    '--tint-clay': t.tintClay,
+    '--tint-plum': t.tintPlum,
+    '--tint-sun': t.tintSun,
+    '--tint-slate': t.tintSlate,
     '--shadow': `0 12px 32px ${t.shadowTint}`,
   };
 }

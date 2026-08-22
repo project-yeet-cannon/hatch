@@ -1,8 +1,8 @@
 # Delivery Observability
 
-**Status:** Plan, unstarted. Phases are independent and ordered by
-value-per-hour, not by dependency — Phase 1 is worth doing on its own even if
-nothing after it happens.
+**Status:** Plan, unstarted. Phases are independent and ordered by priority —
+transparency first, then latency, then alerting — not by dependency. Phase 1 is
+worth doing on its own even if nothing after it happens.
 
 The cutover traded a green checkmark for a reconciliation loop.
 [`delivery-architecture.md`](../delivery-architecture.md) predicted this in as
@@ -102,7 +102,7 @@ Verified before writing; each one changes a step below.
    ([`alerts/flux.yaml`](../../deploy/cluster/observability/config/alerts/flux.yaml))
    already reads it. The reconciled object's namespace arrives as
    **`exported_namespace`**, not `namespace` — the PodMonitor's own `namespace`
-   label wins the collision. Every panel query in Phase 3 has to use the
+   label wins the collision. Every panel query in Phase 1 has to use the
    exported name.
 
 7. **Dashboard JSON must have `${` escaped to `$${`.** `observability-config`
@@ -117,53 +117,59 @@ Verified before writing; each one changes a step below.
    `provision-2-seed-secrets.yml`. Three new parameters below follow it
    unchanged; none of them is a new *kind* of credential.
 
-## Phase 1 — Say something (no latency change)
+## Phase 1 — The dashboard
 
-The cheapest phase and the one that removes the "I don't know if it ran" part of
-the complaint outright. Nothing here touches the reconciliation path.
+The one-stop shop, and the thing that actually answers the question. Depends on
+nothing else here — 1.3 is what turns it from a status board into a timeline,
+and it lives inside this phase for exactly that reason.
 
-- [ ] **1.1 A `Provider`/`Alert` pair posting commit statuses to GitHub.**
-      `Provider` type `github`, `address` the Aerie repo, `secretRef` a Secret
-      holding a fine-grained PAT scoped to this repo with `commit statuses:
-      write` and nothing else. `Alert` with `eventSources` naming the `apps`,
-      `infra-config`, `data-schema` and `site-config` Kustomizations and the
-      `aerie` HelmRelease, at `eventSeverity: info` so successes post too.
+- [ ] **1.1 The GitHub datasource.** Add `grafana-github-datasource` to
+      `grafana.plugins` in
+      [`kube-prometheus-stack.yaml`](../../deploy/cluster/observability/controllers/kube-prometheus-stack.yaml)
+      and provision the datasource with a read-only PAT (new parameter
+      `github/read-token`; `actions:read`, `contents:read`).
 
-      New parameter `github/status-token` in
-      [`parameters.json`](../../scripts/secrets/parameters.json), phase `9`,
-      `githubKind: secret`, landing in `flux-system` as `github-status/token`.
+      Two things to get right: the chart's `sidecar.datasources` already owns
+      datasource provisioning, so this is an `additionalDataSources` entry, not
+      a second mechanism; and the plugin caches API responses for up to five
+      minutes, which is a *floor* on CI panel freshness. That is acceptable for
+      CI history and is not acceptable for "is it live yet" — which is why the
+      live half of the dashboard reads Prometheus, not GitHub.
 
-      *Exit:* pushing a change to `charts/aerie` puts a status check on the
-      commit in GitHub within two minutes, and it goes red when the chart is
-      broken. Read Finding 5 before trusting it for app code.
+      *Exit:* a Grafana Explore query against the datasource returns recent
+      workflow runs.
 
-- [ ] **1.2 Deploy outcome as a Home Assistant notification.** A second `Alert`
-      on the same event sources to a `Provider` type `generic` pointed at
-      `http://${HA_HOST}:${HA_PORT}/api/webhook/${HA_ALERT_WEBHOOK_ID}` — the
-      webhook the Alertmanager receiver already uses
-      ([`kube-prometheus-stack.yaml`](../../deploy/cluster/observability/controllers/kube-prometheus-stack.yaml)).
+- [ ] **1.2 The `Delivery` dashboard**, as
+      `deploy/cluster/observability/config/dashboards/delivery.json` plus one
+      generator entry in that directory's `kustomization.yaml`. **Escape every
+      `${` to `$${` before committing** (Finding 7).
 
-      Decide deliberately whether this shares
-      `HA_ALERT_WEBHOOK_ID` with alerting or gets its own id. Sharing means a
-      routine deploy and a 3am Longhorn failure arrive down the same automation;
-      the phone cannot tell them apart, and the alert path is worth more than
-      the deploy path. **Prefer a second webhook id** — one new optional key in
-      [`cluster-config.json`](../../scripts/k3s/cluster-config.json),
-      `HA_DEPLOY_WEBHOOK_ID`, defaulting to empty with the `Alert` omitted when
-      unset.
+      Four rows, top to bottom, reading as one story:
 
-      *Exit:* a phone notification naming the object and the revision, within a
-      minute of a reconcile finishing, and a distinguishable one when it fails.
+      | Row | Panels | Source |
+      |---|---|---|
+      | Now | Latest `main` SHA; image tag `ImagePolicy` selected; tag in `aerie-image-tags`; tag actually running; agree/disagree stat | Prometheus + GitHub |
+      | CI | Last 20 runs of *Build and test* and *Build and publish containers* — status, duration, actor | GitHub datasource |
+      | CD | `gotk_reconcile_condition{type="Ready"}` per object, as a state timeline; suspended objects; reconcile duration | Prometheus (**`exported_namespace`**, Finding 6) |
+      | Rollout | `kube_deployment_status_replicas_{updated,available}` for the `aerie` namespace; restarts; the running image from `kube_pod_container_info` | Prometheus |
 
-- [ ] **1.3 One command that answers "where is my commit."** A
-      `scripts/k3s/Show-Delivery.ps1` alongside the `Test-*.ps1` family, taking
-      the same `-IPAddress`/`-SshPrivateKey` shape: prints the local HEAD, the
-      `flux-system` source revision, the `ImagePolicy`'s latest tag, the tag in
-      `aerie-image-tags`, and the image actually running on each `aerie` pod, as
-      five lines that either agree or visibly don't.
+      Deploy annotations from 1.3 cross all four rows, so a CI run, a
+      reconcile and a pod roll line up on one time axis.
 
-      *Exit:* run it after a push and the stuck hop is named by reading it, with
-      no second command.
+      *Exit:* `metrics.${DOMAIN}` answers "did my last push ship, and when"
+      without opening GitHub, `flux`, or `kubectl`.
+
+- [ ] **1.3 Deploy events as annotations.** A `Provider` type `grafana` and an
+      `Alert` whose `eventSources` name the `apps`, `infra-config`,
+      `data-schema` and `site-config` Kustomizations and the `aerie`
+      HelmRelease, at `eventSeverity: info` so successes annotate too, using a
+      Grafana service-account token. Every reconcile becomes a vertical line on every dashboard in the
+      instance — which is worth as much on the Longhorn and CNPG dashboards as
+      on this one, since "it started at 4:02" and "we deployed at 4:01" is the
+      correlation those dashboards cannot currently make.
+
+      *Exit:* an annotation appears within a minute of a reconcile and hovering
+      it names the object and revision.
 
 ## Phase 2 — Kill the poll
 
@@ -222,61 +228,60 @@ does not depend on 2.1 or 2.2 being finished.
       observed numbers. The estimates above are the *reason* for this phase and
       make a poor record of its result.
 
-## Phase 3 — The dashboard
+## Phase 3 — Say something (no latency change)
 
-The one-stop shop. Depends on nothing above, but Phase 1's annotations are what
-make it a timeline rather than a status board.
+Last by priority, not by cost — every item here is cheap, and 3.3 in particular
+is an afternoon with no cluster change at all. Nothing in this phase touches the
+reconciliation path. 3.1 reuses the `eventSources` list 1.3 already established;
+if Phase 1 is done, this is a second `Alert` beside it.
 
-- [ ] **3.1 The GitHub datasource.** Add `grafana-github-datasource` to
-      `grafana.plugins` in
-      [`kube-prometheus-stack.yaml`](../../deploy/cluster/observability/controllers/kube-prometheus-stack.yaml)
-      and provision the datasource with a read-only PAT (new parameter
-      `github/read-token`; `actions:read`, `contents:read`).
+- [ ] **3.1 A `Provider`/`Alert` pair posting commit statuses to GitHub.**
+      `Provider` type `github`, `address` the Aerie repo, `secretRef` a Secret
+      holding a fine-grained PAT scoped to this repo with `commit statuses:
+      write` and nothing else. `Alert` with `eventSources` naming the `apps`,
+      `infra-config`, `data-schema` and `site-config` Kustomizations and the
+      `aerie` HelmRelease, at `eventSeverity: info` so successes post too.
 
-      Two things to get right: the chart's `sidecar.datasources` already owns
-      datasource provisioning, so this is an `additionalDataSources` entry, not
-      a second mechanism; and the plugin caches API responses for up to five
-      minutes, which is a *floor* on CI panel freshness. That is acceptable for
-      CI history and is not acceptable for "is it live yet" — which is why the
-      live half of the dashboard reads Prometheus, not GitHub.
+      New parameter `github/status-token` in
+      [`parameters.json`](../../scripts/secrets/parameters.json), phase `9`,
+      `githubKind: secret`, landing in `flux-system` as `github-status/token`.
 
-      *Exit:* a Grafana Explore query against the datasource returns recent
-      workflow runs.
+      *Exit:* pushing a change to `charts/aerie` puts a status check on the
+      commit in GitHub within two minutes, and it goes red when the chart is
+      broken. Read Finding 5 before trusting it for app code.
 
-- [ ] **3.2 The `Delivery` dashboard**, as
-      `deploy/cluster/observability/config/dashboards/delivery.json` plus one
-      generator entry in that directory's `kustomization.yaml`. **Escape every
-      `${` to `$${` before committing** (Finding 7).
+- [ ] **3.2 Deploy outcome as a Home Assistant notification.** A second `Alert`
+      on the same event sources to a `Provider` type `generic` pointed at
+      `http://${HA_HOST}:${HA_PORT}/api/webhook/${HA_ALERT_WEBHOOK_ID}` — the
+      webhook the Alertmanager receiver already uses
+      ([`kube-prometheus-stack.yaml`](../../deploy/cluster/observability/controllers/kube-prometheus-stack.yaml)).
 
-      Four rows, top to bottom, reading as one story:
+      Decide deliberately whether this shares
+      `HA_ALERT_WEBHOOK_ID` with alerting or gets its own id. Sharing means a
+      routine deploy and a 3am Longhorn failure arrive down the same automation;
+      the phone cannot tell them apart, and the alert path is worth more than
+      the deploy path. **Prefer a second webhook id** — one new optional key in
+      [`cluster-config.json`](../../scripts/k3s/cluster-config.json),
+      `HA_DEPLOY_WEBHOOK_ID`, defaulting to empty with the `Alert` omitted when
+      unset.
 
-      | Row | Panels | Source |
-      |---|---|---|
-      | Now | Latest `main` SHA; image tag `ImagePolicy` selected; tag in `aerie-image-tags`; tag actually running; agree/disagree stat | Prometheus + GitHub |
-      | CI | Last 20 runs of *Build and test* and *Build and publish containers* — status, duration, actor | GitHub datasource |
-      | CD | `gotk_reconcile_condition{type="Ready"}` per object, as a state timeline; suspended objects; reconcile duration | Prometheus (**`exported_namespace`**, Finding 6) |
-      | Rollout | `kube_deployment_status_replicas_{updated,available}` for the `aerie` namespace; restarts; the running image from `kube_pod_container_info` | Prometheus |
+      *Exit:* a phone notification naming the object and the revision, within a
+      minute of a reconcile finishing, and a distinguishable one when it fails.
 
-      Deploy annotations from 3.3 cross all four rows, so a CI run, a
-      reconcile and a pod roll line up on one time axis.
+- [ ] **3.3 One command that answers "where is my commit."** A
+      `scripts/k3s/Show-Delivery.ps1` alongside the `Test-*.ps1` family, taking
+      the same `-IPAddress`/`-SshPrivateKey` shape: prints the local HEAD, the
+      `flux-system` source revision, the `ImagePolicy`'s latest tag, the tag in
+      `aerie-image-tags`, and the image actually running on each `aerie` pod, as
+      five lines that either agree or visibly don't.
 
-      *Exit:* `metrics.${DOMAIN}` answers "did my last push ship, and when"
-      without opening GitHub, `flux`, or `kubectl`.
-
-- [ ] **3.3 Deploy events as annotations.** A `Provider` type `grafana` and an
-      `Alert` on the same event sources as 1.1, using a Grafana service-account
-      token. Every reconcile becomes a vertical line on every dashboard in the
-      instance — which is worth as much on the Longhorn and CNPG dashboards as
-      on this one, since "it started at 4:02" and "we deployed at 4:01" is the
-      correlation those dashboards cannot currently make.
-
-      *Exit:* an annotation appears within a minute of a reconcile and hovering
-      it names the object and revision.
+      *Exit:* run it after a push and the stuck hop is named by reading it, with
+      no second command.
 
 ## Phase 4 — The green check, precisely
 
 Optional, and the honest answer to "did *my* commit ship" that Finding 5 says a
-commit status cannot give. Do it if Phase 1's status check proves too loose in
+commit status cannot give. Do it if Phase 3's status check proves too loose in
 practice; skip it if it doesn't.
 
 - [ ] **4.1 A `deploy.yml` gate.** `workflow_run` on *Build and publish
@@ -310,7 +315,7 @@ practice; skip it if it doesn't.
       *Exit:* one check on the commit, in Actions, whose duration is the actual
       convergence time and whose failure names the hop that stalled.
 
-- [ ] **4.2 Retire what 4.1 subsumes.** If the gate lands, 1.1's status check
+- [ ] **4.2 Retire what 4.1 subsumes.** If the gate lands, 3.1's status check
       becomes redundant for `apps` specifically. Keep it for `infra-config` and
       `data-schema`, which no workflow gates.
 
@@ -320,7 +325,7 @@ practice; skip it if it doesn't.
   reaching the cluster; `flux diff` and the dry-run checks from the cluster
   plan's 3b.14 are that, and they are separate work.
 - **It does not consolidate the notification paths.** Alertmanager → HA and Kuma
-  → HA already coexist by design, and 1.2 makes a third. Phase 9 of
+  → HA already coexist by design, and 3.2 makes a third. Phase 9 of
   [the cluster plan](swarm/phase-9-productization.md) owns consolidating them;
   this plan should not pre-empt that decision by inventing a fourth convention.
 - **It does not make rollback faster.** Reverting is still a commit, and
@@ -336,7 +341,7 @@ practice; skip it if it doesn't.
 - [`delivery-architecture.md`](../delivery-architecture.md) — the pull model, the
   timeline of a push, and the paragraph this plan is the answer to
 - [`monitoring-alerting-architecture.md`](../monitoring-alerting-architecture.md)
-  — the notification paths 1.2 joins
+  — the notification paths 3.2 joins
 - [`phase-6-observability.md`](swarm/phase-6-observability.md) — how the Grafana,
   dashboard-ConfigMap and alerting plumbing this plan reuses got there
 - [Flux Receivers](https://fluxcd.io/flux/components/notification/receivers/) and

@@ -171,3 +171,64 @@ export interface DashboardData {
 export interface DashboardDataSource {
   getDashboardData(): Promise<DashboardData>;
 }
+
+/**
+ * Gather — the family's shared lists, as the kiosk consumes them. These mirror
+ * the module's DTOs (src/Aerie.Api/Modules/Gather/Dtos.cs) field for field; the
+ * API answers in camelCase with ISO timestamps, so nothing is transformed on
+ * the way in.
+ */
+export interface GatherListSummary {
+  id: string;
+  name: string;
+  icon: string | null;
+  color: string | null;
+  /** Still to get. This is the number the wall tile shows. */
+  openCount: number;
+  /** Already in the cart — what "Clear checked" would sweep. */
+  checkedCount: number;
+  /** ISO 8601. */
+  createdAt: string;
+  /** ISO 8601. Moves on item activity too, not just a rename. */
+  updatedAt: string;
+}
+
+export interface GatherItem {
+  id: string;
+  listId: string;
+  name: string;
+  /** Free text — "a dozen", "2 lbs", "x2" are all real answers. */
+  quantity: string | null;
+  note: string | null;
+  isChecked: boolean;
+  /** ISO 8601, or null while the item is open. */
+  checkedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * A list and everything on it. Items arrive in display order — unchecked first
+ * by age, then checked most-recently-first — decided server-side so the wall
+ * and the phone can't drift apart on it.
+ */
+export interface GatherListDetail {
+  list: GatherListSummary;
+  items: GatherItem[];
+}
+
+/**
+ * The slice of Gather the wall needs: read the lists, open one, add, check,
+ * sweep. Deliberately not the whole module API — renaming an item and editing a
+ * quantity are phone jobs, and leaving them out is what keeps every control in
+ * the overlay above the keyboard.
+ */
+export interface GatherSource {
+  getLists(): Promise<GatherListSummary[]>;
+  getList(id: string): Promise<GatherListDetail>;
+  /** Upserts on the normalized name: re-adding a checked item brings it back open. */
+  addItem(listId: string, name: string): Promise<GatherItem>;
+  setChecked(listId: string, itemId: string, isChecked: boolean): Promise<GatherItem>;
+  /** Resolves to how many items were removed. */
+  clearChecked(listId: string): Promise<number>;
+}

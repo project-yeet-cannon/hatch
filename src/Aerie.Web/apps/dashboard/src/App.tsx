@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { DashboardData } from './types';
 import { getDashboardDataSource } from './dataSource';
@@ -12,8 +12,11 @@ import { RoutinesSection } from './components/RoutinesSection';
 import { CalendarSection } from './components/CalendarSection';
 import { AlertBanner } from './components/AlertBanner';
 import { DashboardSkeleton } from './components/DashboardSkeleton';
+import { GatherTile } from './components/GatherTile';
+import { GatherOverlay } from './components/GatherOverlay';
 import { clientLogger } from './lib/clientLogger';
 import { useKioskLifecycle } from './hooks/useKioskLifecycle';
+import { useGatherLists } from './hooks/useGatherLists';
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -21,10 +24,22 @@ export function App() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
+  // null when the overlay is closed; the id of the list it is showing otherwise.
+  const [gatherListId, setGatherListId] = useState<string | null>(null);
+  const { lists: gatherLists, refresh: refreshGather } = useGatherLists();
   // Bumps ~30s after the last touch; see hooks/useKioskLifecycle.ts. Also owns
   // the reload-on-new-deploy side of the kiosk's lifecycle, which needs nothing
-  // from this component.
-  const resetToken = useKioskLifecycle();
+  // from this component. Both are suspended while Gather is open - a reset would
+  // take a half-typed item with it and a reload would take the whole page.
+  const gatherOpen = gatherListId !== null;
+  const resetToken = useKioskLifecycle(gatherOpen);
+
+  const closeGather = useCallback(() => {
+    setGatherListId(null);
+    // The tile's counts are known to be wrong the instant this closes; waiting
+    // out the poll would show someone the opposite of what they just did.
+    refreshGather();
+  }, [refreshGather]);
 
   useEffect(() => {
     clientLogger.info('App mounted, starting dashboard data source');
@@ -122,7 +137,15 @@ export function App() {
         ) : (
           <DashboardSkeleton />
         )}
+        {/* Outside the snapshot's ternary on purpose: Gather has its own data
+            path, so a dashboard API that is down doesn't have to take the
+            shopping list off the wall with it. */}
+        <GatherTile lists={gatherLists} onOpen={setGatherListId} />
       </div>
+      {/* Inside .hf-page rather than portalled: the circadian palette is inline
+          custom properties on that element, and an overlay mounted anywhere
+          else would resolve none of them. */}
+      {gatherOpen && <GatherOverlay listId={gatherListId} lists={gatherLists} onClose={closeGather} />}
     </div>
   );
 }

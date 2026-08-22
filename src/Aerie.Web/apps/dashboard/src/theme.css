@@ -571,3 +571,314 @@ body {
   font-size: 21px;
   letter-spacing: -0.01em;
 }
+
+/* ---- Gather ---------------------------------------------------------------
+   The dashboard tile, then the overlay. Everything here is sized to be read
+   across a kitchen (the tile) or at arm's length from a wall mount (the
+   overlay), which is why the type and the touch targets are larger than the
+   rest of this file - a phone's 44px row is a miss on a tablet you reach for
+   without looking straight at it. */
+
+.hf-gather {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 16px;
+}
+.hf-gather-tile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 78px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--card);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font-family: var(--ui);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.hf-gather-tile:active {
+  transform: scale(0.98);
+}
+.hf-gather-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+/* The emoji sits in a square tinted with the list's colour - a name the phone
+   picked, answered here by the circadian palette rather than by a hex chosen in
+   somebody's daylight. See lib/listColor.ts. */
+.hf-gather-tile-icon,
+.hf-gather-pick-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  flex: none;
+  border-radius: 14px;
+  font-size: 24px;
+  line-height: 1;
+}
+.hf-gather-tile-name {
+  font: 600 19px/1.2 var(--ui);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hf-gather-tile-count {
+  font: 800 30px/1 var(--num);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.hf-gather-tile-count.empty {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* The overlay covers the dashboard rather than routing to a page: the kiosk has
+   no router and its lifecycle is tuned to a screen nobody types into, so this
+   is one suspension seam (useKioskLifecycle's hold) instead of making every
+   lifecycle rule route-aware. Fixed rather than absolute, and a child of
+   .hf-page so the circadian custom properties still resolve - they are inline
+   styles on that element, not globals. */
+.hf-gather-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 18px 0;
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--ui);
+  /* Vertical only; the column never scrolls sideways. */
+  touch-action: pan-y;
+}
+.hf-gather-overlay * {
+  box-sizing: border-box;
+}
+.hf-gather-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+}
+.hf-gather-title {
+  flex: 1;
+  min-width: 0;
+  font: 700 27px/1.2 var(--display);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hf-gather-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 22px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.hf-gather-icon-btn:active {
+  transform: scale(0.96);
+}
+/* Keeps the title centred when there is no back button to balance the close. */
+.hf-gather-icon-btn.placeholder {
+  border-color: transparent;
+  background: none;
+}
+
+/* The add field sits at the top, never pinned to the bottom: the keyboard owns
+   the bottom fifth of a portrait tablet and whether the viewport resizes for it
+   is untested. Up here the answer never matters. */
+.hf-gather-add {
+  display: flex;
+  gap: 12px;
+}
+.hf-gather-input {
+  flex: 1;
+  min-width: 0;
+  height: 64px;
+  padding: 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--card);
+  color: var(--ink);
+  font: 500 22px/1 var(--ui);
+}
+.hf-gather-input::placeholder {
+  color: var(--muted);
+}
+.hf-gather-input:focus {
+  outline: 2px solid var(--comfort);
+  outline-offset: -2px;
+}
+.hf-gather-add-btn {
+  width: 64px;
+  height: 64px;
+  flex: none;
+  border: none;
+  border-radius: 18px;
+  background: var(--comfort);
+  color: var(--card);
+  font-size: 24px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.hf-gather-add-btn:active {
+  transform: scale(0.96);
+}
+.hf-gather-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+}
+.hf-gather-counts {
+  min-width: 0;
+  font: 500 16px/1.3 var(--ui);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hf-gather-added {
+  color: var(--ok-ink);
+}
+.hf-gather-error {
+  color: var(--warm-ink);
+}
+/* Top-right rather than a bottom action bar: a button under the keyboard is the
+   same bug as an input under it. */
+.hf-gather-clear {
+  flex: none;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+  color: var(--muted);
+  font: 600 16px/1 var(--ui);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.hf-gather-clear.confirming {
+  border-color: transparent;
+  background: var(--warm-bg);
+  color: var(--warm-ink);
+}
+.hf-gather-scroll {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 24px;
+  overflow-y: auto;
+  /* The dashboard underneath must not scroll when this list hits its end. */
+  overscroll-behavior: contain;
+}
+.hf-gather-row,
+.hf-gather-pick {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  flex: none;
+  min-height: 72px;
+  padding: 12px 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--card);
+  color: var(--ink);
+  font-family: var(--ui);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.hf-gather-row:active,
+.hf-gather-pick:active {
+  transform: scale(0.99);
+}
+.hf-gather-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  color: var(--comfort);
+  font-size: 18px;
+}
+.hf-gather-row.checked {
+  opacity: 0.55;
+}
+.hf-gather-row.checked .hf-gather-box {
+  border-color: var(--comfort);
+  background: var(--ok-bg);
+}
+.hf-gather-row.checked .hf-gather-item-name {
+  text-decoration: line-through;
+}
+.hf-gather-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.hf-gather-item-name {
+  font: 600 21px/1.25 var(--ui);
+  /* Long names wrap rather than truncate - "sharp cheddar, not the block" is
+     the whole content of the row and there is nowhere else to read it. */
+  overflow-wrap: anywhere;
+}
+.hf-gather-item-note {
+  font: 500 15px/1.3 var(--ui);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.hf-gather-qty {
+  flex: none;
+  max-width: 40%;
+  padding: 5px 12px;
+  border-radius: 10px;
+  background: var(--band);
+  color: var(--ink);
+  font: 600 16px/1.2 var(--num);
+  overflow-wrap: anywhere;
+}
+.hf-gather-empty {
+  margin: 8px 4px;
+  font: 500 17px/1.4 var(--ui);
+  color: var(--muted);
+}
+.hf-gather-pick-name {
+  flex: 1;
+  min-width: 0;
+  font: 600 21px/1.25 var(--ui);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hf-gather-pick-count {
+  font: 800 24px/1 var(--num);
+  font-variant-numeric: tabular-nums;
+}
