@@ -1,7 +1,9 @@
+import { handledUnauthorized } from '../lib/signIn';
 import type { DocSummary } from '../types';
 
 async function fetchJson<T>(path: string): Promise<T> {
   const res = await fetch(path, { headers: { Accept: 'application/json' } });
+  if (handledUnauthorized(res)) return await new Promise<T>(() => {});
   if (!res.ok) {
     throw new Error(`GET ${path} failed: ${res.status} ${res.statusText}`);
   }
@@ -15,6 +17,7 @@ export async function getDocContent(slug: string): Promise<string> {
   // its separators to %2F is what the catch-all route can't match.
   const path = slug.split('/').map(encodeURIComponent).join('/');
   const res = await fetch(`/api/docs/${path}`, { headers: { Accept: 'text/markdown' } });
+  if (handledUnauthorized(res)) return await new Promise<string>(() => {});
   if (!res.ok) {
     throw new Error(`GET /api/docs/${slug} failed: ${res.status} ${res.statusText}`);
   }

@@ -1,3 +1,4 @@
+import { handledUnauthorized } from './signIn';
 /**
  * Build-drift detection for the kiosk dashboard.
  *
@@ -81,6 +82,9 @@ export function readLoadedVersion(): string {
 /** The version this API replica is serving, or null if it couldn't be read. */
 export async function fetchDeployedVersion(signal?: AbortSignal): Promise<string | null> {
   const response = await fetch(`/api/app-version/${APP_NAME}`, { cache: 'no-store', signal });
+  // Checked before the !ok bail-out below, which cannot tell a refusal from a
+  // pod mid-restart and answers "no drift" to both.
+  if (handledUnauthorized(response)) return null;
   if (!response.ok) return null;
 
   const body = (await response.json()) as AppVersionResponse;

@@ -44,7 +44,7 @@ public class AuthGateTests
         var gate = NewGate();
 
         Assert.True(gate.IsExempt(path, null));
-        var decision = await gate.EvaluateAsync(path, "home.example.com", token: null, clientIp: null, CancellationToken.None);
+        var decision = await gate.EvaluateAsync(path, "home.example.com", tokens: [], clientIp: null, CancellationToken.None);
         Assert.Equal(AuthOutcome.Allow, decision.Outcome);
     }
 
@@ -74,7 +74,7 @@ public class AuthGateTests
         var gate = NewGate();
 
         Assert.False(gate.IsExempt(path, null));
-        var decision = await gate.EvaluateAsync(path, "home.example.com", token: null, clientIp: "10.0.0.7", CancellationToken.None);
+        var decision = await gate.EvaluateAsync(path, "home.example.com", tokens: [], clientIp: "10.0.0.7", CancellationToken.None);
         Assert.Equal(AuthOutcome.Challenge, decision.Outcome);
         Assert.Equal(AuthDecision.NoCredential, decision.Reason);
     }
@@ -121,12 +121,14 @@ public class AuthGateTests
         var auth = new StubAuthService(Grant("Kitchen tablet"));
         var gate = NewGate(auth: auth);
 
-        var decision = await gate.EvaluateAsync("/apps/admin/devices", "home.example.com", "a-token", "10.0.0.7", CancellationToken.None);
+        var decision = await gate.EvaluateAsync("/apps/admin/devices", "home.example.com", ["a-token"], "10.0.0.7", CancellationToken.None);
 
         Assert.Equal(AuthOutcome.Authenticated, decision.Outcome);
         Assert.Equal("Kitchen tablet", decision.Grant?.Label);
         Assert.True(decision.IsAllowed);
-        Assert.Equal([("a-token", "10.0.0.7")], auth.Verified);
+        var (presented, ip) = Assert.Single(auth.Verified);
+        Assert.Equal(["a-token"], presented);
+        Assert.Equal("10.0.0.7", ip);
     }
 
     [Fact]
@@ -134,7 +136,7 @@ public class AuthGateTests
     {
         var gate = NewGate(auth: new StubAuthService(null));
 
-        var decision = await gate.EvaluateAsync("/api/zones", "home.example.com", "a-revoked-token", "10.0.0.7", CancellationToken.None);
+        var decision = await gate.EvaluateAsync("/api/zones", "home.example.com", ["a-revoked-token"], "10.0.0.7", CancellationToken.None);
 
         Assert.Equal(AuthOutcome.Challenge, decision.Outcome);
         Assert.Equal(AuthDecision.UnknownGrant, decision.Reason);

@@ -1,3 +1,4 @@
+import { handledUnauthorized } from '../lib/signIn';
 import type { DashboardData, DashboardDataSource } from '../types';
 
 /**
@@ -14,6 +15,9 @@ export class ApiDashboardDataSource implements DashboardDataSource {
 
   async getDashboardData(): Promise<DashboardData> {
     const res = await fetch(this.endpoint, { headers: { Accept: 'application/json' } });
+    // The kiosk's whole failure mode: without this the tablet renders its last
+    // good snapshot forever and never asks anyone to sign in.
+    if (handledUnauthorized(res)) return await new Promise<DashboardData>(() => {});
     if (!res.ok) {
       throw new Error(`Dashboard API request failed: ${res.status} ${res.statusText}`);
     }

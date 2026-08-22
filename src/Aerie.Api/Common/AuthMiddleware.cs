@@ -62,9 +62,9 @@ public class AuthMiddleware(RequestDelegate next, IOptions<AuthOptions> options,
             return;
         }
 
-        var token = AuthCookie.Read(request, options);
+        var tokens = AuthCookie.ReadAll(request, options);
         var clientIp = context.Connection.RemoteIpAddress?.ToString();
-        var decision = await gate.EvaluateAsync(request.Path, host, token, clientIp, context.RequestAborted);
+        var decision = await gate.EvaluateAsync(request.Path, host, tokens, clientIp, context.RequestAborted);
 
         if (decision.Outcome == AuthOutcome.Challenge)
         {
@@ -75,7 +75,7 @@ public class AuthMiddleware(RequestDelegate next, IOptions<AuthOptions> options,
         if (decision.Grant is { } grant)
         {
             context.SetAuthGrant(grant);
-            await RenewCookieIfStaleAsync(context, auth, grant, token, time);
+            await RenewCookieIfStaleAsync(context, auth, grant, decision.Token, time);
         }
 
         await next(context);

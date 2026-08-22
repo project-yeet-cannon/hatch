@@ -1,3 +1,4 @@
+import { handledUnauthorized } from '../../lib/signIn';
 import type {
   Crate,
   CrateDetail,
@@ -64,6 +65,9 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { Accept: 'application/json', ...(init?.body ? { 'Content-Type': 'application/json' } : {}) },
     ...init,
   });
+
+  // A cold-scanned bin label lands here un-enrolled: sign in, then the bin.
+  if (handledUnauthorized(res)) return await new Promise<T>(() => {});
 
   // 204 responses (every DELETE here) have no body, and res.json() throws on empty input.
   const text = await res.text();

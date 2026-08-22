@@ -67,7 +67,7 @@ public class AuthController(
         var decision = await gate.EvaluateAsync(
             path,
             string.IsNullOrEmpty(host) ? Request.Host.Value : host,
-            AuthCookie.Read(Request, options),
+            AuthCookie.ReadAll(Request, options),
             HttpContext.Connection.RemoteIpAddress?.ToString(),
             ct);
 
@@ -247,10 +247,10 @@ public class AuthController(
     /// </summary>
     private async Task<EfAuthGrant?> CurrentGrantAsync(CancellationToken ct) =>
         HttpContext.GetAuthGrant()
-        ?? await auth.VerifyAsync(
-            AuthCookie.Read(Request, options),
+        ?? (await auth.VerifyAsync(
+            AuthCookie.ReadAll(Request, options),
             HttpContext.Connection.RemoteIpAddress?.ToString(),
-            ct);
+            ct))?.Grant;
 
     /// <summary>
     /// The path the origin server will actually serve, from the URI Traefik

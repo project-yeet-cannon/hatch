@@ -228,10 +228,20 @@ public class AuthControllerTests
         Assert.True(dto.IsCurrent);
         Assert.Equal([("AERIE-K3M9-P2QT", "Ada's iPhone", "Mozilla/5.0 (iPhone)", "10.0.0.7")], auth.Redemptions);
 
-        var cookie = context.Response.Headers.SetCookie.ToString();
+        var headers = context.Response.Headers.SetCookie;
+        var cookie = headers[0]!;
         Assert.StartsWith("aerie_grant=a-token;", cookie);
         Assert.Contains("domain=.example.com", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
+
+        // The second header is the tombstone for a host-only cookie of the same
+        // name - the landmine phases 1-4 left in any browser that signed in
+        // before Auth:CookieDomain was supplied. It carries no Domain, so it
+        // matches only that cookie and never the one just issued.
+        var tombstone = headers[1]!;
+        Assert.StartsWith("aerie_grant=;", tombstone);
+        Assert.DoesNotContain("domain=", tombstone, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("expires=Thu, 01 Jan 1970", tombstone, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -265,7 +275,9 @@ public class AuthControllerTests
         var result = Assert.IsType<OkObjectResult>(await controller.Me(CancellationToken.None));
 
         Assert.Equal("Kitchen tablet", Assert.IsType<AuthGrantDto>(result.Value).Label);
-        Assert.Equal([("a-token", "10.0.0.7")], auth.Verified);
+        var (presented, ip) = Assert.Single(auth.Verified);
+        Assert.Equal(["a-token"], presented);
+        Assert.Equal("10.0.0.7", ip);
     }
 
     [Fact]

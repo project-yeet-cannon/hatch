@@ -1,3 +1,4 @@
+import { handledUnauthorized } from './signIn';
 import { useEffect, useState } from 'react';
 
 /**
@@ -20,7 +21,13 @@ let inflight: Promise<AppConfig> | null = null;
 /** Fetched once per page load; a failure isn't cached, so a reconnect can still get the real value. */
 export function loadAppConfig(): Promise<AppConfig> {
   inflight ??= fetch('/api/apps/config', { headers: { Accept: 'application/json' } })
-    .then((res) => (res.ok ? (res.json() as Promise<AppConfig>) : Promise.reject(new Error(String(res.status)))))
+    .then((res) => {
+      // Never resolves - the document is being replaced by the sign-in shell,
+      // and rejecting instead would clear `inflight` and refetch into the same
+      // 401 while the navigation is still in flight.
+      if (handledUnauthorized(res)) return new Promise<AppConfig>(() => {});
+      return res.ok ? (res.json() as Promise<AppConfig>) : Promise.reject(new Error(String(res.status)));
+    })
     .catch((err: unknown) => {
       inflight = null;
       throw err;

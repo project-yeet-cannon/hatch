@@ -95,15 +95,28 @@ spec:
             # exactly the routes carrying its annotation.
             - name: Auth__Enabled
               value: {{ ne .Values.auth.mode "none" | quote }}
-            {{- if ne .Values.auth.mode "none" }}
-            - name: Auth__EnforceInProcess
-              value: {{ eq .Values.auth.mode "full" | quote }}
             # The leading dot is the entire single-sign-on story: one
             # enrollment covers home., kiosk. and share. rather than each
             # asking separately. Getting this wrong presents as a device that
             # is challenged again on the next hostname it visits.
+            #
+            # Deliberately outside the mode guard below, unlike everything else
+            # here. Redemption is not gated by Auth:Enabled - it cannot be, or
+            # there would be no way to enrol the first device - so a cookie can
+            # be minted at auth.mode none, and one minted without this value is
+            # host-only. That is a landmine rather than a no-op: it sits in the
+            # browser for the 400-day life of the cookie and shadows the
+            # domain-wide cookie every later sign-in issues, on that one host,
+            # so the device authenticates everywhere except the host it first
+            # signed in on. Found live on 2026-08-22 (docs/plans/auth.md, phase
+            # 6) on a phone that had signed in during phases 1-4, when this was
+            # inside the guard. AuthCookie now reads past a stale duplicate and
+            # expires it, and this renders unconditionally so none are made.
             - name: Auth__CookieDomain
               value: ".{{ .Values.domain }}"
+            {{- if ne .Values.auth.mode "none" }}
+            - name: Auth__EnforceInProcess
+              value: {{ eq .Values.auth.mode "full" | quote }}
             # The hosts whose Ingress never gets the annotation, repeated here
             # so the in-process gate agrees with the proxy instead of being the
             # stricter of two. files. serves the kiosk APK and its checksum,

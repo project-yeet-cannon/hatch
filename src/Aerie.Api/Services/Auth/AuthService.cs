@@ -23,6 +23,14 @@ public record AuthInviteCreated(Guid Id, string Code, DateTimeOffset ExpiresAt, 
 /// person to different next actions, and neither tells an attacker anything a
 /// 15-minute single-use code hadn't already conceded.
 /// </summary>
+/// <summary>
+/// A grant that verified, and the token that carried it. The token is not
+/// incidental: the sliding cookie re-issue has to write back the same secret,
+/// and once a request can present more than one, "the token" is no longer
+/// something the caller already knows.
+/// </summary>
+public record AuthVerification(EfAuthGrant Grant, string Token);
+
 public record AuthRedemption(EfAuthGrant? Grant, string? Token, string? Error)
 {
     public const string InvalidCode = "invalid_code";
@@ -51,7 +59,7 @@ public interface IAuthService
     /// live one. Also keeps LastSeenAt/LastSeenIp current, throttled to
     /// AuthOptions.LastSeenThrottleSeconds.
     /// </summary>
-    Task<EfAuthGrant?> VerifyAsync(string? token, string? clientIp, CancellationToken ct);
+    Task<AuthVerification?> VerifyAsync(IReadOnlyList<string> tokens, string? clientIp, CancellationToken ct);
 
     /// <summary>
     /// Records that the browser was just handed a fresh cookie for this grant,
@@ -193,24 +201,40 @@ public class AuthService(
         return new AuthRedemption(grant, token, null);
     }
 
-    public async Task<EfAuthGrant?> VerifyAsync(string? token, string? clientIp, CancellationToken ct)
+    /// <summary>
+    /// The first of the presented tokens that resolves to a live grant, with
+    /// the token that did it - the caller needs to know *which* one, because
+    /// the sliding re-issue has to write back the same secret.
+    ///
+    /// Plural because a browser can present several cookies of one name at once
+    /// (see <see cref="AuthCookie.ReadAll"/>). Taking only the first, or only
+    /// the last, is how a stale duplicate locks a device out of a host while it
+    /// holds a perfectly good grant. The loop stops on the first match, so the
+    /// ordinary one-cookie request is one query, exactly as before.
+    /// </summary>
+    public async Task<AuthVerification?> VerifyAsync(IReadOnlyList<string> tokens, string? clientIp, CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(token)) return null;
-
-        var hash = AuthTokens.Hash(token);
-        var grant = await db.AuthGrants.FirstOrDefaultAsync(g => g.TokenHash == hash, ct);
-
-        if (grant is null || !AuthTokens.Matches(grant.TokenHash, hash)) return null;
-
-        var now = time.GetUtcNow();
-        if (grant.ExpiresAt is { } expiresAt && expiresAt <= now)
+        foreach (var token in tokens)
         {
-            logger.LogWarning("Grant {GrantId} ({Label}) presented after expiry from {ClientIp}", grant.Id, grant.Label, clientIp);
-            return null;
+            if (string.IsNullOrEmpty(token)) continue;
+
+            var hash = AuthTokens.Hash(token);
+            var grant = await db.AuthGrants.FirstOrDefaultAsync(g => g.TokenHash == hash, ct);
+
+            if (grant is null || !AuthTokens.Matches(grant.TokenHash, hash)) continue;
+
+            var now = time.GetUtcNow();
+            if (grant.ExpiresAt is { } expiresAt && expiresAt <= now)
+            {
+                logger.LogWarning("Grant {GrantId} ({Label}) presented after expiry from {ClientIp}", grant.Id, grant.Label, clientIp);
+                continue;
+            }
+
+            await TouchAsync(grant, clientIp, now, ct);
+            return new AuthVerification(grant, token);
         }
 
-        await TouchAsync(grant, clientIp, now, ct);
-        return grant;
+        return null;
     }
 
     public async Task MarkCookieIssuedAsync(EfAuthGrant grant, CancellationToken ct)

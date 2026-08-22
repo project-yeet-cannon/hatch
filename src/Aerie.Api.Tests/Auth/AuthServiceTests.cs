@@ -144,10 +144,14 @@ public class AuthServiceTests
         var (service, _, _) = NewService();
         var token = await Enroll(service);
 
-        var grant = await service.VerifyAsync(token, "10.0.0.7", CancellationToken.None);
+        var verified = await service.VerifyAsync([token], "10.0.0.7", CancellationToken.None);
 
-        Assert.NotNull(grant);
-        Assert.Equal("10.0.0.7", grant.LastSeenIp);
+        Assert.NotNull(verified);
+        Assert.Equal("10.0.0.7", verified.Grant.LastSeenIp);
+        // The token that matched comes back with the grant, because the sliding
+        // re-issue has to write back that exact secret and a request may have
+        // presented more than one.
+        Assert.Equal(token, verified.Token);
     }
 
     [Fact]
@@ -155,13 +159,14 @@ public class AuthServiceTests
     {
         var (service, _, _) = NewService();
         var token = await Enroll(service);
-        var grant = await service.VerifyAsync(token, null, CancellationToken.None);
+        var verified = await service.VerifyAsync([token], null, CancellationToken.None);
+        var grant = verified!.Grant;
 
-        Assert.True(await service.RevokeGrantAsync(grant!.Id, CancellationToken.None));
+        Assert.True(await service.RevokeGrantAsync(grant.Id, CancellationToken.None));
 
         // Revocation is a DELETE, which is the entire reason the credential is
         // an opaque row rather than a signed token.
-        Assert.Null(await service.VerifyAsync(token, null, CancellationToken.None));
+        Assert.Null(await service.VerifyAsync([token], null, CancellationToken.None));
         Assert.False(await service.RevokeGrantAsync(grant.Id, CancellationToken.None));
     }
 
@@ -174,9 +179,9 @@ public class AuthServiceTests
         grant.ExpiresAt = Now.AddDays(1);
         await db.SaveChangesAsync();
 
-        Assert.NotNull(await service.VerifyAsync(token, null, CancellationToken.None));
+        Assert.NotNull(await service.VerifyAsync([token], null, CancellationToken.None));
         time.Advance(TimeSpan.FromDays(1));
-        Assert.Null(await service.VerifyAsync(token, null, CancellationToken.None));
+        Assert.Null(await service.VerifyAsync([token], null, CancellationToken.None));
     }
 
     [Theory]
@@ -188,7 +193,7 @@ public class AuthServiceTests
         var (service, _, _) = NewService();
         await Enroll(service);
 
-        Assert.Null(await service.VerifyAsync(token, null, CancellationToken.None));
+        Assert.Null(await service.VerifyAsync([token], null, CancellationToken.None));
     }
 
     [Fact]
@@ -198,13 +203,13 @@ public class AuthServiceTests
         var token = await Enroll(service, clientIp: "10.0.0.7");
 
         time.Advance(TimeSpan.FromSeconds(30));
-        await service.VerifyAsync(token, "10.0.0.7", CancellationToken.None);
+        await service.VerifyAsync([token], "10.0.0.7", CancellationToken.None);
         Assert.Equal(Now, (await Grant(db)).LastSeenAt);
 
         // An unthrottled write here is a write on every request through the
         // wall, which is every request in the app.
         time.Advance(TimeSpan.FromSeconds(31));
-        await service.VerifyAsync(token, "10.0.0.7", CancellationToken.None);
+        await service.VerifyAsync([token], "10.0.0.7", CancellationToken.None);
         Assert.Equal(Now.AddSeconds(61), (await Grant(db)).LastSeenAt);
     }
 
@@ -215,7 +220,7 @@ public class AuthServiceTests
         var token = await Enroll(service, clientIp: "10.0.0.7");
 
         time.Advance(TimeSpan.FromSeconds(5));
-        await service.VerifyAsync(token, "10.0.0.9", CancellationToken.None);
+        await service.VerifyAsync([token], "10.0.0.9", CancellationToken.None);
 
         // A stale "last seen" minute is free; a stale address is the one column
         // someone actually reads the Sessions page for.

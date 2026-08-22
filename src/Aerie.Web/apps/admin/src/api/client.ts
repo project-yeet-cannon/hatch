@@ -1,3 +1,4 @@
+import { handledUnauthorized } from '../lib/signIn';
 import type {
   AppsConfig,
   AuthGrant,
@@ -33,6 +34,10 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { Accept: 'application/json', ...(init?.body ? { 'Content-Type': 'application/json' } : {}) },
     ...init,
   });
+  if (handledUnauthorized(res)) {
+    // Navigating away; this promise is abandoned with the document.
+    return await new Promise<T>(() => {});
+  }
   if (!res.ok) {
     throw new Error(`${init?.method ?? 'GET'} ${path} failed: ${res.status} ${res.statusText}`);
   }

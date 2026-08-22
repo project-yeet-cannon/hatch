@@ -10,7 +10,8 @@ namespace Aerie.Api.Tests.Auth;
 /// </summary>
 internal sealed class StubAuthService(EfAuthGrant? grant = null) : IAuthService
 {
-    public List<(string? Token, string? ClientIp)> Verified { get; } = [];
+    /// <summary>Every credential set the gate presented, so a test can prove it passed on *all* of them rather than picking one.</summary>
+    public List<(IReadOnlyList<string> Tokens, string? ClientIp)> Verified { get; } = [];
 
     public List<Guid> CookieIssued { get; } = [];
 
@@ -33,10 +34,25 @@ internal sealed class StubAuthService(EfAuthGrant? grant = null) : IAuthService
     /// <summary>What RedeemAsync answers. A refusal by default, so a test has to opt into success rather than inherit it.</summary>
     public AuthRedemption RedeemResult { get; set; } = AuthRedemption.Failed(AuthRedemption.InvalidCode);
 
-    public Task<EfAuthGrant?> VerifyAsync(string? token, string? clientIp, CancellationToken ct)
+    /// <summary>
+    /// Answers for whichever presented token the test named in
+    /// <see cref="VerifiesToken"/>, or for any of them when it named none -
+    /// which is what lets a test put a stale cookie in front of a good one and
+    /// assert the good one still wins.
+    /// </summary>
+    public string? VerifiesToken { get; set; }
+
+    public Task<AuthVerification?> VerifyAsync(IReadOnlyList<string> tokens, string? clientIp, CancellationToken ct)
     {
-        Verified.Add((token, clientIp));
-        return Task.FromResult(grant);
+        Verified.Add((tokens, clientIp));
+
+        if (grant is null) return Task.FromResult<AuthVerification?>(null);
+
+        var matched = VerifiesToken is null
+            ? tokens.FirstOrDefault()
+            : tokens.FirstOrDefault(t => t == VerifiesToken);
+
+        return Task.FromResult(matched is null ? null : new AuthVerification(grant, matched));
     }
 
     public Task MarkCookieIssuedAsync(EfAuthGrant issued, CancellationToken ct)

@@ -141,7 +141,9 @@ public class AuthMiddlewareTests
 
         Assert.True(served);
         Assert.Same(grant, context.GetAuthGrant());
-        Assert.Equal([("a-token", "10.0.0.7")], auth.Verified);
+        var (presented, ip) = Assert.Single(auth.Verified);
+        Assert.Equal(["a-token"], presented);
+        Assert.Equal("10.0.0.7", ip);
     }
 
     [Fact]
@@ -175,8 +177,10 @@ public class AuthMiddlewareTests
         var (context, served) = await Run(request, auth: auth, at: Now.AddDays(31));
 
         Assert.True(served);
-        Assert.Equal(1, context.Response.Headers.SetCookie.Count);
-        var cookie = context.Response.Headers.SetCookie.ToString();
+        // Two: the re-issued grant cookie, and the host-only tombstone that
+        // travels with every issue (see AuthCookie.Issue).
+        Assert.Equal(2, context.Response.Headers.SetCookie.Count);
+        var cookie = context.Response.Headers.SetCookie[0]!;
         Assert.StartsWith("aerie_grant=a-token;", cookie);
         Assert.Contains("max-age=34560000", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("domain=.example.com", cookie, StringComparison.OrdinalIgnoreCase);

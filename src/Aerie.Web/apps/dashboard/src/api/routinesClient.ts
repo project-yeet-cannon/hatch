@@ -1,3 +1,4 @@
+import { handledUnauthorized } from '../lib/signIn';
 /**
  * The dashboard's first outbound write call - everything else in this app is
  * read-only polling (see dataSource.ts). Kept separate from a
@@ -6,6 +7,7 @@
  */
 export async function triggerRoutine(id: string): Promise<void> {
   const res = await fetch(`/api/routines/${id}/trigger`, { method: 'POST' });
+  if (handledUnauthorized(res)) return;
   if (!res.ok) {
     throw new Error(`Trigger routine failed: ${res.status} ${res.statusText}`);
   }
@@ -14,6 +16,7 @@ export async function triggerRoutine(id: string): Promise<void> {
 /** The "off" half of a toggle routine - see RoutineSummary.isToggle. */
 export async function turnOffRoutine(id: string): Promise<void> {
   const res = await fetch(`/api/routines/${id}/turn-off`, { method: 'POST' });
+  if (handledUnauthorized(res)) return;
   if (!res.ok) {
     throw new Error(`Turn off routine failed: ${res.status} ${res.statusText}`);
   }

@@ -23,7 +23,7 @@ public enum AuthOutcome
 /// Warning log line carries, and eventually what a support conversation starts
 /// from.
 /// </summary>
-public record AuthDecision(AuthOutcome Outcome, EfAuthGrant? Grant, string? Reason)
+public record AuthDecision(AuthOutcome Outcome, EfAuthGrant? Grant, string? Reason, string? Token = null)
 {
     public const string NoCredential = "no_credential";
     public const string UnknownGrant = "unknown_grant";
@@ -32,7 +32,8 @@ public record AuthDecision(AuthOutcome Outcome, EfAuthGrant? Grant, string? Reas
 
     public static readonly AuthDecision Exempt = new(AuthOutcome.Allow, null, null);
 
-    public static AuthDecision Authenticated(EfAuthGrant grant) => new(AuthOutcome.Authenticated, grant, null);
+    /// <summary>Carries the token that verified, so the sliding re-issue writes back the same secret rather than guessing which cookie won.</summary>
+    public static AuthDecision Authenticated(EfAuthGrant grant, string token) => new(AuthOutcome.Authenticated, grant, null, token);
 
     public static AuthDecision Challenge(string reason) => new(AuthOutcome.Challenge, null, reason);
 }
@@ -51,7 +52,7 @@ public interface IAuthGate
     /// forwardAuth endpoint means the ones Traefik forwarded rather than the
     /// proxied request's own.
     /// </summary>
-    Task<AuthDecision> EvaluateAsync(PathString path, string? host, string? token, string? clientIp, CancellationToken ct);
+    Task<AuthDecision> EvaluateAsync(PathString path, string? host, IReadOnlyList<string> tokens, string? clientIp, CancellationToken ct);
 }
 
 /// <summary>
@@ -152,7 +153,7 @@ public class AuthGate(
         return false;
     }
 
-    public async Task<AuthDecision> EvaluateAsync(PathString path, string? host, string? token, string? clientIp, CancellationToken ct)
+    public async Task<AuthDecision> EvaluateAsync(PathString path, string? host, IReadOnlyList<string> tokens, string? clientIp, CancellationToken ct)
     {
         // Off is the rollback, and it is also the whole of local dev. Deciding
         // it here rather than in each caller means there is no way to reach the
@@ -161,12 +162,12 @@ public class AuthGate(
 
         if (IsExempt(path, host)) return AuthDecision.Exempt;
 
-        if (string.IsNullOrEmpty(token)) return Refuse(AuthDecision.NoCredential, path, host, clientIp);
+        if (tokens.Count == 0) return Refuse(AuthDecision.NoCredential, path, host, clientIp);
 
-        var grant = await auth.VerifyAsync(token, clientIp, ct);
-        return grant is null
+        var verified = await auth.VerifyAsync(tokens, clientIp, ct);
+        return verified is null
             ? Refuse(AuthDecision.UnknownGrant, path, host, clientIp)
-            : AuthDecision.Authenticated(grant);
+            : AuthDecision.Authenticated(verified.Grant, verified.Token);
     }
 
     /// <summary>

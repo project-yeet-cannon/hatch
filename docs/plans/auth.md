@@ -550,6 +550,54 @@ is holding a grant that Phase 6 will accept. Rollback is `auth.mode: none`.
 4. Add to `Test-AppTier.ps1`: unauthenticated `home.${DOMAIN}/` → 302 to
    `/apps/auth/`; `/health/ready` → 200; a `/media/...` HEAD → 200; `files.` and
    `status.` unchanged; with a test grant cookie, `home.${DOMAIN}/` → 200.
+
+   > **Two more found live on 2026-08-22, both after the wall was already up.**
+   >
+   > **A stale host-only cookie shadows the domain-wide one, on one host.**
+   > `Auth__CookieDomain` used to render only inside the `ne auth.mode "none"`
+   > guard in [`api-deployment.yaml`](../../charts/aerie/templates/api-deployment.yaml).
+   > But redemption is *not* gated by `Auth:Enabled` — it cannot be, or there is
+   > no way to enrol the first device — so any sign-in tested during phases 1–4
+   > minted a cookie with **no `Domain`**, host-only to whatever host was used.
+   > Cookie identity is (name, domain, path), so that cookie does not get
+   > replaced by later domain-wide ones: it sits alongside them for the 400-day
+   > life of the cookie, and both are sent, in one header, on requests to that
+   > host.
+   >
+   > `HttpRequest.Cookies` is a dictionary and collapses duplicates to one. The
+   > phone therefore authenticated fine on `kiosk.` and was refused
+   > `unknown_grant` on `home.` — and because every fresh sign-in only added
+   > another cookie that was then ignored, redeeming a code produced a
+   > **sign-in loop with no exit**: redeem, `location.replace('/')`, refused,
+   > back to the shell. The DB told the story plainly, once looked at: the grant
+   > row existed with `LastSeenAt` frozen at `CreatedAt`.
+   >
+   > Fixed in three places, because one alone leaves a hole: `AuthCookie.ReadAll`
+   > parses the raw header and `VerifyAsync` accepts if *any* presented token
+   > verifies; `AuthCookie.Issue` sends a host-only tombstone alongside every
+   > cookie it writes, so the landmine is cleared rather than merely stepped
+   > over; and `Auth__CookieDomain` now renders at every mode so no more are
+   > made. Note the tombstone is `Append`ed, not sent through `Cookies.Delete`,
+   > which strips same-named `Set-Cookie` headers already on the response and
+   > would sign the device out on the request that just signed it in.
+   >
+   > **A 401 to `fetch` was nobody's job.** The gate answers a navigation with a
+   > 302 and a fetch with a bare 401, on purpose — but no client did anything
+   > with the 401. The kiosk tablets sat for hours rendering hours-old data:
+   > [`apiDataSource`](../../src/Aerie.Web/apps/dashboard/src/api/apiDataSource.ts)
+   > threw and the last good snapshot stayed on screen, and
+   > [`appVersion`](../../src/Aerie.Web/apps/dashboard/src/lib/appVersion.ts)
+   > returned `null`, which its poller reads as "offline, the next poll covers
+   > it" — so the self-update reload that would have rescued them never fired
+   > either. Their only remaining escape was `MainActivity`'s 12-hour backstop
+   > reload.
+   >
+   > This is not migration cleanup: a revoked grant, or one lapsing past the
+   > browser's 400-day cap, produces the same silence forever. Each app now
+   > carries `lib/signIn.ts` and every fetch choke point calls
+   > `handledUnauthorized(res)`, which navigates to the shell carrying `?r=`.
+   > **Test a wall with a browser, not `curl -I`** — `curl` with `Accept: */*`
+   > gets the 401 and never exercises any of this.
 5. `README.md`: how to enroll a device, and the lockout-recovery pointer.
 
 **Verify by hand, in this order, before walking away**
