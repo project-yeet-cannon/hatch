@@ -23,6 +23,7 @@ namespace Aerie.Api.Services.DeviceMapping;
 /// </summary>
 public class HomeAssistantEventListener(
     IServiceScopeFactory scopes,
+    IMotionEventDispatcher dispatcher,
     TimeProvider time,
     ILogger<HomeAssistantEventListener> logger) : BackgroundService
 {
@@ -127,15 +128,37 @@ public class HomeAssistantEventListener(
         // it's the cheapest place to pick up devices imported since last time.
         motionChannelsExpireAt = DateTimeOffset.MinValue;
 
-        while (!ct.IsCancellationRequested)
+        try
         {
-            if (await ReceiveFrameAsync(socket, ct) is not { } frame) break;
-            if (HomeAssistantEventParser.TryReadMotionTransition(frame) is not { } transition) continue;
+            while (!ct.IsCancellationRequested)
+            {
+                if (await ReceiveFrameAsync(socket, ct) is not { } frame) break;
+                if (HomeAssistantEventParser.TryReadMotionTransition(frame) is not { } transition) continue;
 
-            await HandleTransitionAsync(transition, ct);
+                await HandleTransitionAsync(transition, ct);
+            }
+        }
+        finally
+        {
+            ClearMotionState();
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Drops every device back to no-motion when the socket goes. Same
+    /// reasoning as the parser's treatment of "unavailable": once we can't see,
+    /// we stop claiming there is motion. Without this a device left active at
+    /// the moment the connection broke stays active forever - the "off" that
+    /// ended it arrives during the outage, and the next real "on" is then no
+    /// change from our stale state, so no subscriber is ever told, and a kiosk
+    /// modal is pinned open for good.
+    /// </summary>
+    private void ClearMotionState()
+    {
+        foreach (var deviceId in dispatcher.ActiveDeviceIds)
+            dispatcher.SetMotionState(deviceId, false);
     }
 
     /// <summary>HA's handshake: the server opens with auth_required, the client answers with the long-lived access token, and the server replies auth_ok or auth_invalid.</summary>
@@ -201,7 +224,7 @@ public class HomeAssistantEventListener(
         }
     }
 
-    /// <summary>Phase 4 terminus: the transition is resolved to the devices that own the entity and logged. Phase 5 replaces the log with IMotionEventDispatcher.SetMotionState.</summary>
+    /// <summary>Resolves the entity to the devices that own it and hands each one to the dispatcher, which is where everything Home-Assistant-shaped stops (docs/plans/cameras.md Phase 5).</summary>
     private async Task HandleTransitionAsync(MotionTransition transition, CancellationToken ct)
     {
         var channels = await GetMotionChannelsAsync(ct);
@@ -211,6 +234,8 @@ public class HomeAssistantEventListener(
         {
             logger.LogInformation("Motion {State} on device {DeviceId} (entity {EntityId})",
                 transition.IsActive ? "started" : "ended", deviceId, transition.EntityId);
+
+            dispatcher.SetMotionState(deviceId, transition.IsActive);
         }
     }
 

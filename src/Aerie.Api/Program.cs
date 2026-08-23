@@ -141,6 +141,12 @@ builder.Services.AddScoped<IChannelHistoryWriter, ChannelHistoryWriter>();
 builder.Services.AddScoped<IHomeAssistantConnectionManager, HomeAssistantConnectionManager>();
 builder.Services.AddTransient<IHomeAssistantCommandService, HomeAssistantCommandService>();
 
+// In-memory motion state, and the seam every reaction to motion hangs off.
+// Singleton because the state is the process's, and because the WebSocket
+// listener below and a kiosk's SSE connection have to be looking at the same
+// one - see docs/plans/cameras.md Phase 5.
+builder.Services.AddSingleton<IMotionEventDispatcher, MotionEventDispatcher>();
+
 // One WebSocket subscription to HA's state_changed stream per api replica, not
 // one per cluster - see HomeAssistantEventListener for why every replica needs
 // its own. Never starts in the migrate Job: that branch returns before the host
