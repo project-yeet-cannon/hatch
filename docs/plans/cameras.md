@@ -157,12 +157,7 @@ testing reaches; that and everything downstream of it is Phase 10.
 - **The camera overlay holds the kiosk lifecycle**, alongside Gather. A deploy reload firing while someone is watching who is at the door is the same bug as one firing mid-Gather-entry.
 - **The camera name is fetched separately and never awaited.** The video socket opens on mount regardless, so a slow lookup delays a label, never the picture.
 
-### [] Phase 9 — Docs
-
-- [ ] Add `docs/camera-devices-architecture.md` mirroring `device-architecture.md`'s phased structure, covering the schema additions, the WS listener, the dispatch seam, the SSE stream, and the video-proxy mechanism actually chosen in Phase 7
-- [ ] Write it after Phase 10, not before — the mechanism is settled, but several numbers in it (the stream naming, the resource figures, the measured latency) are Phase 10's output, and a doc written now would need rewriting with them
-
-### [] Phase 10 — First-camera bring-up
+### [] Phase 9 — First-camera bring-up
 
 Everything here needs a camera on the LAN, which is the only reason it isn't
 done. Phases 7 and 8 are built and verified against a synthetic go2rtc stream;
@@ -207,3 +202,9 @@ failure could mean.
 **Open, and deliberately not decided yet.**
 
 - [ ] Whether to point HA's own integration at this go2rtc (`go2rtc: url:`), which the original Phase 7 assumed would be free. **It is not, any more.** The Service is `ClusterIP` with no Ingress and HA runs outside the cluster, so this would mean exposing go2rtc on a NodePort or Ingress — putting camera streams on a listener anything on the LAN can reach, to save one RTSP connection per camera. Worth revisiting only if the cameras turn out to be stingy with concurrent connections.
+
+
+### [] Phase 10 — Docs
+
+- [ ] Add `docs/camera-devices-architecture.md` mirroring `device-architecture.md`'s phased structure, covering the schema additions, the WS listener, the dispatch seam, the SSE stream, and the video-proxy mechanism actually chosen in Phase 7
+- [ ] Write it after Phase 10, not before — the mechanism is settled, but several numbers in it (the stream naming, the resource figures, the measured latency) are Phase 10's output, and a doc written now would need rewriting with them

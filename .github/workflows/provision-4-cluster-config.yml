@@ -174,6 +174,21 @@ jobs:
           AERIE_REPO_OWNER: ${{ vars.AERIE_REPO_OWNER }}
           AERIE_REPO_NAME: ${{ vars.AERIE_REPO_NAME }}
 
+          # Phase 8b.2. The two restic values cd.yml supplied until 7b.9
+          # deleted it, plus the bucket Provision 6 created for Longhorn. Set
+          # all three and dispatch before the 8b.4, 8b.5 and 8b.9 commits reach
+          # the cluster: an undefined token expands to the empty string rather
+          # than failing, so the wrong order is a PersistentVolume mounted at
+          # the share root, a CronJob with `restic -r ''` and a backupTarget of
+          # s3://@us-east-1/ - three quiet wrongs instead of one loud one.
+          # Note the deliberate asymmetry between the first and the third:
+          # restic's region can only travel inside its endpoint hostname, so
+          # the repository string is whole, while Longhorn's has a field of its
+          # own and takes AWS_REGION's copy in the manifest.
+          RESTIC_S3_REPOSITORY: ${{ vars.RESTIC_S3_REPOSITORY }}
+          RESTIC_LOCAL_SUBPATH: ${{ vars.RESTIC_LOCAL_SUBPATH }}
+          LONGHORN_BACKUP_BUCKET: ${{ vars.LONGHORN_BACKUP_BUCKET }}
+
           # Same keypair provision-0/1/2/3 used.
           NODE_SSH_PRIVATE_KEY: ${{ secrets.NODE_SSH_PRIVATE_KEY }}
         run: |

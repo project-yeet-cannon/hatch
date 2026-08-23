@@ -1,5 +1,0 @@
-# Daily backup: dump/snapshot every service, push to both restic repos, prune.
-10 3 * * * /app/scripts/backup.sh
-
-# Weekly restore verification: restore the newest snapshot and sanity-query it.
-0 4 * * 0 /app/scripts/verify-restore.sh

@@ -76,8 +76,11 @@ spec:
       containers:
         - name: restore
           # Already ships restic and postgres:18.4's psql/pg_restore - see
-          # containers/backup/Dockerfile. Its own ENTRYPOINT (supercronic) is
-          # overridden below; this container runs the script once and exits.
+          # containers/backup/Dockerfile. That image's ENTRYPOINT is a bare
+          # shell (it used to be supercronic against its own crontab, until
+          # the cluster plan Phase 8b.3 moved scheduling to CronJobs), and the
+          # `command` below replaces it outright; this container runs the
+          # script once and exits.
           #
           # ${IMAGE_REGISTRY} rather than the registry this repository's author
           # happens to push to: it resolves from aerie-cluster-config through

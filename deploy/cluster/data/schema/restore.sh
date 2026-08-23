@@ -21,7 +21,7 @@ AERIE_DUMP=$(find /restore -name aerie.dump | head -1)
 QUARTZ_DUMP=$(find /restore -name quartz.dump | head -1)
 
 if [ -z "$AERIE_DUMP" ] || [ -z "$QUARTZ_DUMP" ]; then
-  echo "[restore] FAILED: aerie.dump and/or quartz.dump not in the restored snapshot - this backup predates the per-database dumps containers/backup/scripts/backup.sh added in Phase 4b.1" >&2
+  echo "[restore] FAILED: aerie.dump and/or quartz.dump not in the restored snapshot - this backup predates the per-database dumps containers/backup/scripts/cluster-backup.sh added in Phase 4b.1" >&2
   exit 1
 fi
 
