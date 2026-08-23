@@ -1153,7 +1153,7 @@ When dissipating this document, drop the bits about the legacy Docker stack but 
 
   </details>
 
-- [ ] **11. Phase gate as a command** — *scripted*
+- [x] **11. Phase gate as a command** — *scripted*
 
   <details><summary><code>Test-Cutover.ps1</code> — and the one property that makes it its own script</summary>
 
@@ -1207,6 +1207,23 @@ When dissipating this document, drop the bits about the legacy Docker stack but 
   *Exit:* the workflow exits 0. Leave this box unticked until it has, for the
   same reason every gate before it stayed unticked: a gate that has never
   passed has proved nothing.
+
+  **Passed 2026-08-23**, 52 checks, on the third attempt — the two before it
+  are the point. The first found that `K3S_SERVER_ADDRESSES` had been raised
+  to three servers as a repository variable and never pushed into the live
+  ConfigMap, so `kubeEtcd.endpoints` still named two and Prometheus was
+  watching two of three etcd members: 7c.7 looked finished from every angle
+  except the one that matters. The second found that the runner's persistent
+  workspace carried a sparse-checkout index from another workflow, which made
+  `deploy/` and `charts/` absent from disk after a clean checkout — so the
+  tree checks now read HEAD with `git ls-tree` and `git grep` rather than the
+  working directory, since a never-materialised directory is indistinguishable
+  from a deleted one to anything that looks at disk. Two further defects fell
+  out of writing it: `EtcdMemberDown` matched a job label that does not exist
+  (`kube-prometheus-stack-kube-etcd` — the scrape pool, not the label), so it
+  could not fire for any input, and both backup gates mis-aged their newest
+  Backup by a whole UTC offset because `ConvertFrom-Json` returns a
+  `[DateTime]` and casting it to `[string]` drops the zone.
 
   </details>
 
