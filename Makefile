@@ -10,14 +10,9 @@ down:
 destroy:
 	docker compose down -v
 
-enterprise-up:
-	docker compose -f compose.observability.yml up -d
-
-enterprise-down:
-	docker compose -f compose.observability.yml down
-
-enterprise-destroy:
-	docker compose -f compose.observability.yml down -v
+# The `enterprise-*` targets that stood the observability stack up locally are
+# gone with compose.observability.yml (the cluster plan Phase 7b.9). Logs,
+# metrics and status are cluster services now - see deploy/cluster/observability/.
 
 build:
 	bash -c 'export NVM_DIR="$$HOME/.nvm"; [ -s "$$NVM_DIR/nvm.sh" ] && \. "$$NVM_DIR/nvm.sh"; dotnet build ./src/Aerie.Api/Aerie.Api.csproj'

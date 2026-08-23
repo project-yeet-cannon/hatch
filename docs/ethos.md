@@ -63,9 +63,10 @@ downstream of it is declarative and committed.
 
 The pattern is already established and should be followed rather than reinvented.
 
-**Domain.** `${DOMAIN}` is supplied from the `vars.DOMAIN` repository variable in
-[`cd.yml`](../.github/workflows/cd.yml) and flows into compose files
-([`compose.prod.yml`](../compose.prod.yml)) and app config. No document or
+**Domain.** `${DOMAIN}` is supplied from the `vars.DOMAIN` repository variable,
+written into the `aerie-cluster-config` ConfigMap by Provision 4, and flows from
+there into the chart's values
+([`values.yaml`](../charts/aerie/values.yaml)) and app config. No document or
 manifest hardcodes the base domain. Docs that need to show it write `<domain>`.
 
 **Secrets.** Supplied as GitHub Actions repository secrets, injected as

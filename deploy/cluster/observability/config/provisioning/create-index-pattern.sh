@@ -1,9 +1,9 @@
 #!/bin/sh
 # One-shot: creates the aerie-logs-* index pattern in OpenSearch Dashboards
 # (time field: time), so it doesn't need to be clicked through in the UI.
-# Copied unedited from
-# ../../../../../containers/opensearch-provision/create-index-pattern.sh
-# (which stays in place for compose.observability.yml until Phase 7) - see
+# Copied unedited from the old compose stack's
+# containers/opensearch-provision/create-index-pattern.sh, deleted with the
+# rest of that path in 7b.9 and reachable in git history - see
 # ./kustomization.yaml for why this is a real file rather than a string
 # embedded in ./opensearch-provision.yaml.
 #

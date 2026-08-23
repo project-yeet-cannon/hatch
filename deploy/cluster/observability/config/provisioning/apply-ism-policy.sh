@@ -1,9 +1,9 @@
 #!/bin/sh
 # One-shot: applies the aerie-log-retention ISM policy so log indices
 # autodelete instead of growing unbounded, and converges the replica count on
-# the plugin's own config index. Copied from
-# ../../../../../containers/opensearch-provision/apply-ism-policy.sh (which
-# stays in place, unedited, for compose.observability.yml until Phase 7) -
+# the plugin's own config index. Copied from the old compose stack's
+# containers/opensearch-provision/apply-ism-policy.sh, deleted with the rest
+# of that path in 7b.9 and reachable in git history -
 # see ./kustomization.yaml for why this is a real file rather than a string
 # embedded in ./opensearch-provision.yaml.
 #
@@ -21,8 +21,7 @@
 set -eu
 
 # No `${OPENSEARCH_URL:-http://opensearch:9200}` fallback here, and this is
-# the one edit that separates this copy from
-# ../../../../../containers/opensearch-provision/apply-ism-policy.sh. That
+# the one edit that separates this copy from the compose original. That
 # fallback is not shell syntax by the time this script runs: ../../../..
 # /observability.yaml gives this Kustomization a postBuild.substituteFrom, and
 # Flux runs envsubst over everything it renders - including the body of a

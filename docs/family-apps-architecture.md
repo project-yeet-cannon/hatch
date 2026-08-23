@@ -254,10 +254,11 @@ working labels, but never silently. Hardcoding a domain here would be exactly th
 "structural file quietly carrying an operator value" failure mode in
 [`ethos.md`](ethos.md).
 
-This is the one value that reached a compose file: `compose.prod.yml` gains a
-single `Apps__PublicBaseUrl` line built from `DOMAIN`. That's platform cost
+This is the one value that reached a deployment manifest:
+[`api-deployment.yaml`](../charts/aerie/templates/api-deployment.yaml) gains a
+single `Apps__PublicBaseUrl` line built from `domain`. That's platform cost
 rather than per-app cost — it's the install's own URL, and app #2 inherits it
-without touching a compose file. Any module needing the public URL reads it from
+without touching a manifest. Any module needing the public URL reads it from
 `AppsOptions` rather than adding a second setting for the same fact.
 
 ## Deferred
@@ -288,8 +289,8 @@ app #2 adds nothing to any of it:
 
 `apps/dashboard`, `apps/admin`, `apps/docs`, `apps/modeler`, `Ef/AerieContext.cs`
 and its `public` schema, `Program.cs`, `Aerie.Api.csproj`, `Dockerfile.api`,
-`ci.yml`, the `Makefile`, every k3s manifest, and every compose file except the
-one line of `compose.prod.yml` that hands the install its own public URL.
+`ci.yml`, the `Makefile`, and every k3s manifest except the one line of
+`api-deployment.yaml` that hands the install its own public URL.
 
 A module migration must never appear in `Migrations/` or in
 `public.__EFMigrationsHistory`. If adding an app requires editing anything on

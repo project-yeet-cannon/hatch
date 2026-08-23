@@ -212,7 +212,7 @@
       "hint": "A relative path under the share, no leading slash and no '..' segment. Unset turns media serving off entirely, exactly as today - it must not collapse to the share root.",
       "example": "Music",
       "consumedBy": "5b.5 api env (MediaLibrary__RootPath)",
-      "description": "Subpath of the share served, unauthenticated, as the media library. Optional; see compose.share.yml's own reasoning for why unset means off rather than root."
+      "description": "Subpath of the share served, unauthenticated, as the media library. Optional, and unset means off rather than root: an accidental empty value would otherwise publish the whole house share to anyone on the LAN, so the safe reading of 'no value' is 'serve nothing'."
     },
     {
       "key": "AUTH_MODE",

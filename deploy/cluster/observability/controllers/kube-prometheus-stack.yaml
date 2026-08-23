@@ -389,10 +389,10 @@ spec:
       # sidecar.datasources.enabled and its uid: prometheus are already the
       # chart's own defaults, and uid: prometheus is exactly the fixed uid
       # 6b.7's windows-exporter dashboard was pinned against - carried across
-      # unchanged rather than rewritten. Do not port
-      # containers/grafana/provisioning/datasources/prometheus.yml, which
-      # points at a compose service name and would install a second, broken
-      # datasource beside the working one.
+      # unchanged rather than rewritten. Do not port the compose stack's
+      # grafana/provisioning/datasources/prometheus.yml (deleted in 7b.9, in
+      # git history), which points at a compose service name and would install
+      # a second, broken datasource beside the working one.
       #
       # additionalDataSources is that same mechanism rather than a second one,
       # which is the whole reason the GitHub datasource is declared here and

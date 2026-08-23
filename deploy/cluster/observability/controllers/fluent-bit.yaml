@@ -1,9 +1,10 @@
 # The cluster plan Phase 6b.10 - the fluent-bit rewrite. Finding 4, and the
 # only step in this phase that rewrites a pipeline instead of re-hosting one:
-# ../../../../containers/fluent-bit/fluent-bit.conf tailed
-# /var/lib/docker/containers, decoded compose's json-file driver, and read a
-# compose label for the `service` field. None of that exists under containerd,
-# and the replacement is line-by-line below against that file.
+# the old compose stack's containers/fluent-bit/fluent-bit.conf (deleted in
+# 7b.9, in git history) tailed /var/lib/docker/containers, decoded compose's
+# json-file driver, and read a compose label for the `service` field. None of
+# that exists under containerd, and the replacement is line-by-line below
+# against that file.
 #
 # A pinned HelmRelease of the `fluent-bit` chart (DaemonSet, plus the
 # ClusterRole its default rbac.create renders for the kubernetes filter's
@@ -148,7 +149,7 @@ spec:
             script  /fluent-bit/scripts/service_tag.lua
             call    set_service
 
-      # Unchanged from ../../../../containers/fluent-bit/custom_parsers.conf -
+      # Unchanged from the compose stack's custom_parsers.conf (7b.9) -
       # Aerie.Api's JSON console formatter writes one JSON object per line,
       # nothing here depends on being containerd vs. docker.
       customParsers: |

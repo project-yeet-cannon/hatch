@@ -158,7 +158,7 @@ to its contents.
 
 | Key | Default | What it does |
 |---|---|---|
-| `Apps:PublicBaseUrl` | *(empty)* | Absolute base URL printed into QR labels, e.g. `https://home.example.com`. Set at deploy — `compose.prod.yml` passes `Apps__PublicBaseUrl` built from the `DOMAIN` variable. |
+| `Apps:PublicBaseUrl` | *(empty)* | Absolute base URL printed into QR labels, e.g. `https://home.example.com`. Set at deploy — `api-deployment.yaml` passes `Apps__PublicBaseUrl` built from the `DOMAIN` cluster-config value. |
 
 It exists because a QR label is not a link in a page: it is taped to a box for a
 decade and must carry the install's canonical host, not whichever hostname or IP

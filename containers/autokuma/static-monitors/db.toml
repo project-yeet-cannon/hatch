@@ -1,7 +1,0 @@
-type = "port"
-name = "Database"
-hostname = "db"
-port = 5432
-interval = 60
-retry_interval = 60
-max_retries = 1

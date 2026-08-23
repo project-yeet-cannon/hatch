@@ -6,29 +6,885 @@
 
 **Status: Not started**
 
-- [ ] Migrate to cluster-native backup: CNPG/S3 for Postgres, Longhorn backup
-      target → S3 for volumes, restic CronJob for the rest plus the local copy
-- [ ] **`--keep-tag cutover-final` on that CronJob's `forget`**, inherited from
-      [7b.3](phase-7-cutover.md#phase-7b--the-cutover). The retention this phase
-      carries over from Phase 0 — `--keep-daily 7 --keep-weekly 4
-      --keep-monthly 12` — is pointed at the same S3 repo the old stack wrote
-      to, and the snapshot 7b.3 tagged is the last complete copy of the
-      pre-cluster world: Kuma's SQLite and the pre-cutover Postgres dumps exist
-      nowhere else once 7c.3 reformats the disk holding the local repo. One
-      flag, and it belongs in the manifest the first time the `forget` is
-      written rather than after the retention has had a year to reach it
-- [ ] The `backup/*` `ExternalSecret`, deferred here from Phase 3b.6 — all three
-      values are `required: true` and have been seeded since Phase 2, so this is
-      a `kubernetes` block on each entry in
-      [`parameters.json`](../../../scripts/secrets/parameters.json) and a regeneration,
-      landing them in whatever namespace the CronJob above runs in. Until then
-      the entries carry a `kubernetesDeferred` note pointing here, which is what
-      keeps "seeded but consumed by nothing" a decision rather than an oversight
-- [ ] **Alert on backup age and backup-job failure** — the single most valuable
-      alert that doesn't exist today
-- [ ] Export the `/aerie/*` parameter tree into the restic repos on the same
-      schedule. The secret store is now off-site, but "AWS account is gone" is
-      the one failure mode ESO introduces, and `RESTIC_PASSWORD` is already
-      printed offline — that's what closes the loop
-- [ ] Schedule a quarterly DR rehearsal onto throwaway VMs
+> Re-scoped once, against a repository that changed underneath the original six
+> bullets. Those bullets were written before Phase 4 existed and before Phase 7
+> deleted anything, and three facts about what actually got built move most of
+> the work:
+>
+> - **"CNPG/S3 for Postgres" already shipped.** [4b.5](phase-4-data-tier.md)'s
+>   `ObjectStore`, [4b.10](phase-4-data-tier.md)'s nightly `ScheduledBackup` and
+>   the PITR rehearsal that proved it are in the tree and running. This phase
+>   must not re-do it. What it owes Postgres is the *other* copy — logical,
+>   portable, and not in the same AWS account — which is a different artifact
+>   for a different failure.
+> - **Phase 7 deleted the only running backup, and named the gap rather than
+>   closing it.** From [7b.2](phase-7-cutover.md#phase-7b--the-cutover) onward
+>   the only thing backed up anywhere is Postgres, physically, into one bucket
+>   under one set of credentials. Kuma's monitor history, Grafana's database,
+>   Alertmanager's silences and the `/aerie/*` parameter tree have **no copy at
+>   all**. That is what decides this phase's order: restic and its alert first,
+>   Longhorn second, rehearsal last.
+> - **The alerting flows have no teeth.** Phase 7 says so explicitly and hands
+>   the wiring here, because the backup-age alert is the first one that has to
+>   arrive somewhere. An alert that fires into a receiver nobody has ever tested
+>   is the same category of object as a `--keep-tag` whose pruner does not know
+>   about it: paperwork that looks like protection.
+>
+> Two of the original bullets survive unchanged (`--keep-tag cutover-final`, the
+> `backup/*` `ExternalSecret`), two get sharper (the alert, the parameter
+> export), one splits in half (Postgres is done; volumes are not), and one grows
+> a prerequisite (a rehearsal needs a document worth rehearsing, and
+> [7c.10](phase-7-cutover.md#phase-7c--the-old-server-docker-host--k3s-node)
+> left `docs/disaster-recovery.md` deliberately minimal).
+>
+> Eight findings, and the first two are the ones that decide the architecture.
 
+## Findings
+
+1. **No single pod can snapshot both SQLite databases, and neither image ships
+   `sqlite3`.** Grafana (`longhorn-r3`, 2Gi,
+   [kube-prometheus-stack.yaml](../../../deploy/cluster/observability/controllers/kube-prometheus-stack.yaml))
+   and Uptime Kuma (`longhorn-r3`, `uptime-kuma-data`,
+   [uptime-kuma.yaml](../../../deploy/cluster/observability/controllers/uptime-kuma.yaml))
+   are separate Deployments whose PVCs are `ReadWriteOnce`. RWO means *one
+   node*, not one pod — a second pod **on the same node** may co-mount the
+   volume read-only — but nothing places these two workloads on the same node,
+   so no one CronJob can reach both. The `kubectl exec` escape (run
+   `sqlite3 .backup` inside the workload's own container) fails on a different
+   axis: neither the Grafana nor the Kuma image carries a `sqlite3` binary, and
+   `tar cf - grafana.db` out of a live container is precisely the live-file copy
+   [Phase 0](phase-0-backup-and-dr.md) refused to do.
+
+   **This is what puts the two SQLite volumes on Longhorn's backup target
+   rather than into restic**, and it is only a *correct* answer with the second
+   half of the finding attached: Longhorn's `freezeFilesystemForSnapshot`
+   setting calls `fsfreeze` before taking the snapshot, which turns a
+   crash-consistent block image into a filesystem-consistent one. Phase 0's
+   rule — "back up correctly per service, not by copying volume directories" —
+   was aimed at `cp` racing a writer. A frozen, atomic, whole-filesystem
+   snapshot is not that: SQLite recovers from it exactly as it recovers from
+   power loss, which is a supported path rather than a hope. Without the freeze
+   setting this design is worse than Phase 0's and should not be built.
+
+2. **`recurringJobSelector` cannot be added to the StorageClasses, and
+   Longhorn's `default` group backs up the wrong things.** Longhorn selects
+   volumes for a `RecurringJob` by label on the **Volume** CR, and a
+   StorageClass's `recurringJobSelector` parameter only stamps that label at
+   volume-creation time. A StorageClass's `parameters` are immutable
+   ([longhorn-storageclasses.yaml](../../../deploy/cluster/infrastructure/config/longhorn-storageclasses.yaml)
+   already carries the whole argument), and even a delete-and-recreate would not
+   reach the volumes that already exist. The documented shortcut — a
+   `RecurringJob` in the `default` group, which applies to every volume carrying
+   no recurring-job label of its own — is worse than useless here: it sweeps in
+   Prometheus's TSDB and OpenSearch's indices, the two volumes
+   [design.md](design.md#storage-split) says are not worth backing up and the
+   two that would dominate the S3 bill.
+
+   The wanted set is exactly `longhorn-r3` — Grafana, Kuma, Alertmanager — which
+   is the split the class names already encode. So the selection is **a label
+   applied by hand, once, to three existing Volume CRs** (8a.3), and asserted by
+   the phase gate so that a volume recreated later without it is a failed check
+   rather than a silent gap.
+
+3. **The local repo already has a home, and it is 7c.1's copy.**
+   [7c.1](phase-7-cutover.md#phase-7c--the-old-server-docker-host--k3s-node)
+   copies `E:/restic-repo` onto the house share and says to keep it "until Phase
+   8's cluster backup has taken **and verified** its own first snapshot". Do not
+   retire it — **make it the local repo.** Mounted over `smb.csi.k8s.io` (the
+   driver [5b.3](phase-5-app-tier.md) already registered, the PV shape
+   [share-volumes.yaml](../../../charts/aerie/templates/share-volumes.yaml)
+   already establishes), the same repo keeps the entire pre-cluster history,
+   keeps `cutover-final` in two places instead of one, and turns 7c.1's expiry
+   condition into a no-op rather than a decision someone has to remember to
+   make. The rule-of-three from
+   [design.md](design.md#goals) is only satisfied if this copy exists: the CNPG
+   bucket and the restic S3 bucket are both in the same AWS account, so the
+   share is the only copy that survives "the AWS account is gone".
+
+4. **`aerie-restic`'s IAM policy has to grow, or the parameter export needs a
+   second identity.** The export reads `/aerie/*` `SecureString` values, which
+   needs `ssm:GetParametersByPath` and `kms:Decrypt`; `aerie-restic` is scoped
+   to the backup bucket alone. Grow the existing policy rather than minting a
+   third user: after this phase the repository that identity writes to
+   *contains* the tree, so a credential that can read the tree and a credential
+   that can read the repo holding the tree have the same blast radius, and one
+   fewer IAM user is one fewer thing to rotate. The alternative — an
+   `aerie-ssm-export` user, isolated the way `aerie-eso` and `aerie-restic` are
+   from each other — buys nothing once the two sets of bytes have been made
+   equivalent, and this note is here so that reasoning is on the record rather
+   than inferred from a policy diff.
+
+5. **Three of the old repository's variables died with `cd.yml`.**
+   `RESTIC_S3_REPOSITORY`, `RESTIC_AWS_REGION` and the local repo path were
+   environment values [`compose.backup.yml`](phase-7-cutover.md) read and
+   `cd.yml` supplied; 7b.9 deleted both. They come back as
+   [`cluster-config.json`](../../../scripts/k3s/cluster-config.json) keys, and
+   **the region key does not come back at all** — a regional endpoint inside the
+   repository string (`s3:s3.us-east-1.amazonaws.com/<bucket>`) carries it, and
+   one key that cannot disagree with itself beats two that can.
+
+6. **`pg_dumpall` cannot come across, and that is correct.** CNPG disables the
+   superuser role by default, so the cluster-wide dump
+   [backup.sh](../../../containers/backup/scripts/backup.sh) takes today has no
+   credential to run under. It is also the wrong artifact:
+   [4b.1](phase-4-data-tier.md) added the two custom-format per-database dumps
+   precisely because `CREATE ROLE`/`CREATE DATABASE` collide with what CNPG's
+   own bootstrap created. Both databases are owned by the `aerie` role
+   ([quartz-database.yaml](../../../deploy/cluster/data/schema/quartz-database.yaml)'s
+   `owner: aerie`), which is the credential in the CNPG-generated
+   `aerie-pg-app` Secret — so `pg_dump -Fc aerie` and `pg_dump -Fc quartz` come
+   across unchanged, the globals do not come across at all, and
+   [restore.sh](../../../deploy/cluster/data/schema/restore.sh) already expects
+   exactly those two files.
+
+7. **One repo, several clients, one exclusive lock.** Backup, verify and export
+   are three restic invocations against the same two repositories, and
+   `forget --prune` takes an exclusive lock that a concurrent `backup` will
+   refuse to wait behind. **Retention is owned by exactly one job**, and the
+   schedules are staggered around CNPG's existing 02:00 `ScheduledBackup` rather
+   than chosen independently of it.
+
+8. **Every backup in this system is a Kubernetes CronJob or a CNPG object**,
+   which answers the question [6b.8](phase-6-observability.md) left open —
+   "whether that metric comes from a textfile-collector-style sidecar or a small
+   exporter" — with **neither**. kube-state-metrics is already scraping the
+   cluster and already emits `kube_cronjob_status_last_successful_time` and
+   `kube_job_status_failed` for the restic CronJob *and* for the Kubernetes
+   CronJob Longhorn creates behind a `RecurringJob`; CNPG's own collector
+   already emits the Postgres backup and WAL-archiver timestamps
+   ([cloudnative-pg.yaml](../../../deploy/cluster/infrastructure/controllers/cloudnative-pg.yaml)'s
+   note 3 says so). The backup-age alert is a `PrometheusRule` and nothing else
+   — no new workload, no push gateway, no scrape target.
+
+   Two metric names in that paragraph are asserted from documentation rather
+   than read off this cluster. **Check them before trusting them** — the failure
+   mode of a wrong metric name in a `PrometheusRule` is a rule that never fires,
+   which is indistinguishable from a system that is fine, and this is the phase
+   where that distinction is the whole product. 8b.11 says how.
+
+## What this phase is
+
+Three backup paths, one alert family, one rehearsal:
+
+| What | How | Where it lands |
+|---|---|---|
+| Postgres, physical + PITR | CNPG `ScheduledBackup` (Phase 4, unchanged) | WAL bucket, AWS |
+| Postgres, logical + portable | `pg_dump -Fc`, restic CronJob | restic S3 **and** the share |
+| `/aerie/*` parameter tree | `aws ssm get-parameters-by-path`, same CronJob | restic S3 **and** the share |
+| Grafana / Kuma / Alertmanager volumes | Longhorn `RecurringJob` → backup target | Longhorn bucket, AWS |
+| Prometheus TSDB, OpenSearch indices | **nothing, deliberately** | — |
+
+## Phase 8a — Manual prerequisites
+
+- [ ] **1. Two AWS changes, neither of them a new bucket policy you can skip**
+
+      **A bucket and a user for Longhorn.** A dedicated bucket, for the reason
+      [objectstore.yaml](../../../deploy/cluster/data/cluster/objectstore.yaml)
+      gives for the WAL one: Longhorn owns its own `backupstore/` layout and
+      expects to be the only writer, and a lifecycle rule written for one
+      layout applied to another is how a restore discovers a missing object.
+      A dedicated `aerie-longhorn` IAM user scoped to it, same isolation
+      discipline as `aerie-restic` and `aerie-eso`.
+
+      **A policy addition for `aerie-restic`.** `ssm:GetParametersByPath` and
+      `ssm:GetParameters` on `arn:aws:ssm:<region>:<account>:parameter/aerie/*`,
+      plus `kms:Decrypt` on the key the `SecureString` values were sealed with
+      (`alias/aws/ssm` unless Provision 2 was pointed elsewhere). Finding 4 is
+      why this is a policy edit rather than a fourth user.
+
+      *Exit:* `aws s3 ls s3://<longhorn-bucket>` succeeds as `aerie-longhorn`
+      and fails as `aerie-restic`; `aws ssm get-parameters-by-path --path
+      /aerie --recursive --with-decryption` returns values as `aerie-restic`.
+
+- [ ] **2. Put 7c.1's copy where the cluster will look for it**
+
+      Finding 3. Move (do not re-copy) the verified copy of the old
+      `E:/restic-repo` to a fixed subdirectory of the house share — `restic/` at
+      the share root is the assumption 8b.2's `RESTIC_LOCAL_SUBPATH` encodes.
+      It must be reachable at `//${SHARE_HOST}/${SHARE_NAME}/restic` with the
+      credential the `smb-share` Secret already holds, and it must be writable
+      by that identity, which the read-only half of
+      [share-volumes.yaml](../../../charts/aerie/templates/share-volumes.yaml)
+      is a reminder to check rather than assume.
+
+      *Exit:* `restic -r <path> snapshots --tag cutover-final` lists the
+      snapshot 7b.3 tagged, from a machine that is not the old server.
+
+- [ ] **3. Label the three `longhorn-r3` Volume CRs**
+
+      Finding 2. For each of the Volumes backing Grafana, `uptime-kuma-data` and
+      Alertmanager — the three PVCs whose `storageClassName` is `longhorn-r3`:
+
+      ```sh
+      kubectl -n longhorn-system label volume <vol> \
+        recurring-job-group.longhorn.io/aerie-critical=enabled
+      ```
+
+      Volume names are the PV names, not the PVC names —
+      `kubectl get pvc -A -o custom-columns=NS:.metadata.namespace,PVC:.metadata.name,PV:.spec.volumeName,SC:.spec.storageClassName`
+      is the mapping, and filtering it on `longhorn-r3` is also the check that
+      the set is still three and not four.
+
+      *Exit:* exactly three Volumes carry the label, and every `longhorn-r3`
+      PVC's Volume is one of them. 8b.16 asserts this permanently; the reason it
+      is a gate assertion rather than a one-time step is that a volume recreated
+      by a restore comes back **without** the label and with no error anywhere.
+
+- [ ] **4. Prove the offline `RESTIC_PASSWORD` copy still exists and still works**
+
+      Not "confirm you have it". Read it off the paper (or out of the safe, or
+      wherever [Phase 0](phase-0-backup-and-dr.md) put it), type it, and open a
+      repo with it. An offline copy nobody has exercised since the day it was
+      printed is a hypothesis, and this is the last phase in which discovering
+      it is wrong is cheap — the parameter store still holds a working copy
+      today, and 8b.7 is about to make the printed one the only thing that can
+      decrypt the export of that store.
+
+      *Exit:* `restic -r <s3 repo> snapshots` succeeds with `RESTIC_PASSWORD`
+      typed from the offline copy, on a machine that has never held it in an
+      environment variable.
+
+- [ ] **5. Confirm 6a.3's Home Assistant automation reaches a person**
+
+      Finding 8's other half, and the prerequisite 8b.12 cannot supply for
+      itself. `POST` a hand-rolled body to
+      `http://${HA_HOST}:${HA_PORT}/api/webhook/${HA_ALERT_WEBHOOK_ID}` and
+      confirm a notification lands on a phone. If the automation fires and
+      notifies nothing, fix that here — 8b.12's test-fire is meant to prove the
+      *Alertmanager* half of the path, and a single test that can fail in two
+      places proves neither.
+
+      *Exit:* a notification arrives on a device a person carries.
+
+## Phase 8b — Scriptable, in this order
+
+Steps 1–4 are the plumbing every later step reads: credentials, config keys, the
+image, the volume. 5–8 are the restic path and the parameter export. 9–10 are
+Longhorn. 11–12 are the alert and the thing that makes an alert mean something.
+13–15 are the paperwork the rehearsal needs, and 16 is the gate.
+
+- [ ] **1. Flip three deferrals, add two parameters, regenerate** —
+      [`parameters.json`](../../../scripts/secrets/parameters.json),
+      [`New-ExternalSecrets.ps1`](../../../scripts/secrets/New-ExternalSecrets.ps1).
+
+      **The three `backup/*` entries lose `kubernetesDeferred` and gain
+      `kubernetes`.** This is the bullet this phase inherited from
+      [3b.6](phase-3-platform-services.md), and the note each entry carries is
+      the thing being redeemed: "seeded but consumed by nothing" has been a
+      decision in writing since Phase 2, and this is where it stops being one.
+      All three land in **`aerie`**, secretName `restic`:
+
+      | Parameter | secretKey |
+      |---|---|
+      | `backup/restic-password` | `password` |
+      | `backup/s3-access-key-id` | `access-key-id` |
+      | `backup/s3-secret-access-key` | `secret-access-key` |
+
+      `aerie`, not a new `backup` namespace, and the reason is
+      [restore-job.yaml](../../../deploy/cluster/data/schema/restore-job.yaml):
+      it is in `aerie`, it reads the same three values, and 8b.10 deletes the
+      hand-made Secret standing in for them. One namespace means one Secret
+      serves both the thing that writes backups and the thing that reads them,
+      and the CronJob needs `aerie` anyway to reach `aerie-pg-app` and
+      `aerie-pg-rw` (finding 6).
+
+      **Two new parameters for Longhorn**, `required: true`, `phase: 8`,
+      landing in `longhorn-system` as secretName `longhorn-backup-target`:
+
+      | Parameter | env | githubKind | secretKey |
+      |---|---|---|---|
+      | `longhorn/backup-s3-access-key-id` | `LONGHORN_AWS_ACCESS_KEY_ID` | variable | `AWS_ACCESS_KEY_ID` |
+      | `longhorn/backup-s3-secret-access-key` | `LONGHORN_AWS_SECRET_ACCESS_KEY` | secret | `AWS_SECRET_ACCESS_KEY` |
+
+      The `secretKey` values are SCREAMING_SNAKE_CASE against every other entry
+      in the file, and they have to be: Longhorn reads its
+      `backupTargetCredentialSecret` by those exact key names and silently
+      reports an unusable backup target if they are anything else. `AWS_ENDPOINTS`
+      is the third key Longhorn documents and is deliberately absent — it exists
+      for non-AWS S3, and setting it empty is not the same as omitting it.
+
+      The four-part `kubernetesDeferred` ordering [4b.3](phase-4-data-tier.md)
+      established **does** apply to the two new parameters and does not apply to
+      the three flips: the generator refuses a `kubernetes` block on a parameter
+      no run has seeded, so the new pair is seed-then-manifest (edit, dispatch
+      Provision 2, then generate and commit) while the `backup/*` three — seeded
+      on every run since Phase 2 — are one edit and one `New-ExternalSecrets.ps1`.
+
+      *Exit:* `New-ExternalSecrets.ps1 -Check` exits 0; `kubectl -n aerie get
+      externalsecret restic` and `kubectl -n longhorn-system get externalsecret
+      longhorn-backup-target` both report `SecretSynced`; the generated
+      `aerie-restic.yaml` carries three keys and `longhorn-system-longhorn-backup-target.yaml`
+      two.
+
+- [ ] **2. Three new `cluster-config.json` keys, and a Provision 4 re-dispatch** —
+      [`cluster-config.json`](../../../scripts/k3s/cluster-config.json),
+      [`provision-4-cluster-config.yml`](../../../.github/workflows/provision-4-cluster-config.yml).
+
+      | Key | Required | Pattern notes | `consumedBy` |
+      |---|---|---|---|
+      | `RESTIC_S3_REPOSITORY` | yes | A restic S3 repository string — `s3:s3.<region>.amazonaws.com/<bucket>`, leading `s3:`, no trailing slash. The regional endpoint is what removes the need for a region key (finding 5) | 8b.5 CronJob env |
+      | `RESTIC_LOCAL_SUBPATH` | yes | A relative path under the share, no leading slash, no `..` — the same shape `MEDIA_LIBRARY_SUBPATH` already uses, and 8a.2's directory | 8b.4 PV `source` |
+      | `LONGHORN_BACKUP_BUCKET` | yes | An S3 bucket name, same pattern as `WAL_BUCKET`, and **not** either of the other two buckets | 8b.9 `backupTarget` |
+
+      `LONGHORN_BACKUP_BUCKET` is a bucket name rather than the full
+      `s3://bucket@region/` target Longhorn wants, because `AWS_REGION` is
+      already a key and a second copy of the region is a second thing that can
+      be wrong. 8b.9 assembles the two.
+
+      Note the asymmetry with the line above it: restic gets a full repository
+      string, Longhorn gets a bucket name. That is not inconsistency for its own
+      sake — restic's region lives in an endpoint hostname it will not accept
+      separately, and Longhorn's lives in a field of its own. Each key is the
+      smallest thing its consumer cannot derive.
+
+      *Exit:* Provision 4 prints all three in its run log (they are variables,
+      and that is the point) and `kubectl -n flux-system get cm
+      aerie-cluster-config -o yaml` holds them.
+
+- [ ] **3. Rework `containers/backup/` from a compose sidecar into a cluster job** —
+      [`containers/backup/`](../../../containers/backup/).
+
+      The image survives Phase 7 for this step
+      ([7b.9](phase-7-cutover.md#what-this-phase-deletes-and-what-survives)
+      lists it as surviving), and it survives as the same image
+      `restore-job.yaml` already pulls — one image, both directions, which is
+      what keeps `pg_restore` and `pg_dump` version-matched to each other and to
+      the CNPG cluster. What changes:
+
+      - **`crontab` and the supercronic `ENTRYPOINT` go.** The schedule is a
+        `CronJob` now; a container that schedules itself inside a cluster that
+        schedules containers is two schedulers disagreeing about what "daily"
+        means. `ENTRYPOINT` becomes a shell, and each Job names its script.
+      - **`scripts/backup.sh` → `scripts/cluster-backup.sh`.** Drops the
+        `pg_dumpall` (finding 6) and the Kuma SQLite snapshot (finding 1, now
+        Longhorn's). Keeps the two `pg_dump -Fc` invocations, pointed at
+        `$PGHOST` from `aerie-pg-app` rather than at `db`. Adds the parameter
+        export (8b.7). Gains `--keep-tag cutover-final` on the `forget` (8b.6).
+      - **`scripts/verify-restore.sh` → `scripts/cluster-verify.sh`.** Nearly
+        unchanged — it already stands up a throwaway Postgres with
+        `initdb`/`pg_ctl` from the image's own install — but it restores
+        `aerie.dump` with `pg_restore` rather than replaying
+        `postgres-dumpall.sql` with `psql`, since that file no longer exists.
+      - **`scripts/init-repos.sh` survives unedited.** Its refusal to init
+        against a blank password, and its `cat config` probe, are exactly as
+        correct in a CronJob as in a deploy step. Its two repository env vars
+        keep their names.
+      - **`aws-cli` joins `restic`, `sqlite3` and `curl` in the `apk add`.**
+        For 8b.7. `sqlite3` stays: 8b.15's rehearsal restores a Longhorn volume
+        backup and then has to prove the database inside it opens, and this is
+        the image with a shell in it.
+
+      *Exit:* `publish.yml`'s existing `build-and-push-backup-image` job pushes
+      a new tag on the merge; `docker run --rm --entrypoint sh <image> -c 'restic
+      version && aws --version && sqlite3 -version'` answers three times.
+
+- [ ] **4. The local repo, as a PV** —
+      `deploy/cluster/data/backup/local-repo-volume.yaml`.
+
+      A statically-provisioned `smb.csi.k8s.io` PV/PVC pair in `aerie`, in the
+      shape [share-volumes.yaml](../../../charts/aerie/templates/share-volumes.yaml)
+      established — `storageClassName: ""`, an explicit `claimRef`, a
+      `volumeHandle` **distinct from `aerie-share-rw` and `aerie-share-ro`**
+      (that file's own comment says why: two PVs sharing a handle are one
+      volume to the CSI layer, and the second mount silently inherits the
+      first's options, which here would mean a backup repo mounted read-only).
+      `source: //${SHARE_HOST}/${SHARE_NAME}/${RESTIC_LOCAL_SUBPATH}`,
+      `nodeStageSecretRef` naming the `smb-share` Secret ESO already syncs into
+      `aerie`.
+
+      `ReadWriteMany`, because that is what SMB is, and `Retain`, because this
+      volume is a backup repository and `prune: true` reconciles this tree.
+
+      One property to check on the first run rather than assume: **restic's
+      locking on CIFS.** restic coordinates through lock files, and CIFS's
+      handling of them is the least-exercised corner of this design. If a
+      `forget --prune` ever reports a stale lock that `restic unlock` has to
+      clear, that is the finding, and it belongs in this file's comment rather
+      than in someone's memory.
+
+      *Exit:* a throwaway pod mounting the PVC lists the repo's `config`,
+      `data/` and `snapshots/` — the same repo 8a.2 moved, not an empty
+      directory the mount silently created.
+
+- [ ] **5. The backup CronJob** —
+      `deploy/cluster/data/backup/backup-cronjob.yaml`.
+
+      Namespace `aerie`. `image: ${IMAGE_REGISTRY}/aerie-backup:latest` and
+      `imagePullSecrets: [ghcr-pull]`, both for the reasons
+      [restore-job.yaml](../../../deploy/cluster/data/schema/restore-job.yaml)
+      spells out at length — the registry is a substitution because a host baked
+      into this tree is one installation's fact, and the pull secret's absence
+      presents as a bare `401` that reads like a missing image.
+
+      Env: `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD` from `aerie-pg-app`,
+      `RESTIC_PASSWORD`/`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` from the
+      `restic` Secret 8b.1 creates, `RESTIC_REPOSITORY_S3` from
+      `${RESTIC_S3_REPOSITORY}`, `RESTIC_REPOSITORY_LOCAL` a fixed
+      `/mnt/restic-local` mount path over 8b.4's PVC.
+
+      `schedule: "10 3 * * *"` — the same 03:10 Phase 0 used, an hour and ten
+      minutes after CNPG's 02:00 `ScheduledBackup`, which is finding 7's
+      stagger and not a coincidence worth losing. `concurrencyPolicy: Forbid`,
+      `successfulJobsHistoryLimit: 1`, `failedJobsHistoryLimit: 3`,
+      `ttlSecondsAfterFinished`, `backoffLimit: 2` — the shape
+      [opensearch-provision.yaml](../../../deploy/cluster/observability/config/provisioning/opensearch-provision.yaml)
+      already uses, and `Forbid` matters more here than there: two concurrent
+      restic writers against one repo is finding 7.
+
+      *Exit:* one manual run (`kubectl -n aerie create job --from=cronjob/…`)
+      produces a snapshot in **both** repos containing `aerie.dump`,
+      `quartz.dump` and `parameters.json`, and `restic snapshots` on each shows
+      it.
+
+- [ ] **6. `--keep-tag cutover-final`, in the same commit as the `forget`** —
+      the retention half of 8b.5's script.
+
+      Inherited from [7b.3](phase-7-cutover.md#phase-7b--the-cutover), and the
+      reason it is its own step rather than a line item is the ordering claim in
+      the original bullet: it belongs in the manifest **the first time the
+      `forget` is written**, not after the retention has had a year to reach it.
+
+      `restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12
+      --keep-tag cutover-final --prune`, against both repos, run by **this job
+      and no other** (finding 7). The snapshot being protected is the last
+      complete copy of the pre-cluster world: Kuma's SQLite and the pre-cutover
+      Postgres dumps exist nowhere else, and after 7c.3 reformatted the disk
+      holding the old local repo the copies of it are 8a.2's move and the S3
+      repo — both of which this `forget` now prunes.
+
+      *Exit:* after a run, `restic snapshots --tag cutover-final` still lists
+      exactly one snapshot in each repo, and its date is still the pre-cutover
+      one. Assert this rather than read it: it is the check that a policy
+      change three phases from now will break silently.
+
+- [ ] **7. Export the `/aerie/*` tree into the repos, on the same schedule** —
+      `containers/backup/scripts/export-parameters.sh`, called by 8b.5's script.
+
+      ```sh
+      aws ssm get-parameters-by-path --path /aerie --recursive --with-decryption
+      ```
+
+      written to the scratch directory as JSON and picked up by the same
+      `restic backup` invocation as the dumps, so it is one snapshot rather than
+      two things that can be a different age.
+
+      This is the loop [docs/secrets-architecture.md](../../secrets-architecture.md)
+      says Phase 8 closes. The secret store is off-site and that is the point of
+      it, but "the AWS account is gone" is the failure mode ESO *introduces* —
+      before it, every value lived in a GitHub Actions secret, and the whole
+      point of moving them was that a cluster could read them without a human.
+      `RESTIC_PASSWORD` is printed offline (8a.4 just proved it), so the export
+      is readable from outside the account it describes, which is the property
+      that makes it a recovery plan rather than a second copy of the same
+      dependency.
+
+      Two things this file must not do: it must not write to the parameter
+      store (it is `get-parameters-by-path` only, and the credential should not
+      be able to write either), and it must not be logged. `set -x` anywhere in
+      this script puts every secret in the house into a Kubernetes pod log that
+      Fluent Bit ships to OpenSearch — which is a searchable, unauthenticated
+      index ([6b.9](phase-6-observability.md)'s written-down exposure). Say so
+      in the script.
+
+      *Exit:* the newest snapshot contains a `parameters.json` whose key count
+      equals `parameters.json`'s own entry count plus the two bootstrap keys,
+      and a `restic dump latest /…/parameters.json | jq` on a machine holding
+      only the offline password reads a value back.
+
+- [ ] **8. The verify CronJob** —
+      `deploy/cluster/data/backup/verify-cronjob.yaml`.
+
+      Weekly, Sunday 04:00 — Phase 0's slot, and far enough from 03:10 that a
+      slow backup and a verify never share a lock. Runs `cluster-verify.sh`
+      against the **local** repo, which is deliberate on two axes: it exercises
+      the copy that is not in AWS, and it exercises the CIFS mount that 8b.4
+      flagged as the least-proven thing in this phase.
+
+      *Exit:* a run restores the newest `aerie.dump` into a throwaway Postgres
+      and reports a non-zero table count. This is the cluster's replacement for
+      the check Phase 0 had and the cluster has not had since 7b.2; until it
+      passes once, this phase has produced backups nobody has restored.
+
+- [ ] **9. Longhorn's backup target, and the freeze setting finding 1 depends on** —
+      [`longhorn.yaml`](../../../deploy/cluster/infrastructure/controllers/longhorn.yaml).
+
+      Three `defaultSettings` keys:
+
+      ```yaml
+      backupTarget: s3://${LONGHORN_BACKUP_BUCKET}@${AWS_REGION}/
+      backupTargetCredentialSecret: longhorn-backup-target
+      freezeFilesystemForSnapshot: true
+      ```
+
+      The `s3://bucket@region/` form is Longhorn's own and is not a URL anyone
+      else will parse; the `@region` is not optional and a target missing it
+      fails at first use rather than at apply.
+
+      **Read every one of these back.** That file's own note 4 is the reason and
+      it is not a general caution: Longhorn *swallows* a bad setting — a value
+      that does not parse is logged at warn level by the manager and skipped, so
+      `freezeFilesystemForSnapshot: "yes"` is not a failed install, it is
+      filesystem freezing quietly off and finding 1's argument quietly false.
+      There is no `values.schema.json` on this chart either, so a misspelled key
+      installs cleanly and is never read.
+
+      A rollout note this file has earned the hard way: 5b.11's history says a
+      change to `longhorn-manager`'s pod template stalled the `HelmRelease`
+      three times running against timeouts raised twice. These three keys write
+      the `longhorn-default-setting` ConfigMap, which the manager reads without
+      a restart — so this should *not* roll that DaemonSet. Confirm that from
+      the reconcile rather than assume it, because the widened timeouts on that
+      file and on `infra-controllers` are the margin if it does.
+
+      *Exit:* `kubectl -n longhorn-system get settings.longhorn.io backup-target
+      -o jsonpath='{.value}'` reads back the assembled target, the credential
+      setting names the Secret, and `freeze-filesystem-for-snapshot` reads
+      `true`. Expect the data-engine-specific settings to answer
+      `{"v1":…,"v2":…}` rather than a bare scalar, per that file's note 4 —
+      these three are not in that family, but the habit of comparing against
+      what Longhorn *returns* rather than what was set is the one that catches
+      it.
+
+- [ ] **10. The `RecurringJob`, and the retirement of the hand-made Secret** —
+      `deploy/cluster/infrastructure/config/longhorn-recurringjob.yaml`,
+      [`restore-job.yaml`](../../../deploy/cluster/data/schema/restore-job.yaml).
+
+      **The `RecurringJob`:** `task: backup`, `groups: [aerie-critical]` —
+      matching 8a.3's label and *not* `default`, which is finding 2 — `cron:
+      "0 2 * * *"`, `retain: 7`, `concurrency: 1`. Backups after the first are
+      incremental at the block layer, so seven dailies of three small volumes is
+      a number chosen for restore convenience rather than for cost.
+
+      **The Secret:** 4b.9 created `aerie-pg-restore-restic` by hand, with a
+      comment saying "Delete it once Phase 8's own `ExternalSecret` exists and
+      this Job has been updated to read that instead." Both halves happen here:
+      `restore-job.yaml`'s five `secretKeyRef`s move to the `restic` Secret
+      (three of them) and to `${RESTIC_S3_REPOSITORY}` (`RESTIC_REPOSITORY`,
+      now a substitution rather than a Secret key, since a repository path is
+      not a credential), the region key disappears with finding 5's endpoint,
+      and then `kubectl -n aerie delete secret aerie-pg-restore-restic`.
+
+      Editing that Job re-applies an immutable pod template, so its own file
+      comment applies: delete the suspended Job and let Flux recreate it.
+
+      *Exit:* `kubectl -n longhorn-system get recurringjob` lists it; after one
+      night, `kubectl -n longhorn-system get backups.longhorn.io` shows three
+      completed backups and the bucket holds a `backupstore/` prefix. And
+      `aerie-pg-restore-restic` is gone while `restore-job.yaml` still renders —
+      the second half is the one that fails at 3am if it is wrong, so run the
+      restore Job once against the new Secret before ticking this.
+
+- [ ] **11. The alert family** —
+      `deploy/cluster/observability/config/alerts/backup.yaml`.
+
+      A fourth `PrometheusRule` beside
+      [`cluster.yaml`](../../../deploy/cluster/observability/config/alerts/cluster.yaml)
+      and `flux.yaml`, selected the same way and for the same reason
+      (`ruleSelectorNilUsesHelmValues: false`). Finding 8 is why this is the
+      whole of the work: no exporter, no sidecar, no scrape target.
+
+      Five rules, in the order of how much they would cost you:
+
+      | Alert | Shape | `for` | severity |
+      |---|---|---|---|
+      | `ResticBackupTooOld` | `time() - kube_cronjob_status_last_successful_time{namespace="aerie",cronjob="aerie-backup"} > 36h` | 1h | critical |
+      | `ResticBackupJobFailed` | `kube_job_status_failed{namespace="aerie",job_name=~"aerie-backup.*"} > 0` | 15m | warning |
+      | `ResticVerifyStale` | same shape as the first, against the verify CronJob, `> 10d` | 1h | warning |
+      | `CNPGBackupTooOld` | `time() - cnpg_collector_last_available_backup_timestamp{namespace="aerie"} > 36h` | 1h | critical |
+      | `LonghornBackupTooOld` | the first rule's shape against the CronJob Longhorn creates for the `RecurringJob`, in `longhorn-system` | 1h | warning |
+
+      36 hours, not 25: a daily backup that misses one night is a backup that
+      missed one night, and paging for it at 03:11 trains someone to ignore the
+      rule that matters. Ten days for the weekly verify, same reasoning one
+      cadence up.
+
+      **Every one of these needs an `absent()` sibling**, and that is the part
+      that is easy to skip and expensive to have skipped. `time() - <a series
+      that does not exist>` produces no samples, so a rule whose metric name is
+      wrong, whose CronJob was renamed, or whose CronJob was *deleted* is not a
+      firing alert — it is silence, which is exactly what a working backup looks
+      like. `absent(kube_cronjob_status_last_successful_time{…})` for 1h,
+      severity critical, per CronJob.
+
+      Two names in that table are asserted from documentation and not read off
+      this cluster — `kube_cronjob_status_last_successful_time` and
+      `cnpg_collector_last_available_backup_timestamp` — and one thing is
+      asserted about Longhorn's implementation: that a `RecurringJob` is backed
+      by a Kubernetes `CronJob` in `longhorn-system` that kube-state-metrics
+      therefore already sees. **Check all three in Prometheus's own expression
+      browser before committing**, the same way
+      [cluster.yaml](../../../deploy/cluster/observability/config/alerts/cluster.yaml)'s
+      comment flags its unverified `EtcdMemberDown` job label. If Longhorn's
+      recurring job turns out not to surface as a `CronJob`, fall back to
+      `longhorn_backup_state` or to the age of the newest
+      `backups.longhorn.io` object via kube-state-metrics custom resource state
+      config — and write down which, because a reader cannot tell a deliberate
+      fallback from a wrong guess.
+
+      *Exit:* all five (and their `absent()` siblings) appear in Prometheus's
+      Rules page in state `inactive` rather than `unknown`, and each expression
+      returns a number when pasted into the expression browser. `inactive` and
+      `unknown` look nearly identical in the UI and mean opposite things.
+
+- [ ] **12. Give the flows teeth, and prove it once** —
+      [`kube-prometheus-stack.yaml`](../../../deploy/cluster/observability/controllers/kube-prometheus-stack.yaml),
+      Home Assistant.
+
+      [Phase 7](phase-7-cutover.md#what-phase-7-deliberately-does-not-do) is
+      explicit that the alerting flows are a POC — routes and providers exist,
+      nothing reaches a person — and hands the wiring here on the grounds that
+      8b.11's alert is the first one that has to arrive. 6b.8's route already
+      points at `home-assistant`; 8a.5 already proved the automation notifies.
+      What is left is the middle:
+
+      - **Test-fire through Alertmanager**, not through the webhook. `amtool
+        alert add` (or a temporary always-firing rule) into the real route, and
+        confirm the notification arrives with the alert's own annotations in it.
+        This is the half 8a.5 deliberately did not cover.
+      - **Confirm `severity: critical` is distinguishable on the receiving end.**
+        Four of 8b.11's rules are warnings and two are criticals; if Home
+        Assistant renders both identically, the severity label is decoration and
+        the phase should either make the automation branch on it or stop
+        setting it.
+      - **Write down the silencing discipline** Phase 7 handed over: silence by
+        `alertname`, never by receiver. A maintenance window silenced at the
+        receiver eats the one alert that was supposed to survive it, and the
+        first person to plan a Longhorn upgrade will reach for the receiver
+        because it is the easier button.
+
+      *Exit:* a deliberately-fired alert arrives on a phone with its summary
+      text intact, and resolves when it clears (`send_resolved: true` is already
+      set — this is the run that proves it does something).
+
+- [ ] **13. A backup row on the Delivery dashboard** —
+      `deploy/cluster/observability/config/dashboards/`.
+
+      Small, and here rather than in Phase 9 because the alert above is the only
+      thing in this phase that tells you backups stopped, and an alert is a
+      report of a state change, not a way to look at the state. Four stat
+      panels: age of the newest restic snapshot, age of the newest CNPG backup,
+      age of the newest Longhorn backup, age of the last successful verify.
+      Same `grafana_dashboard`-labelled ConfigMap shape as its five neighbours.
+
+      *Exit:* the row renders four numbers, all of them hours rather than
+      `No data`.
+
+- [ ] **14. Rewrite `docs/disaster-recovery.md`** —
+      [`docs/disaster-recovery.md`](../../disaster-recovery.md).
+
+      [7c.10](phase-7-cutover.md#phase-7c--the-old-server-docker-host--k3s-node)
+      left it accurate but minimal, on purpose, and named this phase as what
+      turns it back into a document someone can follow. It is currently the
+      Phase 0 document with a correction pasted over it, and it is wrong in a
+      way worth naming: **its "What's backed up, and how" table lists OpenSearch
+      and Prometheus**, which `backup.sh` never backed up and
+      `compose.backup.yml`'s own comment said it deliberately did not. A table
+      that promises two restores that were never possible is the specific kind
+      of document that gets read at 3am.
+
+      What it must contain after this phase, and did not before:
+
+      - the five-row table from [What this phase is](#what-this-phase-is),
+        including the row that says nothing backs up Prometheus and OpenSearch
+        **and why that is a decision**
+      - four restore procedures, each written as commands: one database from
+        restic, one database to a point in time from CNPG (4b.10's rehearsal,
+        promoted from a phase-doc paragraph into a runbook), one Longhorn volume
+        from a backup, and the whole parameter tree from 8b.7's export
+      - the sentence that has been true since Phase 0 and is now the *only*
+        thing standing between an intact backup and an unrecoverable one: the
+        printed `RESTIC_PASSWORD` is the root of trust, GitHub Actions secrets
+        are write-only, and 8b.7 means the export of the parameter store is
+        sealed with it too
+      - where 8a.2's local repo is, on which machine, and that it is not in AWS
+
+      *Exit:* someone who was not in the room can restore the `aerie` database
+      by following it, without reading a phase document. That is testable and
+      8b.15 tests it.
+
+- [ ] **15. The first rehearsal, and the schedule for the rest** — *manual*
+
+      A quarterly DR rehearsal onto throwaway VMs, and **the first one happens
+      in this phase** rather than being scheduled and deferred — the same
+      argument [Phase 0's gate](phase-0-backup-and-dr.md) made for not starting
+      Phase 1 until a restore had actually been performed. 7c.10 makes this
+      phase's rehearsal unusually valuable: it is the first read of a document
+      that was just rewritten, and the first rehearsal after a rewrite is the
+      one that finds what the rewrite missed.
+
+      The rehearsal is 8b.14's document, followed literally, by someone holding
+      only the offline password and the repo. Scope it honestly: **restoring the
+      whole cluster is not the exercise.** Restoring `aerie` from restic onto a
+      scratch Postgres, restoring one Longhorn volume, and reading one secret
+      back out of the parameter export are three things that either work or
+      do not, and they cover every mechanism this phase built.
+
+      Schedule the rest: a calendar entry is fine, and a `schedule:`-triggered
+      workflow that opens an issue is better, because it survives the person.
+
+      *Exit:* a rehearsal happened, and 8b.14 got at least one correction out of
+      it. A rehearsal that produced no corrections was probably a re-read rather
+      than a rehearsal.
+
+- [ ] **16. Phase gate as a command** — `scripts/k3s/Test-Backup.ps1`,
+      wrapped by `.github/workflows/verify-backup.yml`, in the exact shape
+      3b.13, 4b.11, 5b.14, 6b.15 and 7c.11 established: read-only, **not**
+      numbered into the Provision sequence, does not stop at the first failure,
+      and a check it cannot evaluate is a failure rather than a skip.
+
+      Assert, at minimum:
+
+      - the `restic` and `longhorn-backup-target` `ExternalSecret`s report
+        `SecretSynced`, with three keys and two respectively, and the expected
+        set is read from
+        [`parameters.json`](../../../scripts/secrets/parameters.json) rather
+        than hardcoded — 4b.11's rule
+      - the newest successful run of each of the three backup CronJobs is
+        younger than its own alert threshold, which is the manual form of
+        8b.11's rules and the thing that catches a rule that is silently
+        `absent()`
+      - **`cutover-final` is still present in both repos** — 8b.6, and the check
+        that no retention change has quietly reached it
+      - exactly three Volumes carry `recurring-job-group.longhorn.io/aerie-critical`,
+        and every `longhorn-r3` PVC's Volume is one of them (8a.3's finding: a
+        restored volume comes back unlabelled and silent)
+      - `backup-target`, `backup-target-credential-secret` and
+        `freeze-filesystem-for-snapshot` read back their configured values from
+        `settings.longhorn.io` — finding 1's whole argument rests on the third
+        one, and Longhorn swallows a bad value
+      - the newest snapshot in each restic repo contains `aerie.dump`,
+        `quartz.dump` and `parameters.json`
+      - `aerie-pg-restore-restic` does **not** exist (8b.10's deletion, which is
+        otherwise the kind of cleanup that gets half-done)
+      - every rule in `backup.yaml` is loaded and `inactive`, not `unknown`
+      - the [portability check](design.md#verification) over the new files: grep
+        `deploy/cluster/data/backup/` and the Longhorn additions for the bucket
+        names, the share host and the domain — each should appear only as a
+        `${...}` substitution
+
+      *Exit:* the workflow exits 0. Leave this box unticked until it has, for
+      the same reason every gate before it stayed unticked: a gate that has
+      never passed has proved nothing.
+
+---
+
+## Where these files live
+
+```text
+deploy/cluster/
+  data/
+    backup/                       # new tenant of the data layer
+      local-repo-volume.yaml      # 8b.4, SMB PV/PVC for the local repo
+      backup-cronjob.yaml         # 8b.5 + 8b.6 + 8b.7
+      verify-cronjob.yaml         # 8b.8
+      kustomization.yaml
+    schema/
+      restore-job.yaml            # 8b.10, five secretKeyRefs repointed
+  infrastructure/
+    controllers/
+      longhorn.yaml               # 8b.9, three defaultSettings keys
+    config/
+      longhorn-recurringjob.yaml  # 8b.10
+      external-secrets/           # 8b.1, regenerated - two new files
+  observability/config/
+    alerts/backup.yaml            # 8b.11
+    dashboards/                   # 8b.13, one more ConfigMap
+
+containers/backup/
+  Dockerfile                      # 8b.3, + aws-cli, - supercronic ENTRYPOINT
+  crontab                         # 8b.3, deleted - the CronJob is the schedule
+  scripts/
+    cluster-backup.sh             # 8b.3, was backup.sh
+    cluster-verify.sh             # 8b.3, was verify-restore.sh
+    export-parameters.sh          # 8b.7
+    init-repos.sh                 # unchanged
+
+scripts/
+  secrets/parameters.json         # 8b.1, three flips + two additions
+  k3s/cluster-config.json         # 8b.2, three keys
+  k3s/Test-Backup.ps1             # 8b.16
+.github/workflows/
+  verify-backup.yml               # 8b.16
+
+docs/disaster-recovery.md         # 8b.14, rewritten
+```
+
+One structural note. **`data/backup/` is a third tenant of the data layer, not a
+new Kustomization and not `observability/`.** It sits with the database it dumps
+because it reads `aerie-pg-app` and `aerie-pg-rw` and because
+[`schema/restore-job.yaml`](../../../deploy/cluster/data/schema/restore-job.yaml)
+— its exact inverse — is already one directory over sharing the same Secret. The
+Longhorn half of the phase is in `infrastructure/` for the reason that split
+exists: `longhorn.yaml` is the controller, the `RecurringJob` is an instance of
+what it enables, and layer 1's `wait: true` is what makes the second's assumption
+true.
+
+## What Phase 8 deliberately does not do
+
+- **It does not back up Prometheus or OpenSearch.** Both rebootstrap from their
+  own config, which is committed;
+  [`compose.backup.yml`](phase-7-cutover.md#what-this-phase-deletes-and-what-survives)
+  said so in Phase 0 and nothing since has changed it. What *is* new is that
+  8b.14 writes it down as a decision, because the document currently claims the
+  opposite.
+- **It does not re-implement Postgres backup.** Phase 4 did that. This phase
+  adds the second, logical, portable copy and the alert, and touches neither the
+  `ObjectStore` nor the `ScheduledBackup`.
+- **It does not put a Longhorn backup on every volume.** Finding 2 — the
+  `default` group would, and the two volumes it would add are the two nobody
+  wants. Three labels, asserted by the gate.
+- **It does not build a metrics exporter.** Finding 8 — kube-state-metrics and
+  CNPG's collector already carry every series the alerts need, which retires the
+  open question [6b.8](phase-6-observability.md) left for this phase.
+- **It does not move `RESTIC_PASSWORD` out of GitHub Actions secrets, or make
+  the parameter store its home.** The printed offline copy stays the root of
+  trust; 8b.7 makes that *more* load-bearing rather than less, which is the
+  argument [docs/secrets-architecture.md](../../secrets-architecture.md#what-deliberately-stays-out)
+  already makes and this phase completes rather than revisits.
+- **It does not encrypt or seal anything new.** The export is protected by the
+  repository password and by nothing else, deliberately: a second secret to
+  recover the first is the failure this whole design is arranged against.
+- **It does not automate the quarterly rehearsal.** A rehearsal a machine
+  performs is a test, and the cluster already has one (8b.8). The thing being
+  rehearsed is a **person** following a document, and automating that away
+  removes the only failure mode the exercise exists to find.
+- **It does not consolidate the two notification paths.** Kuma and Alertmanager
+  both reach Home Assistant by different routes; 6b.8 bought that redundancy on
+  purpose and Phase 9 owns the question.
+- **It does not restore anything to production.** 8b.10 runs the restore Job
+  once to prove the repointed Secret works — against the cluster's own data,
+  with `--clean --if-exists`, which is destructive. Do that on a day when
+  losing the interval since the last dump is acceptable, or against a throwaway
+  Cluster, and know which you chose.
+
+## Additions this phase makes to other phases
+
+Recorded here, to be written into the phases that own them:
+
+- **Phase 9 inherits the parameter export as a bootstrap input.**
+  `scripts/restore.sh`, which Phase 9 already owes, now has an obvious first
+  step it did not have: read 8b.7's `parameters.json` out of the repo and seed
+  the tree from it, which is what makes "restore onto new hardware" a script
+  rather than an operator retyping twenty values from paper. The offline
+  `RESTIC_PASSWORD` remains the one thing that cannot come from anywhere.
+- **Phase 9's `values.yaml` gains three keys.** `RESTIC_S3_REPOSITORY`,
+  `RESTIC_LOCAL_SUBPATH` and `LONGHORN_BACKUP_BUCKET` are per-installation by
+  construction, and the site-repo split is where they stop being repository
+  variables.
+- **Phase 9 owns whether the local repo should be somewhere other than the house
+  share.** 8a.2 put it there because 7c.1 already had, and because the share is
+  a different machine — but it is a machine with no backup of its own, and
+  "two local copies" from [design.md](design.md#goals)'s rule-of-three is
+  satisfied only in the sense that the cluster and the share are different
+  boxes. A second operator with a NAS should be able to say so in one value.
+- **Phase 9 owns the `docs/` consolidation this phase does not finish.**
+  `disaster-recovery.md` is rewritten here because it is operationally
+  load-bearing; `metrics-architecture.md` and
+  `monitoring-alerting-architecture.md` remain Phase 9's, per Phase 6's
+  assignment, and `cluster-architecture.md` should absorb the *architecture*
+  half of what 8b.14 writes while leaving the runbook half where someone can
+  find it at 3am.
+- **The alerting flows are no longer a POC after 8b.12**, which retires a
+  sentence in Phase 7's "deliberately does not do" list and makes the silencing
+  discipline written there enforceable rather than advisory. The first
+  maintenance window planned after this phase is the test of it.

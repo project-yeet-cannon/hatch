@@ -136,7 +136,7 @@ not one:
 
 | Consumer | Gets it from | After a change |
 |---|---|---|
-| `Aerie.Api` (`VmConsoleLogsController`) | `cd.yml` → `compose.prod.yml` | re-run the deploy |
+| `Aerie.Api` (`VmConsoleLogsController`) | the `vm-log-shipper` Secret in `aerie`, synced from SSM by ESO | nothing to run — ESO picks it up within its `refreshInterval` (1h) |
 | The per-VM console-log Scheduled Task on each Hyper-V host | `provision-0-new-node.yml` | applied on that VM's next build / `recreate_vm` |
 | `/aerie/logging/vm-log-shipper-token` in SSM, for Phase 3 | this workflow | re-run Provision 2 |
 

@@ -1,6 +1,0 @@
-type = "http"
-name = "Home Assistant"
-url = "http://homeassistant.local:8123"
-interval = 60
-retry_interval = 60
-max_retries = 1

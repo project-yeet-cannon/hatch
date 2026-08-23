@@ -4,10 +4,9 @@
 # Kuma instead of OpenSearch - it needs no configMapGenerator entry of its
 # own, since its image carries provision.py rather than mounting a script.
 #
-# The three .sh files here are real copies of
-# ../../../../../containers/opensearch-provision/*.sh (which stay in place,
-# unedited, for compose.observability.yml until Phase 7 deletes it) rather
-# than strings embedded in ./opensearch-provision.yaml - the same call
+# The three .sh files here are real copies of the old compose stack's
+# containers/opensearch-provision/*.sh (deleted in 7b.9, in git history)
+# rather than strings embedded in ./opensearch-provision.yaml - the same call
 # ../../controllers/fluent-bit.yaml makes for its own Lua script, and for the
 # same reason: a copy pasted into YAML is the kind of thing that drifts from
 # the file everyone actually greps for. They are not identical to the

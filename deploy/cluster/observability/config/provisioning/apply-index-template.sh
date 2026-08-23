@@ -3,11 +3,11 @@
 # (see ../../controllers/fluent-bit/service_tag.lua) is mapped as `keyword`
 # on new daily indices, instead of relying on OpenSearch's dynamic text+
 # keyword guess, and then converges `number_of_replicas: 0` onto the
-# aerie-logs-* indices that already exist. Copied from
-# ../../../../../containers/opensearch-provision/apply-index-template.sh
-# (which stays in place, unedited, for compose.observability.yml until Phase
-# 7) - see ./kustomization.yaml for why this is a real file rather than a
-# string embedded in ./opensearch-provision.yaml.
+# aerie-logs-* indices that already exist. Copied from the old compose
+# stack's containers/opensearch-provision/apply-index-template.sh, deleted
+# with the rest of that path in 7b.9 and reachable in git history - see
+# ./kustomization.yaml for why this is a real file rather than a string
+# embedded in ./opensearch-provision.yaml.
 #
 # settings.number_of_replicas: 0 is the one edit this copy carries over the
 # original: ../../controllers/opensearch.yaml runs `singleNode: true`, and a

@@ -1,11 +1,8 @@
--- The cluster plan Phase 6b.10 - a fork of ../../../../../containers/fluent-bit/
--- service_tag.lua, not an edit of it. That file is still bind-mounted into the
--- old host's compose fluent-bit (compose.observability.yml) and stays there
--- until Phase 7 deletes it - the same "do not edit compose.observability.yml
--- to match" rule the cluster plan's 6a.4 note gives for the Kuma admin
--- password applies here for the same reason: this container's log-tagging
--- would silently stop matching on the container-level branch below, on a host
--- still serving production, for a rewrite it never asked for.
+-- The cluster plan Phase 6b.10 - a fork of the old compose stack's
+-- containers/fluent-bit/service_tag.lua, not an edit of it. That file was
+-- deliberately left untouched while the compose host was still serving
+-- production, and 7b.9 deleted it along with the rest of that path; it is
+-- reachable in git history if the divergence ever needs reading.
 --
 -- Derives the `service` field every log record is tagged with before it
 -- reaches OpenSearch.

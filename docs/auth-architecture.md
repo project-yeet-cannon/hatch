@@ -201,13 +201,12 @@ The wall is a k3s-only feature. `Auth:Enabled` is `false` in
 `make run` stays frictionless — the local flip is
 `Auth__Enabled=true dotnet run`. Nothing but the chart turns it on.
 
-That includes the legacy Windows/Caddy host: `compose.prod.yml` passes no
-`Auth__*` at all, so the app runs there exactly as it did before auth existed,
-covered by the LAN and tailnet boundary alone. It was never targeted — the host
-is being retired by the [cluster cutover](plans/swarm/phase-7-cutover.md), and
-Caddy `forward_auth` labels would have been written to be deleted. The
-in-process gate is the only half that could ever cover it, and would, if that
-soak ever ran long enough to want it.
+That once included the legacy Windows/Caddy host, which passed no `Auth__*` at
+all and ran covered by the LAN and tailnet boundary alone. It was never
+targeted — Caddy `forward_auth` labels would have been written to be deleted —
+and the [cluster cutover](plans/swarm/phase-7-cutover.md) has since retired the
+host and the compose files that described it. The wall is now the only path
+into the app there is.
 
 ## The cookie
 

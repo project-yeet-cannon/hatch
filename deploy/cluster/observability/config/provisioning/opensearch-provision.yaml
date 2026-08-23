@@ -34,7 +34,7 @@
 # accident.
 #
 # The scripts' own retry loops (30 attempts, 5s apart) come across unchanged
-# from ../../../../containers/opensearch-provision/ and are what makes the
+# from the compose originals (7b.9) and are what makes the
 # startup ordering a non-problem - this CronJob carries no dependsOn or
 # initContainer wait on OpenSearch or Dashboards being Ready, because the
 # scripts already poll for it. `backoffLimit: 2` below is a second, outer

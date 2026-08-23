@@ -189,7 +189,7 @@ Everything after "push a keystore" is automated in [`.github/workflows/publish.y
      This is the value Android's QR provisioning flow uses (`PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM`) to verify the downloaded APK before installing it — it's stable across rebuilds since it hashes the signing cert, not the APK bytes.
    - Deletes the keystore from the runner (`if: always()`).
    - Builds a tiny `nginx:alpine` image ([`apps/kiosk/Dockerfile`](../apps/kiosk/Dockerfile)) that just serves the APK, the checksum file, and `version.json` as static assets, and pushes it to `ghcr.io/eouw0o83hf/aerie-kiosk-files`.
-3. **Deploy**: the `files` service in [`compose.prod.yml`](../compose.prod.yml) runs that image and is exposed at `https://files.${DOMAIN}` via the same Caddy-label convention as every other service (see [reverse-proxy-architecture.md](reverse-proxy-architecture.md)). No dedicated CD job is needed — `cd.yml`'s existing `docker compose pull && up -d` picks up the new image on every deploy, the same as any other service.
+3. **Deploy**: the `files` Deployment ([`files-deployment.yaml`](../charts/aerie/templates/files-deployment.yaml)) runs that image and is exposed at `https://files.${DOMAIN}` by the `files` Ingress, the same way every other hostname is routed. No dedicated CD job is needed — Flux's image automation notices the new tag and commits it, the same as any other first-party image.
 
 ## Provisioning (QR, no cable)
 

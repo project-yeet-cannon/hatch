@@ -1,6 +1,0 @@
-type = "http"
-name = "API"
-url = "http://api:8080/health"
-interval = 60
-retry_interval = 60
-max_retries = 1

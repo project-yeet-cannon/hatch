@@ -708,7 +708,7 @@ order the evening runs in — but they are never mixed inside one step:
 
   </details>
 
-- [ ] **8. Soak, on the schedule 7a.4 set** — *manual*
+- [x] **8. Soak, on the schedule 7a.4 set** — *manual*
 
   <details><summary>Not a waiting step — a watching one, with two standing rules</summary>
 
@@ -732,7 +732,7 @@ order the evening runs in — but they are never mixed inside one step:
 
   </details>
 
-- [ ] **9. Delete the compose path from the repo** — *scripted*
+- [x] **9. Delete the compose path from the repo** — *scripted*
 
   <details><summary>One commit, after the soak passes — the full deletion list, and the list of things that look deletable and are not</summary>
 
@@ -749,12 +749,12 @@ order the evening runs in — but they are never mixed inside one step:
   - [`.github/workflows/cutover-tag-snapshot.yml`](../../../.github/workflows/cutover-tag-snapshot.yml)
     — 7b.3's wrapper, which exists to run once against containers this commit
     stops describing. Its own header carries the TODO pointing here.
-  - [`.github/workflows/cd.yml`](../../../.github/workflows/cd.yml) — whole
-    file, which 5b.13 spent a step making possible by moving the two host
-    installs into Provision 0. 7b.1 left it commented out rather than deleted,
-    and its header comment carries the TODO pointing here; this is the step that
-    discharges it, so the tree stops carrying a workflow that only exists to be
-    reverted.
+  - `.github/workflows/cd.yml` — whole file, which 5b.13 spent a step making
+    possible by moving the two host installs into Provision 0. **Already gone
+    when this step ran**: 7b.1's commented-out carcass was deleted outright
+    mid-soak rather than left for here, so there was nothing to discharge. The
+    rollback 7b.1 described — `git revert` the soft stop — stopped being
+    one-line from that commit onward; nothing needed it.
   - [`containers/caddy/`](../../../containers/caddy/) and the `aerie-caddy`
     build/publish job in
     [publish.yml](../../../.github/workflows/publish.yml) — Traefik replaced
@@ -796,6 +796,28 @@ order the evening runs in — but they are never mixed inside one step:
   only prose that has been updated to match; a push to `main` publishes images
   and rolls the cluster through image automation, with nothing deploying to
   anything.
+
+  **That grep is not empty, and the remainder is assigned rather than missed.**
+  Five documents still name the deleted files, and every one of them is
+  somebody else's step: `reverse-proxy-architecture.md`,
+  `delivery-architecture.md`, `tailscale-vpn-architecture.md` and
+  `disaster-recovery.md` are 7c.10's rewrite list, and
+  `metrics-architecture.md` / `monitoring-alerting-architecture.md` were
+  assigned to Phase 9 by Phase 6. Patching a line in each here would be work
+  done twice and thrown away — the four in 7c.10 are being rewritten around
+  Traefik, one delivery path and a cluster backup, not edited. Everything not
+  on either list — `file-share.md`, `media-library.md`,
+  `family-apps-architecture.md`, `kiosk-architecture.md`, `ethos.md`,
+  `auth-architecture.md`, `storage-helper.md`, `scripts/secrets/README.md` and
+  `cluster-config.json`'s one description — was updated here.
+
+  **`deploy/` gains comment-only edits, against the manifest below's "nothing
+  else under `deploy/` changes".** Provenance comments in the observability
+  tree pointed at `containers/` paths by relative path, and several asserted
+  that the compose original "stays in place until Phase 7" — a sentence this
+  step falsifies. They were re-anchored to name the deleted file as history
+  rather than as a path. No rendered output changes; all 15 kustomizations
+  still build.
 
   </details>
 
@@ -1197,7 +1219,7 @@ compose.backup.yml
 compose.yaml                # SURVIVES - local dev, untouched by this phase
 
 .github/workflows/
-  cd.yml                    # 7b.9, deleted whole
+  cd.yml                    # deleted whole, mid-soak rather than at 7b.9
   cutover-tag-snapshot.yml  # 7b.3, new - and 7b.9, deleted with the compose files
   publish.yml               # 7b.9, minus the aerie-caddy job
   stagger-update-reboots.yml# 7b.9, plan job retargeted off legacy-deployer

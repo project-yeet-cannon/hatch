@@ -54,10 +54,13 @@ concurrency:
 jobs:
   plan:
     name: Compute schedule
-    # Any always-on host works here - this job only does string parsing and
-    # arithmetic, it never touches a hyperv-host-* box. legacy-deployer is
-    # the one runner guaranteed to exist regardless of Phase 1 progress.
-    runs-on: [self-hosted, legacy-deployer]
+    # This job only does string parsing and arithmetic - it reads no host and
+    # writes to none - but it stays self-hosted for the billing reason in the
+    # header. Any hyperv-host-* label works and none is more correct than
+    # another; if the labelled box happens to be down or mid-rebuild, edit this
+    # to name a surviving one. (It ran on legacy-deployer until 7b.9 retired
+    # that runner along with the compose host it deployed to.)
+    runs-on: [self-hosted, hyperv-host-0]
     outputs:
       matrix: ${{ steps.compute.outputs.matrix }}
       host_count: ${{ steps.compute.outputs.host_count }}
