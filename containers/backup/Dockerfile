@@ -21,7 +21,14 @@ FROM postgres:18.4-alpine
 #   aws-cli   - scripts/export-parameters.sh, which pulls the /aerie/*
 #               parameter tree into the same snapshot as the dumps.
 #   curl      - ad-hoc probing from inside the cluster's network position.
-RUN apk add --no-cache restic sqlite aws-cli curl ca-certificates
+#   jq        - two exact answers that would otherwise be grep against JSON.
+#               scripts/export-parameters.sh counts the exported tree, and the
+#               file it is counting holds every secret in the house, so a
+#               pattern match against its text is a count a value can inflate;
+#               scripts/cluster-backup.sh compares the cutover-final snapshot
+#               list either side of its `forget`, which needs two fields of
+#               restic's --json output and nothing else in it.
+RUN apk add --no-cache restic sqlite aws-cli curl jq ca-certificates
 
 WORKDIR /app
 COPY scripts/ scripts/

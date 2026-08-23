@@ -272,6 +272,14 @@ Backup*/
 # descend into an excluded directory, so the directory itself has to be
 # re-included here, not just its contents.
 !containers/backup/
+# ...and deploy/cluster/data/backup/, the Phase 8 backup tenant, for exactly
+# the same reason. Found the hard way: the 8b.4 commit that added that
+# directory landed only the ../schema/kustomization.yaml line pointing at it,
+# so HEAD referenced a base git had never been shown and `kubectl kustomize
+# deploy/cluster/data/schema` failed on a fresh clone while building fine in
+# the working tree. Any new directory literally named `backup` needs a line
+# here.
+!deploy/cluster/data/backup/
 UpgradeLog*.XML
 UpgradeLog*.htm
 ServiceFabricBackup/

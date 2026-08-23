@@ -160,6 +160,27 @@
    which is indistinguishable from a system that is fine, and this is the phase
    where that distinction is the whole product. 8b.11 says how.
 
+9. **A CronJob's pod name is restic's snapshot hostname, and that silently
+   disables retention.** Found by running `cluster-backup.sh` ten times against
+   a throwaway repository and noticing that a deliberately broken retention
+   removed nothing. restic stamps each snapshot with the machine's hostname; in
+   Kubernetes that is the pod name, unique to every run of a CronJob. `restic
+   forget` groups snapshots before applying its policy and **groups by
+   `host,paths` by default**, so a per-run hostname puts every night's snapshot
+   in a group of one, where `--keep-daily 7` dutifully keeps all seven of the
+   single snapshot it can see. Ten runs left ten snapshots; every `forget`
+   reported success.
+
+   The failure has no symptom until the bill or the share fills up, and it
+   defeats 8b.6 from the other direction too — a `--keep-tag` protecting a
+   snapshot from a policy that never runs is protecting it from nothing. The
+   fix is one flag, `restic backup --host aerie`, which also restores restic's
+   parent-snapshot lookup (keyed on the same host+paths pair, and without it
+   every run logs "no parent snapshot found" and re-reads both dumps in full).
+   With it, the same ten runs leave three snapshots. `--group-by host,paths` is
+   written on the `forget` explicitly rather than left to the default, because
+   the whole argument depends on it.
+
 ## What this phase is
 
 Three backup paths, one alert family, one rehearsal:
@@ -635,7 +656,7 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       open on purpose: it is answered by 8b.5's first `forget`, not by this
       mount.
 
-- [ ] **5. The backup CronJob** —
+- [x] **5. The backup CronJob** —
       `deploy/cluster/data/backup/backup-cronjob.yaml`.
 
       Namespace `aerie`. `image: ${IMAGE_REGISTRY}/aerie-backup:latest` and
@@ -665,7 +686,87 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       `quartz.dump` and `parameters.json`, and `restic snapshots` on each shows
       it.
 
-- [ ] **6. `--keep-tag cutover-final`, in the same commit as the `forget`** —
+      **Landed 2026-08-23 — the committed half**, as
+      [`backup-cronjob.yaml`](../../../deploy/cluster/data/backup/backup-cronjob.yaml)
+      plus its line in the directory's `kustomization.yaml`: `aerie-backup` in
+      `aerie`, `${IMAGE_REGISTRY}/aerie-backup:latest` behind `ghcr-pull`,
+      `command: ["sh", "/app/scripts/cluster-backup.sh"]` against the bare
+      shell 8b.3 left as the `ENTRYPOINT`, the four `aerie-pg-app` refs and the
+      three `restic` refs, `03:10`, `Forbid`, `1`/`3`, `backoffLimit: 2`, and
+      `/mnt/restic-local` over 8b.4's PVC. Three decisions the bullet above
+      left open, and one bug that had to be fixed before any of it could be
+      committed at all.
+
+      **No `timeZone`, and that is what preserves the stagger.** A CronJob
+      fires in UTC unless `.spec.timeZone` says otherwise, and the obvious
+      tidy-up here is `timeZone: ${TZ}` — the key already exists. It would be
+      wrong: [scheduledbackup.yaml](../../../deploy/cluster/data/schema/scheduledbackup.yaml)
+      is a CNPG object, CNPG's `ScheduledBackup` has no timezone field at all,
+      and it fires in the operator's time. Pinning only this side to a local
+      zone slides the 70-minute gap by the UTC offset, and at
+      `America/New_York` that puts the restic job at 07:10 UTC — five hours
+      *after* the base backup rather than seventy minutes, on a different
+      calendar day, and the stagger finding 7 asks for is gone without anything
+      reporting it. Both sides read UTC; the gap is the one that was designed.
+      `${TZ}` is the app tier's key and is deliberately not used here.
+
+      **One env var the bullet's list does not have: `AWS_DEFAULT_REGION`, from
+      `${AWS_REGION}`.** Finding 5 is right that restic needs no region key —
+      it reads one out of the endpoint hostname in `RESTIC_S3_REPOSITORY`. The
+      `aws-cli` 8b.7 calls has no endpoint to read one out of, and with the
+      variable unset `aws ssm get-parameters-by-path` exits non-zero on "You
+      must specify a region" before it fetches anything. It lands here rather
+      than with 8b.7 because this file *is* 8b.5 + 8b.6 + 8b.7 by the layout
+      above, and because a script cannot set its own pod's environment.
+
+      **`ttlSecondsAfterFinished: 259200`, not the 3600 the shape came with.**
+      The two retention fields fight, which the opensearch CronJob never
+      notices because it runs hourly: the TTL controller deletes a finished Job
+      on its own timer regardless of what `failedJobsHistoryLimit` wants to
+      keep, so an hour-long TTL on a once-a-day job means the pod logs of a
+      03:10 failure are gone before anyone reads the alert about it. Three days
+      of a daily job is exactly the three failures the history limit asks for.
+      The memory limit is loose for a related reason — 1Gi against a 256Mi
+      request, because an OOMKill lands mid-`forget --prune`, which leaves a
+      stale lock for the next run and throws away the repack it had already
+      done.
+
+      **The bug, and it is 8b.4's rather than this step's: the whole directory
+      was gitignored.** `.gitignore` carries Visual Studio's `Backup*/`, which
+      on a case-insensitive checkout (`core.ignorecase=true`, i.e. every macOS
+      clone) matches any directory named `backup`. That trap had already been
+      found once and re-included — `!containers/backup/` is right there with a
+      comment saying why — and `deploy/cluster/data/backup/` walked into it
+      unannounced. The consequence is not cosmetic: 8b.4's commit landed
+      [`schema/kustomization.yaml`](../../../deploy/cluster/data/schema/kustomization.yaml)'s
+      `../backup` line and the doc note, and **neither of the two files that
+      line points at**, so HEAD referenced a base git had never been shown.
+      `kubectl kustomize deploy/cluster/data/schema` builds fine in the working
+      tree and fails on a fresh clone — which is exactly the CI job that would
+      have caught it, and exactly the shape of failure that job exists for.
+      Fixed with a `!deploy/cluster/data/backup/` line and the same style of
+      comment beside it; verified by checking every directory in the repository
+      against `git check-ignore` and finding nothing else but build output.
+
+      Verified locally: 16 kustomizations build, the token check passes with 23
+      tokens all declared (22 before, the new one being `AWS_REGION` reaching
+      `deploy/` for the first time), no address literals, and the namespace
+      transformer stamps `aerie` on the CronJob while still leaving 8b.4's PV
+      alone.
+
+      **What remains: the exit condition.** The sequencing hazard 8b.3 and this
+      step both flagged — `cluster-backup.sh` calling an
+      `export-parameters.sh` that did not exist — is closed: 8b.7 landed in the
+      same push, so the first 03:10 tick has a complete script to run. One env
+      var was added here for it (`PARAMETER_PREFIX`), and one line of this
+      file's own env list belongs to it (`AWS_DEFAULT_REGION`).
+      Before the manual run, confirm 8b.4's exit first — an unresolved
+      `${RESTIC_LOCAL_SUBPATH}` is a PV mounted on the share root, which is the
+      one failure here that looks like success — and expect the CIFS locking
+      question that mount left open to be answered by this job's first
+      `forget`, not before it.
+
+- [x] **6. `--keep-tag cutover-final`, in the same commit as the `forget`** —
       the retention half of 8b.5's script.
 
       Inherited from [7b.3](phase-7-cutover.md#phase-7b--the-cutover), and the
@@ -691,7 +792,49 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       first wrote the `forget`, with the reasoning in the script beside it.
       What is left is the assertion, which needs a run against the real repos.
 
-- [ ] **7. Export the `/aerie/*` tree into the repos, on the same schedule** —
+      **The assertion landed 2026-08-23, inside the loop rather than in the
+      gate** — [`cluster-backup.sh`](../../../containers/backup/scripts/cluster-backup.sh).
+      8b.16 still owns the standing check ("`cutover-final` is still present in
+      both repos"), and this is not a duplicate of it: the gate answers *later*,
+      and this answers *between the two repositories*. The loop prunes the
+      local repo first, the projected snapshot list is captured either side of
+      each `forget`, and a mismatch aborts under `set -e` — so a retention
+      change that eats the tagged snapshot in the local repo stops the run
+      before the S3 `forget` reaches the last remaining copy. A check that ran
+      afterwards could only report the loss of both.
+
+      Two details that decide whether it is correct rather than merely present.
+      It compares `[{short_id, time}]` — a projection, so an image bump that
+      adds a field to restic's snapshot JSON (`summary` is the recent one) does
+      not read as a lost snapshot, and `time` is what makes "still the
+      pre-cutover one" part of the assertion rather than just "still one".
+      And **the empty case must pass**: `.[]?` normalises a repository with no
+      such snapshot, because a fresh installation of this repository has no
+      cutover-final at all and its backups must not fail every night on the
+      absence of one. The property being defended is not "the tag exists", it
+      is "retention never removes it", which is exactly what before-equals-after
+      says and the only form of it that survives being shipped to someone else.
+
+      **That exercise is also what turned up finding 9**, which matters more
+      than the assertion does: the retention this step protects a snapshot
+      *from* was not running at all. A CronJob pod's name is restic's snapshot
+      hostname, `forget` groups by `host,paths`, and so every night's snapshot
+      was its own group and nothing was ever pruned. `--host aerie` on the
+      `backup` and an explicit `--group-by host,paths` on the `forget` are the
+      fix; ten runs go from ten retained snapshots to three. A `--keep-tag` on
+      a policy that never fires protects nothing, so 8b.6 was not finished
+      until this was.
+
+      Exercised rather than asserted, against two throwaway local repos each
+      seeded with a `--time 2026-08-09` snapshot tagged `cutover-final`. The
+      real script keeps it. A deliberately regressed copy — `--group-by ''`,
+      `--keep-last 2`, `--keep-tag` deleted, which is the plausible
+      "simplification" rather than a strawman — destroyed it in the local repo,
+      and the guard fired, exited 1, and **left the S3 copy intact**: after the
+      aborted run `restic snapshots --tag cutover-final` was `[]` locally and
+      still the 2026-08-09 snapshot in S3.
+
+- [x] **7. Export the `/aerie/*` tree into the repos, on the same schedule** —
       `containers/backup/scripts/export-parameters.sh`, called by 8b.5's script.
 
       ```sh
@@ -724,6 +867,77 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       equals `parameters.json`'s own entry count plus the two bootstrap keys,
       and a `restic dump latest /…/parameters.json | jq` on a machine holding
       only the offline password reads a value back.
+
+      **Landed 2026-08-23** as
+      [`export-parameters.sh`](../../../containers/backup/scripts/export-parameters.sh),
+      the `aws ssm get-parameters-by-path` above with both prohibitions written
+      into the header where the next person to reach for `set -x` will read
+      them. Four decisions the bullet left open, and one correction to its exit
+      condition.
+
+      **The path is `$PARAMETER_PREFIX`, not `/aerie`.** The prefix is already a
+      variable everywhere else in this chain — `parameters.json` carries a
+      `prefix` field, `Sync-AerieSecrets.ps1` takes a `-ParameterPrefix` whose
+      help text names the case ("two installations sharing one AWS account give
+      each its own prefix"), and 8a.1's committed
+      [`aerie-restic-ssm.policy.json`](../../../scripts/secrets/iam/aerie-restic-ssm.policy.json)
+      is written against a `<PARAMETER_PREFIX>` placeholder. A hardcoded
+      `/aerie` here would be the one link that could not follow. It defaults to
+      `/aerie` so a stock installation needs no environment, and 8b.5's CronJob
+      sets it explicitly anyway so the change has one obvious home. A bare `/`
+      is rejected: it is a legal path that exports every parameter in the
+      account into a repository scoped to Aerie.
+
+      **`--query 'sort_by(Parameters, &Name)'`, which is doing two jobs.** It
+      drops the `{"Parameters": […]}` envelope so the file *is* the array and
+      its `length` is the parameter count — the number the exit condition wants
+      — and it makes the bytes deterministic. SSM returns pages in no promised
+      order, so an unsorted export differs from yesterday's even when nothing
+      changed and restic stores a new blob for it every night forever. Sorted,
+      an unchanged tree deduplicates to nothing. Pagination is deliberately left
+      to the CLI: `get-parameters-by-path` caps `MaxResults` at 10, so a
+      `--no-paginate` would quietly export the first ten of twenty-two.
+
+      **It refuses to snapshot an empty export.** A wrong prefix and a policy
+      that lost its Resource ARNs both land on "succeeded, captured nothing",
+      which is a green job and a `[]` file nobody opens until the day they need
+      it. `jq length` rather than counting matches in the text, because the text
+      is every secret in the house and a value containing the pattern would
+      inflate the count — which is one of the two reasons `jq` joins the image's
+      `apk add` (the other is 8b.6's assertion). `umask 077` before the
+      redirection, so the file is born 0600 and restic carries that mode into
+      the snapshot.
+
+      **The exit condition's arithmetic is wrong, and the right number is 22.**
+      It says "`parameters.json`'s own entry count plus the two bootstrap
+      keys". The two bootstrap keys are never SSM parameters: `Sync-AerieSecrets.ps1`
+      resolves them from the environment and applies them straight to the
+      cluster as the `aerie-eso-bootstrap` Secret over SSH — that is the whole
+      point of them, since a credential ESO reads from the store it needs the
+      credential to reach would be circular. The single `put-parameter` in the
+      repository is driven by `.parameters` alone. So the tree holds **at most
+      22**, and fewer if either optional entry (`kiosk/wifi-password`,
+      `tailscale/auth-key`) is unset — which makes the shape 8b.16 should assert
+      "every *required* parameter appears in the export" (20 of them) rather
+      than an equality against a total, and that is 4b.11's read-the-expected-
+      set-from-`parameters.json` rule anyway.
+
+      Exercised in the built image against a stub `aws` returning a
+      representative 22-entry tree: 22 exported, file mode 0600, the array
+      sorted. The four refusals all fire — empty result, `PARAMETER_PREFIX=/`,
+      missing output argument — and a custom prefix is passed through to the
+      CLI unaltered. Then end-to-end through `cluster-backup.sh` against a
+      throwaway `postgres:18.4-alpine`: both dumps, the export, both repos, one
+      snapshot each carrying `aerie.dump`, `quartz.dump` and `parameters.json`,
+      and `cluster-verify.sh` afterwards restoring that snapshot into a scratch
+      instance and counting 2 tables. `jq` reports 1.8.1 beside 8b.3's other
+      three versions.
+
+      **What remains:** the exit condition proper, which needs the real tree and
+      the real repos — the count against this installation's 22, and the
+      `restic dump latest /tmp/aerie-backup/parameters.json | jq` read-back from
+      a machine holding only the offline password. That path is typeable rather
+      than elliptical because of 8b.3's fixed staging directory.
 
 - [ ] **8. The verify CronJob** —
       `deploy/cluster/data/backup/verify-cronjob.yaml`.
