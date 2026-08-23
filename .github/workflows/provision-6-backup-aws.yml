@@ -19,9 +19,13 @@
 # worth reading the tradeoff rather than pasting an account root key:
 # PROVISION_AWS_* has to create a bucket and attach inline policies, so it is
 # strictly more powerful than any other credential this repository stores. Give
-# it iam:GetUser, iam:CreateUser, iam:TagUser and iam:PutUserPolicy scoped to
-# 'arn:aws:iam::<account>:user/aerie-*', plus the s3:CreateBucket and
-# s3:Put*Configuration actions - not AdministratorAccess. It is also the one
+# it exactly scripts/secrets/iam/aerie-provisioner.policy.json - IAM scoped to
+# 'arn:aws:iam::<account>:user/aerie-*', S3 scoped to this one bucket, and
+# iam:SimulatePrincipalPolicy, which is what the exit checks assert with and is
+# the one action easy to leave out because nothing provisions with it. Not
+# AdministratorAccess. That document is pasted by hand rather than applied by
+# Set-AerieSecretsIam.ps1, because the identity that attaches policies cannot
+# attach its own. It is also the one
 # credential here with no in-cluster consumer, so it can be deleted between
 # runs and minted again when the backup path next needs repair, which is the
 # recommendation.

@@ -127,6 +127,24 @@ function Write-Stage {
     Write-Host "=== [$script:StageNumber] $Message ===" -ForegroundColor Cyan
 }
 
+function Remove-EnvironmentVariable {
+    <#
+    .SYNOPSIS
+        Unsets an environment variable for this process.
+
+        Not [Environment]::SetEnvironmentVariable($name, $null), which is the
+        obvious spelling and the wrong one: under PowerShell on macOS and
+        Linux that leaves the variable present and EMPTY. An empty AWS_PROFILE
+        is not the absence of a profile - the CLI reads it, looks for a
+        profile named '', and fails every call with "The config profile ()
+        could not be found" no matter which keys were handed to it.
+    #>
+    param([Parameter(Mandatory)][string]$Name)
+    if (Test-Path "Env:\$Name") {
+        Remove-Item "Env:\$Name" -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Invoke-Aws {
     <#
     .SYNOPSIS
@@ -152,7 +170,7 @@ function Invoke-Aws {
             # Cleared, not left alone: a stale AWS_PROFILE or session token in
             # the caller's environment would silently win over the pair being
             # tested, and the check would pass as the wrong identity.
-            [Environment]::SetEnvironmentVariable($name, $null)
+            Remove-EnvironmentVariable -Name $name
         }
         foreach ($name in $Credential.Keys) {
             [Environment]::SetEnvironmentVariable($name, $Credential[$name])
@@ -176,11 +194,18 @@ function Invoke-Aws {
         Remove-Item $stdout, $stderr -Force -ErrorAction SilentlyContinue
         if ($Credential) {
             foreach ($name in $overridden) {
-                [Environment]::SetEnvironmentVariable($name, $saved[$name])
+                # A variable that was absent has to go back to absent, not to
+                # empty - same distinction as above, in the other direction.
+                if ($null -eq $saved[$name]) {
+                    Remove-EnvironmentVariable -Name $name
+                }
+                else {
+                    [Environment]::SetEnvironmentVariable($name, $saved[$name])
+                }
             }
             foreach ($name in $Credential.Keys) {
                 if ($overridden -notcontains $name) {
-                    [Environment]::SetEnvironmentVariable($name, $null)
+                    Remove-EnvironmentVariable -Name $name
                 }
             }
         }
@@ -230,6 +255,28 @@ function Invoke-AwsWithDocument {
     }
 }
 
+function Get-AuthenticationHint {
+    <#
+    .SYNOPSIS
+        Returns a hint when an AWS error says the credential was never
+        recognised, and '' when it does not.
+
+        Authentication and authorization fail differently and mean opposite
+        things here. 'AccessDenied' is a working credential being refused -
+        which is a PASS for the isolation check and a FAIL for the others.
+        'InvalidAccessKeyId', 'UnrecognizedClientException' and
+        'SignatureDoesNotMatch' are a credential AWS has never heard of, which
+        proves nothing in either direction and is nearly always local: an
+        unminted key, a stale one, or an id and secret pasted into each
+        other's variable.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$StdErr)
+    if ($StdErr -match 'InvalidAccessKeyId|UnrecognizedClientException|SignatureDoesNotMatch|InvalidClientTokenId') {
+        return 'That pair never authenticated, so this assertion proves nothing either way. Check the key exists and is Active (aws iam list-access-keys --user-name <user>), and that the id and secret did not land in each other''s variable - an access key id is 20 characters, its secret 40.'
+    }
+    ''
+}
+
 function Test-Assertion {
     <#
     .SYNOPSIS
@@ -245,6 +292,38 @@ function Test-Assertion {
         if ($Detail) { Write-Host "        $Detail" }
         $script:Failures.Add($Name)
     }
+}
+
+function Test-EveryDecisionIs {
+    <#
+    .SYNOPSIS
+        True when a simulation answered at least once and every decision it
+        returned is $Expected.
+
+        The @() around the filter is load-bearing. Where-Object emits nothing
+        when nothing matches, the parenthesised pipeline is then $null, and
+        Set-StrictMode -Version Latest refuses .Count on $null - so the
+        natural spelling of this test throws precisely when every decision was
+        the wanted one, which is to say when the policy is correct.
+    #>
+    param([Parameter(Mandatory)]$Simulation, [Parameter(Mandatory)][string]$Expected)
+    if (-not $Simulation.Ok) { return $false }
+    if (@($Simulation.Decisions).Count -eq 0) { return $false }
+    @($Simulation.Decisions | Where-Object { $_ -ne $Expected }).Count -eq 0
+}
+
+function Test-NoDecisionIs {
+    <#
+    .SYNOPSIS
+        True when a simulation answered at least once and no decision it
+        returned is $Unwanted - the shape a deny assertion needs, since
+        'implicitDeny' and 'explicitDeny' are both acceptable answers and only
+        'allowed' is the failure. Same @() reason as above.
+    #>
+    param([Parameter(Mandatory)]$Simulation, [Parameter(Mandatory)][string]$Unwanted)
+    if (-not $Simulation.Ok) { return $false }
+    if (@($Simulation.Decisions).Count -eq 0) { return $false }
+    @($Simulation.Decisions | Where-Object { $_ -eq $Unwanted }).Count -eq 0
 }
 
 function Get-SimulatedDecision {
@@ -356,8 +435,14 @@ if ($Stage -eq 'both' -or $Stage -eq 'bucket-only') {
     # separately and nothing reconciles the two.
     $locationRaw = (Invoke-AwsOrThrow -Arguments @('s3api', 'get-bucket-location', '--bucket', $LonghornBucket, '--output', 'json') `
             -What 'Reading the bucket location').StdOut | ConvertFrom-Json
-    # us-east-1 answers with a null LocationConstraint, which is not a bug.
-    $location = if ($locationRaw.LocationConstraint) { $locationRaw.LocationConstraint } else { 'us-east-1' }
+    # us-east-1 answers with a null LocationConstraint, which is not a bug -
+    # and the property-existence check is not paranoia either: under
+    # Set-StrictMode -Version Latest, reading a property the response did not
+    # carry throws rather than yielding $null.
+    $location = 'us-east-1'
+    if ($locationRaw.PSObject.Properties.Name -contains 'LocationConstraint' -and $locationRaw.LocationConstraint) {
+        $location = $locationRaw.LocationConstraint
+    }
     if ($location -ne $region) {
         throw "Bucket '$LonghornBucket' is in $location but this run is for $region. 8b.9's backup target names the region separately, so the mismatch fails at first backup rather than here. Use a bucket in $region, or re-run with -AwsRegion $location if that is the intended home."
     }
@@ -490,14 +575,14 @@ $bucketArn = "arn:aws:s3:::$LonghornBucket"
 $simulation = Get-SimulatedDecision -PrincipalArn $longhornArn `
     -Actions @('s3:ListBucket') -ResourceArns @($bucketArn)
 Test-Assertion -Name "$LonghornUserName may list $LonghornBucket" `
-    -Passed ($simulation.Ok -and $simulation.Decisions -and ($simulation.Decisions | Where-Object { $_ -ne 'allowed' }).Count -eq 0) `
+    -Passed (Test-EveryDecisionIs -Simulation $simulation -Expected 'allowed') `
     -Detail "decisions: $($simulation.Decisions -join ', ') $($simulation.Error)"
 
 $simulation = Get-SimulatedDecision -PrincipalArn $longhornArn `
     -Actions @('s3:PutObject', 's3:AbortMultipartUpload', 's3:ListMultipartUploadParts') `
     -ResourceArns @("$bucketArn/backupstore/probe")
 Test-Assertion -Name "$LonghornUserName may write and abort multipart uploads" `
-    -Passed ($simulation.Ok -and $simulation.Decisions -and ($simulation.Decisions | Where-Object { $_ -ne 'allowed' }).Count -eq 0) `
+    -Passed (Test-EveryDecisionIs -Simulation $simulation -Expected 'allowed') `
     -Detail "decisions: $($simulation.Decisions -join ', ') $($simulation.Error)"
 
 if ($ResticUserName) {
@@ -508,7 +593,7 @@ if ($ResticUserName) {
     $simulation = Get-SimulatedDecision -PrincipalArn $resticArn `
         -Actions @('s3:ListBucket', 's3:PutObject') -ResourceArns @($bucketArn, "$bucketArn/*")
     Test-Assertion -Name "$ResticUserName may NOT reach $LonghornBucket" `
-        -Passed ($simulation.Ok -and $simulation.Decisions -and ($simulation.Decisions | Where-Object { $_ -eq 'allowed' }).Count -eq 0) `
+        -Passed (Test-NoDecisionIs -Simulation $simulation -Unwanted 'allowed') `
         -Detail "decisions: $($simulation.Decisions -join ', ') $($simulation.Error)"
 
     # Both ARNs, because only the second one is obvious and only the first one
@@ -517,14 +602,14 @@ if ($ResticUserName) {
         -Actions @('ssm:GetParametersByPath') `
         -ResourceArns @("arn:aws:ssm:${region}:${accountId}:parameter$prefix")
     Test-Assertion -Name "$ResticUserName may list the tree at the bare path ARN" `
-        -Passed ($simulation.Ok -and $simulation.Decisions -and ($simulation.Decisions | Where-Object { $_ -ne 'allowed' }).Count -eq 0) `
+        -Passed (Test-EveryDecisionIs -Simulation $simulation -Expected 'allowed') `
         -Detail "decisions: $($simulation.Decisions -join ', ') $($simulation.Error)"
 
     $simulation = Get-SimulatedDecision -PrincipalArn $resticArn `
         -Actions @('ssm:GetParameters') `
         -ResourceArns @("arn:aws:ssm:${region}:${accountId}:parameter$prefix/backup/restic-password")
     Test-Assertion -Name "$ResticUserName may read a parameter under the tree" `
-        -Passed ($simulation.Ok -and $simulation.Decisions -and ($simulation.Decisions | Where-Object { $_ -ne 'allowed' }).Count -eq 0) `
+        -Passed (Test-EveryDecisionIs -Simulation $simulation -Expected 'allowed') `
         -Detail "decisions: $($simulation.Decisions -join ', ') $($simulation.Error)"
 }
 
@@ -536,8 +621,9 @@ if ($env:LONGHORN_AWS_ACCESS_KEY_ID -and $env:LONGHORN_AWS_SECRET_ACCESS_KEY) {
         AWS_SECRET_ACCESS_KEY = $env:LONGHORN_AWS_SECRET_ACCESS_KEY
         AWS_DEFAULT_REGION    = $region
     }
+    $hint = Get-AuthenticationHint -StdErr $ls.StdErr
     Test-Assertion -Name "aws s3 ls succeeds with $LonghornUserName's own keys" `
-        -Passed ($ls.ExitCode -eq 0) -Detail $ls.StdErr
+        -Passed ($ls.ExitCode -eq 0) -Detail $(if ($hint) { "$hint`n        $($ls.StdErr)" } else { $ls.StdErr })
 }
 else {
     Write-Host "  SKIP  literal check as $LonghornUserName - set LONGHORN_AWS_ACCESS_KEY_ID and LONGHORN_AWS_SECRET_ACCESS_KEY to run it"
@@ -550,9 +636,27 @@ if ($ResticUserName -and $env:RESTIC_AWS_ACCESS_KEY_ID -and $env:RESTIC_AWS_SECR
         AWS_DEFAULT_REGION    = $region
     }
 
+    # The only assertion here whose failure mode is a false PASS, so it is the
+    # only one that has to check *why* the call failed. Any broken invocation -
+    # a malformed credential, an empty AWS_PROFILE, no network - exits non-zero
+    # and would otherwise read as proof of isolation. 8a.5's own words for this
+    # shape: a single test that can fail in two places proves neither.
     $ls = Invoke-Aws -Arguments @('s3', 'ls', "s3://$LonghornBucket") -Credential $resticCredential
-    Test-Assertion -Name "aws s3 ls fails with $ResticUserName's own keys" `
-        -Passed ($ls.ExitCode -ne 0) -Detail 'It succeeded, which means the two backup writers share a bucket.'
+    $refused = $ls.ExitCode -ne 0 -and $ls.StdErr -match 'AccessDenied|Access Denied|not authorized|\(403\)|Forbidden'
+    if ($ls.ExitCode -eq 0) {
+        $detail = 'It succeeded, which means the two backup writers share a bucket.'
+    }
+    else {
+        $hint = Get-AuthenticationHint -StdErr $ls.StdErr
+        if ($hint) {
+            $detail = "$hint`n        $($ls.StdErr)"
+        }
+        else {
+            $detail = "It failed, but not with an authorization error - so it proves nothing about isolation: $($ls.StdErr)"
+        }
+    }
+    Test-Assertion -Name "aws s3 ls is refused with $ResticUserName's own keys" `
+        -Passed $refused -Detail $detail
 
     # The count, not the values. --with-decryption is what proves kms:Decrypt
     # actually resolves, and printing the tree would put every secret in this
@@ -560,10 +664,45 @@ if ($ResticUserName -and $env:RESTIC_AWS_ACCESS_KEY_ID -and $env:RESTIC_AWS_SECR
     $tree = Invoke-Aws -Arguments @('ssm', 'get-parameters-by-path', '--path', $prefix,
         '--recursive', '--with-decryption', '--query', 'length(Parameters)', '--output', 'text') `
         -Credential $resticCredential
+    # Summed across lines, not parsed as one number. AWS CLI v1 auto-paginates
+    # and applies --query to EACH page, so a tree spanning two pages answers
+    # "10\n9" rather than "19"; v2 answers once. Summing is correct on both,
+    # and gives the true total rather than v1's first page.
     $count = 0
-    $parsed = $tree.ExitCode -eq 0 -and [int]::TryParse($tree.StdOut.Trim(), [ref]$count)
-    Test-Assertion -Name "$ResticUserName decrypts the tree ($count parameter(s))" `
-        -Passed ($parsed -and $count -gt 0) -Detail $tree.StdErr
+    $tokens = @($tree.StdOut -split '\s+' | Where-Object { $_ })
+    $parsed = $tree.ExitCode -eq 0 -and $tokens.Count -gt 0
+    if ($parsed) {
+        foreach ($token in $tokens) {
+            $page = 0
+            if (-not [int]::TryParse($token, [ref]$page)) {
+                $parsed = $false
+                break
+            }
+            $count += $page
+        }
+    }
+
+    # Every failure path gets its own sentence. An assertion that fails with an
+    # empty detail - which this one did, when the CLI answered nothing at all -
+    # is worse than no assertion: it says something is wrong and refuses to say
+    # what, and the next person debugs the script instead of the credential.
+    $hint = Get-AuthenticationHint -StdErr $tree.StdErr
+    if ($hint) {
+        $detail = "$hint`n        $($tree.StdErr)"
+    }
+    elseif ($tree.StdErr) {
+        $detail = $tree.StdErr
+    }
+    elseif (-not $parsed) {
+        $detail = "Exited $($tree.ExitCode) with no error text, and stdout was not one or more numbers: [$($tree.StdOut.Trim())]. Run it by hand to see what it answered: aws ssm get-parameters-by-path --path $prefix --recursive --with-decryption --query 'length(Parameters)' --output text"
+    }
+    else {
+        $detail = "The tree at $prefix is readable and empty. That is a Provision 2 problem, not a policy one."
+    }
+
+    $name = "$ResticUserName decrypts the tree"
+    if ($parsed) { $name = "$name ($count parameter(s))" }
+    Test-Assertion -Name $name -Passed ($parsed -and $count -gt 0) -Detail $detail
 }
 elseif ($ResticUserName) {
     Write-Host "  SKIP  literal check as $ResticUserName - set RESTIC_AWS_ACCESS_KEY_ID and RESTIC_AWS_SECRET_ACCESS_KEY to run it"

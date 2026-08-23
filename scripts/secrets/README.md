@@ -249,11 +249,23 @@ in the environment and are skipped, loudly, when they are not.
 
 **`PROVISION_AWS_*` is more powerful than anything else this repository
 stores**, and that is worth stating rather than discovering. It creates a
-bucket and attaches inline policies, so scope it to
-`arn:aws:iam::<account>:user/aerie-*` plus the S3 configuration actions — not
-`AdministratorAccess`. It is also the only credential here with no in-cluster
-consumer, so the cheapest posture is to delete it between runs and mint it
-again when the backup path next needs repair.
+bucket and attaches inline policies, so scope it —
+[`iam/aerie-provisioner.policy.json`](iam/aerie-provisioner.policy.json) is
+that scope, and it is the **one document here that is pasted by hand** rather
+than applied by `Set-AerieSecretsIam.ps1`, for the obvious reason: the identity
+that attaches policies cannot attach its own. Fill in `<LONGHORN_BUCKET>` and
+`<AWS_ACCOUNT_ID>` and put it on a dedicated `aerie-provisioner` user, not on
+`AdministratorAccess`.
+
+Note the third statement. `iam:SimulatePrincipalPolicy` is easy to leave out
+because nothing *provisions* with it — it is what the exit checks use to prove
+a policy landed without holding the tested user's keys, and without it a run
+configures everything correctly and then fails at the assertion, which reads
+like a broken policy rather than a missing one.
+
+`PROVISION_AWS_*` is also the only credential here with no in-cluster consumer,
+so the cheapest posture is to delete it between runs and mint it again when the
+backup path next needs repair.
 
 The reason this is a file and not a paragraph is one easy near-miss. The ESO
 user needs `GetParametersByPath` on **both** `arn:…:parameter/aerie` and

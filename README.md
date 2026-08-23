@@ -144,6 +144,35 @@ longitude on the Settings page, and the **Active alerts** card at the bottom of
 that page is there to confirm the configuration produced something. An empty
 card on a calm, clean-air day is a working configuration, not a broken one.
 
+## Making games with a child
+
+The family shell's **Game** app (`https://home.${DOMAIN}/apps/family/game`) lets
+a child build a game by typing what should happen — "i am a red ball", "i want
+to roll down a hill" — with Claude rewriting the running game each time. The
+design, including why the generated code runs in a sandboxed frame with no
+access to the house, is in [docs/game.md](docs/game.md).
+
+One piece of setup, done once:
+
+1. Get an Anthropic API key (`https://console.anthropic.com`). It is billed to
+   whoever runs this install, which is why Aerie does not ship one.
+2. On the admin app's Settings page, set **Anthropic API key**. It is stored
+   obfuscated and redacted on read, the same as the Home Assistant token.
+
+Until that is set, the Game app says so rather than offering a text box. For
+local development the key can go in `src/Aerie.Api/.env.json` as
+`anthropic_api_key` instead.
+
+Two things worth knowing before handing over the tablet:
+
+- **Turns cost money and take time.** "⚡ Quick" is the default and right for
+  nearly every request; "🧠 Careful" is a slower, pricier model for the ask that
+  keeps coming back wrong. The history panel (🕘) shows what each turn took and
+  how many tokens it used.
+- **Nothing is lost.** Every version is kept, ↩ goes back one step, and a game
+  that crashes repairs itself twice before putting the last working version
+  back on its own.
+
 ## Kiosk tablet install
 
 See [docs/kiosk-architecture.md](docs/kiosk-architecture.md) for how the kiosk app, its CI build, and QR provisioning fit together. To put a fresh tablet into service:

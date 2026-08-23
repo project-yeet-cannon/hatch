@@ -176,7 +176,7 @@ Three backup paths, one alert family, one rehearsal:
 
 ## Phase 8a — Manual prerequisites
 
-- [ ] **1. Two AWS changes, neither of them a new bucket policy you can skip**
+- [x] **1. Two AWS changes, neither of them a new bucket policy you can skip**
 
       **A bucket and a user for Longhorn.** A dedicated bucket, for the reason
       [objectstore.yaml](../../../deploy/cluster/data/cluster/objectstore.yaml)
