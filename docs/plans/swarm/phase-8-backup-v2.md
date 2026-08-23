@@ -556,7 +556,7 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       already implies, since it asks for `parameters.json` in the snapshot.
       Either land 8b.7 first or expect one loud failed Job.
 
-- [ ] **4. The local repo, as a PV** —
+- [x] **4. The local repo, as a PV** —
       `deploy/cluster/data/backup/local-repo-volume.yaml`.
 
       A statically-provisioned `smb.csi.k8s.io` PV/PVC pair in `aerie`, in the
@@ -583,6 +583,57 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       *Exit:* a throwaway pod mounting the PVC lists the repo's `config`,
       `data/` and `snapshots/` — the same repo 8a.2 moved, not an empty
       directory the mount silently created.
+
+      **Landed 2026-08-23 — the committed half**, as
+      [`local-repo-volume.yaml`](../../../deploy/cluster/data/backup/local-repo-volume.yaml)
+      plus the directory's `kustomization.yaml`, in the shape above:
+      `aerie-restic-local` for the PV, the PVC and — the part that matters —
+      the `volumeHandle`, `storageClassName: ""` with a reciprocal
+      `claimRef`/`volumeName`, `ReadWriteMany`, `Retain`, and
+      `nodeStageSecretRef` naming the `smb-share` Secret ESO already syncs
+      into `aerie`.
+
+      **One deviation from share-volumes.yaml, and it decides whether the
+      backup job can write at all: `uid=70,gid=70`, not `uid=0,gid=0`.**
+      [containers/backup/Dockerfile](../../../containers/backup/Dockerfile)
+      ends with `USER postgres` — it has to, since `initdb` refuses to run as
+      root and 8b.8's verify needs it — and in `postgres:18.4-alpine` that is
+      uid/gid 70. The share is a guest CIFS mount, so ownership is *presented*
+      by these mount options and the permission check is client-side against
+      them: copied verbatim from the media PVs, every path in the repository
+      would present as root-owned and restic's first write would fail a
+      permission check that says nothing about mount options. The mode bits
+      tighten to `0770`/`0660` for the same reason they can — only the backup
+      and verify jobs mount this, both as that uid, so the `other` bits serve
+      nobody. This is the one number in the file coupled to an image tag; a
+      base-image change that moves the postgres uid presents here as a backup
+      job that cannot write.
+
+      **Wiring, since "not a new Kustomization" left it open.** `../backup`
+      joins [`data/schema/kustomization.yaml`](../../../deploy/cluster/data/schema/kustomization.yaml)'s
+      `resources` as a *base*, not a file: kustomize's default load restrictor
+      forbids a file reference outside the build root but takes a directory
+      carrying its own `kustomization.yaml`. That puts the tenant behind
+      data-schema's `dependsOn: data-cluster` — which 8b.5's CronJob needs,
+      since a `PGHOST` from a Secret CNPG has not created yet is exactly the
+      failure the cluster/schema split exists to prevent — and inherits its
+      `postBuild.substituteFrom`, where `${SHARE_HOST}`, `${SHARE_NAME}` and
+      `${RESTIC_LOCAL_SUBPATH}` resolve. The directory keeps its own
+      `kustomization.yaml` regardless, because `ci.yml`'s `deploy-manifests`
+      job discovers build roots by finding them. Confirmed locally: 16
+      kustomizations build (15 before this), the namespace transformer leaves
+      the cluster-scoped PV alone rather than stamping `aerie` onto it, and
+      the three tokens are declared keys in `cluster-config.json`.
+
+      **What remains:** the exit condition, which needs a reconciled cluster
+      and 8b.2's Provision 4 dispatch before it — `${RESTIC_LOCAL_SUBPATH}`
+      resolves to the empty string until that variable is set, and an
+      unresolved subpath is a PV mounted on the share *root*, which is the one
+      failure mode here that looks like success. Check that first
+      (`kubectl -n aerie get pv aerie-restic-local -o jsonpath='{.spec.csi.volumeAttributes.source}'`),
+      then run the throwaway pod. And the CIFS locking question above stays
+      open on purpose: it is answered by 8b.5's first `forget`, not by this
+      mount.
 
 - [ ] **5. The backup CronJob** —
       `deploy/cluster/data/backup/backup-cronjob.yaml`.

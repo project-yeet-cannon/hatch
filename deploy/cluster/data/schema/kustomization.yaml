@@ -1,6 +1,7 @@
 # Layer for the data-schema Flux Kustomization (../../data.yaml): everything
 # that assumes aerie-pg already answers - the quartz database, the DDL that
-# fills it, the restore Job and the ScheduledBackup. data-schema carries
+# fills it, the restore Job, the ScheduledBackup, and (as a base, ../backup)
+# the backup tenant the cluster plan Phase 8 adds. data-schema carries
 # dependsOn: data-cluster, so nothing here is even applied until ../cluster's
 # Cluster is Ready.
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -11,9 +12,17 @@ kind: Kustomization
 # one here, and a namespaced kind with no namespace is what Flux's
 # server-side apply rejects as "namespace not specified". This field also
 # covers the hand-written resources with no conflict, since they already
-# agree with it.
+# agree with it - and it leaves ../backup's PersistentVolume alone, because
+# kustomize's namespace transformer skips kinds it knows are cluster-scoped
+# rather than stamping a namespace onto them.
 namespace: aerie
 resources:
+  # A directory, not a file: kustomize's default load restrictor forbids a
+  # *file* reference outside this root but takes a base that carries its own
+  # kustomization.yaml, and ../backup does. Phase 8b.4's note on why the
+  # backup tenant rides this Kustomization rather than getting one of its own
+  # is in that file.
+  - ../backup
   - quartz-database.yaml
   - quartz-ddl-job.yaml
   - restore-job.yaml
