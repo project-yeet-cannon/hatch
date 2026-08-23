@@ -834,7 +834,9 @@ landed.*
 *1–4 retire the Docker host. 5–7 build the k3s node and join it. 8–9 spend what
 the third node buys. 10 is the paperwork, 11 is the gate. Same tags as 7b.*
 
-- [ ] **1. Copy `E:/restic-repo` off the machine, and verify the copy** — *both*
+- [x] **1. --Copy `E:/restic-repo` off the machine, and verify the copy--** — *both*
+
+    Not done, we will not be formatting this drive or losing data. Ignore the rest of this step
 
   <details><summary>The local half of the backup dies with this disk</summary>
 
@@ -860,7 +862,7 @@ the third node buys. 10 is the paperwork, 11 is the gate. Same tags as 7b.*
 
   </details>
 
-- [ ] **2. Confirm the S3 repo still holds `cutover-final`** — *scripted*
+- [x] **2. Confirm the S3 repo still holds `cutover-final`** — *scripted*
 
   <details><summary>Thirty seconds, immediately before the irreversible half</summary>
 
@@ -876,7 +878,7 @@ the third node buys. 10 is the paperwork, 11 is the gate. Same tags as 7b.*
 
   </details>
 
-- [ ] **3. Remove Docker Desktop, enable the Hyper-V role, reboot** — *manual*
+- [x] **3. Remove Docker Desktop, enable the Hyper-V role, reboot** — *manual*
 
   <details><summary>The one-way door</summary>
 
@@ -893,7 +895,7 @@ the third node buys. 10 is the paperwork, 11 is the gate. Same tags as 7b.*
 
   </details>
 
-- [ ] **4. Create the external vSwitch, then fix the pfSense reservation** — *both*
+- [x] **4. Create the external vSwitch, then fix the pfSense reservation** — *both*
 
   <details><summary>Finding 3 — the step whose omission is diagnosed as a Prometheus fault a week later</summary>
 
@@ -921,7 +923,7 @@ the third node buys. 10 is the paperwork, 11 is the gate. Same tags as 7b.*
 
   </details>
 
-- [ ] **5. Provision 0 — the new node VM** — *scripted*
+- [x] **5. Provision 0 — the new node VM** — *scripted*
 
   <details><summary>Same workflow, same script, same golden image as the other two</summary>
 
@@ -942,7 +944,7 @@ the third node buys. 10 is the paperwork, 11 is the gate. Same tags as 7b.*
 
   </details>
 
-- [ ] **6. Provision 5 — node storage, *before* the join** — *scripted*
+- [x] **6. Provision 5 — node storage, *before* the join** — *scripted*
 
   <details><summary>The ordering that prevents a disk-pressure diagnosis</summary>
 
@@ -957,7 +959,7 @@ the third node buys. 10 is the paperwork, 11 is the gate. Same tags as 7b.*
 
   </details>
 
-- [ ] **7. Join it as the third k3s server** — *scripted*
+- [x] **7. Join it as the third k3s server** — *scripted*
 
   <details><summary>Provision 1 with <code>-JoinServer</code>, and the one moment worth watching live</summary>
 
@@ -989,7 +991,7 @@ the third node buys. 10 is the paperwork, 11 is the gate. Same tags as 7b.*
 
   </details>
 
-- [ ] **8. Raise the two counts, and confirm the cluster acts on them** — *both*
+- [x] **8. Raise the two counts, and confirm the cluster acts on them** — *both*
 
   <details><summary>Two repository variables and one dispatch — <b>no commit</b>, which is the entire point of the ConfigMap</summary>
 
@@ -1044,7 +1046,7 @@ the third node buys. 10 is the paperwork, 11 is the gate. Same tags as 7b.*
 
   </details>
 
-- [ ] **9. The three settings the third node makes affordable** — *scripted*
+- [x] **9. The three settings the third node makes affordable** — *scripted*
 
   <details><summary>One commit, after 7c.8 is green — including the strategy block without which the api rollout deadlocks</summary>
 

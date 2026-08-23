@@ -23,6 +23,10 @@ This is a product-vision constraint, not a security one. Several of the patterns
 ruled out below are perfectly good security practice in a single-tenant repo.
 They are excluded because they bake one operator into the artifact.
 
+This document is the **how**. [`purpose.md`](purpose.md) is the **why** — what
+Aerie is for, and which trade-offs are the right ones when two designs are
+equally clean.
+
 ## The three categories
 
 Every piece of configuration in Aerie falls into one of three buckets. Knowing
