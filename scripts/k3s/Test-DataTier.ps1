@@ -231,6 +231,52 @@ function Add-ObjectReadyCheck {
     return $false
 }
 
+function ConvertTo-UtcDateTime {
+    <#
+    .SYNOPSIS
+        One Kubernetes timestamp as a UTC [DateTime], whatever shape
+        ConvertFrom-Json handed it back in - or $null if it is not a
+        timestamp at all.
+
+    .DESCRIPTION
+        ConvertFrom-Json does not leave an RFC 3339 string as a string: it
+        deserializes it into a [DateTime]. Casting that back to [string] -
+        the obvious way to read `status.startedAt` - renders it in the
+        *current culture's* format with no zone at all ('08/23/2026
+        02:00:02'), and re-parsing that assumes local time. On a runner four
+        hours behind UTC that turned a backup taken four hours ago into one
+        taken now, so 4b.10's age check could not see a stale backup within a
+        whole UTC offset of its threshold. The same cast also mis-sorts:
+        'MM/dd/yyyy' orders by month before year, so "the newest Backup"
+        chosen by string comparison is only correct within one December.
+        Found while building scripts/k3s/Test-Cutover.ps1 (7c.11), which
+        carries the same helper.
+
+        Kind is handled rather than assumed: PowerShell 7 returns Kind=Utc
+        for a 'Z' input, Windows PowerShell 5.1 has historically returned the
+        same instant as Kind=Local, and the workflow wrapper runs 5.1.
+        Unspecified is read as UTC - every timestamp this script reads comes
+        from the Kubernetes API server, which emits nothing else.
+    #>
+    param([Parameter(Mandatory)][AllowNull()]$Value)
+
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [DateTime]) {
+        if ($Value.Kind -eq [DateTimeKind]::Local) { return $Value.ToUniversalTime() }
+        if ($Value.Kind -eq [DateTimeKind]::Unspecified) { return [DateTime]::SpecifyKind($Value, [DateTimeKind]::Utc) }
+        return $Value
+    }
+
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+    [DateTimeOffset]$parsed = [DateTimeOffset]::MinValue
+    $styles = [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal
+    if ([DateTimeOffset]::TryParse($text, [Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$parsed)) {
+        return $parsed.UtcDateTime
+    }
+    return $null
+}
+
 function Get-YamlScalar {
     <#
     .SYNOPSIS
@@ -517,18 +563,22 @@ try {
         Add-Check -Step '4b.10' -Name 'Newest Backup' -Status 'Fail' -Detail 'no Backup objects found - the ScheduledBackup has not produced one yet'
     }
     else {
-        $newest = $backups | Sort-Object { [string](Get-Path $_ 'status.startedAt') } -Descending | Select-Object -First 1
+        # Sorted and aged on the real instant - see ConvertTo-UtcDateTime
+        # above for why a [string] cast of status.startedAt is neither.
+        $newest = $backups |
+            Sort-Object { $moment = ConvertTo-UtcDateTime (Get-Path $_ 'status.startedAt'); if ($null -eq $moment) { [DateTime]::MinValue } else { $moment } } -Descending |
+            Select-Object -First 1
         $phase = [string](Get-Path $newest 'status.phase')
-        $startedAtRaw = [string](Get-Path $newest 'status.startedAt')
-        [DateTimeOffset]$started = [DateTimeOffset]::MinValue
+        $startedAtRaw = Get-Path $newest 'status.startedAt'
+        $started = ConvertTo-UtcDateTime $startedAtRaw
         if ($phase -ne 'completed') {
             Add-Check -Step '4b.10' -Name 'Newest Backup' -Status 'Fail' -Detail "phase is '$phase', not completed - $(Get-Path $newest 'metadata.name')"
         }
-        elseif (-not [DateTimeOffset]::TryParse($startedAtRaw, [ref]$started)) {
-            Add-Check -Step '4b.10' -Name 'Newest Backup' -Status 'Fail' -Detail "completed, but status.startedAt ('$startedAtRaw') didn't parse"
+        elseif ($null -eq $started) {
+            Add-Check -Step '4b.10' -Name 'Newest Backup' -Status 'Fail' -Detail "completed, but status.startedAt ('$startedAtRaw') isn't a timestamp"
         }
         else {
-            $age = (Get-Date).ToUniversalTime() - $started.UtcDateTime
+            $age = (Get-Date).ToUniversalTime() - $started
             # "Younger than the schedule interval" per 4b.11 - derived from
             # the committed six-field cron rather than a parameter. This gate
             # only recognises the shape 4b.10 actually uses (a fixed daily

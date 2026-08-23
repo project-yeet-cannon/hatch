@@ -5,22 +5,35 @@
 
 .NOTES
     Dot-sourced by Initialize-AerieNode.ps1. Nothing here is Hyper-V-specific;
-    it only needs ssh.exe on PATH and a private key whose public half was
+    it only needs an OpenSSH client on PATH and a private key whose public half was
     injected via cloud-init.
 #>
 
 function Assert-OpenSshClient {
     <#
     .SYNOPSIS
-        Fails early with an actionable message if ssh.exe or ssh-keygen.exe
-        isn't installed.
+        Fails early with an actionable message if ssh or ssh-keygen isn't
+        installed.
+
+    .DESCRIPTION
+        Extensionless, and the call sites below match: PowerShell resolves a
+        native command through PATHEXT, so `ssh` finds ssh.exe on Windows and
+        ssh on macOS and Linux. Hardcoding `.exe` cost nothing while the only
+        callers were the provisioning scripts, which run on a Hyper-V host by
+        construction - but scripts/k3s/Test-Cutover.ps1 (7c.11) and the gates
+        beside it are read-only checks an operator has every reason to run
+        from whatever laptop is in front of them, and `& ssh.exe` on a Mac
+        fails in a way that reads as a missing dependency rather than as a
+        wrong assumption.
     #>
-    $missing = @('ssh.exe', 'ssh-keygen.exe') | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) }
+    $missing = @('ssh', 'ssh-keygen') | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) }
     if ($missing) {
         throw @"
-$($missing -join ', ') not found on PATH. The OpenSSH client is an optional Windows feature; install it with:
+$($missing -join ', ') not found on PATH. On Windows the OpenSSH client is an optional feature; install it with:
 
   Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
+
+On macOS and Linux install your distribution's openssh-client package.
 
 Or re-run with -SkipWaitForReady to provision the VM without post-boot verification.
 "@
@@ -71,11 +84,17 @@ function Get-SshPublicKeyFingerprint {
     [CmdletBinding()]
     param([Parameter(Mandatory)][AllowEmptyString()][string]$PublicKey)
 
-    $tempFile = Join-Path $env:TEMP "aerie-pub-$([Guid]::NewGuid().ToString('N')).pub"
+    # [IO.Path]::GetTempPath() rather than $env:TEMP, here and below:
+    # $env:TEMP is a Windows-only variable, and Join-Path against the $null
+    # it reads as elsewhere throws "Cannot bind argument to parameter 'Path'"
+    # - which is what a read-only gate run from a Mac used to hit before it
+    # had checked anything. GetTempPath() resolves to %TEMP% on Windows, so
+    # nothing changes there.
+    $tempFile = Join-Path ([IO.Path]::GetTempPath()) "aerie-pub-$([Guid]::NewGuid().ToString('N')).pub"
     try {
         [IO.File]::WriteAllText($tempFile, ($PublicKey.Replace("`r`n", "`n").Trim() + "`n"))
         $ErrorActionPreference = 'Continue'
-        $output = & ssh-keygen.exe -l -f $tempFile 2>&1
+        $output = & ssh-keygen -l -f $tempFile 2>&1
         if ($LASTEXITCODE -ne 0) { return $null }
         # "256 SHA256:xxxxx comment (ED25519)"
         return ((([string]$output) -split '\s+') | Where-Object { $_ -like 'SHA256:*' } | Select-Object -First 1)
@@ -120,7 +139,7 @@ function Resolve-SshPrivateKeyFile {
     )
 
     if ($SshPrivateKey) {
-        $tempKeyFile = Join-Path $env:TEMP "aerie-$VMName-$([Guid]::NewGuid().ToString('N')).key"
+        $tempKeyFile = Join-Path ([IO.Path]::GetTempPath()) "aerie-$VMName-$([Guid]::NewGuid().ToString('N')).key"
         # WriteAllText rather than Set-Content, and LF rather than CRLF:
         # OpenSSH rejects a key file with CRLF line endings, and equally
         # rejects one whose PEM footer has no trailing newline at all.
@@ -145,7 +164,7 @@ function Resolve-SshPrivateKeyFile {
     # NativeCommandError - so a rejected key would surface as that generic
     # error rather than the message written for it a few lines down.
     $ErrorActionPreference = 'Continue'
-    $keygenOutput = '' | & ssh-keygen.exe -y -f $path 2>&1
+    $keygenOutput = '' | & ssh-keygen -y -f $path 2>&1
     if ($LASTEXITCODE -ne 0) {
         if ($tempKeyFile) { Remove-Item $tempKeyFile -Force -ErrorAction SilentlyContinue }
         throw "The SSH private key at '$path' doesn't parse (ssh-keygen: $keygenOutput). Check -SshPrivateKey / -SshPrivateKeyPath (or the NODE_SSH_PRIVATE_KEY secret) holds a complete, unencrypted OpenSSH private key with its BEGIN/END markers intact - not truncated, not the public key, not passphrase-protected."
@@ -346,10 +365,10 @@ $Command
         $OutputEncoding = New-Object Text.UTF8Encoding($false)
 
         if ($PSBoundParameters.ContainsKey('StdIn')) {
-            $StdIn | & ssh.exe @sshArgs 1> $stdout 2> $stderr
+            $StdIn | & ssh @sshArgs 1> $stdout 2> $stderr
         }
         else {
-            & ssh.exe @sshArgs 1> $stdout 2> $stderr
+            & ssh @sshArgs 1> $stdout 2> $stderr
         }
         $exitCode = $LASTEXITCODE
 

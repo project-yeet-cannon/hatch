@@ -13,13 +13,17 @@
 # because one member of three is a survivable degradation and Phase 1's
 # staggered Windows Update reboots produce it on a schedule - long enough to
 # ride out a reboot, short enough that a member that never comes back is
-# reported while there is still a second one to lose. The job label on it is
-# the chart's default naming for the pinned 88.3.0 release
-# (`kube-prometheus-stack-kube-etcd`) and is the one part of this file that
-# was not checked against a running cluster - confirm it with `kubectl -n
-# observability get servicemonitor,endpoints -l app=kube-prometheus-stack-kube-etcd`
-# (or whatever the chart actually emits) before trusting it; a wrong job label
-# here is a silently-dead rule, not an error.
+# reported while there is still a second one to lose. The job label on it was
+# the one part of this file that had not been checked against a running
+# cluster, with a note here saying so - and it was wrong: it read
+# `kube-prometheus-stack-kube-etcd`, the *scrape pool* name, while the label
+# prometheus-operator actually attaches is `kube-etcd`, from the jobLabel on
+# the Service the chart's kubeEtcd block creates. `up{job="..."}` matched
+# nothing, so EtcdMemberDown could not fire for any input - a silently-dead
+# rule, exactly as this note warned. Corrected 7c.11, from the live target
+# list; re-confirm with `kubectl get --raw
+# /api/v1/namespaces/observability/services/prometheus-operated:9090/proxy/api/v1/targets`
+# if the chart version ever moves.
 #
 # Longhorn degraded volumes - ../../scrape/longhorn.yaml (6b.6) is the job.
 # `for: 30m`, deliberately long: Phase 1's staggered Windows Update reboots
@@ -55,7 +59,7 @@ spec:
           annotations:
             summary: 'etcd member {{ $labels.instance }} reports no leader - quorum is 2 of 3, so this is a stopped cluster'
         - alert: EtcdMemberDown
-          expr: up{job="kube-prometheus-stack-kube-etcd"} == 0
+          expr: up{job="kube-etcd"} == 0
           for: 15m
           labels:
             severity: warning

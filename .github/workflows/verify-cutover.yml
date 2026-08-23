@@ -1,0 +1,125 @@
+# The cluster plan Phase 7c.11 - the Phase 7 gate, as something that exits 0.
+# The same thin-wrapper shape verify-cluster-platform.yml, verify-data-tier.yml,
+# verify-app-tier.yml and verify-observability.yml established for 3b.13,
+# 4b.11, 5b.14 and 6b.15: it checks out the repo and hands every decision to
+# scripts/k3s/Test-Cutover.ps1.
+#
+# Not "Provision 6": read-only, the same reason none of the other verify-*.yml
+# workflows are numbered into that sequence either.
+#
+# One thing here is not like the gates before it. Every one of those reaches
+# the cluster by dialling the ingress VIP directly and sending the hostname as
+# SNI, because until 7b.4 pointed pfSense Unbound at the VIP there was no DNS
+# record to follow. This one resolves names normally, and that makes
+# `runs-on: self-hosted` load-bearing rather than only a billing choice: a
+# self-hosted runner is a client on the house LAN, resolving through the same
+# Unbound the house does, which is the vantage point 7c.11 asks about. A
+# GitHub-hosted runner would answer a question nobody asked - and would have
+# no route to the nodes or the VIP anyway. As a side effect, runs never
+# consume Actions minutes.
+#
+# **This run is the LAN half of the name checks.** A tailnet client's resolver
+# is Tailscale's 100.100.100.100 forwarding ${DOMAIN} on to that same pfSense
+# by split DNS, and no client is both at once from DNS's point of view. The
+# script says which vantage point it ran from rather than letting a green
+# check imply both; scripts/k3s/Test-NameResolution.ps1, run by hand from a
+# tailnet client, is the other half.
+name: 'Verify: Cutover'
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: 'Runner to dispatch from (any host works - it needs SSH to the nodes, the house resolver, and a route to the ingress VIP)'
+        required: true
+        type: choice
+        options:
+          - hyperv-host-0
+          - hyperv-host-1
+          - hyperv-host-2
+      ip_address:
+        description: "A k3s server's LAN address. Any server - everything read over SSH is cluster state"
+        required: true
+        type: string
+      legacy_host_address:
+        description: 'LAN address of the Docker host this phase retired - the one value the portability check greps the tree for'
+        required: true
+        type: string
+      resolver:
+        description: 'Optional: a resolver address to query directly (defaults to whatever this runner is configured to use, which on the LAN is pfSense)'
+        required: false
+        type: string
+
+# Read-only, so two concurrent runs cannot corrupt anything - but they would
+# interleave their output in the same summary and prove nothing twice, so a
+# second dispatch waits rather than doubling up.
+concurrency:
+  group: verify-cutover
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Phase 7 gate
+    runs-on: [self-hosted, '${{ inputs.host }}']
+
+    # One SSH round trip for the cluster objects, one more per node for etcd,
+    # then fourteen DNS queries and seven TLS handshakes. Nothing here waits
+    # on a reconciliation, so 10m failing means something is hanging rather
+    # than being slow - most likely a resolver accepting a query and never
+    # answering, which the script reports per name.
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out provisioning scripts
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency OpenSshClient
+
+      # ASCII only in this block - no em dashes, no curly quotes, in code OR
+      # in comments. The runner writes it to a temp .ps1 as UTF-8 with no BOM
+      # and Windows PowerShell 5.1 decodes that as CP1252, where an em dash's
+      # third byte is a curly closing quote and PowerShell treats curly quotes
+      # as real string delimiters. Test-Cutover.ps1 itself is ASCII throughout
+      # for the same reason.
+      - name: Assert 7c.11's checklist
+        shell: powershell
+        env:
+          IP_ADDRESS: ${{ inputs.ip_address }}
+          LEGACY_HOST_ADDRESS: ${{ inputs.legacy_host_address }}
+          RESOLVER: ${{ inputs.resolver }}
+
+          # Same keypair every provision-*/verify-* workflow uses.
+          NODE_SSH_PRIVATE_KEY: ${{ secrets.NODE_SSH_PRIVATE_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+
+          if (-not $env:NODE_SSH_PRIVATE_KEY) {
+            throw "NODE_SSH_PRIVATE_KEY is not set. It's the same repository secret provision-0-new-node.yml already requires."
+          }
+
+          # DOMAIN and INGRESS_VIP are deliberately absent here: unlike
+          # verify-name-resolution.yml, this gate holds a cluster credential,
+          # so it reads both out of the live aerie-cluster-config ConfigMap.
+          # The expectation comes from the cluster and only the answer comes
+          # from DNS.
+          $arguments = @{
+            IPAddress         = $env:IP_ADDRESS
+            SshPrivateKey     = $env:NODE_SSH_PRIVATE_KEY
+            LegacyHostAddress = $env:LEGACY_HOST_ADDRESS
+          }
+          if ($env:RESOLVER) { $arguments['Resolver'] = @($env:RESOLVER) }
+
+          & .\scripts\k3s\Test-Cutover.ps1 @arguments
+
+          # Same reason every other verify-*.yml propagates this explicitly:
+          # `exit` inside a script invoked with & sets $LASTEXITCODE without
+          # ending the caller.
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
