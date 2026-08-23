@@ -322,6 +322,42 @@
       "example": "Aerie",
       "consumedBy": "docs/plans/deploy-observability.md 1.2, the Delivery dashboard's GitHub panels",
       "description": "Name of the Aerie repository, paired with AERIE_REPO_OWNER. Two keys rather than one owner/name string because the grafana-github-datasource query model takes `owner` and `repository` as separate fields and Flux's substitution cannot split one value across two."
+    },
+    {
+      "key": "RESTIC_S3_REPOSITORY",
+      "env": "RESTIC_S3_REPOSITORY",
+      "githubSource": "RESTIC_S3_REPOSITORY",
+      "githubKind": "variable",
+      "required": true,
+      "pattern": "^s3:s3\\.[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-[0-9]\\.amazonaws\\.com/(?!.*\\.\\.)(?![0-9.]+(/|$))[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](/[A-Za-z0-9._-]+)*$",
+      "hint": "A restic repository string, not a bucket name and not an s3:// URL: the scheme is 's3:' with a colon and no slashes, the host is the bucket's REGIONAL endpoint, and there is no trailing slash. A prefix under the bucket is accepted and rarely wanted - Phase 0's repository sits at the bucket root.",
+      "example": "s3:s3.us-east-1.amazonaws.com/my-aerie-restic",
+      "consumedBy": "8b.5 backup CronJob env (RESTIC_REPOSITORY_S3)",
+      "description": "Off-site restic repository, created in Phase 0 and supplied to compose.backup.yml as a cd.yml variable until 7b.9 deleted both. The region lives inside the endpoint hostname on purpose: restic will not take it separately, so there is no RESTIC_AWS_REGION beside this key - one value that cannot disagree with itself beats two that can. Not WAL_BUCKET and not LONGHORN_BACKUP_BUCKET; three repositories, three buckets, three blast radii."
+    },
+    {
+      "key": "RESTIC_LOCAL_SUBPATH",
+      "env": "RESTIC_LOCAL_SUBPATH",
+      "githubSource": "RESTIC_LOCAL_SUBPATH",
+      "githubKind": "variable",
+      "required": true,
+      "pattern": "^(?!.*\\.\\.)[^/\\\\\\x00][^\\x00]*$",
+      "hint": "A relative path under the share, no leading slash and no '..' segment - the same shape MEDIA_LIBRARY_SUBPATH takes. Forward slashes if it is nested: it is joined into an SMB source of the form //host/share/subpath.",
+      "example": "restic-repo",
+      "consumedBy": "8b.4 local-repo-volume.yaml PersistentVolume volumeAttributes.source",
+      "description": "Directory on the house share holding the local half of the restic repository pair - the copy 8a.2 moved off the old server, which keeps the name it had there rather than being shortened. Required where MEDIA_LIBRARY_SUBPATH is optional, and for the mirror image of that key's reasoning: an unset media subpath serves nothing, while an unset backup subpath would make the entire house share the restic repository."
+    },
+    {
+      "key": "LONGHORN_BACKUP_BUCKET",
+      "env": "LONGHORN_BACKUP_BUCKET",
+      "githubSource": "LONGHORN_BACKUP_BUCKET",
+      "githubKind": "variable",
+      "required": true,
+      "pattern": "^(?!.*\\.\\.)(?!^[0-9.]+$)[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
+      "hint": "A valid S3 bucket name: lowercase, 3-63 characters, no underscores, no consecutive dots, not formatted as an IP address. The name alone - Longhorn's own s3://bucket@region/ target is assembled in the manifest, so do not paste one here. The dedicated bucket Provision 6 created, and neither the WAL bucket nor the restic one.",
+      "example": "my-aerie-longhorn",
+      "consumedBy": "8b.9 longhorn.yaml defaultSettings.backupTarget",
+      "description": "S3 bucket Longhorn writes volume backups into, from Phase 8a.1. A bucket name rather than the full s3://bucket@region/ string Longhorn wants, because AWS_REGION is already a key and a second copy of the region is a second thing that can be wrong - 8b.9 joins the two. Dedicated for the reason objectstore.yaml gives for the WAL bucket: Longhorn owns the backupstore/ layout underneath it and expects to be its only writer."
     }
   ]
 }

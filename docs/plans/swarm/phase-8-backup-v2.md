@@ -4,8 +4,6 @@
 
 # Phase 8 — Backup v2 + rehearsal
 
-**Status: In progress — Phase 8a done, 8b.1 done, 8b.2 next**
-
 > Re-scoped once, against a repository that changed underneath the original six
 > bullets. Those bullets were written before Phase 4 existed and before Phase 7
 > deleted anything, and three facts about what actually got built move most of
@@ -425,7 +423,7 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       'Parameters[].Name'` rather than with the run's conclusion — a green run
       is not evidence the tree changed.
 
-- [ ] **2. Three new `cluster-config.json` keys, and a Provision 4 re-dispatch** —
+- [x] **2. Three new `cluster-config.json` keys, and a Provision 4 re-dispatch** —
       [`cluster-config.json`](../../../scripts/k3s/cluster-config.json),
       [`provision-4-cluster-config.yml`](../../../.github/workflows/provision-4-cluster-config.yml).
 
@@ -450,7 +448,35 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       and that is the point) and `kubectl -n flux-system get cm
       aerie-cluster-config -o yaml` holds them.
 
-- [ ] **3. Rework `containers/backup/` from a compose sidecar into a cluster job** —
+      **Landed 2026-08-23 — the committed half.** All three keys are in
+      `cluster-config.json` and mapped in `provision-4-cluster-config.yml`, and
+      the file's own rule is what kept the change to two files: the script reads
+      the map, so a key needs a `vars.` line and nothing else. Three notes on
+      the patterns, since that field is the whole point of this map:
+      `RESTIC_S3_REPOSITORY` requires the *regional* endpoint
+      (`s3:s3.<region>.amazonaws.com/<bucket>`), which is what makes finding 5's
+      missing region key safe — a bare `s3.amazonaws.com` is rejected here rather
+      than resolving to us-east-1 at first use — and it accepts an optional
+      prefix under the bucket while rejecting a trailing slash, an `s3://` URL
+      and a bare bucket name. `RESTIC_LOCAL_SUBPATH` takes
+      `MEDIA_LIBRARY_SUBPATH`'s pattern exactly, and `required: true` where that
+      one is optional: an unset media subpath serves nothing, an unset backup
+      subpath is 8b.4's PV mounted on the share root.
+      `LONGHORN_BACKUP_BUCKET` takes `WAL_BUCKET`'s pattern exactly, which also
+      rejects the `s3://bucket@region/` target string that is the likely paste.
+      All three were exercised against .NET's engine with `-cmatch` — 28 cases,
+      valid and invalid, including the case-sensitivity the map's comment warns
+      `-match` does not give.
+
+      **What remains:** set the three repository variables (Settings → Secrets
+      and variables → Actions → Variables) — the restic repository string and
+      `restic-repo` from 8a.2, and the Longhorn bucket 8a.1's Provision 6 run
+      created — then dispatch Provision 4 against a server. `preflight_only`
+      first is worth the extra run here: it validates and diffs without
+      applying, and a rejected value at that point costs nothing. The exit
+      condition is that dispatch, not this commit.
+
+- [x] **3. Rework `containers/backup/` from a compose sidecar into a cluster job** —
       [`containers/backup/`](../../../containers/backup/).
 
       The image survives Phase 7 for this step
@@ -486,6 +512,49 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       *Exit:* `publish.yml`'s existing `build-and-push-backup-image` job pushes
       a new tag on the merge; `docker run --rm --entrypoint sh <image> -c 'restic
       version && aws --version && sqlite3 -version'` answers three times.
+
+      **Landed 2026-08-23.** All four bullets above, as written, plus two notes.
+
+      The base image's comment now version-matches itself to
+      [cluster.yaml](../../../deploy/cluster/data/cluster/cluster.yaml)'s
+      `postgresql:18.4` rather than to the `db` service Phase 7 deleted — the
+      same tag, a live reason for it. `ENTRYPOINT ["sh"]`, so a `command:` in
+      either Job replaces it outright and a bare `docker run` lands in a shell
+      instead of idling; [restore-job.yaml](../../../deploy/cluster/data/schema/restore-job.yaml)'s
+      comment, which described the supercronic it was overriding, was updated
+      in the same commit rather than left to describe an image that no longer
+      exists.
+
+      **One deviation, and it is the reason `restic dump` will work later.**
+      `cluster-backup.sh` stages into a fixed `/tmp/aerie-backup` rather than
+      `mktemp -d`. restic records the *absolute* path of every file it backs
+      up, so a random directory per run puts the same dump at a different path
+      in every snapshot — which is why 8b.7's exit condition below had to write
+      `restic dump latest /…/parameters.json` with an ellipsis in it. With a
+      fixed staging path the name is `/tmp/aerie-backup/parameters.json` in
+      every snapshot and that command is typeable. `cluster-verify.sh` still
+      finds its dump by `find … -name`, so it reads older snapshots too.
+
+      Exercised end-to-end locally rather than asserted: a throwaway
+      `postgres:18.4-alpine` with `aerie` (a `public` table and a `storage`
+      one) and `quartz`, two local restic repos, `cluster-backup.sh` and then
+      `cluster-verify.sh` against them. Both repos took a snapshot carrying
+      `aerie.dump`, `quartz.dump` and `parameters.json`; `forget` reported
+      `keep … and all snapshots with tags [[cutover-final]]`; the verify
+      restored into a scratch instance and counted 2 tables across
+      `public`+`storage`. `init-repos.sh` reported "already initialized" on the
+      second run, unedited, as predicted. The exit command's three versions:
+      restic 0.18.1, aws-cli 2.34.63, sqlite3 3.53.4.
+
+      **What remains — and it is a sequencing hazard, not a leftover.**
+      `cluster-backup.sh` calls `/app/scripts/export-parameters.sh`, which is
+      8b.7's file and does not exist yet. The image builds and the exit
+      condition above passes without it, but a run of the backup job fails at
+      that line (`not found`, after the dumps and before any `restic backup`,
+      so it produces no snapshot rather than a partial one). **8b.7 has to land
+      before 8b.5's first manual run** — which 8b.5's own exit condition
+      already implies, since it asks for `parameters.json` in the snapshot.
+      Either land 8b.7 first or expect one loud failed Job.
 
 - [ ] **4. The local repo, as a PV** —
       `deploy/cluster/data/backup/local-repo-volume.yaml`.
@@ -565,6 +634,11 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       exactly one snapshot in each repo, and its date is still the pre-cutover
       one. Assert this rather than read it: it is the check that a policy
       change three phases from now will break silently.
+
+      **The manifest half landed with 8b.3**, which is the whole point of this
+      step: `--keep-tag cutover-final` is on the `forget` in the commit that
+      first wrote the `forget`, with the reasoning in the script beside it.
+      What is left is the assertion, which needs a run against the real repos.
 
 - [ ] **7. Export the `/aerie/*` tree into the repos, on the same schedule** —
       `containers/backup/scripts/export-parameters.sh`, called by 8b.5's script.

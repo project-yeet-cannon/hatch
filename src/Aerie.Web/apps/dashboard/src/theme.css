@@ -882,3 +882,95 @@ body {
   font: 800 24px/1 var(--num);
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------------------------------------------------------------------------
+   Camera feed (docs/plans/cameras.md Phase 8)
+
+   Same overlay idiom as Gather above - fixed, inside .hf-page so the circadian
+   custom properties resolve - with one difference that drives the rest: this
+   one opens by itself, on motion, with nobody's hand on the tablet. So it goes
+   above Gather's z-index rather than beside it (someone mid-shopping-list still
+   wants to know a person is at the door), it is black rather than --bg (a
+   letterboxed feed on a warm evening background reads as a rendering fault),
+   and the ✕ is the same 56px target Gather uses, in the same corner, because
+   the one thing a modal that opened on its own must be is easy to close.
+--------------------------------------------------------------------------- */
+.hf-camera-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  box-sizing: border-box;
+  background: #000;
+  color: #fff;
+  font-family: var(--ui);
+}
+.hf-camera-overlay * {
+  box-sizing: border-box;
+}
+.hf-camera-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+}
+.hf-camera-title {
+  flex: 1;
+  min-width: 0;
+  font: 700 27px/1.2 var(--display);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Its own rule rather than reusing .hf-gather-icon-btn: that one is painted in
+   the circadian palette (--card on --bg), which on this overlay's black would
+   be a pale slab in the corner on a bright afternoon and invisible at night.
+   Same 56px target and same corner, so the gesture is the one already learned. */
+.hf-camera-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  flex: none;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 22px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.hf-camera-close:active {
+  transform: scale(0.96);
+}
+/* min-height: 0 so the video can shrink inside the flex column instead of
+   overflowing it - a flex item's default min-height: auto is the reason a
+   video in a column like this otherwise pushes the bar off screen. */
+.hf-camera-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* contain, not cover: these are wide sensors on a portrait tablet, and cropping
+   to fill would cut away the sides of the frame - which on a driveway camera is
+   where whatever tripped it is standing. */
+.hf-camera-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+/* .hf-note is painted in --muted, which is chosen to sit quietly on the
+   circadian --bg and disappears on this overlay's black. The one place the
+   feed can fail is the one place the reason has to be readable. */
+.hf-camera-overlay .hf-note {
+  margin: 0;
+  font: 500 17px/1.4 var(--ui);
+  color: rgba(255, 255, 255, 0.75);
+}

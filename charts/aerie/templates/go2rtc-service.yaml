@@ -1,0 +1,22 @@
+# docs/plans/cameras.md Phase 7. ClusterIP and no Ingress, on purpose: the only
+# client is the api pod's CameraController relay, and everything reachable here
+# is either a camera credential (go2rtc's own config API) or a stream those
+# credentials open. Named "go2rtc" for the same reason api-service.yaml is named
+# "api" - it is what makes Program.cs's Cameras:Go2RtcBaseAddress default
+# (http://go2rtc:1984/) resolve inside the pod's own namespace.
+apiVersion: v1
+kind: Service
+metadata:
+  name: go2rtc
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+    app.kubernetes.io/component: go2rtc
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "aerie.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: go2rtc
+  ports:
+    - name: http
+      port: 1984
+      targetPort: http

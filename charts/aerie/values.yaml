@@ -131,6 +131,39 @@ share:
     limits:
       memory: 64Mi
 
+# go2rtc, the camera stream source (docs/plans/cameras.md Phase 7). Unlike
+# every placeholder above, these are real defaults - go2rtc's address and image
+# are the same for every installation, and the one installation-specific part
+# (which cameras exist, at which RTSP URLs, with which passwords) never appears
+# in Helm values at all. It arrives as the `go2rtc-streams` Secret, so a camera
+# credential lives in the parameter store and nowhere in git.
+go2rtc:
+  image:
+    # docker.io, not the chart's own registry - go2rtc is third-party. Pinned to
+    # an exact version rather than a moving tag: the pod is a single replica
+    # with Recreate strategy, so an unattended upstream change would take the
+    # only stream source down with no second replica still serving the old one.
+    repository: alexxit/go2rtc
+    tag: "1.9.14"
+  # info. debug logs every network interface at startup and every frame decision
+  # after it, which is useful during bring-up and noise in OpenSearch afterwards.
+  logLevel: info
+  # Mounted optional (go2rtc-deployment.yaml), so this naming a Secret that does
+  # not exist yet is the normal state until the first camera is configured.
+  streamsSecretName: go2rtc-streams
+  # An estimate, not a measurement - there is no camera to measure against yet,
+  # and the bring-up phase replaces these with real numbers. Sized for the
+  # design's actual work: relaying an already-H.264 sub-stream is a copy, not a
+  # decode, so the cost is roughly per-connection buffers. A transcode (an
+  # H.265 main stream) would blow through the memory limit and is exactly why
+  # the plan puts the kiosk on the sub-stream.
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
 # The migrate hook Job (migrate-job.yaml, 5b.6). Matches api on memory - same
 # image, same EF model - and asks for more CPU than api's idle-weighted
 # request because Helm blocks the whole release on this Job finishing; it

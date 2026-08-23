@@ -250,6 +250,11 @@ builder.Services.AddHttpClient("KioskFiles", c => c.BaseAddress = new Uri(kioskF
 
 builder.Services.Configure<MediaLibraryOptions>(builder.Configuration.GetSection(MediaLibraryOptions.SectionName));
 
+// Where camera video comes from - see CameraStreamOptions and
+// CameraController. Deploy-time config rather than a SiteSetting, so the host
+// the API relays kiosk video from is fixed by how Aerie is installed.
+builder.Services.Configure<CameraStreamOptions>(builder.Configuration.GetSection(CameraStreamOptions.SectionName));
+
 // API / HTTP
 
 // DataProtection: nothing here uses antiforgery tokens, cookie
@@ -402,6 +407,13 @@ app.UseMiddleware<AuthMiddleware>();
 // pipeline by minimal hosting, so the [EnableRateLimiting] metadata on
 // AuthController is already resolved by the time this runs.
 app.UseRateLimiter();
+
+// Camera video (CameraController, docs/plans/cameras.md Phase 7). After the
+// wall for the same reason the static file handlers are: an upgrade request
+// that skipped it would be a camera feed served to anyone who asked. Inert for
+// every other request - this only inspects the upgrade headers - so its cost to
+// the rest of the API is a branch.
+app.UseWebSockets();
 
 // Apps (static landing page + SPAs living under wwwroot/apps, outside the REST API)
 var appsPath = Path.Combine(app.Environment.WebRootPath, "apps");

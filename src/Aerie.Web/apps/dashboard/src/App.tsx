@@ -14,9 +14,11 @@ import { AlertBanner } from './components/AlertBanner';
 import { DashboardSkeleton } from './components/DashboardSkeleton';
 import { GatherTile } from './components/GatherTile';
 import { GatherOverlay } from './components/GatherOverlay';
+import { CameraFeedModal } from './components/CameraFeedModal';
 import { clientLogger } from './lib/clientLogger';
 import { useKioskLifecycle } from './hooks/useKioskLifecycle';
 import { useGatherLists } from './hooks/useGatherLists';
+import { useMotionEvents } from './hooks/useMotionEvents';
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -33,7 +35,14 @@ export function App() {
   // are suspended while Gather is open - a reset would take a half-typed item
   // with it, and a reload would take the whole page.
   const gatherOpen = gatherListId !== null;
-  const { resetToken } = useKioskLifecycle(gatherOpen);
+  // The camera a motion event is asking the wall to show, if any - see
+  // hooks/useMotionEvents.ts and docs/plans/cameras.md Phase 8.
+  const { cameraDeviceId, dismiss: dismissCamera } = useMotionEvents();
+  // Both overlays suspend the lifecycle, for the two halves of the same reason
+  // the hook already documents: an idle reset or a deploy reload would take a
+  // half-typed Gather item with it, and would drop a live camera feed while
+  // someone is standing there watching who is at the door.
+  const { resetToken } = useKioskLifecycle(gatherOpen || cameraDeviceId !== null);
 
   const closeGather = useCallback(() => {
     setGatherListId(null);
@@ -149,6 +158,14 @@ export function App() {
           custom properties on that element, and an overlay mounted anywhere
           else would resolve none of them. */}
       {gatherOpen && <GatherOverlay listId={gatherListId} lists={gatherLists} onClose={closeGather} />}
+      {/* Above Gather rather than instead of it: this one opens on its own,
+          with nobody's hand on the tablet, so it has to be able to interrupt.
+          Keyed on the device id so switching cameras tears the video pipeline
+          down and builds a new one, rather than feeding one camera's fragments
+          into a SourceBuffer opened for another's codec. */}
+      {cameraDeviceId !== null && (
+        <CameraFeedModal key={cameraDeviceId} deviceId={cameraDeviceId} onClose={dismissCamera} />
+      )}
     </div>
   );
 }
