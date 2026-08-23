@@ -23,6 +23,57 @@ public class DiscoveryServiceTests
     }
 
     [Fact]
+    public void InferKind_MultipleCameraProfiles_AnchorsOnSubStreamNotOrdinalFirst()
+    {
+        // The five camera.* entities a Reolink device publishes. Ordinal-first is
+        // _balanced, which is H.265 and won't play in a browser; _fluent is the
+        // H.264 sub-stream. _snapshots_fluent also ends in _fluent but is stills.
+        var match = DiscoveryService.InferKind([
+            "camera.front_door_balanced",
+            "camera.front_door_clear",
+            "camera.front_door_fluent",
+            "camera.front_door_snapshots_clear",
+            "camera.front_door_snapshots_fluent",
+            "binary_sensor.front_door_motion",
+        ]);
+
+        Assert.Equal(new DiscoveryService.KindMatch(DeviceKind.Camera, "camera.front_door_fluent"), match);
+    }
+
+    [Fact]
+    public void InferKind_MultipleCameraProfiles_AnchorIsIndependentOfInputOrder()
+    {
+        // BuildSuggestion sorts before calling, but the anchor must not depend on
+        // it: enabling a disabled profile entity must not move the anchor.
+        var match = DiscoveryService.InferKind([
+            "camera.front_door_snapshots_fluent",
+            "camera.front_door_fluent",
+            "camera.front_door_balanced",
+        ]);
+
+        Assert.Equal(new DiscoveryService.KindMatch(DeviceKind.Camera, "camera.front_door_fluent"), match);
+    }
+
+    [Fact]
+    public void InferKind_NoSubStreamProfile_FallsBackToOrdinalFirstCamera()
+    {
+        // A non-Reolink camera naming its entities anything else still imports.
+        var match = DiscoveryService.InferKind(["camera.front_door_hd", "camera.front_door_sd"]);
+
+        Assert.Equal(new DiscoveryService.KindMatch(DeviceKind.Camera, "camera.front_door_hd"), match);
+    }
+
+    [Fact]
+    public void InferKind_OnlySnapshotProfiles_StillReturnsCamera()
+    {
+        // _snapshots_fluent is excluded from the sub-stream preference, not from
+        // the fallback - a group with nothing else should still import.
+        var match = DiscoveryService.InferKind(["camera.front_door_snapshots_clear", "camera.front_door_snapshots_fluent"]);
+
+        Assert.Equal(new DiscoveryService.KindMatch(DeviceKind.Camera, "camera.front_door_snapshots_clear"), match);
+    }
+
+    [Fact]
     public void InferKind_UnrecognizedEntities_ReturnsNull()
     {
         var match = DiscoveryService.InferKind(["sensor.outdoor_temperature", "sensor.outdoor_humidity"]);
@@ -47,6 +98,56 @@ public class DiscoveryServiceTests
         Assert.Collection(channels,
             c => Assert.Equal((DeviceChannelMetric.CameraFeed, "camera.front_door", (string?)null), (c.Metric, c.HaEntityId, c.HaAttribute)),
             c => Assert.Equal((DeviceChannelMetric.MotionState, "binary_sensor.front_door_motion", (string?)null), (c.Metric, c.HaEntityId, c.HaAttribute)));
+    }
+
+    [Fact]
+    public void CameraChannelBuilder_WithPersonSibling_PrefersPersonOverMotion()
+    {
+        // On-camera AI detection: _person fires far less often than the plain
+        // _motion sensor, and every transition opens a modal on the kiosk.
+        var channels = CameraChannelBuilder.Build("camera.front_door_fluent", [
+            "camera.front_door_fluent",
+            "binary_sensor.front_door_motion",
+            "binary_sensor.front_door_person",
+            "binary_sensor.front_door_vehicle",
+        ]);
+
+        Assert.Collection(channels,
+            c => Assert.Equal((DeviceChannelMetric.CameraFeed, "camera.front_door_fluent", (string?)null), (c.Metric, c.HaEntityId, c.HaAttribute)),
+            c => Assert.Equal((DeviceChannelMetric.MotionState, "binary_sensor.front_door_person", (string?)null), (c.Metric, c.HaEntityId, c.HaAttribute)));
+    }
+
+    [Fact]
+    public void CameraChannelBuilder_WithPersonSibling_PrefersPersonRegardlessOfInputOrder()
+    {
+        var channels = CameraChannelBuilder.Build("camera.front_door_fluent", [
+            "binary_sensor.front_door_person",
+            "binary_sensor.front_door_motion",
+        ]);
+
+        Assert.Equal("binary_sensor.front_door_person", channels[1].HaEntityId);
+    }
+
+    [Fact]
+    public void CameraChannelBuilder_WithoutPersonSibling_FallsBackToMotion()
+    {
+        // A camera with no AI detection only ever publishes _motion.
+        var channels = CameraChannelBuilder.Build("camera.driveway", ["camera.driveway", "binary_sensor.driveway_motion"]);
+
+        Assert.Collection(channels,
+            c => Assert.Equal(DeviceChannelMetric.CameraFeed, c.Metric),
+            c => Assert.Equal((DeviceChannelMetric.MotionState, "binary_sensor.driveway_motion"), (c.Metric, c.HaEntityId)));
+    }
+
+    [Fact]
+    public void CameraChannelBuilder_WithUnrelatedBinarySensors_EmitsOnlyFeedChannel()
+    {
+        // Cameras carry other binary_sensor.* siblings too; none of them is a
+        // motion source, so nothing should be mapped to MotionState.
+        var channels = CameraChannelBuilder.Build("camera.driveway", ["camera.driveway", "binary_sensor.driveway_sd_card"]);
+
+        var channel = Assert.Single(channels);
+        Assert.Equal(DeviceChannelMetric.CameraFeed, channel.Metric);
     }
 
     [Fact]

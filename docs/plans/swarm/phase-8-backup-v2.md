@@ -187,14 +187,46 @@ Three backup paths, one alert family, one rehearsal:
       discipline as `aerie-restic` and `aerie-eso`.
 
       **A policy addition for `aerie-restic`.** `ssm:GetParametersByPath` and
-      `ssm:GetParameters` on `arn:aws:ssm:<region>:<account>:parameter/aerie/*`,
-      plus `kms:Decrypt` on the key the `SecureString` values were sealed with
-      (`alias/aws/ssm` unless Provision 2 was pointed elsewhere). Finding 4 is
-      why this is a policy edit rather than a fourth user.
+      `ssm:GetParameters` on **both**
+      `arn:aws:ssm:<region>:<account>:parameter/aerie` and
+      `…:parameter/aerie/*` — the bare path ARN is not optional, for the
+      reason [`iam/aerie-eso.policy.json`](../../../scripts/secrets/iam/aerie-eso.policy.json)
+      already carries: `GetParametersByPath` authorizes against the *path*,
+      which `/aerie/*` does not match, so the natural one-ARN policy denies
+      the export with `is not authorized to perform: ssm:GetParametersByPath`.
+      Plus `kms:Decrypt` on the key the `SecureString` values were sealed with
+      — scoped by `kms:ViaService` rather than by key id, which covers
+      `alias/aws/ssm` without naming a key that changes if Provision 2 is ever
+      pointed at a CMK. Finding 4 is why this is a policy addition rather than
+      a fourth user; it is an *addition* rather than an edit because Phase 0's
+      own document for that user is not committed here, and `put-user-policy`
+      overwrites by name.
+
+      **Both halves are scripted.** Actions -> *Provision 6: Backup AWS
+      resources*, or
+      [`Set-AerieBackupAws.ps1`](../../../scripts/secrets/Set-AerieBackupAws.ps1)
+      by hand. It creates and configures the bucket, creates
+      `aerie-longhorn`, and delegates the two policies to
+      [`Set-AerieSecretsIam.ps1`](../../../scripts/secrets/Set-AerieSecretsIam.ps1)
+      and the committed documents in
+      [`scripts/secrets/iam/`](../../../scripts/secrets/iam/) — so this step
+      is a dispatch rather than a console session, and re-runnable by the next
+      operator. What stays manual is `aerie-longhorn`'s **access key**, for
+      the reason that script has always given: minting one means printing one.
+      The one new thing it asks for is `PROVISION_AWS_*`, an operator
+      credential more powerful than anything else this repository stores —
+      [`scripts/secrets/README.md`](../../../scripts/secrets/README.md#phase-8s-backup-bucket-and-the-one-credential-that-outranks-the-others)
+      carries how to scope it and why deleting it between runs is the cheapest
+      posture.
 
       *Exit:* `aws s3 ls s3://<longhorn-bucket>` succeeds as `aerie-longhorn`
       and fails as `aerie-restic`; `aws ssm get-parameters-by-path --path
       /aerie --recursive --with-decryption` returns values as `aerie-restic`.
+      `-Stage verify-only` asserts exactly these, and asserts them twice —
+      once through `iam simulate-principal-policy`, which needs no access key
+      and so can run *before* Longhorn's is minted, and once literally as each
+      identity, which is the authority and the only half that would also catch
+      a bucket policy or an SCP.
 
 - [ ] **2. Put 7c.1's copy where the cluster will look for it**
 

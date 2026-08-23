@@ -59,21 +59,21 @@ Cleaner with Reolink: **HA for events, camera-direct for video.** Reolink publis
 
 Follows the existing `Device`/`DeviceChannel` model (`src/Aerie.Api/Ef/DeviceMapping.cs`) and discovery pipeline (`src/Aerie.Api/Services/DeviceMapping/DiscoveryService.cs`) that Mysa/power-switches used — see `docs/device-architecture.md` for the phase-doc convention this mirrors.
 
-### Phase 1 — Domain model
+### [x] Phase 1 — Domain model
 
 - [x] Add `Camera` to `DeviceKind` (`Ef/DeviceMapping.cs:33`)
 - [x] Add `CameraFeed` and `MotionState` to `DeviceChannelMetric` (`Ef/DeviceMapping.cs:61`) — `CameraFeed` channel's `HaEntityId` is the `camera.*` entity; `MotionState` channel's `HaEntityId` is the sibling `binary_sensor.*_motion` entity, `HaAttribute` null, bare on/off state (fits `EfStateChange`/`ChannelValueExtractor` as-is, no extractor changes needed)
 - [x] Confirm no EF migration is actually required (new enum members, same underlying int column, no CHECK constraint) — run `dotnet ef migrations add CameraDevices` and check the generated migration is empty/only whitespace; delete it if so
 
-### Phase 2 — Discovery/import
+### [x] Phase 2 — Discovery/import
 
 - [x] Add a `camera.*` branch to `DiscoveryService.BuildSuggestion` (`Services/DeviceMapping/DiscoveryService.cs:58`), before the sensor fallback
 - [x] Add a `CameraChannels(cameraEntityId, entityIds)` helper mirroring `ThermostatChannels`/`SwitchChannels`: always emits the `CameraFeed` channel, plus a `MotionState` channel if a sibling `binary_sensor.*_motion` entity is present in the group — landed as `CameraChannelBuilder.cs`, matching `LightChannelBuilder`'s standalone-class shape
 - [x] Extract `BuildSuggestion`'s kind-inference chain into a pure function of `IReadOnlyList<string> entityIds` (it isn't today) so the new branch is unit-testable — `DiscoveryService` currently has zero test coverage because `TemplateClient` is sealed; this sidesteps that without adding a wrapper interface — landed as `DiscoveryService.InferKind` + `KindMatch`
 - [x] Unit test: camera+motion grouping produces the right `DeviceKind`/channels; camera-without-motion-sibling still imports with just `CameraFeed`
-- [ ] **Pin the camera-entity anchor deterministically** instead of relying on ordinal `FirstOrDefault` (`DiscoveryService.InferKind`). Reolink emits five `camera.*` entities per device (`_fluent`/`_balanced`/`_clear`/`_snapshots_*`); today the right one is picked only because the rest are disabled and stateless. Prefer the sub-stream (`_fluent`) explicitly — it's H.264, where `_clear` is H.265 and won't play in a browser — and fall back to ordinal-first for non-Reolink cameras. See Hardware Selection §1/§2.
-- [ ] **Prefer `binary_sensor.*_person` over `*_motion`** for the `MotionState` channel in `CameraChannelBuilder.Build`, falling back to `_motion` when no AI sensor exists. Reolink's plain motion sensor fires on trees/rain/headlights, and v1 opens a modal on every transition. See Hardware Selection §3.
-- [ ] Unit test both of the above: multi-`camera.*` group picks the sub-stream anchor; `_person`-present group picks it over `_motion`; `_motion`-only group still works
+- [x] **Pin the camera-entity anchor deterministically** instead of relying on ordinal `FirstOrDefault` (`DiscoveryService.InferKind`). Reolink emits five `camera.*` entities per device (`_fluent`/`_balanced`/`_clear`/`_snapshots_*`); today the right one is picked only because the rest are disabled and stateless. Prefer the sub-stream (`_fluent`) explicitly — it's H.264, where `_clear` is H.265 and won't play in a browser — and fall back to ordinal-first for non-Reolink cameras. See Hardware Selection §1/§2.
+- [x] **Prefer `binary_sensor.*_person` over `*_motion`** for the `MotionState` channel in `CameraChannelBuilder.Build`, falling back to `_motion` when no AI sensor exists. Reolink's plain motion sensor fires on trees/rain/headlights, and v1 opens a modal on every transition. See Hardware Selection §3.
+- [x] Unit test both of the above: multi-`camera.*` group picks the sub-stream anchor; `_person`-present group picks it over `_motion`; `_motion`-only group still works
 
 ### Phase 3 — Admin UI
 

@@ -1,9 +1,11 @@
 <#
 .SYNOPSIS
-    Renders and applies the IAM policies Provision 2 and Phase 4 depend on -
-    the read-only 'aerie-eso' policy, the seed writer's, and CNPG's WAL
-    archiving user - from the committed documents in iam\, scoped to this
-    account, region, parameter prefix and (for CNPG) WAL bucket.
+    Renders and applies the IAM policies Provision 2, Phase 4 and Phase 8
+    depend on - the read-only 'aerie-eso' policy, the seed writer's, CNPG's
+    WAL archiving user, Longhorn's backup target user, and the parameter-tree
+    read 'aerie-restic' grows for Phase 8's export - from the committed
+    documents in iam\, scoped to this account, region, parameter prefix and
+    (for the two bucket users) their bucket.
 
 .DESCRIPTION
     The policies in iam\*.policy.json are the structural half: identical for
@@ -42,6 +44,29 @@
     The S3 bucket -CnpgUserName is scoped to - a dedicated bucket, not the
     restic one, per 4a.2. Required when -CnpgUserName is passed.
 
+.PARAMETER LonghornUserName
+    The user longhorn-manager holds for its backup target (the cluster plan
+    Phase 8a.1/8b.9). Omit to leave its policy alone. Requires
+    -LonghornBucket.
+
+.PARAMETER LonghornBucket
+    The S3 bucket -LonghornUserName is scoped to. A third dedicated bucket:
+    Longhorn owns its own backupstore/ layout and expects to be the only
+    writer, so it is neither the WAL bucket nor the restic one. Required when
+    -LonghornUserName is passed. This is the value cluster-config.json carries
+    as LONGHORN_BACKUP_BUCKET.
+
+.PARAMETER ResticUserName
+    The Phase 0 restic user, which Phase 8a.1 grows a parameter-tree read on
+    so 8b.7's export can dump /aerie/* into the backup repository. Omit to
+    leave it alone.
+
+    This attaches a SECOND inline policy ('aerie-parameter-export-read')
+    rather than editing the bucket policy that user already carries. Inline
+    policies union, put-user-policy overwrites by name, and Phase 0's
+    document is not committed here - so rewriting it from this script would
+    replace a policy nobody has a copy of and silently break every backup.
+
 .PARAMETER ParameterPrefix
     Overrides parameters.json's prefix. Must match what Sync-AerieSecrets.ps1
     and the Phase 3 ClusterSecretStore use, or ESO reads an empty tree.
@@ -72,6 +97,13 @@
 .EXAMPLE
     # The CNPG WAL archiving user, scoped to its own bucket
     .\Set-AerieSecretsIam.ps1 -CnpgUserName aerie-cnpg -WalBucket my-aerie-cnpg-wal
+
+.EXAMPLE
+    # Phase 8a.1's two policies, and nothing else - an empty -EsoUserName is
+    # how to skip the default target. This is what Set-AerieBackupAws.ps1 calls.
+    .\Set-AerieSecretsIam.ps1 -EsoUserName '' `
+        -LonghornUserName aerie-longhorn -LonghornBucket my-aerie-longhorn `
+        -ResticUserName aerie-restic
 #>
 [CmdletBinding()]
 param(
@@ -82,6 +114,12 @@ param(
     [string]$CnpgUserName,
 
     [string]$WalBucket,
+
+    [string]$LonghornUserName,
+
+    [string]$LonghornBucket,
+
+    [string]$ResticUserName,
 
     [string]$MapPath = (Join-Path $PSScriptRoot 'parameters.json'),
 
@@ -104,6 +142,15 @@ if ($CnpgUserName -and -not $WalBucket) {
 }
 if ($WalBucket -and -not $CnpgUserName) {
     throw '-WalBucket has no effect without -CnpgUserName.'
+}
+if ($LonghornUserName -and -not $LonghornBucket) {
+    throw '-LonghornUserName needs -LonghornBucket: the policy scopes to one bucket and nothing else.'
+}
+if ($LonghornBucket -and -not $LonghornUserName) {
+    throw '-LonghornBucket has no effect without -LonghornUserName.'
+}
+if ($LonghornBucket -and $LonghornBucket -eq $WalBucket) {
+    throw "-LonghornBucket and -WalBucket are both '$LonghornBucket'. They are separate buckets by design (4a.2, 8a.1): each of these two writers assumes it owns the whole prefix layout."
 }
 
 $script:StageNumber = 0
@@ -216,11 +263,20 @@ Write-Stage 'Render'
 # ---------------------------------------------------------------- #
 
 $targets = [System.Collections.Generic.List[object]]::new()
-$targets.Add([pscustomobject]@{
-        UserName   = $EsoUserName
-        PolicyName = 'aerie-secrets-read'
-        FileName   = 'aerie-eso.policy.json'
-    })
+# The one target with a default, because repairing it is why this script
+# exists. Pass -EsoUserName '' to skip it - what a caller wanting only the
+# Phase 8 pair does, so a backup provisioning run does not silently re-apply
+# the credential the whole cluster reads.
+if ($EsoUserName) {
+    $targets.Add([pscustomobject]@{
+            UserName   = $EsoUserName
+            PolicyName = 'aerie-secrets-read'
+            FileName   = 'aerie-eso.policy.json'
+        })
+}
+else {
+    Write-Host "No -EsoUserName: leaving the ESO read policy untouched."
+}
 if ($SeedWriterUserName) {
     $targets.Add([pscustomobject]@{
             UserName   = $SeedWriterUserName
@@ -241,6 +297,30 @@ if ($CnpgUserName) {
 else {
     Write-Host 'No -CnpgUserName: leaving the CNPG WAL policy untouched.'
 }
+if ($LonghornUserName) {
+    $targets.Add([pscustomobject]@{
+            UserName   = $LonghornUserName
+            PolicyName = 'aerie-longhorn-backup-s3'
+            FileName   = 'aerie-longhorn.policy.json'
+        })
+}
+else {
+    Write-Host 'No -LonghornUserName: leaving the Longhorn backup policy untouched.'
+}
+if ($ResticUserName) {
+    $targets.Add([pscustomobject]@{
+            UserName   = $ResticUserName
+            PolicyName = 'aerie-parameter-export-read'
+            FileName   = 'aerie-restic-ssm.policy.json'
+        })
+}
+else {
+    Write-Host 'No -ResticUserName: leaving the parameter-export read untouched.'
+}
+
+if ($targets.Count -eq 0) {
+    throw 'Every target was skipped, so there is nothing to do. Name at least one user.'
+}
 
 foreach ($target in $targets) {
     $path = Join-Path $PSScriptRoot (Join-Path 'iam' $target.FileName)
@@ -251,7 +331,8 @@ foreach ($target in $targets) {
         Replace('<AWS_REGION>', $region).
         Replace('<AWS_ACCOUNT_ID>', $accountId).
         Replace('<PARAMETER_PREFIX>', $prefix).
-        Replace('<WAL_BUCKET>', [string]$WalBucket)
+        Replace('<WAL_BUCKET>', [string]$WalBucket).
+        Replace('<LONGHORN_BUCKET>', [string]$LonghornBucket)
 
     # Catches a placeholder renamed in the JSON but not here, which would
     # otherwise be applied verbatim and deny everything at runtime.

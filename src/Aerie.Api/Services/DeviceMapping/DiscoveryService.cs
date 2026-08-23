@@ -104,11 +104,28 @@ public class DiscoveryService(TemplateClient template, AerieContext db, IHomeAss
         if (lightEntity is not null)
             return new KindMatch(DeviceKind.Light, lightEntity);
 
-        var cameraEntity = entityIds.FirstOrDefault(id => id.StartsWith("camera.", StringComparison.Ordinal));
+        var cameraEntity = PickCameraAnchor(entityIds);
         if (cameraEntity is not null)
             return new KindMatch(DeviceKind.Camera, cameraEntity);
 
         return null;
+    }
+
+    /// <summary>Suffix of the camera.* entity to anchor a Camera device on when the group offers a choice. Reolink publishes one camera.* entity per stream profile (_fluent/_balanced/_clear, plus _snapshots_* still-image variants); only the low-res "Fluent" sub-stream is H.264, where the higher-res profiles are H.265 and won't play in a browser. Nothing enforces this suffix - it's a preference, not a requirement, so non-Reolink cameras fall through to the ordinal-first candidate.</summary>
+    private const string SubStreamSuffix = "_fluent";
+
+    /// <summary>The camera.* entity a Camera device's CameraFeed channel should point at. Picks the browser-playable sub-stream when the group has one, ignoring the _snapshots_* still-image entities (which also end in _fluent), and otherwise takes the ordinal-first camera entity. Sorts its own candidates rather than trusting the caller's ordering, so the anchor doesn't silently change when a previously-disabled profile entity starts reporting state.</summary>
+    private static string? PickCameraAnchor(IReadOnlyList<string> entityIds)
+    {
+        var cameras = entityIds
+            .Where(id => id.StartsWith("camera.", StringComparison.Ordinal))
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .ToList();
+
+        return cameras.FirstOrDefault(id =>
+                   id.EndsWith(SubStreamSuffix, StringComparison.Ordinal)
+                   && !id.Contains("_snapshots", StringComparison.Ordinal))
+               ?? cameras.FirstOrDefault();
     }
 
     /// <summary>Result of InferKind: the inferred DeviceKind and the specific entity id its channel builder should be built around.</summary>

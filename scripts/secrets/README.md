@@ -182,10 +182,11 @@ failure.
 
 ### The IAM policies are committed, not retyped
 
-[`iam/aerie-eso.policy.json`](iam/aerie-eso.policy.json) and
-[`iam/seed-writer.policy.json`](iam/seed-writer.policy.json) hold the two
-policies with `<AWS_REGION>`, `<AWS_ACCOUNT_ID>` and `<PARAMETER_PREFIX>` left
-as placeholders, so nothing installation-specific is committed.
+[`iam/`](iam/) holds one document per identity — the two this workflow needs
+(`aerie-eso`, the seed writer), CNPG's WAL user from Phase 4, and Phase 8's
+pair — with `<AWS_REGION>`, `<AWS_ACCOUNT_ID>`, `<PARAMETER_PREFIX>`,
+`<WAL_BUCKET>` and `<LONGHORN_BUCKET>` left as placeholders, so nothing
+installation-specific is committed.
 [`Set-AerieSecretsIam.ps1`](Set-AerieSecretsIam.ps1) fills them in from
 `sts get-caller-identity` and `parameters.json`, then attaches them:
 
@@ -201,6 +202,58 @@ as placeholders, so nothing installation-specific is committed.
 
 It attaches policies to users that already exist; it does not create users or
 access keys, because minting a key means printing one.
+
+| Document | Attached to | As | Grants |
+|---|---|---|---|
+| [`iam/aerie-eso.policy.json`](iam/aerie-eso.policy.json) | `aerie-eso` | `aerie-secrets-read` | read the tree, decrypt via SSM |
+| [`iam/seed-writer.policy.json`](iam/seed-writer.policy.json) | the seed writer | `aerie-secrets-seed` | read-before-write the tree |
+| [`iam/aerie-cnpg.policy.json`](iam/aerie-cnpg.policy.json) | `aerie-cnpg` | `aerie-cnpg-wal-s3` | the WAL bucket, and nothing else |
+| [`iam/aerie-longhorn.policy.json`](iam/aerie-longhorn.policy.json) | `aerie-longhorn` | `aerie-longhorn-backup-s3` | the Longhorn backup bucket, and nothing else |
+| [`iam/aerie-restic-ssm.policy.json`](iam/aerie-restic-ssm.policy.json) | `aerie-restic` | `aerie-parameter-export-read` | read the tree, decrypt via SSM |
+
+The last row is an **addition**, not a replacement: it attaches a second inline
+policy beside the bucket policy Phase 0 gave that user. Inline policies union,
+`put-user-policy` overwrites by name, and Phase 0's document is not committed
+here — so rewriting it from this script would replace a policy nobody has a
+copy of and break every backup at 2am. The reason `aerie-restic` gets the tree
+at all is [the Phase 8 plan's finding 4](../../docs/plans/swarm/phase-8-backup-v2.md):
+after that phase, the repository that identity writes to *contains* the tree,
+so a credential that can read the tree and one that can read the repo holding
+it have the same blast radius, and one fewer IAM user is one fewer thing to
+rotate.
+
+### Phase 8's backup bucket, and the one credential that outranks the others
+
+[`Set-AerieBackupAws.ps1`](Set-AerieBackupAws.ps1) is [Phase
+8a.1](../../docs/plans/swarm/phase-8-backup-v2.md) end to end — the dedicated
+bucket Longhorn backs up into, the `aerie-longhorn` user scoped to it, the two
+policies above (delegated to `Set-AerieSecretsIam.ps1`, so the rendering engine
+has one implementation), and then the step's own exit criteria asserted rather
+than assumed. Dispatch it from **Actions → *Provision 6: Backup AWS resources***.
+
+```powershell
+# The whole step
+.\Set-AerieBackupAws.ps1 -LonghornBucket my-aerie-longhorn
+
+# Change nothing; just prove it still holds. Safe any time.
+.\Set-AerieBackupAws.ps1 -LonghornBucket my-aerie-longhorn -Stage verify-only
+```
+
+The exit checks run twice over, and the split matters. `iam
+simulate-principal-policy` needs no access key for the users being tested,
+which is what makes the criteria checkable *before* anyone mints one — but it
+evaluates identity policies only. The literal `aws s3 ls` and
+`ssm get-parameters-by-path --with-decryption` checks speak as each identity
+and are the authority; they run whenever `LONGHORN_AWS_*` / `RESTIC_AWS_*` are
+in the environment and are skipped, loudly, when they are not.
+
+**`PROVISION_AWS_*` is more powerful than anything else this repository
+stores**, and that is worth stating rather than discovering. It creates a
+bucket and attaches inline policies, so scope it to
+`arn:aws:iam::<account>:user/aerie-*` plus the S3 configuration actions — not
+`AdministratorAccess`. It is also the only credential here with no in-cluster
+consumer, so the cheapest posture is to delete it between runs and mint it
+again when the backup path next needs repair.
 
 The reason this is a file and not a paragraph is one easy near-miss. The ESO
 user needs `GetParametersByPath` on **both** `arn:…:parameter/aerie` and
@@ -256,6 +309,9 @@ and statuses only.
   console work, same tier as generating `K3S_CLUSTER_TOKEN`. Their *policies*
   are no longer manual — [`Set-AerieSecretsIam.ps1`](Set-AerieSecretsIam.ps1)
   applies the committed documents, for the reason
-  [above](#the-iam-policies-are-committed-not-retyped).
+  [above](#the-iam-policies-are-committed-not-retyped). Phase 8's
+  `aerie-longhorn` is the one user that *is* created for you, because it is new
+  in that phase and creating a user is not what this rule protects; its access
+  key is not, because minting one means printing one.
 - **Rotating the underlying credentials.** Rotation is "change the value, re-run
   this" — the re-run is scripted; deciding to rotate isn't.
