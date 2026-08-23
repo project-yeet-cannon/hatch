@@ -89,8 +89,10 @@ prevent:
 - a `required: true` parameter with neither a `kubernetes` block nor a
   `kubernetesDeferred` note. That's the direction that rots quietly: a value
   seeded on every run and read by nothing looks, from every angle, like a value
-  that works. `backup/*` carries such a note — its CronJob and namespace arrive
-  in Phase 8.
+  that works. `longhorn/*` carries such a note today — 8b.1 seeds the pair
+  first and manifests it on the next commit, because an `ExternalSecret` cannot
+  point at a path no run has written yet. `backup/*` carried the same note from
+  Phase 2 until 8b.1 redeemed it.
 
 It also rejects a namespace, Secret name or key Kubernetes would reject, two
 parameters claiming one key inside one Secret, and a `$` anywhere in the
@@ -108,6 +110,8 @@ expands to an empty string rather than an error).
 | `ESO_AWS_SECRET_ACCESS_KEY` | repository **secret** | Its secret half. `aerie-eso` holds `ssm:GetParameter*` + `ssm:GetParametersByPath` on `/aerie` **and** `/aerie/*`, and `kms:Decrypt` through SSM. Both ARNs — see [the policies](#the-iam-policies-are-committed-not-retyped). This pair becomes the in-cluster bootstrap Secret. |
 | `NODE_SSH_PRIVATE_KEY` | repository secret | Already set for Provision 0/1 — the key cloud-init baked into the node. |
 | `VM_LOG_SHIPPER_TOKEN` | repository secret | Required, and the one value here with **no issuer to fetch it from** — see below. |
+| `LONGHORN_AWS_ACCESS_KEY_ID` | repository **variable** | The **`aerie-longhorn`** user's id (Phase 8a.1). New in Phase 8 and the one pair here that predates no other workflow, so it is genuinely one-time setup rather than a value `cd.yml` already held. |
+| `LONGHORN_AWS_SECRET_ACCESS_KEY` | repository **secret** | Its secret half, minted by hand — `Set-AerieBackupAws.ps1` creates the user and its policy but will not print a key. Both halves are `required: true` in [`parameters.json`](parameters.json) from Phase 8 on, so a Provision 2 run without them fails preflight rather than seeding a partial tree. |
 
 Everything else the workflow passes (`AWS_ACCESS_KEY_ID`, `HA_TOKEN`,
 `RESTIC_*`, …) already exists for `cd.yml`. Optional entries with no matching

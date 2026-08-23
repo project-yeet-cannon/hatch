@@ -23,6 +23,7 @@ resources:
   - aerie-cnpg-wal-s3.yaml
   - aerie-ghcr-pull.yaml
   - aerie-home-assistant.yaml
+  - aerie-restic.yaml
   - aerie-smb-share.yaml
   - aerie-vm-log-shipper.yaml
   - cert-manager-route53-credentials.yaml

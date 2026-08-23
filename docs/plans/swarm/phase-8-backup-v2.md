@@ -4,7 +4,7 @@
 
 # Phase 8 — Backup v2 + rehearsal
 
-**Status: In progress — 8a.1 through 8a.3 done, 8a.4 next**
+**Status: In progress — Phase 8a done; 8b.1 is half-landed and waiting on a Provision 2 dispatch**
 
 > Re-scoped once, against a repository that changed underneath the original six
 > bullets. Those bullets were written before Phase 4 existed and before Phase 7
@@ -390,6 +390,29 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       longhorn-backup-target` both report `SecretSynced`; the generated
       `aerie-restic.yaml` carries three keys and `longhorn-system-longhorn-backup-target.yaml`
       two.
+
+      **Half done 2026-08-23 — the seed half.** The three `backup/*` flips are
+      in: `aerie-restic.yaml` renders with all three keys, `-Check` exits 0, and
+      `kubectl kustomize` over the generated directory builds. The two
+      `longhorn/*` parameters are added `required: true` with a
+      `kubernetesDeferred` note rather than a `kubernetes` block, which is the
+      seed-then-manifest half of 4b.3's ordering — the manifest cannot exist
+      before a run has written the path. `provision-2-seed-secrets.yml` maps
+      both onto `vars.LONGHORN_AWS_ACCESS_KEY_ID` /
+      `secrets.LONGHORN_AWS_SECRET_ACCESS_KEY`, and
+      [`scripts/secrets/README.md`](../../../scripts/secrets/README.md#one-time-setup)
+      now lists that pair as one-time setup: it is the first credential here
+      that `cd.yml` never held, so *nothing* supplies it by accident, and
+      `required: true` means a dispatch without it fails preflight rather than
+      seeding a partial tree.
+
+      **What remains, in order:** put 8a.1's `aerie-longhorn` access key on the
+      two Actions tabs, dispatch Provision 2 (`stage=parameters-only` is enough
+      — no bootstrap Secret changes), confirm both paths seeded, then give the
+      two entries a `kubernetes` block (namespace `longhorn-system`, secretName
+      `longhorn-backup-target`, secretKeys `AWS_ACCESS_KEY_ID` /
+      `AWS_SECRET_ACCESS_KEY`), regenerate, and commit. The `SecretSynced` half
+      of the exit condition belongs to that commit, not this one.
 
 - [ ] **2. Three new `cluster-config.json` keys, and a Provision 4 re-dispatch** —
       [`cluster-config.json`](../../../scripts/k3s/cluster-config.json),
