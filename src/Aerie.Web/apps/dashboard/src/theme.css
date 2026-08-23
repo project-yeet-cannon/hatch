@@ -966,3 +966,11 @@ body {
   object-fit: contain;
   background: #000;
 }
+/* .hf-note is painted in --muted, which is chosen to sit quietly on the
+   circadian --bg and disappears on this overlay's black. The one place the
+   feed can fail is the one place the reason has to be readable. */
+.hf-camera-overlay .hf-note {
+  margin: 0;
+  font: 500 17px/1.4 var(--ui);
+  color: rgba(255, 255, 255, 0.75);
+}
