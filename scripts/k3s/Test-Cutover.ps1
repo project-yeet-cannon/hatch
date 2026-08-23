@@ -350,6 +350,38 @@ function Get-YamlScalar {
     return $match.Matches[0].Groups[1].Value.Trim('"', "'")
 }
 
+function Invoke-Git {
+    <#
+    .SYNOPSIS
+        One git command against the checkout, returning its exit code and
+        output instead of throwing - `git grep` uses exit code 1 to mean
+        "found nothing", which is this gate's *passing* answer.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string[]]$Arguments
+    )
+
+    $stdoutFile = [IO.Path]::GetTempFileName()
+    $stderrFile = [IO.Path]::GetTempFileName()
+    try {
+        # Function-scoped, the same reason AerieSsh.ps1's Invoke-NodeSsh
+        # drops it: under Stop a native command writing to stderr raises a
+        # terminating NativeCommandError, and git writes advice there.
+        $ErrorActionPreference = 'Continue'
+        & git -C $RepositoryRoot @Arguments 1> $stdoutFile 2> $stderrFile
+        $exitCode = $LASTEXITCODE
+        return [pscustomobject]@{
+            ExitCode = $exitCode
+            StdOut   = (Get-Content -Raw -Path $stdoutFile -ErrorAction SilentlyContinue)
+            StdErr   = (Get-Content -Raw -Path $stderrFile -ErrorAction SilentlyContinue)
+        }
+    }
+    finally {
+        Remove-Item $stdoutFile, $stderrFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Get-ExceptionMessage {
     <#
     .SYNOPSIS
@@ -804,20 +836,30 @@ try {
     # never held the files. Anchored on two things this repository always
     # has, so a stale or half-copied tree is a usage error here rather than
     # a green table later.
+    # The Tree stage reads the *commit*, not the working tree - see its own
+    # comment for why. All this has to establish is that there is a commit to
+    # read: a git that runs, a repository under -RepositoryRoot, and a HEAD
+    # that carries the four directories 7c.11's last two bullets are about.
     $repositoryRootPath = $null
+    $treeFiles = @()
     if (Test-Path $RepositoryRoot -PathType Container) {
         $repositoryRootPath = (Resolve-Path $RepositoryRoot).Path
-        $missingAnchors = @(@('deploy', 'charts', 'scripts', '.github') | Where-Object { -not (Test-Path (Join-Path $repositoryRootPath $_) -PathType Container) })
-        if ($missingAnchors.Count -gt 0) {
-            # What is actually there, not just what is not: the failure this
-            # message has to explain is a checkout that looks complete to the
-            # workflow log and is not - a sparse cone left behind on a
-            # self-hosted runner by another workflow, which materialises some
-            # of the tree and none of the rest. Naming the four missing
-            # directories without naming the twenty that are present sends the
-            # reader to the wrong question.
-            $present = @(Get-ChildItem -Force -Path $repositoryRootPath -ErrorAction SilentlyContinue | ForEach-Object { if ($_.PSIsContainer) { "$($_.Name)/" } else { $_.Name } })
-            $failures.Add("-RepositoryRoot '$repositoryRootPath' is missing $($missingAnchors -join ', '), so it is not a complete Aerie checkout. What is there: $(if ($present.Count -gt 0) { $present -join ' ' } else { '(nothing)' })")
+
+        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            $failures.Add('git is not on PATH. The tree checks read the committed tree rather than the working directory, so they cannot run without it.')
+        }
+        else {
+            $listing = Invoke-Git -RepositoryRoot $repositoryRootPath -Arguments @('ls-tree', '-r', '--name-only', 'HEAD')
+            if ($listing.ExitCode -ne 0) {
+                $failures.Add("git could not read HEAD under '$repositoryRootPath': $((($listing.StdErr) -replace '\s+', ' ').Trim())")
+            }
+            else {
+                $treeFiles = @($listing.StdOut -split "`r?`n" | Where-Object { $_ })
+                $missingAnchors = @(@('deploy/', 'charts/', 'scripts/', '.github/') | Where-Object { $anchor = $_; -not ($treeFiles | Where-Object { $_.StartsWith($anchor) } | Select-Object -First 1) })
+                if ($missingAnchors.Count -gt 0) {
+                    $failures.Add("HEAD under '$repositoryRootPath' contains no $($missingAnchors -join ', ') - $($treeFiles.Count) file(s) in the commit, so this is not an Aerie checkout.")
+                }
+            }
         }
     }
     else {
@@ -1526,6 +1568,24 @@ try {
     # is a file check rather than a cluster one: the cluster is perfectly
     # happy while a compose file that describes a machine that no longer
     # exists sits in the tree waiting to be read as current.
+    #
+    # "The tree" is the *commit*, read with git ls-tree, and not the working
+    # directory - which is a correctness fix rather than a preference. Found
+    # on this repository's own Windows runner, 7c.11: its persistent
+    # workspace carried a sparse-checkout index left behind by another
+    # workflow, so deploy/ and charts/ were absent from disk after a checkout
+    # whose log shows a clean fetch and a `sparse-checkout disable`. The
+    # skip-worktree bits outlive the config that set them, and `git status`
+    # calls that tree clean. A disk-based "is it gone?" check reads a
+    # never-materialised directory as a deletion and passes, at full
+    # confidence, on a repository that still holds every file it claims to
+    # have removed. The commit cannot be fooled that way, and it is also the
+    # thing the question is actually about: what a second operator gets when
+    # they clone this.
+    #
+    # Presence on disk still counts *against* a must-not-exist path, since a
+    # file sitting there is a finding whatever git thinks. The reverse does
+    # not hold, which is why the must-exist list below is commit-only.
     $mustNotExist = @(
         @{ Path = 'compose.prod.yml'; Why = '7b.9' }
         @{ Path = 'compose.share.yml'; Why = '7b.9' }
@@ -1541,7 +1601,14 @@ try {
         @{ Path = 'containers/opensearch-provision'; Why = '7b.9' }
         @{ Path = 'containers/autokuma'; Why = '7b.9' }
     )
-    $leftBehind = @($mustNotExist | Where-Object { Test-Path (Join-Path $repositoryRootPath $_.Path) } | ForEach-Object { "$($_.Path) ($($_.Why))" })
+    $leftBehind = @($mustNotExist |
+            Where-Object {
+                $candidate = $_.Path
+                $inCommit = @($treeFiles | Where-Object { $_ -eq $candidate -or $_.StartsWith("$candidate/") } | Select-Object -First 1).Count -gt 0
+                $onDisk = Test-Path (Join-Path $repositoryRootPath $candidate)
+                $inCommit -or $onDisk
+            } |
+            ForEach-Object { "$($_.Path) ($($_.Why))" })
     if ($leftBehind.Count -gt 0) {
         Add-Check -Step $step -Name 'The compose path is gone from the tree (7b.9)' -Status 'Fail' -Detail ($leftBehind -join '; ')
     }
@@ -1558,7 +1625,12 @@ try {
         @{ Path = 'containers/backup'; Why = 'restore-job.yaml and Phase 8 run it' }
         @{ Path = 'containers/kuma-provision'; Why = '6b.13 made it a cluster image' }
     )
-    $overDeleted = @($mustExist | Where-Object { -not (Test-Path (Join-Path $repositoryRootPath $_.Path)) } | ForEach-Object { "$($_.Path) - $($_.Why)" })
+    $overDeleted = @($mustExist |
+            Where-Object {
+                $candidate = $_.Path
+                -not (@($treeFiles | Where-Object { $_ -eq $candidate -or $_.StartsWith("$candidate/") } | Select-Object -First 1).Count -gt 0)
+            } |
+            ForEach-Object { "$($_.Path) - $($_.Why)" })
     if ($overDeleted.Count -gt 0) {
         Add-Check -Step $step -Name 'The local-dev path survives (7b.9)' -Status 'Fail' -Detail ($overDeleted -join '; ')
     }
@@ -1569,17 +1641,25 @@ try {
     # publish.yml keeps its other jobs, so its deletion is a grep rather than
     # a file check - the one piece of 7b.9 that edits a file instead of
     # removing one.
-    $publishPath = Join-Path $repositoryRootPath '.github/workflows/publish.yml'
-    if (-not (Test-Path $publishPath -PathType Leaf)) {
-        Add-Check -Step $step -Name 'No aerie-caddy job in publish.yml (7b.9)' -Status 'Fail' -Detail '.github/workflows/publish.yml does not exist - it is not on this phase''s deletion list'
+    $publishInCommit = @($treeFiles | Where-Object { $_ -eq '.github/workflows/publish.yml' }).Count -gt 0
+    if (-not $publishInCommit) {
+        Add-Check -Step $step -Name 'No aerie-caddy job in publish.yml (7b.9)' -Status 'Fail' -Detail '.github/workflows/publish.yml is not in HEAD - it is not on this phase''s deletion list'
     }
     else {
-        $caddyHits = @(Select-String -Path $publishPath -SimpleMatch -Pattern 'caddy' -ErrorAction SilentlyContinue)
-        if ($caddyHits.Count -gt 0) {
-            Add-Check -Step $step -Name 'No aerie-caddy job in publish.yml (7b.9)' -Status 'Fail' -Detail "publish.yml still names caddy at line(s) $(($caddyHits | ForEach-Object { $_.LineNumber }) -join ', ')"
+        # -I so a binary file can never be matched, --fixed-strings so
+        # nothing here is a regex. Exit code 1 from `git grep` is "no match",
+        # which is the passing answer; anything above 1 is an error and gets
+        # reported as one rather than read as a pass.
+        $caddyGrep = Invoke-Git -RepositoryRoot $repositoryRootPath -Arguments @('grep', '-n', '-I', '--fixed-strings', '-i', 'caddy', 'HEAD', '--', '.github/workflows/publish.yml')
+        if ($caddyGrep.ExitCode -eq 1) {
+            Add-Check -Step $step -Name 'No aerie-caddy job in publish.yml (7b.9)' -Status 'Pass' -Detail 'publish.yml does not name caddy'
+        }
+        elseif ($caddyGrep.ExitCode -eq 0) {
+            $lines = @($caddyGrep.StdOut -split "`r?`n" | Where-Object { $_ } | Select-Object -First 5)
+            Add-Check -Step $step -Name 'No aerie-caddy job in publish.yml (7b.9)' -Status 'Fail' -Detail "publish.yml still names caddy: $($lines -join '; ')"
         }
         else {
-            Add-Check -Step $step -Name 'No aerie-caddy job in publish.yml (7b.9)' -Status 'Pass' -Detail 'publish.yml does not name caddy'
+            Add-Check -Step $step -Name 'No aerie-caddy job in publish.yml (7b.9)' -Status 'Fail' -Detail "git grep failed (exit $($caddyGrep.ExitCode)): $((($caddyGrep.StdErr) -replace '\s+', ' ').Trim())"
         }
     }
 
@@ -1599,18 +1679,25 @@ try {
     }
     else {
         $scanRoots = @('deploy', 'charts', 'scripts', '.github')
-        $scanned = New-Object Collections.Generic.List[object]
-        foreach ($root in $scanRoots) {
-            $scanned.AddRange(@(Get-ChildItem -Path (Join-Path $repositoryRootPath $root) -Recurse -File -ErrorAction SilentlyContinue))
+        $scannedCount = @($treeFiles | Where-Object { $path = $_; @($scanRoots | Where-Object { $path.StartsWith("$_/") }).Count -gt 0 }).Count
+        $addressGrep = Invoke-Git -RepositoryRoot $repositoryRootPath -Arguments (@('grep', '-n', '-I', '--fixed-strings', $LegacyHostAddress, 'HEAD', '--') + $scanRoots)
+        if ($addressGrep.ExitCode -eq 1) {
+            Add-Check -Step $step -Name 'The old host''s address appears nowhere in the tree' -Status 'Pass' -Detail "$scannedCount file(s) under $($scanRoots -join '/, ')/ name nothing at $LegacyHostAddress"
         }
-        $hits = @($scanned | Select-String -SimpleMatch -Pattern $LegacyHostAddress -ErrorAction SilentlyContinue)
-        if ($hits.Count -gt 0) {
-            $where = @($hits | ForEach-Object { "$($_.Path.Substring($repositoryRootPath.Length).TrimStart('\', '/')):$($_.LineNumber)" })
+        elseif ($addressGrep.ExitCode -eq 0) {
+            # `git grep <commit>` prefixes every hit with the commit, so a
+            # line reads HEAD:<path>:<line>:<text>. Only the first three
+            # fields are wanted - the text is whatever quoted the address,
+            # and printing it here would put the value in the table twice.
+            $where = @($addressGrep.StdOut -split "`r?`n" |
+                    Where-Object { $_ -match '^[^:]+:(?<path>[^:]+):(?<line>\d+):' } |
+                    ForEach-Object { "$($Matches['path']):$($Matches['line'])" } |
+                    Select-Object -First 8)
             Add-Check -Step $step -Name 'The old host''s address appears nowhere in the tree' -Status 'Fail' `
                 -Detail "$LegacyHostAddress at $($where -join '; ') - it belongs in the tree as a `${...} substitution and nowhere else (docs/ethos.md)"
         }
         else {
-            Add-Check -Step $step -Name 'The old host''s address appears nowhere in the tree' -Status 'Pass' -Detail "$($scanned.Count) file(s) under $($scanRoots -join '/, ')/ name nothing at $LegacyHostAddress"
+            Add-Check -Step $step -Name 'The old host''s address appears nowhere in the tree' -Status 'Fail' -Detail "git grep failed (exit $($addressGrep.ExitCode)): $((($addressGrep.StdErr) -replace '\s+', ' ').Trim())"
         }
     }
 }
