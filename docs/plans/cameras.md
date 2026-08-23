@@ -39,7 +39,7 @@ Buy PoE. **Not** WiFi, and **not** battery — battery models (Argus, Doorbell B
 ### Shortcomings and how they hit this plan
 
 1. **Five `camera.*` entities per device.** Reolink emits Fluent, Balanced, Clear, Snapshots Fluent, Snapshots Clear; only Fluent (low-res sub-stream) is enabled by default. `InferKind` takes `FirstOrDefault` over an **ordinal-sorted** entity list, so today it lands on `_fluent` by accident (the others have no state while disabled). Enabling "Clear" for 4K makes `_balanced`/`_clear` sort ahead and silently changes the anchor. → Phase 2 item.
-2. **H.265 main stream won't play in a browser.** On the 4K/12MP models the main ("Clear") stream is H.265; the sub-stream ("Fluent") is H.264. The kiosk modal wants the sub-stream anyway — lower latency, no transcode, and it removes any pressure to transcode 4K on the Windows prod box.
+2. **H.265 main stream won't play in a browser.** On the 4K/12MP models the main ("Clear") stream is H.265; the sub-stream ("Fluent") is H.264. The kiosk modal wants the sub-stream anyway — lower latency, no transcode, and it removes any pressure to transcode 4K on a cluster node.
 3. **The `_motion` sensor is noisy** (trees, rain, headlights, shadows). v1 opens a modal on every transition, which gets annoying fast. Reolink also exposes `binary_sensor.*_person` / `_vehicle` / `_pet` from on-camera AI, with far fewer false positives. → Phase 2 item.
 4. **Avoid dual-lens models** (Duo 3, TrackMix): multiple lenses/channels under one HA device, and `CameraChannelBuilder` takes `FirstOrDefault` for both feed and motion, so half the camera would import silently. Single-lens keeps the one-device-one-feed assumption true.
 
@@ -53,7 +53,7 @@ Buy PoE. **Not** WiFi, and **not** battery — battery models (Argus, Doorbell B
 
 Phase 7 currently assumes the stream is fetched *through* HA. That's the hard path: HA bundles go2rtc (since 2024.11) but binds its API to port **11984** and doesn't expose it by default — the docs only describe opening it via `debug_ui`, explicitly flagged as debug-only.
 
-Cleaner with Reolink: **HA for events, camera-direct for video.** Reolink publishes stable RTSP URLs (`rtsp://user:pass@<ip>:554/h264Preview_01_sub` for the H.264 sub-stream), and a **standalone go2rtc** sidecar on the Windows box converts RTSP → HLS/MSE/WebRTC over plain HTTP that `CameraController` proxies. HA can be pointed at that same instance (`go2rtc: url: http://...:1984`), so both systems share one stream source instead of two. `CameraFeed`'s `HaEntityId` stays the identity/discovery key — no schema change — while the bytes come from a documented, stable URL rather than HA internals. This likely also removes the `hls.js` dependency flagged in Phase 8.
+Cleaner with Reolink: **HA for events, camera-direct for video.** Reolink publishes stable RTSP URLs (`rtsp://user:pass@<ip>:554/h264Preview_01_sub` for the H.264 sub-stream), and a **standalone go2rtc** converts RTSP → HLS/MSE/WebRTC over plain HTTP that `CameraController` proxies. (Written when prod was a single Windows host, which is where "sidecar on the Windows box" came from; Phase 7 landed it as a Deployment in the k3s cluster instead.) HA can be pointed at that same instance (`go2rtc: url: http://...:1984`), so both systems share one stream source instead of two. `CameraFeed`'s `HaEntityId` stays the identity/discovery key — no schema change — while the bytes come from a documented, stable URL rather than HA internals. This likely also removes the `hls.js` dependency flagged in Phase 8.
 
 ## Implementation Plan
 
@@ -114,25 +114,96 @@ Follows the existing `Device`/`DeviceChannel` model (`src/Aerie.Api/Ef/DeviceMap
 - **Also added, not in the original plan:** the opening frame is a heartbeat. An SSE response writes no headers until its first frame, so a kiosk connecting on a quiet night would otherwise wait up to 20s for `EventSource.onopen` — indistinguishable from a broken API. Confirmed by the smoke test: headers at 0.00s.
 - **Snapshot before that heartbeat, both on the first `MoveNextAsync`.** Reading `ActiveDeviceIds` in the same resumption as the subscribe is what keeps the Phase 5 ordering guarantee tight; yielding first and reading later would open a window where a device could appear in the snapshot *and* have its change queued from before the read.
 
-### [] Phase 7 — Video stream proxy
+### [x] Phase 7 — Video stream proxy
 
-- [ ] Confirm what the actual cameras/HA setup support (HA `stream` integration HLS vs. go2rtc WebRTC) by prototyping directly against one real camera entity — **flag back if the real capabilities push this toward a heavier lift than expected**, since this is genuinely new territory for the repo
-- [ ] **Evaluate the camera-direct route recommended in Hardware Selection §"Impact on Phase 7" before building the HA-proxy version.** Verify the Reolink sub-stream RTSP URL plays directly (`ffplay rtsp://user:pass@<ip>:554/h264Preview_01_sub`), then stand up a **standalone go2rtc** on the Windows prod box and confirm it serves that stream over plain HTTP. HA's bundled go2rtc binds 11984 and isn't exposed by default, so proxying through HA is the harder path.
-- [ ] If the sidecar route holds up: point HA's own integration at the same instance (`go2rtc: url:`) so both systems share one stream source, and decide where the RTSP URL/credentials live (they are *not* the `CameraFeed` `HaEntityId` — that stays the identity key, so this needs a home: config, a new channel, or device metadata). **Flag the choice back before implementing.**
-- [ ] Add a `CameraController` endpoint (e.g. `GET /api/devices/{id}/channels/{channelId}/camera/stream`) resolving the `CameraFeed` channel's `HaEntityId`, fetching the stream (from the go2rtc sidecar if the above holds, otherwise HA-side playlist/segments or WebRTC negotiation via `IHomeAssistantConnectionManager`'s host/port/token), and proxying it back
-- [ ] Confirm go2rtc + any ffmpeg dependency actually runs as a service on Windows prod (see `project_windows_prod_servers`) — not just on the dev Mac
-- [ ] If proxying HLS, extract playlist-URL-rewriting (so segment URLs route back through this endpoint) into a pure, unit-testable function, same convention as `ChannelValueExtractor`
-- [ ] Unit test: the playlist-rewriting function
-- [ ] Manual test: confirm the proxied stream actually plays (e.g. `ffplay` or a bare `<video>` tag) against a real camera before wiring the kiosk modal to it
+Landed on the camera-direct route Hardware Selection recommended, and it held
+up: **HA for events, go2rtc for video.** What could be settled without a camera
+turned out to be almost all of it — go2rtc itself is testable with a synthetic
+stream, so the protocol, the relay and the deployment are verified rather than
+assumed. The RTSP hop from camera to go2rtc is the one link no amount of local
+testing reaches; that and everything downstream of it is Phase 10.
 
-### [] Phase 8 — Kiosk dashboard modal (frontend)
+- [~] ~~Confirm what the actual cameras/HA setup support by prototyping against one real camera entity~~ — **deferred to Phase 10** (no camera on the LAN yet). The question it was asked to answer — HLS through HA vs. go2rtc — was settled without it, by the reasoning in Hardware Selection plus a local go2rtc: HA's bundled go2rtc binds 11984 and is documented as debug-only, while a standalone one is a documented API.
+- [x] **Evaluated the camera-direct route before building anything HA-side**, and took it. `ffplay` against a camera moves to Phase 10, but go2rtc's own half was verified in full by running `alexxit/go2rtc:1.9.14` under Docker against a synthetic source (`ffmpeg:virtual?video=testsrc`) — which turns out to be a complete stand-in for a camera as far as everything in this repo is concerned.
+- [x] **Decided where the RTSP URL and credentials live: in go2rtc, and nowhere else.** This was flagged for a decision and the answer is the leanest of the three offered — not config, not a new channel, not device metadata. go2rtc's own streams file names each stream after the `camera.*` entity id it corresponds to, so the `CameraFeed` channel's `HaEntityId` is *already* the mapping and nothing new is stored. What that buys is the part worth having: no RTSP URL and no camera password ever enters Aerie's database, its API, or its git history. The streams file arrives as the `go2rtc-streams` Secret from the parameter store (`docs/secrets-architecture.md`), mounted `optional` so the cluster is healthy with zero cameras configured.
+- [x] Added the endpoint — `GET /api/devices/{deviceId}/camera/stream`, a **WebSocket relay** (`CameraController` + `CameraStreamRelay`). By device id rather than the planned `.../channels/{channelId}/...`: a device has exactly one `CameraFeed` channel, and the kiosk gets a bare device id from the SSE stream, so resolving the channel server-side saves the client a round trip at the one moment latency is the whole point.
+- [x] **Transport is MSE over WebSocket, not HLS** — flagged back and chosen. The relay is byte-transparent and knows nothing of go2rtc's protocol, which is what keeps a second implementation of it out of the path of every frame. Sub-second latency, and it is what removes the `hls.js` dependency Phase 8 flagged.
+- [~] ~~Confirm go2rtc + ffmpeg runs as a service on Windows prod~~ — **superseded.** Prod has been a k3s cluster since the swarm plan's Phase 7 cutover; `docs/delivery-architecture.md` says outright that any surviving reference to the Windows Compose host is stale. go2rtc is a Deployment/Service/ConfigMap in `charts/aerie` (single replica, `Recreate`, because every replica is an independent RTSP *client* and Reolink caps concurrent sub-stream connections in the single digits).
+- [~] ~~Extract playlist-URL-rewriting into a pure, unit-testable function~~ / ~~unit test it~~ — **not applicable, and replaced.** There is no playlist; MSE has no manifest to rewrite. The pure, testable piece is `CameraStreamTarget` (entity id + base address → go2rtc URL) with **18 tests**, including the case that motivated writing it by hand: `Uri`'s own relative resolution silently drops the last path segment of a base with no trailing slash, so a go2rtc mounted under `/go2rtc` would have been proxied from the root.
+- [x] Manual test: **the proxied stream plays, verified end-to-end through the running API** — a real `Camera` device in the local dev DB, `CameraController` relaying to a local go2rtc, a WebSocket client on the other end. The control exchange and 147 binary frames / 234 KB of fMP4 arrived intact in six seconds, message boundaries preserved, with clean open/close log lines and no unhandled exceptions. Against a *real camera* rather than a synthetic source: Phase 10.
 
-- [ ] Port the `Modal.tsx` pattern (`apps/admin/src/components/Modal.tsx`) into a new `apps/dashboard/src/components/CameraFeedModal.tsx`, plus matching `.modal-overlay`/`.modal-panel` CSS in dashboard's `theme.css` (doesn't exist there yet — dashboard has no modal today)
-- [ ] If the stream is HLS, add `hls.js` as a dashboard dependency (native `<video>` doesn't support HLS outside Safari) — **flag this new frontend dependency back given the lean-build ask**. Likely avoidable: if Phase 7 lands on the go2rtc sidecar, its MSE/WebRTC output plays in a plain `<video>` with a small inline shim and no npm dependency. Re-check once Phase 7 is settled.
-- [ ] In `App.tsx`, subscribe to `/api/motion-events/stream` via `EventSource` on mount; track which camera device (if any) currently has active motion
-- [ ] Render `CameraFeedModal` when a camera's motion is active, sourcing video from the Phase 7 proxy endpoint; close on motion-inactive or the modal's X button
-- [ ] Build + lint the dashboard app; in-browser verification of the live feed/modal is on you as usual, not claimed here as tested
+**Verified about go2rtc 1.9.14 by running it, not by reading its docs** — each of these is load-bearing somewhere in the chart or the client:
+
+- Repeated `-config` arguments **merge**, and a path that does not exist is skipped silently. This is the whole reason the streams Secret can be `optional` and the cluster can be healthy with no cameras.
+- `rtsp: listen: ""` breaks **every** `ffmpeg:` source with `streams: exec: rtsp module disabled` — ffmpeg pushes back into go2rtc over its own RTSP listener. So RTSP binds loopback rather than being disabled, which keeps a future transcode (an H.265 main stream) possible while exposing nothing.
+- It runs non-root (uid 65532) with a read-only root filesystem, needing only a writable `/tmp`.
+- A stream may be named for an HA entity id, dots included — which is what makes `HaEntityId` usable as the stream name.
+- `/api/streams` answers 200 with `{}` when nothing is configured, so it can be the readiness probe without a down camera taking the pod with it.
+- The MSE reply carries the codec the **stream** actually has, not the one requested: asking for `avc1.640028` returned `avc1.640029`. Handing `addSourceBuffer` the requested string instead would reject every fragment that followed.
+
+### [x] Phase 8 — Kiosk dashboard modal (frontend)
+
+- [~] ~~Port the `Modal.tsx` pattern from `apps/admin`~~ — **deviated on purpose.** The dashboard already has an overlay idiom of its own (`GatherOverlay`, `.hf-gather-overlay`): full-screen, fixed, mounted inside `.hf-page` so the circadian custom properties resolve, with one 56px touch target. That is the right shape for a portrait tablet on a wall; admin's centred dialog with a small ✕ is the right shape for a desktop browser. `CameraFeedModal` follows the local one.
+- [x] **No `hls.js`, and no new frontend dependency at all** — the flagged concern is resolved rather than accepted. Phase 7's MSE-over-WebSocket transport hands over fragmented MP4, which `MediaSource` takes directly.
+- [x] `App.tsx` subscribes to `/api/motion-events/stream` via `EventSource` on mount (`useMotionEvents`), and tracks which camera has active motion.
+- [x] `CameraFeedModal` renders when a camera's motion is active, sourced from the Phase 7 relay; closes on motion-inactive or the ✕.
+- [x] Build + lint + tests pass. In-browser verification is the user's, as always, and is not claimed here.
+
+**Also added, not in the original plan** — each of these is a failure the lean version would have shipped with:
+
+- **Dismissal is per *event*, not per camera** (`lib/motionEvents.ts`, a pure reducer, 13 tests). Closing the modal has to stop being in effect when the motion ends, or the ✕ silently mutes that camera forever. The same reducer makes a repeated `isActive: true` frame a no-op — the SSE contract explicitly permits one, and without this it would reopen a modal the user had just closed.
+- **SourceBuffer trimming and drift correction** (`lib/cameraStream.ts`, 23 tests). A `MediaSource` has a finite quota, so a modal open for the length of a long motion event ends in `QuotaExceededError` and a dead feed; and a kiosk tab that was backgrounded between events comes back seconds behind, showing footage of what already happened. Both are silent without the fix, and both are certain to happen on a wall display.
+- **The stream dropping clears all motion**, mirroring what `HomeAssistantEventListener` does when it loses HA — once we cannot see, we stop claiming there is something to look at. Otherwise the end-of-motion frame arrives during the outage and the modal is pinned open for good.
+- **The camera overlay holds the kiosk lifecycle**, alongside Gather. A deploy reload firing while someone is watching who is at the door is the same bug as one firing mid-Gather-entry.
+- **The camera name is fetched separately and never awaited.** The video socket opens on mount regardless, so a slow lookup delays a label, never the picture.
 
 ### [] Phase 9 — Docs
 
 - [ ] Add `docs/camera-devices-architecture.md` mirroring `device-architecture.md`'s phased structure, covering the schema additions, the WS listener, the dispatch seam, the SSE stream, and the video-proxy mechanism actually chosen in Phase 7
+- [ ] Write it after Phase 10, not before — the mechanism is settled, but several numbers in it (the stream naming, the resource figures, the measured latency) are Phase 10's output, and a doc written now would need rewriting with them
+
+### [] Phase 10 — First-camera bring-up
+
+Everything here needs a camera on the LAN, which is the only reason it isn't
+done. Phases 7 and 8 are built and verified against a synthetic go2rtc stream;
+what remains is the RTSP hop from camera to go2rtc, and the handful of
+predictions this plan made about what a Reolink actually publishes to Home
+Assistant. Each item below is written to name **what it would falsify** if it
+came out the other way, so a surprise points at the code it invalidates rather
+than just failing.
+
+Ordered so the cheapest checks come first and each one narrows what a later
+failure could mean.
+
+**The camera itself** — nothing else can be diagnosed until this is known good.
+
+- [ ] `ffplay rtsp://<user>:<pass>@<ip>:554/h264Preview_01_sub` plays. Confirms both the URL shape Hardware Selection assumed and that the sub-stream is H.264. If the path differs, only the go2rtc streams file changes — no code does.
+- [ ] `ffplay rtsp://<user>:<pass>@<ip>:554/h264Preview_01_main` — check whether main really is H.265, as Hardware Selection §2 predicts. If it is H.264 after all, the sub-stream is *still* the right choice for the kiosk (latency, and no 4K decode on a tablet), but the constraint stops being load-bearing.
+- [ ] Note the sub-stream's resolution and frame rate. This is what makes `go2rtc.resources` in `charts/aerie/values.yaml` a measurement instead of the estimate it currently admits to being.
+
+**HA entity shape** — Phase 2 encoded three predictions about Reolink; this is where they are checked.
+
+- [ ] Confirm five `camera.*` entities appear under one device, and that `_fluent` is the sub-stream. `DiscoveryService.InferKind` pins the anchor to `_fluent` explicitly rather than taking the ordinal first. If the naming differs, that preference list is what changes.
+- [ ] Confirm `binary_sensor.*_person` exists alongside `*_motion`. `CameraChannelBuilder` prefers `_person` and falls back to `_motion`; if the AI sensors are absent or named differently, the fallback carries it, but the modal will fire on trees and headlights (Hardware Selection §3).
+- [ ] Run discovery, import the camera, and confirm the device lands as `Camera` with a `CameraFeed` channel and a `MotionState` channel pointing at the sensor you expect.
+
+**go2rtc streams** — the one design assumption in Phase 7 that a camera can overturn.
+
+- [ ] Settle the stream naming. `CameraStreamTarget` assumes **the go2rtc stream name equals the `CameraFeed` channel's `HaEntityId`**. Writing the streams file by hand makes that true by construction. If instead HA's own go2rtc integration is pointed at this instance and auto-registers streams under different names, either add an alias stream in the config or revisit that assumption — it is the single point where the two systems' vocabularies have to agree.
+- [ ] Add a `cameras/go2rtc-streams` entry to `scripts/secrets/parameters.json` and regenerate: `pwsh ./scripts/secrets/New-ExternalSecrets.ps1`. It must be `required: true` — `parameters.json` documents that an optional parameter may not carry a `kubernetes` block, because an ExternalSecret pointing at something never seeded sits in `SecretSyncError` and takes its Kustomization's Ready gate down with it. That rule is exactly why this step waits for a camera: until there is a stream to name, there is no value to seed.
+- [ ] The `secretKey` must be **`streams.yaml`**, not a kebab-case name. `go2rtc-deployment.yaml` mounts the Secret as a *directory* at `/streams`, so the key becomes the filename that `-config /streams/streams.yaml` reads.
+- [ ] Seed `GO2RTC_STREAMS` as a GitHub **secret** (it contains camera passwords, so not a variable) and run the seed workflow.
+- [ ] `kubectl rollout restart deploy/go2rtc -n aerie` after the Secret lands. go2rtc reads its config once at startup and never watches the files; the deployment's `checksum/config` annotation covers the ConfigMap only, because Helm cannot see a Secret's contents to hash them.
+- [ ] Confirm pod-network egress reaches the camera's RTSP port from a cluster node. **This is the item that could force a design change** — if the CNI or a firewall rule blocks pod → LAN, go2rtc has to move off-cluster or onto host networking, and it is the only untested link that would.
+
+**End to end.**
+
+- [ ] From inside the cluster, `curl http://go2rtc:1984/api/frame.jpeg?src=<entity id>` returns a real JPEG. This is the clean split point: a frame here means the camera half works and anything still broken is Aerie's; no frame means the camera half is, and none of Phase 7 or 8 is implicated.
+- [ ] Open the kiosk dashboard, walk in front of the camera, confirm the modal opens with live video and closes when the motion ends. Then confirm the ✕ closes it, and that the *next* motion event reopens it — that is the per-event dismissal rule, and it is the one piece of Phase 8's behaviour that a unit test can assert but not prove.
+- [ ] **Confirm MSE works in the kiosk's Android WebView specifically.** Everything in Phase 8 rests on `MediaSource`, and the kiosk is a WebView rather than Chrome proper. `supportedCodecs()` already reports the empty case as "this display can't play the feed" rather than failing obscurely, so a bad answer here is visible rather than silent — but it would mean rethinking the transport.
+- [ ] Measure motion → first frame. If it disappoints, the suspects in order are: HA's push latency (Hardware Selection's whole reason for choosing Reolink), the SSE hop, and go2rtc opening a cold RTSP session on first viewer. The last is the fixable one — a stream can be kept warm.
+- [ ] Replace `go2rtc.resources` in `charts/aerie/values.yaml` with measured figures, and remove the comment admitting they are guesses.
+
+**Open, and deliberately not decided yet.**
+
+- [ ] Whether to point HA's own integration at this go2rtc (`go2rtc: url:`), which the original Phase 7 assumed would be free. **It is not, any more.** The Service is `ClusterIP` with no Ingress and HA runs outside the cluster, so this would mean exposing go2rtc on a NodePort or Ingress — putting camera streams on a listener anything on the LAN can reach, to save one RTSP connection per camera. Worth revisiting only if the cameras turn out to be stingy with concurrent connections.
