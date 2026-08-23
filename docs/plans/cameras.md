@@ -94,12 +94,15 @@ Follows the existing `Device`/`DeviceChannel` model (`src/Aerie.Api/Ef/DeviceMap
 - **Motion is exactly the state `on`.** `off`, `unavailable`, `unknown` and a missing state all read as no-motion, so a sensor that drops off the network mid-detection (reports `unavailable`, never reports `off`) closes the Phase 6 modal instead of pinning it open until the camera returns. Attribute-only `state_changed` frames — same state, new `last_seen` — are not transitions, so they can't re-open a modal the user just dismissed.
 - **Phase 4 terminates in a log line.** The resolved transition is logged as `Motion {started|ended} on device {DeviceId}`; Phase 5 replaces that with `IMotionEventDispatcher.SetMotionState`.
 
-### [] Phase 5 — Motion dispatch (the hardcoded-for-v1 seam)
+### [x] Phase 5 — Motion dispatch (the hardcoded-for-v1 seam)
 
-- [ ] Add `IMotionEventDispatcher` (`Services/DeviceMapping/MotionEventDispatcher.cs`) holding per-device motion-active state in memory (`ConcurrentDictionary<Guid, bool>`) and raising a C# event on change
-- [ ] `HomeAssistantEventListener` calls `SetMotionState(deviceId, isActive)` on each transition
-- [ ] Register `IMotionEventDispatcher` as a singleton in `Program.cs`
-- [ ] Unit test: state transitions and change-event firing, no HA/DB dependency
+- [x] Add `IMotionEventDispatcher` (`Services/DeviceMapping/MotionEventDispatcher.cs`) holding per-device motion-active state in memory and raising a C# event on change — landed as a `HashSet<Guid>` of *active* devices under a `Lock` rather than the planned `ConcurrentDictionary<Guid, bool>`: membership is the state, so a no-op set is detected by the set operation itself, and the lock makes mutate-and-raise one step. Split apart, two transitions on one device can be applied in order and announced out of order, which leaves a kiosk showing a modal for motion that already ended. The lock is never contended today — one receive loop is the only caller.
+- [x] `HomeAssistantEventListener` calls `SetMotionState(deviceId, isActive)` on each transition (the Phase 4 log line stays; it's the only trace of a motion event that survives a restart)
+- [x] Register `IMotionEventDispatcher` as a singleton in `Program.cs`
+- [x] Unit test: state transitions and change-event firing, no HA/DB dependency — `MotionEventDispatcherTests`, 11 tests
+- [x] **Also added, not in the original plan:** `ActiveDeviceIds` snapshot on the interface. Without it the stored state has no reader, and a kiosk connecting mid-motion would show nothing until the *next* transition. Phase 6 subscribes first and reads the snapshot second — since a change carries absolute state rather than a toggle, that ordering can duplicate a change but can never miss one.
+- [x] **Also added, not in the original plan:** per-subscriber exception isolation in the raise loop. Every subscriber is a kiosk connection, and one that died between the raise and its own cleanup would otherwise blind every other kiosk on the replica for that change.
+- [x] **Also added, not in the original plan:** `HomeAssistantEventListener.ClearMotionState` drops every device to no-motion when the socket goes, in a `finally` around the receive loop. Same reasoning as the parser's treatment of `unavailable` — once we can't see, we stop claiming there is motion. Without it, a device left active when the connection broke is stuck: the `off` that ended it arrives during the outage, so the next real `on` is no change from the stale state, nothing is announced, and the modal is pinned open for good.
 
 ### [] Phase 6 — Aerie → kiosk push (SSE)
 
