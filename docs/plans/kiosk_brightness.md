@@ -127,9 +127,8 @@ and assigns a zone in the admin app.
   "nobody's here" step. Three keyframes rather than one number, for the reason
   in the decisions table: Phase 2 built it that way and a scalar cannot express
   it.
-- `StandbyAfterSeconds` — when the page swaps to the standby view. Phase 2's
-  `IdleResetSeconds` belongs here too; the ladder is only correct read as a
-  whole, so it should arrive as a whole.
+- Phase 2's `IdleResetSeconds` belongs here too; the ladder is only correct
+  read as a whole, so it should arrive as a whole.
 - `BlackoutStart`, `BlackoutEnd` (nullable — null means never),
   `BlackoutMode` (`Dim` | `ScreenOff`), `BlackoutBrightness`.
 - `WakeOnPresence` — whether a zone presence signal lifts the display.
@@ -236,7 +235,7 @@ with the rest of the list.
 
 Kills the 3am lamp on its own. Everything after this makes it adjustable.
 
-### [x] Phase 2 — Idle dim and standby
+### [x] Phase 2 — Idle dim
 
 - [x] Native idle timer off `dispatchTouchEvent`; dim to an idle floor, restore
       instantly on touch. Ramp the dim (4s, 10 steps a second), snap the restore
@@ -247,27 +246,25 @@ Kills the 3am lamp on its own. Everything after this makes it adjustable.
       now" tracks the day instead of being too dark at noon and too bright at
       midnight. Its night keyframe is `0.0`; see the fake-off note above for
       why the black overlay that usually accompanies that is deliberately absent.
-- [x] Standby view in the dashboard on a longer timeout: time, date, indoor
-      temp, at across-the-room scale
-      ([`StandbyView.tsx`](../../src/Aerie.Web/apps/dashboard/src/components/StandbyView.tsx)).
-      It covers the dashboard rather than replacing it — the snapshot stays
-      mounted and polling, so lifting standby shows live data rather than a
-      skeleton, and a fixed overlay moves no scroll position, which would
-      otherwise arrive back at the lifecycle as activity and lift the standby it
-      just entered. Indoor temp is the first zone with a reading, which is the
-      operator's own ordering (`ZoneService` sorts by `SortOrder`) rather than a
-      new setting invented for one view.
+- [~] **Standby view in the dashboard on a longer timeout — built, then
+      removed 2026-08-23 after living with it.** A full-screen clock five
+      minutes after the last touch was the wrong call on the wall: it hid the
+      dashboard exactly when someone glanced over from across the room, which is
+      the display's whole job. The backlight dim below covers the "nobody is
+      here" case without taking the information away. If this is revisited, it
+      should be an opt-in per-kiosk profile setting rather than the default —
+      a hallway might want it where a kitchen plainly does not.
 - [x] Both timeouts come from one place —
       [`kioskIdleTimings.ts`](../../src/Aerie.Web/apps/dashboard/src/lib/kioskIdleTimings.ts),
-      holding the whole ladder (reset 30s, dim 2m, standby 5m) with the
+      holding the whole ladder (reset 30s, dim 2m) with the
       reasoning for why each is only correct relative to the others. **One
       caveat, stated rather than papered over:** the shell cannot import a TS
       module, so the dim rung is a mirrored Kotlin constant on the same terms as
       `CircadianBrightness.kt`'s transition constants. Phase 3 is what makes it
       literally one place, by making both sides fetch it.
 - [x] Respect [`kioskLifecycle`](../../src/Aerie.Web/apps/dashboard/src/lib/kioskLifecycle.ts)'s
-      `hold()` — standby must not swallow a half-typed Gather entry, which is
-      the same bug the existing idle reset already guards against. `input` is
+      `hold()` — nothing on this ladder may swallow a half-typed Gather entry,
+      which is the bug the idle reset already guards against. `input` is
       now in `ACTIVITY_EVENTS` itself rather than bolted on by `GatherOverlay`,
       for the reason
       [kiosk-architecture.md](../kiosk-architecture.md#text-entry-on-the-wall)
@@ -290,7 +287,7 @@ Kills the 3am lamp on its own. Everything after this makes it adjustable.
 - [ ] `GET /api/kiosk/display-profile`, self-registering, AuthGate allow-listed.
 - [ ] Shell polls it; the hardcoded Phase 1 and 2 constants become its fallback
       for a tablet that has never reached the server.
-- [ ] Dashboard fetches the same profile for its standby timings. This is what
+- [ ] Dashboard fetches the same profile for its idle timings. This is what
       retires `kioskIdleTimings.ts`'s mirrored Kotlin constant — until then the
       idle ladder is one file plus one copy, which Phase 2 flagged rather than
       pretended away.

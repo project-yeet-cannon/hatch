@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { IDLE_TIMEOUT_MS, STANDBY_AFTER_MS } from './kioskIdleTimings';
+import { IDLE_TIMEOUT_MS } from './kioskIdleTimings';
 import { createKioskLifecycle, type KioskLifecycleDeps } from './kioskLifecycle';
 
 // The reset and the reload are the two things that can take a half-typed
@@ -37,7 +37,6 @@ interface HarnessOptions extends Partial<KioskLifecycleDeps> {
 
 function harness({ deployed = LOADED, ...overrides }: HarnessOptions = {}) {
   const onReset = vi.fn();
-  const onStandbyChange = vi.fn();
   const reload = vi.fn();
   const fetchDeployedVersion = vi.fn<() => Promise<string | null>>().mockResolvedValue(deployed);
   const log = { info: vi.fn(), error: vi.fn() };
@@ -46,14 +45,13 @@ function harness({ deployed = LOADED, ...overrides }: HarnessOptions = {}) {
     loadedVersion: LOADED,
     fetchDeployedVersion,
     onReset,
-    onStandbyChange,
     reload,
     storage: memoryStorage(),
     log,
     ...overrides,
   });
 
-  return { lifecycle, onReset, onStandbyChange, reload, fetchDeployedVersion, log };
+  return { lifecycle, onReset, reload, fetchDeployedVersion, log };
 }
 
 /** A touch, clear of the 250ms activity throttle. */
@@ -163,80 +161,6 @@ describe('hold', () => {
     expect(onReset).toHaveBeenCalledTimes(1);
 
     lifecycle.dispose();
-  });
-});
-
-describe('standby', () => {
-  it('arms itself on a page nobody has touched', () => {
-    // The asymmetry with the idle reset is deliberate: a freshly-loaded page is
-    // already in base state, but it is not in standby, and a tablet that boots
-    // at 3am would otherwise hold a lit dashboard until morning.
-    const { lifecycle, onStandbyChange } = harness();
-
-    vi.advanceTimersByTime(STANDBY_AFTER_MS - 1);
-    expect(onStandbyChange).not.toHaveBeenCalled();
-
-    vi.advanceTimersByTime(1);
-    expect(onStandbyChange).toHaveBeenCalledWith(true);
-
-    lifecycle.dispose();
-  });
-
-  it('waits a full timeout from the last touch', () => {
-    const { lifecycle, onStandbyChange } = harness();
-
-    vi.advanceTimersByTime(STANDBY_AFTER_MS - 1_000);
-    touch(lifecycle);
-
-    vi.advanceTimersByTime(STANDBY_AFTER_MS - 1);
-    expect(onStandbyChange).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1);
-    expect(onStandbyChange).toHaveBeenCalledWith(true);
-
-    lifecycle.dispose();
-  });
-
-  it('lifts on the first event of a touch, throttle notwithstanding', () => {
-    const { lifecycle, onStandbyChange } = harness();
-
-    vi.advanceTimersByTime(STANDBY_AFTER_MS);
-    expect(onStandbyChange).toHaveBeenLastCalledWith(true);
-
-    // Two events inside one throttle window - the sort of pair a single tap
-    // produces. The first has to lift it; the second must not re-report.
-    lifecycle.markActivity();
-    lifecycle.markActivity();
-    expect(onStandbyChange).toHaveBeenLastCalledWith(false);
-    expect(onStandbyChange).toHaveBeenCalledTimes(2);
-
-    lifecycle.dispose();
-  });
-
-  it('does not fire while held, and re-arms from the release', () => {
-    // Someone slowly typing a shopping list is the case that matters: a standby
-    // clock over a half-typed item is the same bug as a reset that eats it.
-    const { lifecycle, onStandbyChange } = harness();
-
-    touch(lifecycle);
-    lifecycle.hold();
-    vi.advanceTimersByTime(STANDBY_AFTER_MS * 2);
-    expect(onStandbyChange).not.toHaveBeenCalled();
-
-    lifecycle.release();
-    vi.advanceTimersByTime(STANDBY_AFTER_MS - 1);
-    expect(onStandbyChange).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1);
-    expect(onStandbyChange).toHaveBeenCalledWith(true);
-
-    lifecycle.dispose();
-  });
-
-  it('stops arming once disposed', () => {
-    const { lifecycle, onStandbyChange } = harness();
-
-    lifecycle.dispose();
-    vi.advanceTimersByTime(STANDBY_AFTER_MS * 2);
-    expect(onStandbyChange).not.toHaveBeenCalled();
   });
 });
 

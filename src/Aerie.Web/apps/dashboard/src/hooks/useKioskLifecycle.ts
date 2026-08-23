@@ -4,10 +4,9 @@ import { clientLogger } from '../lib/clientLogger';
 import { ACTIVITY_EVENTS, createKioskLifecycle, type KioskLifecycle } from '../lib/kioskLifecycle';
 
 /**
- * React's half of the kiosk lifecycle: window listeners in, a reset token and a
- * standby flag out. The behaviour itself - the idle reset, the standby, the
- * deploy reload, and the hold that suspends all three - lives in
- * lib/kioskLifecycle.ts, where it is unit-tested.
+ * React's half of the kiosk lifecycle: window listeners in, a reset token out.
+ * The behaviour itself - the idle reset, the deploy reload, and the hold that
+ * suspends both - lives in lib/kioskLifecycle.ts, where it is unit-tested.
  *
  * `resetToken` increments on each idle reset. Callers remount whatever holds
  * stray presentational state by using it as a `key` - deliberately not the
@@ -16,17 +15,12 @@ import { ACTIVITY_EVENTS, createKioskLifecycle, type KioskLifecycle } from '../l
  * reconciles against the server on its own 60s poll, so clearing it here would
  * visually revert a tap the user just made).
  *
- * `standby` is the last rung of the same ladder, minutes later: the wall stops
- * showing a dashboard nobody is reading and shows a clock instead.
- *
- * `hold` suspends all three while something on screen cannot survive them -
+ * `hold` suspends both while something on screen cannot survive them -
  * GatherOverlay, which has a text field in it. One flag covers them deliberately:
- * a reload that fires mid-entry is the same bug as a reset that does, and a
- * standby that swallows the overlay is the same bug again.
+ * a reload that fires mid-entry is the same bug as a reset that does.
  */
-export function useKioskLifecycle(hold: boolean): { resetToken: number; standby: boolean } {
+export function useKioskLifecycle(hold: boolean): { resetToken: number } {
   const [resetToken, setResetToken] = useState(0);
-  const [standby, setStandby] = useState(false);
   const lifecycleRef = useRef<KioskLifecycle | null>(null);
 
   useEffect(() => {
@@ -44,7 +38,6 @@ export function useKioskLifecycle(hold: boolean): { resetToken: number; standby:
         window.scrollTo(0, 0);
         setResetToken((token) => token + 1);
       },
-      onStandbyChange: setStandby,
       reload: () => location.reload(),
       storage,
       log: clientLogger,
@@ -74,5 +67,5 @@ export function useKioskLifecycle(hold: boolean): { resetToken: number; standby:
     else lifecycle.release();
   }, [hold]);
 
-  return { resetToken, standby };
+  return { resetToken };
 }

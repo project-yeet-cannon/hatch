@@ -2,24 +2,22 @@
  * The idle ladder: how long after the last touch each stage of "nobody is
  * standing here" takes effect.
  *
- * They live in one file because none of the three is correct on its own - each
- * is a statement about the other two. The page resets first (cheap, invisible
- * from across the room), the backlight dims second, and only then does the page
- * give up the dashboard for a standby clock. Read in the other order the wall
- * would go blank while still lit, or dim while still showing a full dashboard
- * nobody can now read.
+ * They live in one file because neither is correct on its own - each is a
+ * statement about the other. The page resets first (cheap, invisible from
+ * across the room) and the backlight dims well afterwards. Read in the other
+ * order the wall would dim in the face of someone who is still reading it, then
+ * tidy itself up once they had gone.
  *
- * **The middle rung is mirrored in Kotlin**
+ * **The dim rung is mirrored in Kotlin**
  * (`IDLE_DIM_AFTER_MS` in apps/kiosk/.../DisplayController.kt) because the
  * backlight is the shell's to move and the shell cannot import this file - the
  * same seam, and the same accepted duplication, as circadianTheme.ts /
  * CircadianBrightness.kt. Change one and change the other, or the panel and the
  * page start disagreeing about whether anyone is there.
  *
- * All three are per-kiosk profile values in
- * docs/plans/kiosk_brightness.md Phase 3, at which point both sides fetch them
- * from the server and the mirroring goes away. Until then a hallway and a
- * kitchen idle on the same schedule.
+ * Both are per-kiosk profile values in docs/plans/kiosk_brightness.md Phase 3,
+ * at which point both sides fetch them from the server and the mirroring goes
+ * away. Until then a hallway and a kitchen idle on the same schedule.
  */
 
 /**
@@ -38,10 +36,3 @@ export const IDLE_TIMEOUT_MS = 30_000;
  */
 export const IDLE_DIM_AFTER_MS = 120_000;
 
-/**
- * How long after the last touch the dashboard gives way to the standby view.
- * Last rung, and the only one that changes what the wall *says* rather than how
- * brightly it says it - so it waits until the room has clearly been empty for a
- * while, not merely quiet.
- */
-export const STANDBY_AFTER_MS = 300_000;

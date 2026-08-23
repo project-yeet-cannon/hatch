@@ -41,9 +41,8 @@ private const val SUN_RETRY_MS = 15 * 60 * 1000L
  *
  * **Mirrored from `IDLE_DIM_AFTER_MS` in
  * src/Aerie.Web/apps/dashboard/src/lib/kioskIdleTimings.ts**, which holds the
- * whole ladder - the page's idle reset above this rung, its standby view below
- * it - and explains why the three numbers are only correct relative to each
- * other. The shell cannot import that file, so this is the second copy, on the
+ * whole ladder - the page's idle reset above this rung - and explains why the
+ * two numbers are only correct relative to each other. The shell cannot import that file, so this is the second copy, on the
  * same terms as CircadianBrightness.kt's transition constants: change one and
  * change the other, or the panel and the page start disagreeing about whether
  * anyone is standing here.
@@ -184,8 +183,7 @@ class DisplayController(
         // Armed before anyone has touched anything, which is the point: a
         // tablet that boots at 3am and is never touched should arrive at the
         // idle floor on its own rather than wait for a first finger to start
-        // the clock. The dashboard arms its standby the same way and for the
-        // same reason.
+        // the clock.
         lastActivityAt = SystemClock.elapsedRealtime()
         armIdle()
         handler.post(tick)
