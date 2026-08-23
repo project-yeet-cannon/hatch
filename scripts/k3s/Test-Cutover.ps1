@@ -92,6 +92,13 @@
     The checkout the Tree stage reads. Defaults to this script's own
     repository, which is the only thing that makes sense on a runner.
 
+.PARAMETER ScheduledBackupManifestPath
+    Where the backup schedule is read from, so that "younger than the
+    interval" has an interval that comes from the repository rather than
+    from a number typed here. Repository-relative and spelled with forward
+    slashes, because it is read out of the commit (`git show HEAD:<path>`)
+    before it is looked for on disk.
+
 .PARAMETER Resolver
     One or more resolver addresses to query directly, in addition to this
     client's own stack. Defaults to whatever this client is configured to
@@ -115,7 +122,7 @@ param(
 
     [string]$RepositoryRoot = (Join-Path $PSScriptRoot '..\..'),
 
-    [string]$ScheduledBackupManifestPath = (Join-Path $PSScriptRoot '..\..\deploy\cluster\data\schema\scheduledbackup.yaml'),
+    [string]$ScheduledBackupManifestPath = 'deploy/cluster/data/schema/scheduledbackup.yaml',
 
     [string[]]$Resolver,
 
@@ -335,19 +342,20 @@ function ConvertTo-UtcDateTime {
 function Get-YamlScalar {
     <#
     .SYNOPSIS
-        Pulls a single `key: value` scalar out of a committed manifest by
+        Pulls a single `key: value` scalar out of a manifest's text by
         line-matching, not a YAML parser. Test-DataTier.ps1's copy has the
         argument for why that is proportionate here: one cron expression,
         out of this repository's own committed file.
     #>
     param(
-        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][AllowNull()][string]$Text,
         [Parameter(Mandatory)][string]$Key
     )
-    if (-not (Test-Path $Path -PathType Leaf)) { return $null }
-    $match = Select-String -Path $Path -Pattern "^\s*${Key}:\s*(.+?)\s*$" | Select-Object -First 1
-    if (-not $match) { return $null }
-    return $match.Matches[0].Groups[1].Value.Trim('"', "'")
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+    foreach ($line in ($Text -split "`r?`n")) {
+        if ($line -match "^\s*${Key}:\s*(.+?)\s*$") { return $Matches[1].Trim('"', "'") }
+    }
+    return $null
 }
 
 function Invoke-Git {
@@ -1205,7 +1213,22 @@ try {
     # --- 4b.10 through 7b.2: the newest Backup, which is now the only one
     # The schedule comes from the committed manifest rather than a
     # parameter, the same source Test-DataTier.ps1 reads it from.
-    $scheduleExpression = Get-YamlScalar -Path $ScheduledBackupManifestPath -Key 'schedule'
+    # Out of the commit, like the Tree stage and for the same reason: the
+    # runner's workspace may hold a sparse index in which deploy/ was never
+    # materialised, and a schedule read as absent would turn "younger than
+    # the interval" into an unprovable check on a cluster that is fine. The
+    # working copy is the fallback for a caller running from an export
+    # rather than a checkout.
+    $scheduleText = $null
+    $scheduleFromCommit = Invoke-Git -RepositoryRoot $repositoryRootPath -Arguments @('show', "HEAD:$ScheduledBackupManifestPath")
+    if ($scheduleFromCommit.ExitCode -eq 0) {
+        $scheduleText = $scheduleFromCommit.StdOut
+    }
+    else {
+        $onDisk = Join-Path $repositoryRootPath $ScheduledBackupManifestPath
+        if (Test-Path $onDisk -PathType Leaf) { $scheduleText = (Get-Content -Raw -Path $onDisk) }
+    }
+    $scheduleExpression = Get-YamlScalar -Text $scheduleText -Key 'schedule'
     if ($pgBackups.Count -eq 0) {
         Add-Check -Step $step -Name 'Newest CNPG Backup completed and recent (7b.2)' -Status 'Fail' -Detail 'no Backup objects in namespace aerie - after 7b.2 this is the only backup the system has'
     }
