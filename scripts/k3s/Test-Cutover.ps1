@@ -369,7 +369,17 @@ function Invoke-Git {
         # drops it: under Stop a native command writing to stderr raises a
         # terminating NativeCommandError, and git writes advice there.
         $ErrorActionPreference = 'Continue'
-        & git -C $RepositoryRoot @Arguments 1> $stdoutFile 2> $stderrFile
+        # safe.directory, per invocation and never written to any config:
+        # on a self-hosted runner the workspace is owned by the runner
+        # service account rather than by whoever the step runs as, and git
+        # refuses to read a repository it considers dubiously owned.
+        # actions/checkout does add the exception - into a *temporary* HOME
+        # it discards when its own step ends, so it is gone by the time any
+        # later step runs git. The path is spelled with forward slashes
+        # because that is the form git normalises to and compares against,
+        # which its own error message quotes back.
+        $safeDirectory = $RepositoryRoot.Replace('\', '/')
+        & git -c "safe.directory=$safeDirectory" -C $RepositoryRoot @Arguments 1> $stdoutFile 2> $stderrFile
         $exitCode = $LASTEXITCODE
         return [pscustomobject]@{
             ExitCode = $exitCode
