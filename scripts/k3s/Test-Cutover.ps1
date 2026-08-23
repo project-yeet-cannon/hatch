@@ -807,10 +807,17 @@ try {
     $repositoryRootPath = $null
     if (Test-Path $RepositoryRoot -PathType Container) {
         $repositoryRootPath = (Resolve-Path $RepositoryRoot).Path
-        foreach ($anchor in @('deploy', 'charts', 'scripts', '.github')) {
-            if (-not (Test-Path (Join-Path $repositoryRootPath $anchor))) {
-                $failures.Add("-RepositoryRoot '$repositoryRootPath' has no '$anchor' directory, so it is not an Aerie checkout.")
-            }
+        $missingAnchors = @(@('deploy', 'charts', 'scripts', '.github') | Where-Object { -not (Test-Path (Join-Path $repositoryRootPath $_) -PathType Container) })
+        if ($missingAnchors.Count -gt 0) {
+            # What is actually there, not just what is not: the failure this
+            # message has to explain is a checkout that looks complete to the
+            # workflow log and is not - a sparse cone left behind on a
+            # self-hosted runner by another workflow, which materialises some
+            # of the tree and none of the rest. Naming the four missing
+            # directories without naming the twenty that are present sends the
+            # reader to the wrong question.
+            $present = @(Get-ChildItem -Force -Path $repositoryRootPath -ErrorAction SilentlyContinue | ForEach-Object { if ($_.PSIsContainer) { "$($_.Name)/" } else { $_.Name } })
+            $failures.Add("-RepositoryRoot '$repositoryRootPath' is missing $($missingAnchors -join ', '), so it is not a complete Aerie checkout. What is there: $(if ($present.Count -gt 0) { $present -join ' ' } else { '(nothing)' })")
         }
     }
     else {
