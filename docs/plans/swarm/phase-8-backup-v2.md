@@ -319,7 +319,7 @@ Three backup paths, one alert family, one rehearsal:
       typed from the offline copy, on a machine that has never held it in an
       environment variable.
 
-- [ ] **5. Confirm 6a.3's Home Assistant automation reaches a person**
+- [x] **5. Confirm 6a.3's Home Assistant automation reaches a person**
 
       Finding 8's other half, and the prerequisite 8b.12 cannot supply for
       itself. `POST` a hand-rolled body to
