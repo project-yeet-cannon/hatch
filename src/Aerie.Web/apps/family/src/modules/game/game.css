@@ -1,0 +1,425 @@
+/*
+  The game module's styles. Shell tokens only (--card, --line, --primary,
+  --radius, ...) - see theme.css - so this follows the house into dark mode
+  without knowing anything about it.
+
+  The one shape worth explaining is the play screen: a big stage with a small
+  row under it. Everything competes for the same finite height on a tablet, and
+  the game wins every argument - the toolbar floats over the stage rather than
+  sitting beside it, and the ask-box is one line rather than a panel.
+*/
+
+.game {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ---- The stage ---- */
+
+.game-stage {
+  position: relative;
+  height: clamp(260px, 58dvh, 640px);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #7ec8f5;
+  box-shadow: var(--shadow);
+}
+
+.game-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/* What the model said it did, over the top-left of the game. Pointer-events off:
+   this must never be the thing a tap lands on mid-play. */
+.game-note {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  max-width: min(64%, 420px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(20, 30, 38, 0.72);
+  color: #fff;
+  pointer-events: none;
+  animation: game-note-in 200ms ease;
+}
+
+@keyframes game-note-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.game-note-text {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.game-note-extra {
+  font-size: 13px;
+  color: #ffe08a;
+}
+
+/* ---- Floating toolbar ---- */
+
+.game-tools {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.game-tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 40px square: a thumb target that still leaves the game the screen. */
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(20, 30, 38, 0.6);
+  color: #fff;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.game-tool:active {
+  background: rgba(20, 30, 38, 0.85);
+}
+
+/* ---- Asking for something ---- */
+
+.game-ask {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.game-input {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.game-input:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: -1px;
+}
+
+.game-go {
+  padding: 12px 20px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.game-go:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.game-speed {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+}
+
+.game-speed-choice {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.game-speed-choice.active {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+  color: var(--primary-ink);
+}
+
+/* ---- Waiting, and trouble ---- */
+
+.game-working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.game-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--line);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: game-spin 700ms linear infinite;
+}
+
+@keyframes game-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-spinner {
+    animation-duration: 2.4s;
+  }
+
+  .game-note {
+    animation: none;
+  }
+}
+
+.game-trouble,
+.game-blocked {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--danger-bg);
+  color: var(--danger-ink);
+  font-size: 14px;
+}
+
+.game-blocked {
+  background: var(--primary-bg);
+  color: var(--primary-ink);
+}
+
+/* ---- History ---- */
+
+.game-history {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 20;
+  max-height: 70dvh;
+  overflow-y: auto;
+  padding: 12px max(16px, env(safe-area-inset-left))
+    calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 12px) max(16px, env(safe-area-inset-right));
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+.game-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+.game-history-close {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.game-history-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.game-history-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.game-history-row.current {
+  background: var(--primary-bg);
+  border-radius: 10px;
+  padding-inline: 8px;
+}
+
+.game-history-row.broken {
+  opacity: 0.55;
+}
+
+.game-history-mark {
+  flex: none;
+  font-size: 18px;
+}
+
+.game-history-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.game-history-title {
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-history-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.game-history-now {
+  flex: none;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary-ink);
+}
+
+.game-history-go {
+  flex: none;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.game-history-go:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---- The list of games ---- */
+
+.game-worlds {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.game-world-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.game-world-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+.game-world-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.game-world-icon {
+  font-size: 30px;
+}
+
+.game-world-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.game-world-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.game-world-sub {
+  font-size: 13px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-world-delete {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.game-new {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.game-new-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.game-new-icon {
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.game-new-icon.active {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+
+.game-new-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}

@@ -154,6 +154,15 @@ public static class SiteSettingKeys
     /// <summary>How many days of agenda the kiosk shows, counting today. Defaults to 2 - today and tomorrow.</summary>
     public const string CalendarAgendaDays = "CalendarAgendaDays";
 
+    /// <summary>
+    /// Anthropic API key, used by the game module to write games from what a
+    /// player types - see Modules/Game. Operator-supplied like the Google
+    /// credentials above: it is billed to whoever runs this house, so it is a
+    /// setting rather than anything shipped (docs/ethos.md). Unset simply means
+    /// the game app says so instead of offering a text box.
+    /// </summary>
+    public const string AnthropicApiKey = "AnthropicApiKey";
+
     /// <summary>Which IWeatherAlertProvider supplies watches and warnings, by its Name - "nws" (default) or "none" to disable. The seam that keeps NWS's US-only reach from being a decision baked into the schema; see HazardProviders.</summary>
     public const string WeatherAlertProvider = "WeatherAlertProvider";
 

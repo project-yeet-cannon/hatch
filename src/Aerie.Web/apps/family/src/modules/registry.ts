@@ -38,4 +38,11 @@ export const modules: FamilyModule[] = [
     icon: '🧺',
     Component: lazy(() => import('./gather/GatherApp')),
   },
+  {
+    id: 'game',
+    title: 'Game',
+    tagline: 'Say what happens next, and it happens',
+    icon: '🎮',
+    Component: lazy(() => import('./game/GameApp')),
+  },
 ];

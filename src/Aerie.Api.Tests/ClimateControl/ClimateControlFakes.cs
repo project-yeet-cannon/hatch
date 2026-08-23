@@ -76,5 +76,6 @@ internal sealed class FakeSiteSettingsService(string? mediaBaseUrl = null, int o
         AirQualityProvider: HazardProviders.OpenMeteo,
         WeatherAlertContact: null,
         AirQualityAlertThresholdAqi: 101,
-        HazardMaxSeverityAgeHours: 48));
+        HazardMaxSeverityAgeHours: 48,
+        AnthropicApiKey: null));
 }

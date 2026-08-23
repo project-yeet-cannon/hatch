@@ -1,4 +1,5 @@
 using Aerie.Api.Modules.Gather;
+using Aerie.Api.Modules.Game;
 using Aerie.Api.Modules.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -25,6 +26,7 @@ public static class ModuleRegistration
         // and its services, so this list stays a table of contents.
         services.AddStorageModule(configuration);
         services.AddGatherModule(configuration);
+        services.AddGameModule(configuration);
 
         return services;
     }

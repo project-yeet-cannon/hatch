@@ -5,16 +5,17 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.2"/>
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3"/>
-    <PackageReference Include="HADotNet.Core" Version="1.6.0"/>
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.2"/>
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0"/>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.2"/>
-    <PackageReference Include="Quartz" Version="3.15.1"/>
-    <PackageReference Include="Quartz.Serialization.SystemTextJson" Version="3.15.1"/>
-    <PackageReference Include="Quartz.Extensions.DependencyInjection" Version="3.15.1"/>
-    <PackageReference Include="Quartz.Extensions.Hosting" Version="3.15.1"/>
+    <PackageReference Include="Anthropic" Version="12.42.0" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.2" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
+    <PackageReference Include="HADotNet.Core" Version="1.6.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.2" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.2" />
+    <PackageReference Include="Quartz" Version="3.15.1" />
+    <PackageReference Include="Quartz.Serialization.SystemTextJson" Version="3.15.1" />
+    <PackageReference Include="Quartz.Extensions.DependencyInjection" Version="3.15.1" />
+    <PackageReference Include="Quartz.Extensions.Hosting" Version="3.15.1" />
   </ItemGroup>
 
   <!--
@@ -24,7 +25,7 @@
     included - see .env.json usage in Program.cs.
   -->
   <ItemGroup>
-    <Content Remove=".env.json"/>
+    <Content Remove=".env.json" />
   </ItemGroup>
 
   <!--
@@ -34,43 +35,39 @@
     built in their own stages and copied in (see Dockerfile.api).
   -->
   <ItemGroup>
-    <DashboardSource Include="../Aerie.Web/apps/dashboard/src/**/*.*;../Aerie.Web/apps/dashboard/index.html;../Aerie.Web/apps/dashboard/package.json;../Aerie.Web/apps/dashboard/vite.config.ts"/>
+    <DashboardSource Include="../Aerie.Web/apps/dashboard/src/**/*.*;../Aerie.Web/apps/dashboard/index.html;../Aerie.Web/apps/dashboard/package.json;../Aerie.Web/apps/dashboard/vite.config.ts" />
   </ItemGroup>
 
-  <Target Name="BuildDashboard" BeforeTargets="Build" Condition="'$(SkipDashboardBuild)' != 'true'"
-          Inputs="@(DashboardSource)" Outputs="wwwroot/apps/dashboard/index.html">
-    <Exec Command="npm install" WorkingDirectory="../Aerie.Web/apps/dashboard" Condition="!Exists('../Aerie.Web/apps/dashboard/node_modules')"/>
-    <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/dashboard"/>
+  <Target Name="BuildDashboard" BeforeTargets="Build" Condition="'$(SkipDashboardBuild)' != 'true'" Inputs="@(DashboardSource)" Outputs="wwwroot/apps/dashboard/index.html">
+    <Exec Command="npm install" WorkingDirectory="../Aerie.Web/apps/dashboard" Condition="!Exists('../Aerie.Web/apps/dashboard/node_modules')" />
+    <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/dashboard" />
   </Target>
 
   <ItemGroup>
-    <AdminSource Include="../Aerie.Web/apps/admin/src/**/*.*;../Aerie.Web/apps/admin/index.html;../Aerie.Web/apps/admin/package.json;../Aerie.Web/apps/admin/vite.config.ts"/>
+    <AdminSource Include="../Aerie.Web/apps/admin/src/**/*.*;../Aerie.Web/apps/admin/index.html;../Aerie.Web/apps/admin/package.json;../Aerie.Web/apps/admin/vite.config.ts" />
   </ItemGroup>
 
-  <Target Name="BuildAdmin" BeforeTargets="Build" Condition="'$(SkipAdminBuild)' != 'true'"
-          Inputs="@(AdminSource)" Outputs="wwwroot/apps/admin/index.html">
-    <Exec Command="npm install" WorkingDirectory="../Aerie.Web/apps/admin" Condition="!Exists('../Aerie.Web/apps/admin/node_modules')"/>
-    <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/admin"/>
+  <Target Name="BuildAdmin" BeforeTargets="Build" Condition="'$(SkipAdminBuild)' != 'true'" Inputs="@(AdminSource)" Outputs="wwwroot/apps/admin/index.html">
+    <Exec Command="npm install" WorkingDirectory="../Aerie.Web/apps/admin" Condition="!Exists('../Aerie.Web/apps/admin/node_modules')" />
+    <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/admin" />
   </Target>
 
   <ItemGroup>
-    <ModelerSource Include="../Aerie.Web/apps/modeler/src/**/*.*;../Aerie.Web/apps/modeler/index.html;../Aerie.Web/apps/modeler/package.json;../Aerie.Web/apps/modeler/vite.config.ts"/>
+    <ModelerSource Include="../Aerie.Web/apps/modeler/src/**/*.*;../Aerie.Web/apps/modeler/index.html;../Aerie.Web/apps/modeler/package.json;../Aerie.Web/apps/modeler/vite.config.ts" />
   </ItemGroup>
 
-  <Target Name="BuildModeler" BeforeTargets="Build" Condition="'$(SkipModelerBuild)' != 'true'"
-          Inputs="@(ModelerSource)" Outputs="wwwroot/apps/modeler/index.html">
-    <Exec Command="npm install" WorkingDirectory="../Aerie.Web/apps/modeler" Condition="!Exists('../Aerie.Web/apps/modeler/node_modules')"/>
-    <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/modeler"/>
+  <Target Name="BuildModeler" BeforeTargets="Build" Condition="'$(SkipModelerBuild)' != 'true'" Inputs="@(ModelerSource)" Outputs="wwwroot/apps/modeler/index.html">
+    <Exec Command="npm install" WorkingDirectory="../Aerie.Web/apps/modeler" Condition="!Exists('../Aerie.Web/apps/modeler/node_modules')" />
+    <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/modeler" />
   </Target>
 
   <ItemGroup>
-    <DocsSource Include="../Aerie.Web/apps/docs/src/**/*.*;../Aerie.Web/apps/docs/index.html;../Aerie.Web/apps/docs/package.json;../Aerie.Web/apps/docs/vite.config.ts"/>
+    <DocsSource Include="../Aerie.Web/apps/docs/src/**/*.*;../Aerie.Web/apps/docs/index.html;../Aerie.Web/apps/docs/package.json;../Aerie.Web/apps/docs/vite.config.ts" />
   </ItemGroup>
 
-  <Target Name="BuildDocs" BeforeTargets="Build" Condition="'$(SkipDocsBuild)' != 'true'"
-          Inputs="@(DocsSource)" Outputs="wwwroot/apps/docs/index.html">
-    <Exec Command="npm install" WorkingDirectory="../Aerie.Web/apps/docs" Condition="!Exists('../Aerie.Web/apps/docs/node_modules')"/>
-    <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/docs"/>
+  <Target Name="BuildDocs" BeforeTargets="Build" Condition="'$(SkipDocsBuild)' != 'true'" Inputs="@(DocsSource)" Outputs="wwwroot/apps/docs/index.html">
+    <Exec Command="npm install" WorkingDirectory="../Aerie.Web/apps/docs" Condition="!Exists('../Aerie.Web/apps/docs/node_modules')" />
+    <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/docs" />
   </Target>
 
   <!--
@@ -79,13 +76,12 @@
     Screen" work, and editing one without touching src/ must still rebuild.
   -->
   <ItemGroup>
-    <FamilySource Include="../Aerie.Web/apps/family/src/**/*.*;../Aerie.Web/apps/family/public/**/*.*;../Aerie.Web/apps/family/index.html;../Aerie.Web/apps/family/package.json;../Aerie.Web/apps/family/vite.config.ts"/>
+    <FamilySource Include="../Aerie.Web/apps/family/src/**/*.*;../Aerie.Web/apps/family/public/**/*.*;../Aerie.Web/apps/family/index.html;../Aerie.Web/apps/family/package.json;../Aerie.Web/apps/family/vite.config.ts" />
   </ItemGroup>
 
-  <Target Name="BuildFamily" BeforeTargets="Build" Condition="'$(SkipFamilyBuild)' != 'true'"
-          Inputs="@(FamilySource)" Outputs="wwwroot/apps/family/index.html">
-    <Exec Command="npm install" WorkingDirectory="../Aerie.Web/apps/family" Condition="!Exists('../Aerie.Web/apps/family/node_modules')"/>
-    <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/family"/>
+  <Target Name="BuildFamily" BeforeTargets="Build" Condition="'$(SkipFamilyBuild)' != 'true'" Inputs="@(FamilySource)" Outputs="wwwroot/apps/family/index.html">
+    <Exec Command="npm install" WorkingDirectory="../Aerie.Web/apps/family" Condition="!Exists('../Aerie.Web/apps/family/node_modules')" />
+    <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/family" />
   </Target>
 
   <!--
@@ -94,19 +90,17 @@
     on a 404 - so it is built like the rest rather than left to a manual step.
   -->
   <ItemGroup>
-    <AuthSource Include="../Aerie.Web/apps/auth/src/**/*.*;../Aerie.Web/apps/auth/index.html;../Aerie.Web/apps/auth/package.json;../Aerie.Web/apps/auth/vite.config.ts"/>
+    <AuthSource Include="../Aerie.Web/apps/auth/src/**/*.*;../Aerie.Web/apps/auth/index.html;../Aerie.Web/apps/auth/package.json;../Aerie.Web/apps/auth/vite.config.ts" />
   </ItemGroup>
 
-  <Target Name="BuildAuth" BeforeTargets="Build" Condition="'$(SkipAuthBuild)' != 'true'"
-          Inputs="@(AuthSource)" Outputs="wwwroot/apps/auth/index.html">
-    <Exec Command="npm install" WorkingDirectory="../Aerie.Web/apps/auth" Condition="!Exists('../Aerie.Web/apps/auth/node_modules')"/>
-    <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/auth"/>
+  <Target Name="BuildAuth" BeforeTargets="Build" Condition="'$(SkipAuthBuild)' != 'true'" Inputs="@(AuthSource)" Outputs="wwwroot/apps/auth/index.html">
+    <Exec Command="npm install" WorkingDirectory="../Aerie.Web/apps/auth" Condition="!Exists('../Aerie.Web/apps/auth/node_modules')" />
+    <Exec Command="npm run build" WorkingDirectory="../Aerie.Web/apps/auth" />
   </Target>
 
   <!-- Apps landing page (../Aerie.Web/index.html) - just a static file, no build step needed. -->
-  <Target Name="CopyAppsIndex" BeforeTargets="Build"
-          Inputs="../Aerie.Web/index.html" Outputs="wwwroot/apps/index.html">
-    <Copy SourceFiles="../Aerie.Web/index.html" DestinationFolder="wwwroot/apps"/>
+  <Target Name="CopyAppsIndex" BeforeTargets="Build" Inputs="../Aerie.Web/index.html" Outputs="wwwroot/apps/index.html">
+    <Copy SourceFiles="../Aerie.Web/index.html" DestinationFolder="wwwroot/apps" />
   </Target>
 
   <!--
@@ -114,11 +108,10 @@
     (index.html + generated support.js), no npm build step needed.
   -->
   <ItemGroup>
-    <LogoAppSource Include="../Aerie.Web/apps/logo/**/*.*"/>
+    <LogoAppSource Include="../Aerie.Web/apps/logo/**/*.*" />
   </ItemGroup>
 
-  <Target Name="CopyLogoApp" BeforeTargets="Build"
-          Inputs="@(LogoAppSource)" Outputs="wwwroot/apps/logo/index.html">
-    <Copy SourceFiles="@(LogoAppSource)" DestinationFolder="wwwroot/apps/logo"/>
+  <Target Name="CopyLogoApp" BeforeTargets="Build" Inputs="@(LogoAppSource)" Outputs="wwwroot/apps/logo/index.html">
+    <Copy SourceFiles="@(LogoAppSource)" DestinationFolder="wwwroot/apps/logo" />
   </Target>
 </Project>

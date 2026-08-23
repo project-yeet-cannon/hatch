@@ -24,7 +24,8 @@ public record SiteSettingsSnapshot(
     string AirQualityProvider,
     string? WeatherAlertContact,
     int AirQualityAlertThresholdAqi,
-    int HazardMaxSeverityAgeHours);
+    int HazardMaxSeverityAgeHours,
+    string? AnthropicApiKey);
 
 public interface ISiteSettingsService
 {
@@ -93,7 +94,10 @@ public class SiteSettingsService(IDbContextFactory<AerieContext> dbFactory, Time
                 AirQualityAlertThresholdAqi: ParseInt(values, SiteSettingKeys.AirQualityAlertThresholdAqi, 101),
                 // Two days, matching the agenda half of the kiosk: a warning
                 // that starts Thursday is not what a Tuesday glance is for.
-                HazardMaxSeverityAgeHours: ParseInt(values, SiteSettingKeys.HazardMaxSeverityAgeHours, 48));
+                HazardMaxSeverityAgeHours: ParseInt(values, SiteSettingKeys.HazardMaxSeverityAgeHours, 48),
+                // Deobfuscated for the same reason as the Google secret above:
+                // the game module has to hand it to an SDK, not display it.
+                AnthropicApiKey: Deobfuscated(values.GetValueOrDefault(SiteSettingKeys.AnthropicApiKey)));
 
             cached = snapshot;
             expiresAt = time.GetUtcNow() + CacheTtl;

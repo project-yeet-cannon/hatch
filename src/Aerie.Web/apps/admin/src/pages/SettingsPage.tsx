@@ -88,6 +88,12 @@ const FIELDS: FieldDef[] = [
     help: 'The kiosk says nothing below this. Defaults to 101, the bottom of "Unhealthy for Sensitive Groups".',
   },
   {
+    key: 'AnthropicApiKey',
+    label: 'Anthropic API key',
+    type: 'password',
+    help: 'Lets the family Game app write games from what a child types. Billed to this key, so it is yours to supply. Stored obfuscated; leave blank to keep the current value.',
+  },
+  {
     key: 'HazardMaxSeverityAgeHours',
     label: 'Hazard window (hours)',
     type: 'number',
