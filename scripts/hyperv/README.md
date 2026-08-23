@@ -258,11 +258,12 @@ at all. Get the new hash with `Get-FileHash -Algorithm SHA256 <the zip>`.
 
 ## Phase-specific usage
 
-**Phase 0 — DR-restore scratch VM.** `-ExtraPackages docker.io
--DataDiskSizeGB 0` — the restore-gate procedure in
-[`docs/disaster-recovery.md`](../../docs/disaster-recovery.md) only needs
-Docker, not a Longhorn disk. `-RunCmd` can carry anything else it turns out to
-need (e.g. `git`, if you'd rather clone the repo than copy compose files over).
+**Phase 0 — DR-restore scratch VM.** Historical: the Phase 0 restore gate
+built a throwaway Docker host with `-ExtraPackages docker.io -DataDiskSizeGB 0`
+and restored the Compose stack onto it. That stack no longer exists, and
+[`docs/disaster-recovery.md`](../../docs/disaster-recovery.md)'s recovery path
+is now the Provision sequence plus a CNPG restore — nothing this script needs a
+special invocation for.
 
 **Phase 1 — node VMs.** Use the real per-host memory split from
 [the cluster plan](../../docs/plans/swarm/design.md) (16 / 24 / 24 GB) via `-MemoryGB`, and set `-DataDiskSizeGB`

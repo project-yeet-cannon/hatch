@@ -834,6 +834,8 @@ landed.*
 *1–4 retire the Docker host. 5–7 build the k3s node and join it. 8–9 spend what
 the third node buys. 10 is the paperwork, 11 is the gate. Same tags as 7b.*
 
+When dissipating this document, drop the bits about the legacy Docker stack but make sure we retain knowledge of how to add a new node to the cluster. I plan on adding a few more nodes in the near future.
+
 - [x] **1. --Copy `E:/restic-repo` off the machine, and verify the copy--** — *both*
 
     Not done, we will not be formatting this drive or losing data. Ignore the rest of this step
@@ -1105,7 +1107,7 @@ the third node buys. 10 is the paperwork, 11 is the gate. Same tags as 7b.*
 
   </details>
 
-- [ ] **10. Put back what was turned off, and fix the documents that now lie** — *manual*
+- [x] **10. Put back what was turned off, and fix the documents that now lie** — *manual*
 
   <details><summary>The unglamorous half, and the half whose omission is discovered during an incident</summary>
 

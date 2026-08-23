@@ -290,8 +290,8 @@ manual repoint ever costs more than that. Tracked in
 
 - [`docs/ethos.md`](ethos.md) — why no secret bytes are committed, encrypted or
   otherwise
-- [`docs/disaster-recovery.md`](disaster-recovery.md) — the restic side of the
-  same trust chain
+- [`docs/disaster-recovery.md`](disaster-recovery.md) — which of these
+  parameters are recovery credentials, and what they can and cannot recover
 - [`scripts/secrets/README.md`](../scripts/secrets/README.md) — running the seed
 - [`scripts/flux/README.md`](../scripts/flux/README.md) — the bootstrap that
   starts consuming these

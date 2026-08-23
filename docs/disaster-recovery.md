@@ -1,146 +1,181 @@
 # Disaster Recovery
 
-## Summary
+> **Deliberately short, and honest about it.** Phase 7 retired the Compose stack
+> and the `backup` container that ran with it, and named the resulting gap rather
+> than closing it. [Phase 8](plans/swarm/phase-8-backup-v2.md) is the rework. What
+> follows describes what is true **today** — one thing is backed up, and the rest
+> is not.
 
-Every stateful service is backed up nightly to two [restic](https://restic.readthedocs.io/) repositories — one on a local, physically separate disk (`E:\restic-repo` on the host), one on S3 (`aerie-restic-backups`) — by a dedicated `backup` service ([`compose.backup.yml`](../compose.backup.yml), image built from [`containers/backup/`](../containers/backup/)). A weekly job restores the latest snapshot into a throwaway Postgres and sanity-queries it, so a silently broken backup gets caught automatically rather than discovered during an actual emergency.
+## What is backed up
 
-This is Phase 0 of [the cluster plan](plans/swarm/phase-0-backup-and-dr.md): backup + DR exist before any cluster work starts, on the current single Windows host.
+**Postgres. That is the whole list.**
 
-> **The offline-stored `RESTIC_PASSWORD` is the actual recovery credential.** It lives as a GitHub Actions secret so `cd.yml` can inject it into the `backup` container at deploy time — but GitHub Actions secrets are **write-only**; nobody can read `RESTIC_PASSWORD` back out of GitHub once it's set, not even a repo admin. Every manual restore procedure in this document assumes you have the password from wherever you printed and stored it offline. Without it, both restic repositories are permanently unreadable — that's the whole point of encryption, but it means the offline copy isn't optional paperwork.
+CloudNativePG archives Aerie's database to S3 through the barman-cloud plugin,
+in two forms that only work together:
 
-## Architecture
-
-- **`backup` service**: always-on container running [supercronic](https://github.com/aptible/supercronic) (crontab: [`containers/backup/crontab`](../containers/backup/crontab)), on the `local`/`observability`/`metrics` networks so it can reach `db`, `opensearch`, and `prometheus` by service name.
-- **Image**: built on `postgres:18.4-alpine` — version-matched to the `db` service so `pg_dumpall` is never older than the server it's dumping from — plus `restic`, `sqlite3`, and `curl`.
-- **Two repos, one dump**: each service is dumped/snapshotted once per run into a scratch directory, then pushed to both the local and S3 repos, so a Postgres outage never gets dumped twice.
-- **Secrets**: injected as plain environment variables by `cd.yml` at deploy time (`RESTIC_PASSWORD` and `RESTIC_AWS_SECRET_ACCESS_KEY` as repository secrets, `RESTIC_AWS_ACCESS_KEY_ID` as a repository variable — see [`scripts/secrets/README.md`](../scripts/secrets/README.md#which-tab-ids-are-variables-everything-else-is-a-secret)), the same pattern already used for the Route53 and Home Assistant credentials. The AWS credentials belong to a dedicated `aerie-restic` IAM user scoped to only the `aerie-restic-backups` bucket — a leak of these can't touch Route53, and vice versa. See [the cluster plan](plans/swarm/phase-0-backup-and-dr.md) for why this is GitHub Actions secrets rather than the SOPS + age setup planned for Phase 2.
-
-## What's backed up, and how
-
-Every service is backed up by its own correct method — never by copying a live volume directory, which risks an inconsistent copy for anything that isn't already snapshot-safe.
-
-| Service | Method | Why |
+| | What | Where it's configured |
 |---|---|---|
-| Postgres (`db`) | `pg_dumpall` over the network | Logical dump, always consistent, portable across Postgres patch versions |
-| Grafana | `sqlite3 grafana.db ".backup"` | SQLite's own online-backup API — safe against a live, concurrently-written database |
-| Uptime Kuma | `sqlite3 kuma.db ".backup"` | Same as Grafana |
-| OpenSearch | Snapshot API (`_snapshot`) | The only consistent way to capture a running cluster's indices |
-| Prometheus | TSDB snapshot endpoint (`/api/v1/admin/tsdb/snapshot`) | Point-in-time copy of the block storage without stopping the scrape loop |
+| Continuous WAL archiving | Every write, streamed to S3 as it is generated | [`cluster.yaml`](../deploy/cluster/data/cluster/cluster.yaml)'s `plugins:` block, `isWALArchiver: true` |
+| Nightly base backup | 02:00 daily, a full physical copy | [`scheduledbackup.yaml`](../deploy/cluster/data/schema/scheduledbackup.yaml) |
+| Destination | `s3://${WAL_BUCKET}/`, `base/` and `wals/` prefixes, gzip | [`objectstore.yaml`](../deploy/cluster/data/cluster/objectstore.yaml) |
+| Retention | `30d`, pruned by barman itself | same |
+| Credentials | the `cnpg-wal-s3` Secret, synced by External Secrets from SSM `/aerie/postgres/wal-s3-*` | [`docs/secrets-architecture.md`](secrets-architecture.md) |
 
-Implementation: [`containers/backup/scripts/backup.sh`](../containers/backup/scripts/backup.sh). OpenSearch and Prometheus snapshots are staged in their own volumes only long enough for restic to capture them, then deleted — restic is where the actual history lives; neither service prunes its own snapshots, so leaving them in place would grow unbounded.
+The pair is what makes **point-in-time recovery** possible: a base backup gives
+you a starting image, and the WAL stream replays forward from it to any moment
+inside the retention window. A base backup alone would be a nightly snapshot with
+up to 24 hours of loss behind it.
 
-## Retention
+This has been rehearsed. Phase 4b.10's exit criterion was an actual PITR against
+a throwaway Cluster with a `recoveryTarget.targetTime` before a marker change,
+confirming the marker was absent — not a claim, a run.
 
-`restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --prune`, run against both repos after every backup. All snapshots are tagged `daily`.
+**Replication is not backup.** `synchronous.dataDurability: required` across three
+instances means an acknowledged write is on at least two nodes and a primary
+failure loses nothing. It does nothing whatsoever about a `DROP TABLE`, which
+replicates faithfully. The S3 archive is the only thing that answers that.
 
-## Schedule
+## What is not backed up
 
-- **03:10 daily** — backup + retention (`backup.sh`)
-- **04:00 Sunday** — restore verification (`verify-restore.sh`)
+Everything else. Named individually, because a list is harder to forget than a
+sentence:
 
-Both run inside the `backup` container via cron; check `docker compose logs backup` for output from either.
+| Not backed up | What is lost with it | Where it lives |
+|---|---|---|
+| Grafana's database | dashboards created in the UI, users, alert-rule state | `longhorn-r3` PVC |
+| Uptime Kuma | monitor definitions and all history | `uptime-kuma-data`, `longhorn-r3` |
+| Alertmanager | silences and notification state | `longhorn-r3` |
+| OpenSearch | every log index | Longhorn, explicitly out of scope for HA |
+| Prometheus | the TSDB — all metric history | Longhorn, same |
+| The `/aerie/*` SSM tree | every seeded secret, if the AWS account goes | AWS Parameter Store |
 
-## Automated restore verification
+Three mitigations blunt this, and none of them is a backup:
 
-Every Sunday, [`verify-restore.sh`](../containers/backup/scripts/verify-restore.sh) restores the latest snapshot from the local repo, starts a throwaway Postgres instance using `initdb`/`pg_ctl` from the backup image's own Postgres install (no extra container, no docker-socket access), replays the `pg_dumpall` output into it, and confirms `information_schema.tables` isn't empty. A failure here means the backup exists but isn't restorable — treat it as a page-worthy incident, not a log line to ignore.
+- **Grafana's dashboards are in git** as ConfigMaps, so the ones that matter are
+  reprovisioned on a rebuild. Anything created by hand in the UI is not.
+- **Kuma's monitors come from git**, as the `AUTOKUMA__STATIC_MONITORS`
+  ConfigMap AutoKuma syncs in, so the monitor *set* comes back. Its history does
+  not.
+- **Longhorn replicates each volume three ways**, which survives a node loss and
+  survives nothing else — see the note on replication above.
 
-This proves the backup *contents* are valid. It does **not** by itself satisfy the Phase 0 gate below — it restores into a throwaway Postgres inside the same container, not a standalone VM.
+Closing this is [Phase 8](plans/swarm/phase-8-backup-v2.md): a restic CronJob to
+S3, Longhorn's own backup target for the three `longhorn-r3` volumes, an export of
+the parameter tree, and a backup-age alert that actually reaches a person.
 
-## Triggering a backup or verification out of schedule
+## The recovery credentials
 
-```
-docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml exec backup /app/scripts/backup.sh
-docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml exec backup /app/scripts/verify-restore.sh
-```
+Two, and they are not interchangeable:
 
-## Listing snapshots
+- **The CNPG archive** is read with the `aerie-cnpg` IAM user's keys, seeded from
+  the `CNPG_AWS_*` repository secrets into SSM by Provision 2. A rebuild that can
+  run Provision 2 can reach the archive.
+- **The pre-cutover restic repos** are read with `RESTIC_PASSWORD`, seeded at
+  `/aerie/backup/restic-password`. It is also **stored offline**, and that copy is
+  the one that matters: restic encryption is not recoverable without it, and if
+  the AWS account is what was lost, SSM went with it.
 
-```
-docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml exec backup sh -c 'restic -r "$RESTIC_REPOSITORY_LOCAL" snapshots'
-```
+## The pre-cutover history
 
-Swap `$RESTIC_REPOSITORY_LOCAL` for `$RESTIC_REPOSITORY_S3` to check the S3 copy instead — the `backup` container already has both repos' credentials, so no separate setup is needed to query either one. (Note the single quotes: this has to be a literal string handed to the container's own shell, not expanded by your host shell — see the postmortem in this repo's history for what happens when that goes wrong.)
+The old Compose stack's restic backups still exist and still hold everything the
+table above says is unprotected — as of the cutover, and no later. Two repos:
 
-## Manual restore procedures
+- **The local repo on the old Docker host's data drive** (`E:\restic-repo` on
+  this installation), on the machine that is now the third node's Hyper-V host.
+  That drive was deliberately **not** reformatted during the Phase 7c rebuild, so
+  the repo survived in place.
+- **The restic S3 bucket**, the same repo's twin. Its location was an
+  environment value on the retired `cd.yml`; Phase 8 re-establishes it as a
+  config key rather than a remembered string, and until then it is whatever
+  `RESTIC_REPOSITORY_S3` was on the old host.
 
-These are for actual data loss — restoring `pg_dumpall` output over a live, populated database will conflict with existing objects. Don't run the Postgres procedure against a healthy `db`.
+Both carry a snapshot tagged **`cutover-final`** — the last complete image of the
+old world, tagged in [7b.3](plans/swarm/phase-7-cutover.md) specifically so that a
+future `restic forget` cannot reach it. Phase 8 inherits the obligation to pass
+`--keep-tag cutover-final` to whatever prunes these.
 
-All of them start the same way: restore the latest snapshot into a scratch directory inside the `backup` container, then move the relevant piece into place.
+Nothing has been written to either repo since the cutover. They are an archive,
+not a backup.
 
-```
-docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml exec backup sh -c '
-  restic -r "$RESTIC_REPOSITORY_LOCAL" restore latest --target /tmp/dr-restore --tag daily
-'
-```
+## Restoring Postgres
 
-### Postgres
+**Recovery always bootstraps a new `Cluster`; it never acts in place.** That is
+CNPG's model and it is a feature — a recovery is cheap to rehearse and impossible
+to accidentally perform on the live database.
 
-```
-docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml exec backup sh -c '
-  DUMP=$(find /tmp/dr-restore -name postgres-dumpall.sql)
-  PGPASSWORD="$POSTGRES_PASSWORD" psql -h db -U "$POSTGRES_USER" -d postgres -f "$DUMP"
-'
-```
+The shape, in outline:
 
-`pg_dumpall` output includes its own `CREATE DATABASE` statements, so this replays cleanly against an empty Postgres instance.
+1. Write a new `Cluster` manifest with a different `metadata.name`, a
+   `bootstrap.recovery` block, and an `externalClusters` entry naming
+   `serverName: aerie-pg` and the same `barmanObjectName: aerie-pg-wal` the live
+   cluster uses.
+2. For PITR, add `recoveryTarget.targetTime`. Omit it to recover to the end of
+   the WAL stream.
+3. Apply, and watch it bootstrap. Verify against the recovered instance directly.
+4. Only then decide what to do with it — promote it by repointing the
+   application, or extract what you need and delete it.
 
-### Grafana / Uptime Kuma
+If the *live* cluster is the thing being recovered onto, the same manifest is what
+`deploy/cluster/data/cluster/` should temporarily hold; commit it, let Flux apply
+it, and remove the recovery block once the new cluster is the primary.
 
-The `backup` container mounts these volumes read-only, so the restored file has to move through the host:
+## Restoring from the pre-cutover archive
 
-```
-docker cp "$(docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml ps -q backup)":/tmp/dr-restore/tmp/grafana.db ./grafana.db.restore
-docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml stop grafana
-docker cp ./grafana.db.restore "$(docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml ps -q grafana)":/var/lib/grafana/grafana.db
-docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml start grafana
-rm ./grafana.db.restore
-```
+Only relevant for data that predates the cutover, or for the non-Postgres services
+in the table above.
 
-Same pattern for Kuma: substitute `kuma.db`, service `uptime-kuma`, and destination path `/app/data/kuma.db`.
+The tree still carries [`restore-job.yaml`](../deploy/cluster/data/schema/restore-job.yaml)
+— a **suspended** Job that restores a `pg_dumpall` from the restic S3 repo and
+replays it into the cluster's Postgres. It was the one-shot migration path in
+Phase 4b.9 and it still works, with one caveat: the `aerie-pg-restore-restic`
+Secret it reads was created **by hand** and is not in git. Recreate it from the
+`/aerie/backup/*` parameters before unsuspending the Job. (Phase 8 replaces the
+hand-made Secret with an `ExternalSecret` and deletes it.)
 
-### OpenSearch
+For anything else in those repos, restic is the tool and there is no wrapper:
+mount or restore the repo from a machine that has the password, and put the files
+where the workload expects them. There is no automation for this today, which is
+the honest version of "Grafana is not backed up."
 
-```
-docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml exec backup sh -c '
-  cp -a /tmp/dr-restore/mnt/opensearch-snapshots/. /mnt/opensearch-snapshots/
-  curl -fsS -X PUT "http://opensearch:9200/_snapshot/aerie_backup" -H "Content-Type: application/json" -d "{\"type\":\"fs\",\"settings\":{\"location\":\"/mnt/snapshots\"}}"
-  curl -fsS "http://opensearch:9200/_snapshot/aerie_backup/_all"
-'
-```
+## Full disaster recovery
 
-The last command lists the restored snapshot's name. Restore it with:
+**If the cluster is gone but the S3 archive is not**, the rebuild is the ordinary
+provisioning sequence — which is the whole argument for pull-based delivery
+([`docs/delivery-architecture.md`](delivery-architecture.md)):
 
-```
-curl -fsS -X POST "http://opensearch:9200/_snapshot/aerie_backup/<snapshot-name>/_restore?wait_for_completion=true" -H "Content-Type: application/json" -d '{"indices":"*","include_global_state":true}'
-```
+1. **Provision 0** per host — the node VM.
+2. **Provision 5** per node — the Longhorn data disk, *before* the join.
+3. **Provision 1** per node — k3s, first node then joins.
+4. **Provision 2** — seed SSM. Needs the repository secrets, from wherever they
+   are stored offline; GitHub Actions will not hand them back.
+5. **Provision 3** — install Flux and point it at the repo.
+6. **Provision 4** — plant the `aerie-cluster-config` ConfigMap.
+7. **Wait.** Flux reconciles the entire tree: controllers, ingress, certificates,
+   observability, the app. Nothing here is a manual apply.
+8. **Recover Postgres** with the procedure above, against the surviving bucket.
 
-(run from inside the `backup` container, same as above). If indices from before the loss still exist, OpenSearch refuses to restore over them — close or delete the conflicting indices first. Observability data is explicitly out of scope for HA in this stack (see [the cluster plan](plans/swarm/design.md)), so this is the lowest-priority restore of the five.
+Everything in the "not backed up" table comes back empty. That is the current
+cost of a total loss, stated so nobody discovers it at 3am.
 
-### Prometheus
+**If the AWS account is gone**, the CNPG archive and the restic S3 repo are both
+gone with it — they share an account. What survives is the local restic repo, on a
+machine in the house, holding pre-cutover data only. This is the gap Phase 8's
+finding 3 exists to close, by making that repo a live destination again.
 
-```
-docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml stop prometheus
-docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml exec backup sh -c '
-  cp -a /tmp/dr-restore/mnt/prometheus/snapshots/*/. /mnt/prometheus/
-'
-docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml start prometheus
-```
+## Known gaps
 
-## Full disaster recovery (host is gone)
+Named, not solved. Each has an owner.
 
-This is the Phase 0 gate: **do not start Phase 1 until this has actually been performed once**, on a genuine scratch VM, not just talked through.
-
-1. Provision a scratch VM with Docker installed.
-2. Check out this repo at the `main` commit currently in production.
-3. Bring up the stack with the same env vars `cd.yml` provides (`DOMAIN`, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` for Route53, `RESTIC_PASSWORD`, `RESTIC_AWS_ACCESS_KEY_ID`/`RESTIC_AWS_SECRET_ACCESS_KEY`, etc. — pull these from wherever they're stored offline, since GitHub Actions won't hand them back):
-   ```
-   docker compose -f compose.prod.yml -f compose.observability.yml -f compose.metrics.yml -f compose.backup.yml up -d
-   ```
-4. Point `RESTIC_REPOSITORY_S3` at the same bucket — the local repo won't exist on a fresh VM, so this run recovers from S3 only, which is the realistic scenario if the original host (and its local disk) is what was lost.
-5. Run the manual restore procedures above for each service, sourcing from `$RESTIC_REPOSITORY_S3` instead of `$RESTIC_REPOSITORY_LOCAL`.
-6. Verify: all services start, the API serves traffic, Grafana/Kuma/OpenSearch show restored data.
-7. Record how long this actually took and anything that didn't go as documented — update this file if the real procedure diverged from what's written here.
-
-## Known gap
-
-Per [the cluster plan](plans/swarm/design.md) goal 6: the local repo and the live host are in the same building on the same circuit — fire, flood, theft, or a bad surge takes out both at once. Until a UPS and a genuinely offsite second copy exist, S3 is the *real* second copy, not the third, and the full-DR procedure above (S3-only) is the one to trust.
+- **One copy of the only backup.** The CNPG archive is one bucket, one account,
+  one region. *[Phase 8]*
+- **Everything except Postgres.** See the table above. *[Phase 8]*
+- **No alert on backup age.** If archiving stopped, nothing would say so until
+  someone looked. This is the first alert that has to reach a person, which is why
+  it is entangled with giving the notification flows teeth at all. *[Phase 8]*
+- **The full-DR sequence above has not been rehearsed end to end** since the
+  cutover. The Postgres half has (Phase 4b.10's PITR); the rebuild half is
+  Provision workflows that have each run, but not in sequence against a cold
+  cluster. *[Phase 8's rehearsal]*
+- **Same building, same circuit.** The house's copy and the house are the same
+  blast radius, which is why S3 is the second copy rather than the third.
+  *[Design goal 6, [design.md](plans/swarm/design.md)]*

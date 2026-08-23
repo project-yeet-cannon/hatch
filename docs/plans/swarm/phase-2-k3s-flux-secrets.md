@@ -118,8 +118,14 @@
 - [x] Note the gap, don't solve it here: `kubectl`/Flux target node 1's IP
       directly — there's no VIP in front of the apiserver itself (kube-vip in
       Phase 3 fronts *ingress* traffic only). Losing node 1 means manually
-      repointing the kubeconfig context at node 2 until Phase 7 restores a
-      third node. Acceptable for a home cluster; call it out if that changes
+      repointing the kubeconfig context at another server. **Phase 7 did not
+      close this**, and the sentence that used to say "until Phase 7 restores a
+      third node" was wrong in a way worth correcting rather than letting
+      expire: the third node restored *quorum tolerance* — etcd now survives
+      losing one member — but the kubeconfig still names one machine, and
+      losing that machine is still a manual repoint. Phase 9 inherits the
+      question, which is the natural moment for it, since a kubeconfig is
+      per-installation. Acceptable for a home cluster; call it out if that changes
       — *written up in
       [`docs/secrets-architecture.md`](../../secrets-architecture.md#known-gap-no-vip-in-front-of-the-apiserver),
       with the recovery (both workflows are idempotent — re-run against a

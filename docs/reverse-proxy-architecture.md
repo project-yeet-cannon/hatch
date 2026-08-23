@@ -2,62 +2,192 @@
 
 ## Summary
 
-This repo hosts all apps on the home server behind a single Caddy reverse proxy (`containers/caddy`, service `caddy` in [`compose.prod.yml`](../compose.prod.yml)). Caddy is built with [`caddy-docker-proxy`](https://github.com/lucaslorentz/caddy-docker-proxy) and [`caddy-dns/route53`](https://github.com/caddy-dns/route53), so:
+Every `*.${DOMAIN}` hostname in the house is served by **Traefik**, the ingress
+controller k3s bundles, reached at a single virtual IP that kube-vip advertises
+onto the LAN. Nothing about routing is host-specific any more: a hostname is an
+`Ingress` object in git, and which node answers it is a scheduling detail.
 
-- **Routing** is driven entirely by Docker container labels — Caddy watches the Docker socket and rebuilds its config whenever a labeled container starts/stops. There is no central Caddyfile to hand-edit.
-- **TLS** certs are issued automatically via Let's Encrypt DNS-01 challenges against Route53. Because it's DNS-01, subdomains never need to be publicly resolvable or have a public A record — the home server's IP stays off the public internet entirely.
-- **Local resolution**: pfSense's DNS Resolver (Unbound) redirects the entire base domain to the server's LAN IP via a `local-zone`/`local-data` pair in Services → DNS Resolver → General Settings → Custom options (each line prefixed `server:`, matching the convention pfBlockerNG already uses in that box on this install):
+- **Routing** is `Ingress` objects, reconciled by Flux
+  ([`docs/delivery-architecture.md`](delivery-architecture.md)). Traefik's
+  `kubernetesIngress` provider watches the API server and rebuilds its own
+  routing table; there is no Traefik config file to hand-edit, and no proxy
+  container watching a Docker socket.
+- **One address for all of it.** Traefik's Service is a `LoadBalancer` pinned to
+  `${INGRESS_VIP}` by a `kube-vip.io/loadbalancerIPs` annotation
+  ([`traefik-helmchartconfig.yaml`](../deploy/cluster/infrastructure/config/traefik-helmchartconfig.yaml)),
+  and kube-vip answers ARP for that address from whichever node currently holds
+  it. Losing a node moves the VIP; it does not move the hostnames.
+- **TLS** is one wildcard certificate — `*.${DOMAIN}` and `${DOMAIN}` — issued
+  by cert-manager from Let's Encrypt over a **Route53 DNS-01** challenge
+  ([`wildcard-certificate.yaml`](../deploy/cluster/infrastructure/config/wildcard-certificate.yaml)).
+  Because it is DNS-01, no subdomain ever needs a public A record, and the
+  house's IP stays off the public internet entirely.
+- **Local resolution**: pfSense's DNS Resolver (Unbound) redirects the entire
+  base domain to the VIP. Unchanged in shape since the Caddy era — only the
+  address it points at changed, at [cutover](plans/swarm/phase-7-cutover.md).
 
-  ```text
-  server:local-zone: "<domain>." redirect
-  server:local-data: "<domain>. A <lan-ip>"
-  ```
+## The path a request takes
 
-  This covers every subdomain automatically — no DNS edit needed for new ones. Note pfSense's own Host Override GUI does *not* support a literal wildcard `*` entry (its hostname field rejects `*`), and per-host overrides can't coexist with the zone above: Unbound's `redirect` zone type only permits a single `local-data` entry, at the zone apex — any Host Override for a subdomain of the same domain produces a second, non-apex entry and `unbound-checkconf` will fail the whole config. Any prior individual overrides (e.g. one per subdomain) must be deleted once this is in place.
-- **Secrets** (Route53 credentials, ACME email, base domain) are injected at deploy time from GitHub Actions secrets/variables into the `docker compose up -d` environment in [`cd.yml`](../.github/workflows/cd.yml) — nothing sensitive lives on the server's filesystem.
-
-All app services and `caddy` share a single external Docker network, `edge`, created once on the server (`docker network create edge`) and referenced as `external: true` in compose — it's shared across every app stack, not owned by any one of them.
-
-## Adding a new app
-
-To expose a new service (e.g. `immich`, `dashboard`) at `<name>.<domain>`:
-
-1. Add the service to `compose.prod.yml` (or its own compose file, if it doesn't already live in this repo).
-2. Attach it to the `edge` network, in addition to whatever private network it needs for its own dependencies:
-   ```yaml
-   networks:
-     - edge
-   ```
-3. Add two labels:
-   ```yaml
-   labels:
-     caddy: <name>.${DOMAIN}
-     caddy.reverse_proxy: "{{upstreams <container-port>}}"
-   ```
-4. Don't publish the service's port to the host — Caddy reaches it directly over `edge` by container name.
-5. Deploy. Caddy detects the new labels, requests a cert via Route53 DNS-01, and starts routing — no Caddy config changes, no DNS changes (the pfSense wildcard override already covers the new hostname).
-
-That's the whole process — steps 2–4 mirror what's already done for the `api` service in `compose.prod.yml`.
-
-## Aliasing a subdomain to a path on an existing app
-
-Some apps (e.g. `dashboard`) aren't separate services — they're static SPAs served by the `api` container under a path like `/apps/dashboard/`. To give one of these its own subdomain (e.g. `kiosk.${DOMAIN}` → `/apps/dashboard/`), add a second, numbered `caddy_1`-prefixed label block to the *same* container rather than standing up a new service:
-
-```yaml
-labels:
-  caddy: home.${DOMAIN}
-  caddy.reverse_proxy: "{{upstreams 8080}}"
-  caddy_1: kiosk.${DOMAIN}
-  caddy_1.@root.path: /
-  caddy_1.rewrite: "@root /apps/dashboard/"
-  caddy_1.reverse_proxy: "{{upstreams 8080}}"
+```
+[browser / tablet / Sonos]
+   │  home.${DOMAIN}?
+   ▼
+pfSense Unbound  ──── local-zone redirect ────►  ${INGRESS_VIP}
+   │
+   ▼
+kube-vip (DaemonSet, one node holds the VIP and answers ARP for it)
+   │
+   ▼
+Traefik  ── :80 ──► permanent redirect to :443
+         ── :443 ─► TLS terminated with the default wildcard cert
+   │
+   ├── matches an Ingress rule by Host + path
+   ├── applies whatever Middlewares that rule's annotation names
+   ▼
+Service ──► pod
 ```
 
-`caddy-docker-proxy` treats each `caddy_<N>` label as an independent site block on the same container. The `@root` matcher only rewrites the bare `/` request to `/apps/dashboard/`; everything else (hashed asset requests, API calls like `/api/dashboard`) passes straight through to the same upstream unmodified. This only works cleanly because the target SPA already emits root-absolute asset URLs baked in at build time (Vite's `base: '/apps/dashboard/'`) and has no client-side router — if a future aliased app uses relative asset paths or client-side routing, the rewrite/matcher will need to be broader (or the app served from a real subdomain instead).
+Two properties of that picture are worth stating outright, because both used to
+be true of a single machine and are now true of a cluster:
+
+- **Nothing publishes a port to a host.** A workload is reachable because a
+  `Service` selects it and an `Ingress` names that Service, not because anything
+  bound `0.0.0.0:8080` somewhere.
+- **The VIP is not a machine.** `${INGRESS_VIP}` is a lease, not a NIC address.
+  It is the only address the house's DNS knows about, and it is deliberately
+  distinct from any node's own address so that a node rebuild is invisible from
+  the LAN.
+
+## The hostnames
+
+Seven, all covered by the one wildcard certificate and the one resolver entry:
+
+| Host | Serves | Defined in |
+|---|---|---|
+| `home.${DOMAIN}` | the API and every family app it hosts | [`charts/aerie/templates/ingress.yaml`](../charts/aerie/templates/ingress.yaml) |
+| `kiosk.${DOMAIN}` | the same API, root-rewritten to the dashboard SPA | same |
+| `files.${DOMAIN}` | the published-app manifest and bundles | same |
+| `share.${DOMAIN}` | dufs, in front of the house share | same |
+| `status.${DOMAIN}` | Uptime Kuma | [`ingress-status.yaml`](../deploy/cluster/observability/config/ingress-status.yaml) |
+| `logs.${DOMAIN}` | OpenSearch Dashboards | [`ingress-logs.yaml`](../deploy/cluster/observability/config/ingress-logs.yaml) |
+| `metrics.${DOMAIN}` | Grafana | [`kube-prometheus-stack.yaml`](../deploy/cluster/observability/controllers/kube-prometheus-stack.yaml)'s `grafana.ingress` |
+
+[`Test-NameResolution.ps1`](../scripts/k3s/Test-NameResolution.ps1) asserts all
+seven — that each resolves to `${INGRESS_VIP}` through the LAN resolver *and*
+that the socket actually reached that address. A 200 proves something answered;
+only the address proves it was the cluster.
+
+## TLS: one certificate, served by default
+
+`cert-manager` renews the wildcard into the `aerie-wildcard-tls` Secret in
+`kube-system`, and
+[`traefik-tlsstore.yaml`](../deploy/cluster/infrastructure/config/traefik-tlsstore.yaml)
+names that Secret as the `default` `TLSStore`'s `defaultCertificate`.
+
+**This is why no `Ingress` in the repo carries a `tls:` block.** A router that
+names no certificate of its own gets the store default, which is the wildcard —
+so adding a hostname needs no certificate work at all, and there is no
+per-hostname issuance to wait on, rate-limit, or debug. That default is the
+entire argument for having bought a wildcard rather than per-name certificates.
+
+The `websecure` entrypoint terminates TLS
+(`ports.websecure.http.tls.enabled: true`), and `web` is a permanent redirect to
+it, so plain HTTP to any hostname is a 308 rather than a second code path.
+
+The Route53 IAM credentials stay scoped to `_acme-challenge.*` TXT records on
+the one hosted zone, and reach cert-manager as the `route53-credentials` Secret
+that External Secrets syncs from SSM — see
+[`docs/secrets-architecture.md`](secrets-architecture.md).
+
+## Local resolution (pfSense Unbound)
+
+**Services → DNS Resolver → General Settings → Custom options** — each line
+prefixed `server:`, matching the convention pfBlockerNG already uses in that box
+on this install:
+
+```text
+server:local-zone: "<domain>." redirect
+server:local-data: "<domain>. IN A <ingress-vip>"
+```
+
+This covers every subdomain automatically — no DNS edit for a new one. Two
+constraints on that pair, both learned the hard way and both still true:
+
+- pfSense's own Host Override GUI does **not** accept a literal wildcard `*`
+  (its hostname field rejects it).
+- Unbound's `redirect` zone type permits a single `local-data` entry, at the
+  zone apex. Any Host Override for a subdomain of the same domain produces a
+  second, non-apex entry and `unbound-checkconf` fails the whole config. Prior
+  per-subdomain overrides must be deleted once this pair is in place.
+
+Remote clients get the same answer through Tailscale's split DNS, which
+forwards `${DOMAIN}` to this same resolver — see
+[`docs/tailscale-vpn-architecture.md`](tailscale-vpn-architecture.md).
+
+## Adding a new hostname
+
+To expose a new service at `<name>.<domain>`:
+
+1. Give it a `Service` in whatever chart or Kustomization owns it.
+2. Add an `Ingress` naming `ingressClassName: traefik`, one rule with
+   `host: <name>.{{ .Values.domain }}` (or `<name>.${DOMAIN}` in a plain
+   manifest), and a backend pointing at that Service and port.
+3. Commit. Flux applies it; Traefik picks it up from the API server within
+   seconds of the apply.
+
+That is the whole process. **No certificate step** (the wildcard TLSStore
+default covers it), **no DNS step** (the Unbound redirect covers it), and no
+node-level anything. `ingressClassName: traefik` is k3s's own bundled
+IngressClass, which is marked default — the observability Ingresses omit the
+field and rely on that; the chart's set it explicitly. Either is fine, as long
+as no second IngressClass ever appears.
+
+## Path rewriting and other per-route behaviour
+
+What Caddy expressed as extra `caddy_<N>` label blocks on a container is now a
+Traefik `Middleware` CR plus an annotation on the route that wants it.
+
+The kiosk tablet's pinned URL is the live example:
+[`middleware-kiosk.yaml`](../charts/aerie/templates/middleware-kiosk.yaml)
+declares a `replacePathRegex` from `^/$` to `/apps/dashboard/`, and the `kiosk`
+Ingress names it in
+`traefik.ingress.kubernetes.io/router.middlewares`. `replacePathRegex`, not
+`redirectRegex`: Caddy rewrote internally, server-side, and a redirect would
+change the tablet's address bar — breaking the pinned URL the kiosk shell loads
+on boot.
+
+Three sharp edges live in that annotation, and each one fails *silently*:
+
+- **The name format is `<namespace>-<name>@kubernetescrd`, and it is
+  unforgiving.** A bare name is not found, and the route then serves without the
+  middleware. For the kiosk that looks like the tablet showing the API landing
+  page; for
+  [`middleware-auth.yaml`](../charts/aerie/templates/middleware-auth.yaml) it
+  looks exactly like success, because the route serves *unauthenticated*. Only a
+  302 from an un-enrolled client proves the auth middleware is attached — see
+  [`docs/auth-architecture.md`](auth-architecture.md).
+- **Order matters, and the annotation is a comma-separated list applied in
+  order.** Auth is named before the rewrite: rewriting a request that is about
+  to be refused wastes the work and puts the rewritten path into the return-to
+  the sign-in shell sends the client back to.
+- **Two Ingresses on the same host are ranked by rule length**, not by file
+  order. `PathPrefix(/apps/docs)` outranks `PathPrefix(/)`, which is what makes
+  the auth canary work. If that ever inverts, the gated prefix serves ungated.
 
 ## Notes / gotchas
 
-- `edge` must exist on the server *before* the first `docker compose up -d` that references it — it's declared `external: true` so compose won't create or manage it.
-- The `caddy` container mounts `/var/run/docker.sock`, which is equivalent to root on the host. Keep its image (and the two plugins it's built with) intentionally minimal, and don't add other capabilities to that container.
-- Global Caddy options (ACME email, default DNS provider) are set via labels on the `caddy` service itself (`caddy.email`, `caddy.acme_dns`), not a config file — see `caddy` service in `compose.prod.yml`.
-- Route53 IAM credentials should stay scoped to `_acme-challenge.*` TXT records on the one hosted zone, per the policy set up when this was first configured.
+- **`prune: true` is live here.** Deleting an `Ingress` from git deletes the
+  route from the cluster on the next reconcile. `git rm` is a production action
+  on this path.
+- **A missing substitution is an empty host, not an error.** `${DOMIAN}` in an
+  Ingress reconciles happily into a rule with no host — which matches nothing,
+  or worse, matches everything. See the substitution notes in
+  [`docs/delivery-architecture.md`](delivery-architecture.md).
+- **No proxy holds a Docker socket any more.** The single most privileged thing
+  in the old design — Caddy mounting `/var/run/docker.sock`, equivalent to root
+  on the host — has no equivalent here. Traefik reads the Kubernetes API through
+  a ServiceAccount scoped to what an ingress controller needs.
+- **kube-vip needs the right interface.** `vip_interface` comes from
+  `${NODE_INTERFACE}` in the cluster ConfigMap; a wrong value is a VIP that is
+  never ARPed for and a house that resolves correctly to an address nothing
+  answers.

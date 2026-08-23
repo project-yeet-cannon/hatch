@@ -1,29 +1,37 @@
 # Delivery Architecture
 
-How a commit becomes a running thing — and why the answer is different depending
-on which half of the system you're changing.
+How a commit becomes a running thing.
 
 ## Summary
 
-Aerie currently has **two independent delivery paths**, and they work in
-opposite directions:
+**Aerie has one delivery path, and it pulls.** Nothing in GitHub Actions deploys
+anything. You push to `main`; controllers inside the cluster notice and converge
+on what git says.
 
-| | Legacy Windows host | k3s cluster |
-|---|---|---|
-| What runs there | The whole production stack today — API, kiosk `files`, Postgres, observability, backup | Infrastructure controllers only, so far |
-| Defined by | `compose.*.yml` at the repo root | `deploy/cluster/**` |
-| Delivery mechanism | GitHub Actions **pushes** to the host | Flux **pulls** from GitHub |
-| Triggered by | Push to `main` → build → deploy workflow | Push to `main` — no workflow involved |
-| Credential direction | The runner holds a Docker socket on the host | The cluster holds a read-only git credential |
-| Where the deploy logic lives | [`.github/workflows/cd.yml`](../.github/workflows/cd.yml) | In the cluster, as `GitRepository` + `Kustomization` objects |
+| | |
+|---|---|
+| What runs there | Everything — API, kiosk `files`, the share, Postgres, observability, ingress |
+| Defined by | `deploy/cluster/**` and [`charts/aerie/`](../charts/aerie/) |
+| Delivery mechanism | Flux **pulls** from GitHub |
+| Triggered by | Push to `main` — no workflow involved |
+| Credential direction | The cluster holds a read-only git credential; nothing outside holds a credential to the cluster |
+| Where the deploy logic lives | In the cluster, as `GitRepository` + `Kustomization` objects |
 
-This split is temporary by design. [the cluster plan](plans/swarm/phase-7-cutover.md) Phase 7 is
-the cutover that retires the left column. Until then, **the deploy workflow never
-touches Kubernetes and Kubernetes never reads the deploy workflow.**
+GitHub Actions still does two things, and neither of them is a deploy:
+[`publish.yml`](../.github/workflows/publish.yml) builds container images and
+pushes them to `ghcr.io`, and the `provision-*` workflows build or configure
+*nodes* and plant out-of-band configuration. Both are covered below.
 
-If you only remember one thing: **`cd.yml` does not deploy the cluster.** Every
-`kubectl`-shaped verb in this system is performed by a controller running inside
-the cluster, reacting to what's in git.
+This used to be two paths. Until the
+[Phase 7 cutover](plans/swarm/phase-7-cutover.md) a push-based `cd.yml` deployed
+a Compose stack to a single Windows host, and this document spent half its length
+keeping the two straight. That host is now the cluster's third node; `cd.yml`,
+the `legacy-deployer` runner and every `compose.*.yml` are deleted. If you find a
+reference to any of them, it is stale — say so.
+
+If you only remember one thing: **every `kubectl`-shaped verb in this system is
+performed by a controller running inside the cluster, reacting to what's in
+git.**
 
 ## If you're new to Kubernetes
 
@@ -95,37 +103,60 @@ hand-editing a live object is a temporary act — the next pass overwrites you.
 an in-cluster agent pulls it, and there is no privileged CI pipeline with a
 foothold in the cluster.
 
-## Path 1 — the legacy Windows host
+## How a commit becomes a running thing
 
-Push-based, and conventional. Three workflows chain by event:
+Two kinds of change reach the cluster, and they take different routes.
+
+### A manifest change
+
+You edit something under `deploy/` or in `charts/aerie/`, and push to `main`.
+That is the entire procedure. The `GitRepository` polls once a minute, the
+Kustomizations reconcile, and the change is live — see [the timeline](#the-timeline-of-a-push)
+below.
+
+### An application code change
+
+Application code becomes an image, and the image tag has to reach a manifest.
+Three actors, none of which is a deploy pipeline:
 
 1. **Push to `main`** →
-   [`publish.yml`](../.github/workflows/publish.yml) builds each container image
-   and pushes it to `ghcr.io`, tagged with the commit SHA.
-2. **On that workflow succeeding** →
-   [`cd.yml`](../.github/workflows/cd.yml) fires via `workflow_run`. It does not
-   trigger on push directly, which is what guarantees a deploy never runs against
-   images that were never published.
-3. `cd.yml` runs on the `legacy-deployer` self-hosted runner — a runner
-   physically on the Docker host — and does `docker compose pull` then
-   `docker compose up -d`, with `IMAGE_TAG` pinned to
-   `github.event.workflow_run.head_sha` so the deploy pulls exactly the images
-   step 1 built.
+   [`publish.yml`](../.github/workflows/publish.yml) builds each image and pushes
+   it to `ghcr.io`, tagged three ways: `latest`, the commit SHA, and
+   `<YYYYMMDDHHmmss>-<short-sha>`. That third tag is the one that matters — it
+   sorts chronologically as a number, which is what makes automated selection a
+   `numerical` policy rather than a guess. The build starts in parallel with CI
+   and only *pushes* once CI reports success for the same commit, so an image
+   that exists is an image that passed.
+2. **Flux's image-reflector-controller scans GHCR** every 5m
+   ([`image-repositories.yaml`](../deploy/cluster/apps/automation/image-repositories.yaml)),
+   and an `ImagePolicy`
+   ([`image-policies.yaml`](../deploy/cluster/apps/automation/image-policies.yaml))
+   picks the highest timestamp matching that pattern.
+3. **image-automation-controller commits the selected tag** — not here. It writes
+   to a **private, per-installation site repo**
+   ([`gitrepository.yaml`](../deploy/cluster/site/gitrepository.yaml)), whose one
+   file is an `aerie-image-tags` ConfigMap. The `apps` Kustomization substitutes
+   from that ConfigMap, so the new tag lands in the `HelmRelease`'s values on the
+   next reconcile.
 
-Everything operator-specific arrives as `vars.*` / `secrets.*` in that
-workflow's `env:` block and is interpolated into the compose files. That's the
-mechanism [`docs/ethos.md`](ethos.md) describes for keeping values out of git,
-on this path.
+**Why the site repo exists is worth understanding before you touch any of this.**
+A `contents:write` token in the cluster's own `flux-system` namespace, over the
+repository that governs the cluster, means a compromised workload's blast radius
+no longer stops at the cluster. And the value being written — which build one
+installation happens to be running — is an operator value, exactly the class of
+fact [`docs/ethos.md`](ethos.md) keeps out of this repo. The site repo takes both
+problems at once: the write credential is scoped to a repository that governs
+nothing, and this repository stays true of every installation.
 
-Note what the runner has: `DOCKER_HOST: tcp://localhost:2375`. A GitHub Actions
-job holds an open socket to the production Docker daemon. That is normal for
-push-based CD and it is exactly what the cluster path is designed to avoid.
+The practical consequence: **shipping application code is still just a push to
+`main`**, with roughly a five-minute tail while the scan and the commit happen.
+Nothing to dispatch, and no tag to hand-edit.
 
-## Path 2 — the k3s cluster
+## The cluster path
 
-**Nothing in GitHub Actions deploys to the cluster.** The provisioning workflows
-(`provision-0` through `provision-5`) are `workflow_dispatch` only — you run them
-by hand, from the Actions tab, and they build or configure *nodes*.
+The provisioning workflows (`provision-0` through `provision-5`) are
+`workflow_dispatch` only — you run them by hand, from the Actions tab, and they
+build or configure *nodes*.
 [`provision-3-bootstrap-flux.yml`](../.github/workflows/provision-3-bootstrap-flux.yml)
 is the last one that has anything to do with application delivery, and it runs
 once: it installs Flux and points it at this repository. After that the cluster
@@ -147,6 +178,10 @@ installation's owner/repo/branch, which [`docs/ethos.md`](ethos.md) rules out.
 That is also why this repo runs `flux install` rather than `flux bootstrap`; see
 [`scripts/flux/README.md`](../scripts/flux/README.md) for the full reasoning.
 
+The `aerie-site` `GitRepository` is the one exception in kind: it *is* committed,
+but its `url` is a `${SITE_REPO_URL}` token resolved from the cluster ConfigMap
+rather than a literal.
+
 ### The timeline of a push
 
 You commit a change to `deploy/cluster/**` and push to `main`:
@@ -156,44 +191,63 @@ You commit a change to `deploy/cluster/**` and push to `main`:
 | 0s | GitHub has the commit. Nothing in the cluster knows yet. |
 | ≤60s | The `GitRepository` poll finds the new revision, clones it, and publishes it as a new source artifact. |
 | immediately after | kustomize-controller **watches** the source, so a revision change triggers reconciliation at once. It does *not* wait for the 10m interval. |
-| +seconds | The root `Kustomization` builds `deploy/cluster` and applies it — which, since that path contains only pointers, means applying the two child Kustomizations in [`infrastructure.yaml`](../deploy/cluster/infrastructure.yaml). |
-| then | `infra-controllers` reconciles, and because it carries `wait: true`, it does not report Ready until every object it applied is *healthy* — chart installed, CRDs registered, DaemonSets up. Budgeted at `timeout: 10m` because Longhorn is slow on a cold node. |
-| then | `infra-config` reconciles, gated behind `dependsOn: infra-controllers`. |
+| +seconds | The root `Kustomization` builds `deploy/cluster` and applies it — which, since that path contains only pointers, means applying the layer Kustomizations in [`infrastructure.yaml`](../deploy/cluster/infrastructure.yaml), [`data.yaml`](../deploy/cluster/data.yaml), [`site.yaml`](../deploy/cluster/site.yaml), [`apps.yaml`](../deploy/cluster/apps.yaml) and [`observability.yaml`](../deploy/cluster/observability.yaml). |
+| then | Each layer reconciles in dependency order, and because every one carries `wait: true`, it does not report Ready until the objects it applied are *healthy* — chart installed, CRDs registered, DaemonSets up. |
 
-So: **typically under two minutes for a trivial change**, and bounded below by
-the 1-minute source poll. The 10m / 30m intervals on the Kustomizations are the
-*idle* re-apply cadence — drift correction — not your deploy latency.
+So: **typically under two minutes for a change to a leaf layer**, and bounded
+below by the 1-minute source poll. A change that has to walk the whole dependency
+chain takes as long as the slowest layer in front of it. The 10m / 30m intervals
+on the Kustomizations are the *idle* re-apply cadence — drift correction — not
+your deploy latency.
 
-The intervals are chosen accordingly. `infra-controllers` sits at 30m precisely
+The intervals are chosen accordingly. The controller layers sit at 30m precisely
 because re-applying an unchanged `HelmRelease` every ten minutes accomplishes
 nothing; drift *inside* a Helm release is helm-controller's job on its own
 schedule, and a git change is picked up by the source poll regardless.
 
-### The two-layer split
+### The layers, and the one rule that orders them
 
-[`infrastructure.yaml`](../deploy/cluster/infrastructure.yaml) defines exactly
-one ordering constraint, and it's the CRD constraint from the primer above:
+Every ordering constraint in the tree is the CRD constraint from the primer
+above: you cannot apply an instance of a type nothing has defined yet. Read
+`dependsOn` as "the types and the data I need exist."
 
 ```
-infra-controllers   (path: infrastructure/controllers/,  wait: true)
-        │             HelmReleases: External Secrets, cert-manager,
-        │             kube-vip, Longhorn, CloudNativePG — these
-        │             register the types
-        ▼
-infra-config        (path: infrastructure/config/,  dependsOn: infra-controllers)
-                      Instances of those types: ClusterSecretStore,
-                      ExternalSecrets, ClusterIssuers, the wildcard
-                      Certificate, StorageClasses, Traefik's HelmChartConfig
+infra-controllers   (infrastructure/controllers/, wait: true, 30m)
+      │              External Secrets, cert-manager, kube-vip, Longhorn,
+      │              CloudNativePG, the barman-cloud plugin, csi-driver-smb
+      ▼
+infra-config        (infrastructure/config/, 10m)
+      │              ClusterSecretStore, ExternalSecrets, ClusterIssuers, the
+      │              wildcard Certificate, StorageClasses, Traefik's config
+      ├──────────────────────────────────┐
+      ▼                                  ▼
+data-cluster        (data/cluster/)     observability-controllers  (30m)
+      │              the CNPG Cluster     │   kube-prometheus-stack, OpenSearch,
+      │              and its ObjectStore  │   fluent-bit, Uptime Kuma, AutoKuma
+      ▼                                  ▼
+data-schema         (data/schema/)      observability-config
+      │              DDL and backup       │   dashboards, alert rules, scrape
+      │              schedule Jobs        │   configs, the logs/status Ingresses
+      ▼
+apps                (apps/, dependsOn: data-schema + site-config)
+                     the aerie HelmRelease and image automation
+
+site-source (site/) ──► site-config (the private site repo) ──┘
+                        supplies aerie-image-tags
 ```
 
-`wait: true` on the first layer is what makes the boundary real. Without it a
-`Kustomization` reports Ready as soon as its objects are *applied* — for a
-`HelmRelease` that means "the CR exists," not "the chart installed and its CRDs
-landed." `dependsOn` would then be waiting on a lie.
+`wait: true` is what makes each boundary real. Without it a `Kustomization`
+reports Ready as soon as its objects are *applied* — for a `HelmRelease` that
+means "the CR exists," not "the chart installed and its CRDs landed." `dependsOn`
+would then be waiting on a lie.
 
+`apps` depending on **both** `data-schema` and `site-config` is the load-bearing
+pair: the API needs a schema to talk to, and the HelmRelease needs an image tag
+to substitute. Either missing produces a workload that starts and then fails in a
+way that looks like an application bug.
 ### `prune: true`, and what it means for your workflow
 
-Both Kustomizations set `prune: true`. **Deleting a manifest from git deletes the
+Every `Kustomization` in the tree sets `prune: true`. **Deleting a manifest from git deletes the
 object from the cluster** on the next reconcile. This is the property that makes
 the repo the whole truth about the cluster rather than an append-only log of
 things once applied — but it means `git rm` is a destructive production action on
@@ -223,22 +277,26 @@ Two sharp edges worth internalizing before you write a manifest under `deploy/`:
   later and looks like something else.
 
 Changing an operator value is therefore **not** a commit: set the repository
-variable, re-dispatch Provision 4, and the next reconciliation picks it up. This
-is how Phase 7 raises `LONGHORN_REPLICA_COUNT` from 2 to 3.
+variable, re-dispatch Provision 4, and the next reconciliation picks it up. That
+is how Phase 7 raised `LONGHORN_REPLICA_COUNT` and `POSTGRES_INSTANCES` from 2 to
+3 when the third node joined — two variables and a dispatch, no commit, which is
+the entire argument for putting them in a ConfigMap.
 
 ## Why pull instead of push
 
-Worth stating plainly, since the push model in Path 1 is the more familiar one
-and the cluster deliberately abandons it.
+Worth stating plainly, since push-based CD is the more familiar model and this
+system deliberately abandoned it — including on the one path that used it.
 
 **The credential direction inverts.** Push-based CD requires the pipeline to hold
-production credentials — `cd.yml` holds a Docker socket on the host. A cluster
-equivalent would mean a kubeconfig with write access sitting in GitHub secrets,
-reachable by any workflow, any compromised action, any fork with a clever PR.
-Pull-based means the cluster holds a *read-only* credential to git and nothing
-outside holds a credential to the cluster. Note that Provision 3's own token
-requirement dropped to `contents:read` — and for a public repo, to nothing at
-all — precisely because the design stopped needing to write.
+production credentials; the retired `cd.yml` held an open Docker socket on the
+production host. A cluster equivalent would mean a kubeconfig with write access
+sitting in GitHub secrets, reachable by any workflow, any compromised action, any
+fork with a clever PR. Pull-based means the cluster holds a *read-only* credential
+to git and nothing outside holds a credential to the cluster. Note that Provision
+3's own token requirement dropped to `contents:read` — and for a public repo, to
+nothing at all — precisely because the design stopped needing to write. The one
+write credential that does exist, image automation's, is scoped to a repository
+that governs nothing.
 
 **Drift correction is continuous, not per-deploy.** A push-based deploy converges
 the cluster once, at deploy time, and says nothing about what happens between
@@ -248,10 +306,12 @@ next release.
 
 **Recovery is a rebuild, not a replay.** With the cluster's desired state entirely
 in git, rebuilding a control plane is Provision 1–4 plus "let Flux catch up." There
-is no need to re-run a year of pipeline history in order.
+is no need to re-run a year of pipeline history in order. This is also why
+[`docs/disaster-recovery.md`](disaster-recovery.md) is as short as it is: the only
+thing a restore has to carry is data.
 
 **The cost, honestly:** you lose the single green checkmark that means "it
-shipped." Push completes long before the change lands, failures surface in
+shipped." A push completes long before the change lands, failures surface in
 cluster state rather than in a workflow log, and there is no build artifact
 gating the apply — a syntactically valid but wrong manifest reaches the cluster
 without anything having tried it first. The observability section below is how
@@ -265,9 +325,10 @@ cluster no single commit describes. And an object can apply perfectly and never
 become healthy, which needs no push at all: helm-controller can fail an upgrade
 on its own interval hours after a commit that was fine. All three retry forever
 and none of them tell anyone. [the cluster plan](plans/swarm/phase-3-platform-services.md) Phase 3b.14 is
-where that gets closed — two pre-merge checks against the first two, and a Phase
-6 alert on `gotk_reconcile_condition` for the third, which is the only one no
-gate in front of a merge can reach.
+where the first two get closed, with pre-merge checks in
+[`ci.yml`](../.github/workflows/ci.yml); the third is a Phase 6 alert on
+`gotk_reconcile_condition`, and it is the only one no gate in front of a merge
+can reach.
 
 ## What a push does *not* do
 
@@ -277,21 +338,17 @@ gate in front of a merge can reach.
 | Operator secrets (Route53 creds, HA token, …) | Re-dispatch **Provision 2**, which seeds AWS SSM; External Secrets syncs them in |
 | The Flux version | Bump [`scripts/versions.json`](../scripts/versions.json), re-dispatch **Provision 3** |
 | The k3s version | Bump `versions.json`, re-run **Provision 1** per node |
-| Adding a node | **Provision 0** → **1** → **5** |
+| Adding a node | **Provision 0** → **5** → **1** (storage before the join — a node that joins first starts filling its OS disk with Longhorn replicas) |
 | The `GitRepository` / root `Kustomization` themselves | They live in the cluster, not git — re-dispatch **Provision 3** |
-
-Also note: **there is no image automation on the cluster path.** Flux *can* watch
-a registry and rewrite image tags into git (`ImageUpdateAutomation`); this repo
-does not configure it. When app workloads move to the cluster in Phase 5, an
-image tag will be a value in a manifest, so shipping new application code will
-mean a commit that changes that tag — not merely a `publish.yml` run. Today this
-is moot, because the cluster runs no application images.
+| An application image tag | image automation commits it to the site repo; see [above](#an-application-code-change) |
 
 Two more consequences of the push path being uninvolved:
 
 - **A cluster change lands even if CI is red.** Nothing gates the Flux path on
-  [`ci.yml`](../.github/workflows/ci.yml) or `publish.yml`. Branch protection on
-  `main` is the only gate that exists.
+  `ci.yml` or `publish.yml` — a manifest change reconciles regardless. Branch
+  protection on `main` is the only gate that exists. (An application *image* is
+  the exception, and by construction: `publish.yml` withholds the push until CI
+  passes, so a red build produces no new tag for automation to select.)
 - **Uncommitted work is invisible.** Files sitting in your working tree under
   `deploy/` do not exist as far as the cluster is concerned — including
   `git add`-ed but unpushed ones. The cluster reads `origin/main`, not your disk.
@@ -338,13 +395,16 @@ kubectl -n flux-system logs deploy/helm-controller -f
 |---|---|
 | Source revision is behind your SHA | Pushed to the wrong branch, or the poll hasn't fired yet (≤60s) |
 | `infra-config` NotReady, `infra-controllers` Ready | Genuine object failure — a `Certificate` stuck on DNS-01, an `ExternalSecret` that can't reach SSM |
+| Everything downstream NotReady, one layer NotReady | `dependsOn` doing its job — fix the layer that is actually failing and the rest follow |
+| `apps` NotReady with a substitution complaint | `site-config` hasn't reconciled, so `aerie-image-tags` isn't in the cluster yet |
 | `infra-controllers` NotReady with a timeout | `wait: true` gave up at 10m; usually Longhorn still rolling out on a cold node, so check whether it's failure or slowness |
 | `no matches for kind "X"` | A layer-2 object whose CRD isn't installed — something is in `config/` that should be in `controllers/`, or its controller failed |
 | `substitution variable not set`, or a resource with an empty field | Missing or misspelled key vs. `cluster-config.json`; check the ConfigMap exists — a missing one fails loudly on purpose |
 | An object you deleted from git is gone from the cluster | `prune: true` working as intended |
 
-An `infra-config` sitting NotReady during the deliberate staging-issuer stop in
-Phase 3b.10 is the *expected report*, not a fault.
+A layer reporting NotReady is not automatically a fault: `wait: true` means it is
+also how the tree reports "still coming up." Check the age of the condition before
+treating it as an incident.
 
 ## Mental model, mapped
 
@@ -362,24 +422,35 @@ For an application architect coming from managed SaaS platforms:
 | Infrastructure-as-code apply step | The reconciliation loop, running continuously rather than on invocation |
 | "Someone hotfixed prod by hand" | Drift — and it gets reverted automatically on the next pass |
 
-## Where this is going
+## What's still ahead
 
-The two paths converge at [the cluster plan](plans/swarm/phase-7-cutover.md) Phase 7. Phases 4–6
-move the data tier (CloudNativePG), app tier, and observability into
-`deploy/cluster/`; Phase 7 points DNS at the cluster VIP and retires the Windows
-host. At that point `cd.yml`, the `legacy-deployer` runner, and the root
-`compose.*.yml` files all go away, and every change to Aerie is a commit under
-`deploy/` — which is the reason the comment at the top of `cd.yml` says to
-retarget its runner only when the stack itself moves, not before.
+The two paths converged at [Phase 7](plans/swarm/phase-7-cutover.md), and what
+that leaves is a shorter list than this document used to carry:
+
+- **[Phase 8](plans/swarm/phase-8-backup-v2.md)** owns backup v2. Everything
+  except Postgres currently has no copy at all — see
+  [`docs/disaster-recovery.md`](disaster-recovery.md), which names the gap rather
+  than papering over it.
+- **[Phase 9](plans/swarm/phase-9-productization.md)** owns the productization
+  pass: consolidating the architecture documents that now describe one system,
+  and deciding what to do about the apiserver having no VIP in front of it
+  ([`docs/secrets-architecture.md`](secrets-architecture.md#known-gap-no-vip-in-front-of-the-apiserver)).
+- **The alerting flows have no teeth.** The routes and providers exist; nothing
+  reaches a person yet. A `gotk_reconcile_condition` alert is what closes the
+  honest gap named above, and it is only worth as much as the receiver behind it.
 
 ## See also
 
 - [`docs/ethos.md`](ethos.md) — why operator values and secrets are kept out of
-  git in the first place; the constraint that shapes both paths
+  git in the first place; the constraint that shapes this path, the site repo,
+  and the ConfigMap
 - [`scripts/flux/README.md`](../scripts/flux/README.md) — the bootstrap step, and
   why it isn't `flux bootstrap github`
 - [`scripts/k3s/README.md`](../scripts/k3s/README.md) — node provisioning
 - [`docs/secrets-architecture.md`](secrets-architecture.md) — the SSM → External
   Secrets path that `deploy/` holds pointers into
-- [`docs/disaster-recovery.md`](disaster-recovery.md) — rebuild procedure
-- [the cluster plan](plans/swarm/design.md) — the migration plan these phases belong to
+- [`docs/reverse-proxy-architecture.md`](reverse-proxy-architecture.md) — how a
+  request from the house reaches one of these workloads
+- [`docs/disaster-recovery.md`](disaster-recovery.md) — what is backed up, and
+  what a rebuild looks like
+- [the cluster plan](plans/swarm/design.md) — the migration these phases belong to
