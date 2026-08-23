@@ -406,6 +406,14 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       `-Check` exits 0 over 15 files and `kubectl kustomize` builds the
       directory.
 
+      Confirmed in the cluster by the Phase 3 gate rather than by eye: after
+      `infra-config` reconciled, `verify-cluster-platform.yml` reports **14
+      ExternalSecrets, none failing to sync** — twelve before this step plus
+      `aerie/restic` and `longhorn-system/longhorn-backup-target`, which is the
+      count the map now renders. The gate names only the Phase 3 parameters
+      individually, so the aggregate is what covers these two; it is the same
+      assertion either way, since an unsynced one would appear there.
+
       One lesson worth the line, because 4b.3's ordering does not mention it and
       it costs a whole cycle: **the seed reads `parameters.json` from the
       remote, not from the working tree.** The first Provision 2 dispatch
