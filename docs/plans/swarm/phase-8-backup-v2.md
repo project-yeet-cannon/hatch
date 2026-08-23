@@ -4,7 +4,7 @@
 
 # Phase 8 — Backup v2 + rehearsal
 
-**Status: In progress — Phase 8a done; 8b.1 is half-landed and waiting on a Provision 2 dispatch**
+**Status: In progress — Phase 8a done, 8b.1 done, 8b.2 next**
 
 > Re-scoped once, against a repository that changed underneath the original six
 > bullets. Those bullets were written before Phase 4 existed and before Phase 7
@@ -338,7 +338,7 @@ image, the volume. 5–8 are the restic path and the parameter export. 9–10 ar
 Longhorn. 11–12 are the alert and the thing that makes an alert mean something.
 13–15 are the paperwork the rehearsal needs, and 16 is the gate.
 
-- [ ] **1. Flip three deferrals, add two parameters, regenerate** —
+- [x] **1. Flip three deferrals, add two parameters, regenerate** —
       [`parameters.json`](../../../scripts/secrets/parameters.json),
       [`New-ExternalSecrets.ps1`](../../../scripts/secrets/New-ExternalSecrets.ps1).
 
@@ -391,28 +391,31 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       `aerie-restic.yaml` carries three keys and `longhorn-system-longhorn-backup-target.yaml`
       two.
 
-      **Half done 2026-08-23 — the seed half.** The three `backup/*` flips are
-      in: `aerie-restic.yaml` renders with all three keys, `-Check` exits 0, and
-      `kubectl kustomize` over the generated directory builds. The two
-      `longhorn/*` parameters are added `required: true` with a
-      `kubernetesDeferred` note rather than a `kubernetes` block, which is the
-      seed-then-manifest half of 4b.3's ordering — the manifest cannot exist
-      before a run has written the path. `provision-2-seed-secrets.yml` maps
-      both onto `vars.LONGHORN_AWS_ACCESS_KEY_ID` /
+      **Done 2026-08-23**, in the two commits the seed-then-manifest ordering
+      requires. The three `backup/*` flips land in the first with
+      `aerie-restic.yaml`; the `longhorn/*` pair is added `required: true` with
+      a `kubernetesDeferred` note, `provision-2-seed-secrets.yml` maps both onto
+      `vars.LONGHORN_AWS_ACCESS_KEY_ID` /
       `secrets.LONGHORN_AWS_SECRET_ACCESS_KEY`, and
       [`scripts/secrets/README.md`](../../../scripts/secrets/README.md#one-time-setup)
-      now lists that pair as one-time setup: it is the first credential here
-      that `cd.yml` never held, so *nothing* supplies it by accident, and
-      `required: true` means a dispatch without it fails preflight rather than
-      seeding a partial tree.
+      lists that pair as one-time setup — the first credential here `cd.yml`
+      never held, so nothing supplies it by accident. Provision 2
+      (`stage=parameters-only`) then seeded both paths, and the second commit
+      flips them to `longhorn-system` / `longhorn-backup-target` with
+      Longhorn's own `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` key names.
+      `-Check` exits 0 over 15 files and `kubectl kustomize` builds the
+      directory.
 
-      **What remains, in order:** put 8a.1's `aerie-longhorn` access key on the
-      two Actions tabs, dispatch Provision 2 (`stage=parameters-only` is enough
-      — no bootstrap Secret changes), confirm both paths seeded, then give the
-      two entries a `kubernetes` block (namespace `longhorn-system`, secretName
-      `longhorn-backup-target`, secretKeys `AWS_ACCESS_KEY_ID` /
-      `AWS_SECRET_ACCESS_KEY`), regenerate, and commit. The `SecretSynced` half
-      of the exit condition belongs to that commit, not this one.
+      One lesson worth the line, because 4b.3's ordering does not mention it and
+      it costs a whole cycle: **the seed reads `parameters.json` from the
+      remote, not from the working tree.** The first Provision 2 dispatch
+      succeeded and seeded nothing new — `actions/checkout` had a commit that
+      predated the two entries, so from that run's point of view there was no
+      new parameter, and success looked identical to a run that had done the
+      work. Push before dispatching, and confirm with `aws ssm
+      get-parameters-by-path --path /aerie --recursive --query
+      'Parameters[].Name'` rather than with the run's conclusion — a green run
+      is not evidence the tree changed.
 
 - [ ] **2. Three new `cluster-config.json` keys, and a Provision 4 re-dispatch** —
       [`cluster-config.json`](../../../scripts/k3s/cluster-config.json),
