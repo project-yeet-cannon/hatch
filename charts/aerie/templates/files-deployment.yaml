@@ -41,13 +41,17 @@ spec:
       # 5b.1's dockerconfigjson Secret - same reason as api-deployment.yaml.
       imagePullSecrets:
         - name: {{ .Values.image.pullSecret }}
-      # DoNotSchedule, unlike api-deployment.yaml's ScheduleAnyway: api's 3
-      # replicas over 2 nodes can never satisfy an even spread, so a hard
-      # constraint would strand the third pod Pending forever. files' 2
-      # replicas over 2 nodes can always satisfy maxSkew 1 exactly - a soft
-      # constraint here just lets node-1's control-plane/etcd/Postgres load
-      # keep outscoring the spread preference and pack both replicas onto
-      # node-2, which is the failure this hardens against.
+      # DoNotSchedule, and safe here from the start - unlike api, which had
+      # to wait for Phase 7's third node before it could harden the same
+      # constraint. 2 replicas over 2 nodes always satisfied maxSkew 1
+      # exactly, where api's 3 over 2 never could; a soft constraint would
+      # just let node-1's control-plane/etcd/Postgres load keep outscoring
+      # the spread preference and pack both replicas onto node-2, which is
+      # the failure this hardens against.
+      #
+      # Deliberately without api-deployment.yaml's maxSurge: 0 strategy: 2
+      # replicas over 3 nodes leave a node free for the surge pod, so the
+      # default rollout has somewhere to put it and does not deadlock.
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname

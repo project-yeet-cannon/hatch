@@ -20,6 +20,20 @@ metadata:
     app.kubernetes.io/component: api
 spec:
   replicas: {{ .Values.replicaCount }}
+  # maxSurge: 0 is not a preference - it is what the DoNotSchedule below
+  # makes mandatory (Phase 7c.9). 3 replicas at maxSkew: 1 over 3 nodes fill
+  # the spread exactly, so a surge pod is skew 2 wherever it lands and a hard
+  # constraint refuses to place it; the default maxSurge: 1 / maxUnavailable: 0
+  # would then wait forever for a fourth pod that can never schedule. Removing
+  # one replica first is what frees a node for its replacement. The deadlock
+  # would surface at the next image bump rather than at the commit that set
+  # DoNotSchedule, which is why the two travel together.
+  # files-deployment.yaml needs no equivalent: 2 replicas over 3 nodes already
+  # leave a node free for the surge pod.
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       {{- include "aerie.selectorLabels" . | nindent 6 }}
@@ -34,14 +48,18 @@ spec:
       # ImagePullBackOff, since the api image lives in a private registry.
       imagePullSecrets:
         - name: {{ .Values.image.pullSecret }}
-      # ScheduleAnyway, not DoNotSchedule: 3 replicas over the two-node build
-      # window cannot satisfy an even 1-1-1 spread, and DoNotSchedule would
-      # leave the third pod Pending forever. Revisit at Phase 7, when a third
-      # node makes DoNotSchedule free.
+      # DoNotSchedule since Phase 7c.9, when the third node arrived: 3
+      # replicas over 3 nodes satisfy an even 1-1-1 spread exactly, so the
+      # hard constraint costs nothing and stops the scheduler packing two
+      # replicas onto one node whenever some other signal outscores an even
+      # spread. Through the two-node build window this was ScheduleAnyway,
+      # because 3 replicas over 2 nodes can never satisfy maxSkew: 1 and a
+      # hard constraint would have left the third pod Pending forever. See
+      # the rollout strategy above, which this makes mandatory.
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: ScheduleAnyway
+          whenUnsatisfiable: DoNotSchedule
           labelSelector:
             matchLabels:
               {{- include "aerie.selectorLabels" . | nindent 14 }}

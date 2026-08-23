@@ -8,12 +8,12 @@ metadata:
   name: aerie-pg
   namespace: aerie
 spec:
-  # 2 during the build window, exactly parallel to LONGHORN_REPLICA_COUNT.
-  # Phase 7 raises this to 3 by changing the repository variable and
-  # re-dispatching Provision 4 - no commit, which is the point of the
-  # ConfigMap this substitutes from. The substitution is textual and happens
-  # before YAML parsing, so this renders as `instances: 2` and parses as an
-  # integer; quoting it would produce the type error the operator's own
+  # 3 since Phase 7c.8, and 2 through the build window before it - exactly
+  # parallel to LONGHORN_REPLICA_COUNT. The raise was a repository variable
+  # and a Provision 4 re-dispatch rather than a commit, which is the point of
+  # the ConfigMap this substitutes from. The substitution is textual and
+  # happens before YAML parsing, so this renders as `instances: 3` and parses
+  # as an integer; quoting it would produce the type error the operator's own
   # schema does catch.
   instances: ${POSTGRES_INSTANCES}
 
@@ -46,24 +46,28 @@ spec:
     synchronous:
       method: any
       number: 1
-      # preferred, not the required default - the single most consequential
-      # line in this file. required gives RPO=0 but pauses every write
-      # whenever the synchronous standby is unavailable, and Phase 1's
-      # staggered Windows Update reboots make one node unavailable on a
-      # schedule - on two instances that is a recurring, self-inflicted write
+      # required since Phase 7c.9, when the third node made it affordable -
+      # the single most consequential line in this file. required is RPO=0: a
+      # write is not acknowledged until the synchronous standby holds it, and
+      # nothing acknowledged can be lost to a primary failure. What it costs
+      # is that a write pauses whenever no standby can satisfy number: 1, and
+      # on two instances Phase 1's staggered Windows Update reboots took the
+      # only candidate away on a schedule - a recurring, self-inflicted write
       # outage that presents as a hung site, with nothing in Postgres's own
-      # logs but a wait. preferred degrades to asynchronous replication while
-      # the standby is away and re-arms once it returns.
+      # logs but a wait. That was the whole case for preferred, and three
+      # instances end it: either surviving standby satisfies number: 1, so one
+      # node rebooting no longer costs the quorum.
       #
-      # Revisit in Phase 7: with three instances and number: 1, a single node
-      # reboot no longer costs the quorum, and required becomes affordable.
-      dataDurability: preferred
+      # This is why POSTGRES_INSTANCES must never fall back to 2 while this
+      # says required - the pair is what makes reboots survivable, not either
+      # line alone.
+      dataDurability: required
 
   # required, not the preferred default: preferred will happily co-locate two
   # instances on one node under pressure, which silently converts an HA
   # database into a single point of failure - and the failure being invisible
   # is the argument for required here. Two instances across two nodes is a
-  # clean split; the third instance Phase 7 adds still fits, because required
+  # clean split; the third instance Phase 7 added still fits, because required
   # anti-affinity is a per-pod constraint, not a per-node cap. What it does
   # cost is that a two-node cluster asked for 3 instances would leave one pod
   # permanently Pending, which is the reason 4b.7's pattern caps
@@ -104,9 +108,10 @@ spec:
         barmanObjectName: aerie-pg-wal
 
   # Let the operator switch over on an image or config change rather than
-  # waiting on a human `kubectl cnpg promote`. With dataDurability: preferred
-  # and a healthy standby this is a safe default; a supervised strategy here
-  # would mostly mean a rollout that silently never finishes.
+  # waiting on a human `kubectl cnpg promote`. With dataDurability: required
+  # the promoted replica is by definition caught up, so this is a safe
+  # default; a supervised strategy here would mostly mean a rollout that
+  # silently never finishes.
   primaryUpdateStrategy: unsupervised
 
   # Left at its default (false). 4b.8's DDL Job and 4b.9's restore Job are

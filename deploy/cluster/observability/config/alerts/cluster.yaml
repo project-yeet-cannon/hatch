@@ -5,9 +5,15 @@
 #
 # etcd quorum - ../../controllers/kube-prometheus-stack.yaml's kubeEtcd block
 # and scripts/k3s/Install-K3sNode.ps1's etcd-expose-metrics (6b.1) are what put
-# a target here to alert on. `for: 1m` on both, not longer: with two servers,
-# quorum is 2 of 2 until Phase 7, and a lost member is an outage the instant
-# it happens, not fifteen minutes later. The job label on EtcdMemberDown is
+# a target here to alert on. Three servers since Phase 7c.7, and that is where
+# the two rules part company - they were both `for: 1m` / critical while a lost
+# member on two servers was an instant outage. EtcdNoLeader keeps both: no
+# leader is a stopped cluster whatever the member count, and no amount of
+# waiting makes it less true. EtcdMemberDown is now a warning at `for: 15m`,
+# because one member of three is a survivable degradation and Phase 1's
+# staggered Windows Update reboots produce it on a schedule - long enough to
+# ride out a reboot, short enough that a member that never comes back is
+# reported while there is still a second one to lose. The job label on it is
 # the chart's default naming for the pinned 88.3.0 release
 # (`kube-prometheus-stack-kube-etcd`) and is the one part of this file that
 # was not checked against a running cluster - confirm it with `kubectl -n
@@ -20,15 +26,18 @@
 # produce exactly this state on a healthy cluster, and
 # ../../../infrastructure/config/longhorn-storageclasses.yaml's
 # staleReplicaTimeout: 30 (minutes) is the number this must not undercut.
-# Expect this to fire until Phase 7 - longhorn-r3 cannot be satisfied on two
-# nodes, which that storage class file already says out loud.
+# Through the two-node build window this fired continuously and was expected
+# to - longhorn-r3 cannot be satisfied on two nodes, which that storage class
+# file already says out loud. Phase 7c.8's third node ended that: every
+# longhorn-r3 volume rebuilt to three replicas, and this rule now means what
+# it says.
 #
 # CNPG replication lag and instance count - ../../scrape/cloudnative-pg.yaml
 # (6b.6) is the job. The instance-count threshold reads ${POSTGRES_INSTANCES}
-# rather than a literal 2, so Phase 7's raise to 3 does not also require an
-# edit here - the exact caveat the cluster plan's own text flags for a
-# hardcoded threshold, sidestepped by templating against the same key
-# deploy/cluster/data/cluster/cluster.yaml already uses.
+# rather than a literal 2, which is why Phase 7's raise to 3 was a repository
+# variable and not an edit here - the exact caveat the cluster plan's own text
+# flags for a hardcoded threshold, sidestepped by templating against the same
+# key deploy/cluster/data/cluster/cluster.yaml already uses.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -44,14 +53,14 @@ spec:
           labels:
             severity: critical
           annotations:
-            summary: 'etcd member {{ $labels.instance }} reports no leader - quorum is 2 of 2 until Phase 7'
+            summary: 'etcd member {{ $labels.instance }} reports no leader - quorum is 2 of 3, so this is a stopped cluster'
         - alert: EtcdMemberDown
           expr: up{job="kube-prometheus-stack-kube-etcd"} == 0
-          for: 1m
+          for: 15m
           labels:
-            severity: critical
+            severity: warning
           annotations:
-            summary: 'etcd member {{ $labels.instance }} is not answering its metrics port'
+            summary: 'etcd member {{ $labels.instance }} has not answered its metrics port for 15m - quorum is 2 of 3, one member from an outage'
     - name: longhorn
       rules:
         - alert: LonghornVolumeDegraded
