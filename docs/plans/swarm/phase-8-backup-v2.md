@@ -4,7 +4,7 @@
 
 # Phase 8 — Backup v2 + rehearsal
 
-**Status: Not started**
+**Status: In progress — 8a.1 through 8a.3 done, 8a.4 next**
 
 > Re-scoped once, against a repository that changed underneath the original six
 > bullets. Those bullets were written before Phase 4 existed and before Phase 7
@@ -228,21 +228,39 @@ Three backup paths, one alert family, one rehearsal:
       identity, which is the authority and the only half that would also catch
       a bucket policy or an SCP.
 
-- [ ] **2. Put 7c.1's copy where the cluster will look for it**
+- [x] **2. Put 7c.1's copy where the cluster will look for it**
 
       Finding 3. Move (do not re-copy) the verified copy of the old
-      `E:/restic-repo` to a fixed subdirectory of the house share — `restic/` at
-      the share root is the assumption 8b.2's `RESTIC_LOCAL_SUBPATH` encodes.
-      It must be reachable at `//${SHARE_HOST}/${SHARE_NAME}/restic` with the
-      credential the `smb-share` Secret already holds, and it must be writable
-      by that identity, which the read-only half of
+      `E:/restic-repo` to a fixed subdirectory of the house share —
+      **`restic-repo/`** at the share root, which is the value 8b.2's
+      `RESTIC_LOCAL_SUBPATH` takes. The directory keeps the name it had on the
+      old server rather than being shortened to `restic/`: 7c.1 and
+      `compose.backup.yml` before it already called the repository by that
+      name, so keeping it means the path is one string across the pre-cluster
+      history and the post-cluster config, and there is no window in which a
+      half-renamed 1 GiB directory exists on the share.
+      It must be reachable at `//${SHARE_HOST}/${SHARE_NAME}/restic-repo` with
+      the credential the `smb-share` Secret already holds, and it must be
+      writable by that identity, which the read-only half of
       [share-volumes.yaml](../../../charts/aerie/templates/share-volumes.yaml)
       is a reminder to check rather than assume.
 
       *Exit:* `restic -r <path> snapshots --tag cutover-final` lists the
       snapshot 7b.3 tagged, from a machine that is not the old server.
 
-- [ ] **3. Label the three `longhorn-r3` Volume CRs**
+      **Done 2026-08-23.** Verified from `aerie-node-0` through a throwaway pod
+      mounting the existing `aerie-share-rw` PVC — the same SMB path and the
+      same `smb-share` credential 8b.4's PV will use, rather than a hand-made
+      mount that would have proved a different thing. `3bb9e508`
+      (`daily,cutover-final`, 2026-08-20) lists; the whole history came across
+      (6 snapshots, 957.8 MiB, 66 pack files); `restic check` reports no errors
+      over all packs, snapshots, trees and blobs; and the repository is
+      writable by that identity — `check` took and released its exclusive lock,
+      and `locks/` is empty afterward. Not checked: whether `E:/restic-repo` on
+      the old server is actually gone, which is the *move* half rather than the
+      copy half and needs that host's filesystem, not its share.
+
+- [x] **3. Label the three `longhorn-r3` Volume CRs**
 
       Finding 2. For each of the Volumes backing Grafana, `uptime-kuma-data` and
       Alertmanager — the three PVCs whose `storageClassName` is `longhorn-r3`:
@@ -262,7 +280,32 @@ Three backup paths, one alert family, one rehearsal:
       is a gate assertion rather than a one-time step is that a volume recreated
       by a restore comes back **without** the label and with no error anywhere.
 
-- [ ] **4. Prove the offline `RESTIC_PASSWORD` copy still exists and still works**
+      **Done 2026-08-23.** The mapping still reads three and not four:
+      `kube-prometheus-stack-grafana` ->
+      `pvc-5924bbc8-a067-4ff8-a0d3-a859160efd37`, `uptime-kuma-data` ->
+      `pvc-0f0d44e7-9829-423d-91c1-236cb7dbc7bb`, and Alertmanager's
+      `alertmanager-kube-prometheus-stack-alertmanager-db-...-0` ->
+      `pvc-78197967-bd29-4e68-889c-f6608ba0b0ff`. All three are labelled, the
+      label selects exactly those three, and the two sets are equal in both
+      directions — which is the half of the exit condition that a count alone
+      would not have proved.
+
+      One correction to finding 2, found here rather than at 8b.10 where it
+      would have mattered more: the `default` group is **not** implicit on these
+      volumes. Longhorn has stamped
+      `recurring-job-group.longhorn.io/default=enabled` explicitly on all five
+      Longhorn volumes, Prometheus's and OpenSearch's included, so the three
+      critical volumes now carry two group labels rather than one. That is inert
+      today — `kubectl -n longhorn-system get recurringjob` is empty, and 8b.10
+      creates its job in `aerie-critical` — and the labels were left alone
+      rather than stripped, because stripping `default` from these three would
+      not have protected the two volumes finding 2 is actually worried about.
+      What changes is the shape of the trap: a `default`-group job added later
+      sweeps in the TSDB and the indices *and* double-backs-up the three, and
+      nothing in the label state warns about it. If that is worth closing, it is
+      closed by never creating a `default` job, not by a label.
+
+- [x] **4. Prove the offline `RESTIC_PASSWORD` copy still exists and still works**
 
       Not "confirm you have it". Read it off the paper (or out of the safe, or
       wherever [Phase 0](phase-0-backup-and-dr.md) put it), type it, and open a
@@ -355,7 +398,7 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       | Key | Required | Pattern notes | `consumedBy` |
       |---|---|---|---|
       | `RESTIC_S3_REPOSITORY` | yes | A restic S3 repository string — `s3:s3.<region>.amazonaws.com/<bucket>`, leading `s3:`, no trailing slash. The regional endpoint is what removes the need for a region key (finding 5) | 8b.5 CronJob env |
-      | `RESTIC_LOCAL_SUBPATH` | yes | A relative path under the share, no leading slash, no `..` — the same shape `MEDIA_LIBRARY_SUBPATH` already uses, and 8a.2's directory | 8b.4 PV `source` |
+      | `RESTIC_LOCAL_SUBPATH` | yes | A relative path under the share, no leading slash, no `..` — the same shape `MEDIA_LIBRARY_SUBPATH` already uses, and 8a.2's directory, which is `restic-repo` | 8b.4 PV `source` |
       | `LONGHORN_BACKUP_BUCKET` | yes | An S3 bucket name, same pattern as `WAL_BUCKET`, and **not** either of the other two buckets | 8b.9 `backupTarget` |
 
       `LONGHORN_BACKUP_BUCKET` is a bucket name rather than the full

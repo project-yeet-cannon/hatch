@@ -141,6 +141,12 @@ builder.Services.AddScoped<IChannelHistoryWriter, ChannelHistoryWriter>();
 builder.Services.AddScoped<IHomeAssistantConnectionManager, HomeAssistantConnectionManager>();
 builder.Services.AddTransient<IHomeAssistantCommandService, HomeAssistantCommandService>();
 
+// One WebSocket subscription to HA's state_changed stream per api replica, not
+// one per cluster - see HomeAssistantEventListener for why every replica needs
+// its own. Never starts in the migrate Job: that branch returns before the host
+// runs, so no hosted service in this file starts there.
+builder.Services.AddHostedService<HomeAssistantEventListener>();
+
 // Every write to HA goes through IClimateCommandService, which ledgers it -
 // nothing else should be resolving IHomeAssistantCommandService directly (see
 // docs/climate-brain-architecture.md Phase 1).
