@@ -1716,10 +1716,15 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       - exactly three Volumes carry `recurring-job-group.longhorn.io/aerie-critical`,
         and every `longhorn-r3` PVC's Volume is one of them (8a.3's finding: a
         restored volume comes back unlabelled and silent)
-      - `backup-target`, `backup-target-credential-secret` and
-        `freeze-filesystem-for-snapshot` read back their configured values from
-        `settings.longhorn.io` — finding 1's whole argument rests on the third
-        one, and Longhorn swallows a bad value
+      - the backup target URL and its credential Secret read back from the
+        **`backuptargets.longhorn.io/default` CR**, and
+        `freeze-filesystem-for-snapshot` from `settings.longhorn.io` — 8b.9's
+        correction, which this bullet carried in the old
+        three-settings-reads shape until 8b.16 was written. The setting is the
+        input; the CR is what Longhorn resolved, and `status.available` on it
+        is the only thing that distinguishes a configured target from a
+        reachable one. Finding 1's whole argument rests on the freeze setting,
+        and Longhorn swallows a bad value
       - the newest snapshot in each restic repo contains `aerie.dump`,
         `quartz.dump` and `parameters.json`
       - `aerie-pg-restore-restic` does **not** exist (8b.10's deletion, which is
@@ -1733,6 +1738,60 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       *Exit:* the workflow exits 0. Leave this box unticked until it has, for
       the same reason every gate before it stayed unticked: a gate that has
       never passed has proved nothing.
+
+      **Written 2026-08-24, and it runs: 20 of 21 checks pass.** The box stays
+      unticked, because the twenty-first is a real failure and this gate's
+      whole value is that it says so.
+
+      [`Test-Backup.ps1`](../../../scripts/k3s/Test-Backup.ps1), wrapped by
+      [`verify-backup.yml`](../../../.github/workflows/verify-backup.yml), in
+      the established shape — read-only, unnumbered, no early exit, and a
+      check it cannot evaluate is a failure. Every assertion this step asked
+      for is in it, plus three the writing produced: that the backup target is
+      *reachable* (`status.available`), that the Longhorn recurring job has
+      actually produced three completed `backups.longhorn.io` objects, and
+      that the thresholds in `backup.yaml` still match the ones the gate
+      compares against — a gate and an alert that disagree silently are worse
+      than either alone.
+
+      **The one deviation, and it is deliberate.** Two exit criteria —
+      `cutover-final` in both repositories, and the newest snapshot holding
+      all three files — cannot be answered by reading Kubernetes objects.
+      They need `restic` against both repositories, and nothing long-lived in
+      this cluster has the password, the S3 credential and the SMB mount at
+      once. So the gate creates **one short-lived Job, built from the live
+      `aerie-backup` CronJob's own pod template**, replaces its command with
+      `snapshots`, `ls` and `dump`, reads the log and deletes it. Building it
+      from the live CronJob rather than restating the image and credentials is
+      what makes the check meaningful: a probe that named its own repository
+      could pass against one the nightly backup no longer writes to.
+      `-SkipResticProbe` refuses even that, and fails the two checks instead —
+      which is the honest price rather than a way to make the gate quiet.
+
+      **The failing check is 8b.10's**: `aerie-pg-restore-restic` still
+      exists, because running the restore Job against the new Secret writes
+      over the live databases and is a person's decision. That check is
+      correct and should stay failing until it is done.
+
+      Three things the run found:
+
+      - The `restic` Secret's three keys and `longhorn-backup-target`'s two
+        both match what `parameters.json` declares, in both directions.
+      - The parameter export holds **21** parameters, exactly the count of
+        `required: true` entries in `parameters.json` — the floor 8b.7's
+        `[]`-guard was written to defend, asserted rather than assumed.
+      - A ``` `restic` ``` inside a double-quoted PowerShell string is a
+        carriage return: `` `r `` ate its own `r` and the message read "the
+        estic Secret". Found by reading the gate's own output, which is the
+        only reason anyone would.
+
+      One check failed on the first run and has passed on every run since:
+      the `longhorn-backup-target` ExternalSecret's Ready condition, against
+      an object `kubectl` reported as `SecretSynced` thirty seconds later.
+      Either that one call returned empty and the probe substituted `{}`, or
+      the object was mid-write. The check now distinguishes "no object" from
+      "no Ready condition" so the next occurrence says which, rather than
+      being re-diagnosed from scratch.
 
 ---
 
