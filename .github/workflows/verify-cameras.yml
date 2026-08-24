@@ -1,0 +1,97 @@
+# docs/plans/cameras.md Phase 9's cluster half, as something that exits 0 -
+# the same shape verify-app-tier.yml and verify-data-tier.yml established for
+# the cluster plan's phase gates.
+#
+# Not numbered into the Provision sequence, for the same reason those two
+# aren't: it is read-only. Nothing here writes to the cluster, and nothing
+# here prints a stream source - go2rtc's own API returns every camera's RTSP
+# URL with its password in it, and this run log is not the place for that.
+#
+# Dispatch it after seeding GO2RTC_STREAMS and restarting go2rtc, and again
+# every time a camera is added: a new camera is a new line in the same Secret
+# plus a rollout restart somebody has to remember, and the failure when they
+# don't is a kiosk feed that never opens.
+#
+# Same thin-wrapper rule as every other workflow here: this checks out the
+# repo and hands every decision to scripts/k3s/Test-Cameras.ps1, which also
+# runs by hand from any Windows box with the OpenSSH client and SSH to a node.
+#
+# Billing: `runs-on` pins `self-hosted`, so runs never land on a GitHub-hosted
+# runner (which has no route to the node's LAN address anyway) and never
+# consume Actions minutes.
+name: 'Verify: Cameras'
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: 'Runner to dispatch from (any host works - it needs SSH to a node)'
+        required: true
+        type: choice
+        options:
+          - hyperv-host-0
+          - hyperv-host-1
+          - hyperv-host-2
+      ip_address:
+        description: "A k3s server's LAN address. Any server - everything read here is cluster state"
+        required: true
+        type: string
+
+# Read-only, so two concurrent runs cannot corrupt anything - but each one
+# opens an RTSP session per camera through go2rtc, and a Reolink caps
+# concurrent sub-stream clients in the single digits. A second dispatch waits.
+concurrency:
+  group: verify-cameras
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Camera bring-up gate
+    runs-on: [self-hosted, '${{ inputs.host }}']
+
+    # One SSH round trip, but the frame fetches inside it wait on real
+    # hardware: a cold stream costs an RTSP connect plus up to one keyframe
+    # interval - 4 s on the measured Reolink sub-stream - per camera. 15m
+    # failing means something is hanging rather than being slow.
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out provisioning scripts
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency OpenSshClient
+
+      - name: Assert the camera path from the cluster side
+        shell: powershell
+        env:
+          IP_ADDRESS: ${{ inputs.ip_address }}
+
+          # Same keypair every provision-*/verify-* workflow uses.
+          NODE_SSH_PRIVATE_KEY: ${{ secrets.NODE_SSH_PRIVATE_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+
+          if (-not $env:NODE_SSH_PRIVATE_KEY) {
+            throw "NODE_SSH_PRIVATE_KEY is not set. It's the same repository secret provision-0-new-node.yml already requires."
+          }
+
+          # No camera name and no go2rtc address passed in: the script reads
+          # where the streams Secret lands from scripts/secrets/parameters.json
+          # and which streams to prove from the Secret itself, so this stays
+          # correct as cameras are added.
+          & .\scripts\k3s\Test-Cameras.ps1 `
+            -IPAddress $env:IP_ADDRESS `
+            -SshPrivateKey $env:NODE_SSH_PRIVATE_KEY
+
+          # Same reason every other verify-*.yml propagates this explicitly:
+          # `exit` inside a script invoked with & sets $LASTEXITCODE without
+          # ending the caller.
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

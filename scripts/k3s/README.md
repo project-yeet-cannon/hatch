@@ -376,3 +376,44 @@ else. That splits in two, because the two halves need different things:
 | No address literal anywhere under `deploy/` | [`ci.yml`](../../.github/workflows/ci.yml) | Needs no per-installation value, so it runs on every PR |
 | Every `${TOKEN}` in the built output is a declared key | [`ci.yml`](../../.github/workflows/ci.yml) | Flux expands an undefined token to the empty string, so `${DOMIAN}` is not a failed reconciliation — it is an Ingress with no host |
 | The base domain and VIP appear in no file under `deploy/` | this script | Needs the actual values, which [`docs/ethos.md`](../../docs/ethos.md) keeps out of the repository — the cluster's ConfigMap is the only place both halves exist at once |
+
+## Verify — the camera bring-up gate
+
+[`Test-Cameras.ps1`](Test-Cameras.ps1), dispatched as *Verify: Cameras*. Not a
+cluster-plan phase gate at all — [the cameras
+plan](../../docs/plans/cameras.md) Phase 9 is a bring-up checklist, and this
+is the half of it a machine can answer.
+
+That split is the point. Half of Phase 9 needs a person: walking in front of a
+camera, watching a modal open on a wall tablet, judging whether the feed feels
+live. The other half is a set of yes/no facts about a cluster — is the streams
+Secret there, does go2rtc hold it, and can a *pod* reach a camera's RTSP port
+— and those facts get re-asked every time a camera is added, not once. A
+second camera is a new line in the same Secret plus a `kubectl rollout restart`
+somebody has to remember, and the failure when they don't is a kiosk feed that
+never opens. So: run it after the first camera, and after every camera after
+that. A green run also prints the four things it did *not* prove, because a
+green table is otherwise an invitation to believe cameras are done.
+
+**It takes no camera name.** Where the streams Secret lands comes from
+[`parameters.json`](../secrets/parameters.json) — the same file that generated
+the ExternalSecret — and which streams to prove comes from the Secret itself.
+
+**The check worth the whole script** is one JPEG frame per stream, fetched
+through the API server's service proxy. A frame means go2rtc opened an RTSP
+session *from inside the pod network* to that camera's address, the credential
+in the streams file was accepted, and a keyframe arrived and decoded. Pod
+egress to the LAN was the plan's one untested link that could have forced a
+design change; this is what closes it, and what re-opens it if a CNI upgrade
+or a firewall rule ever breaks it.
+
+### No stream source is ever printed
+
+A go2rtc stream source is an RTSP URL with the camera's password in it, and
+`GET /api/streams` returns those URLs verbatim. This script's output is a CI
+run log, so that response is fetched to `/dev/null` and only its status is
+reported. Stream *names* come from the Secret instead, decoded inside a
+pipeline on the node that keeps only the text left of the first colon — which
+for `camera.x: rtsp://user:pass@host/path` is `camera.x`, and for a
+continuation line is nothing at all. Everything else that crosses the wire is
+a byte count.
