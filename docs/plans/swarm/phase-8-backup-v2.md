@@ -1285,7 +1285,38 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       5. After one night, three `backups.longhorn.io` completed and a
          `backupstore/` prefix in the bucket.
 
-- [ ] **11. The alert family** —
+      **Cluster half done 2026-08-24, except one item that is the operator's
+      to make.** Steps 1 and 2 were already true. Step 3 was not, and it was
+      louder than the step implied: the stale `aerie-pg-restore` Job had
+      `data-schema` reporting `Job.batch "aerie-pg-restore" is invalid:
+      spec.template: field is immutable` on every reconcile, which took
+      `apps` down with it through `dependsOn` - so the immutable pod template
+      this step predicted had, by the time it was found, stopped the whole
+      application tenant from reconciling rather than merely failing its own
+      apply. Deleting the Job cleared both within ninety seconds; Flux
+      recreated it suspended.
+
+      Step 5 did not wait for the night. The `RecurringJob`'s cron was moved
+      to `*/5 * * * *` long enough for one run and put back: three
+      `backups.longhorn.io` objects reached `Completed` (77.6 MiB, 81.8 MiB
+      and 348.1 MiB of snapshot), `longhorn_volume_last_backup_at` went from
+      0 to a unix timestamp on all three volumes, and
+      `kube_cronjob_status_last_successful_time` appeared for
+      `longhorn-system/aerie-critical-daily` - which is also what let 8b.11's
+      rules be written against a series that exists rather than one that
+      should. **The generated CronJob is named `aerie-critical-daily`, not
+      `aerie-critical-daily-c`** as step 2 above says.
+
+      Step 4 is **not done and is deliberately left for a person**:
+      `restore.sh` runs `pg_restore` into the live `aerie` and `quartz`
+      databases, which is a write to production that no automated run should
+      make on its own. It is in this phase's manual list, and 8b.15's
+      rehearsal - a restore onto a scratch Postgres - is the cheaper way to
+      prove the same credential. `aerie-pg-restore-restic` therefore still
+      exists, which 8b.16's gate asserts against; that assertion is correct
+      and will fail until step 4 happens.
+
+- [x] **11. The alert family** —
       `deploy/cluster/observability/config/alerts/backup.yaml`.
 
       A fourth `PrometheusRule` beside
@@ -1336,6 +1367,83 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       Rules page in state `inactive` rather than `unknown`, and each expression
       returns a number when pasted into the expression browser. `inactive` and
       `unknown` look nearly identical in the UI and mean opposite things.
+
+      **Done 2026-08-24 — eleven rules, and the step's own instruction to
+      check three asserted facts is what earned two of them.**
+      [`backup.yaml`](../../../deploy/cluster/observability/config/alerts/backup.yaml)
+      carries six alerts and five `absent()` siblings in three groups, and all
+      eleven read `inactive`/`ok` in Prometheus's rules API with every
+      expression returning a number.
+
+      Of the three facts:
+
+      - `kube_cronjob_status_last_successful_time` is real, with the
+        `namespace` and `cronjob` labels the table assumed.
+      - A Longhorn `RecurringJob` **is** backed by an ordinary Kubernetes
+        CronJob that kube-state-metrics already scrapes, so the fallback this
+        step pre-authorized was not needed. (Its name is `aerie-critical-daily`
+        — see 8b.10 above.)
+      - `cnpg_collector_last_available_backup_timestamp` is real, is scraped,
+        and reads **0** on all three instances of a cluster that has completed
+        a base backup every night since 4b.10. So does
+        `cnpg_collector_first_recoverability_point`. Both render Cluster status
+        fields (`status.lastSuccessfulBackup`,
+        `status.firstRecoverabilityPoint`) that nothing writes under the
+        barman-cloud **plugin** — the path
+        [objectstore.yaml](../../../deploy/cluster/data/cluster/objectstore.yaml)
+        takes and the only one CNPG 1.28 offers. `time() - 0` is fifty-six
+        years, so the rule as specified would have fired every night forever.
+        This step's warning was about a rule that can never fire; this is the
+        same defect in its loud form, and it is worth naming as a pair.
+
+      **The replacement is a second `CustomResourceState` entry** in
+      [kube-prometheus-stack.yaml](../../../deploy/cluster/observability/controllers/kube-prometheus-stack.yaml),
+      over `backups.postgresql.cnpg.io`, emitting
+      `aerie_cnpg_backup_stopped_at` from `status.stoppedAt` with a `phase`
+      label — the mechanism this step pre-authorized as Longhorn's fallback,
+      spent on CNPG instead. It cost two findings of its own:
+
+      - **`path: [status, stoppedAt]`, not `valueFrom:`.** Written the
+        obvious way, kube-state-metrics registered the family, logged
+        `Custom resource state added metrics`, answered `/metrics` with HELP
+        and TYPE lines, and emitted **zero samples** with no error. A Gauge
+        whose path resolves to a map iterates that map's entries, so an
+        omitted path is five failed lookups against the object's top-level
+        keys. Pointed at the leaf it takes the scalar branch and gets the
+        RFC3339-to-unix-seconds conversion. `CNPGBackupMetricAbsent` went
+        `pending` within a minute of the rules loading, which is how this was
+        found — the sibling doing precisely the job it was added for, on its
+        first day, against its own author.
+      - **The chart sets no checksum annotation on that ConfigMap**, so a
+        Helm upgrade changing only the CustomResourceState config updates the
+        ConfigMap and leaves the pod running the old one. It needs
+        `kubectl -n observability rollout restart
+        deploy/kube-prometheus-stack-kube-state-metrics`.
+
+      Two departures from the table, both argued in the file:
+      `kube_job_failed{condition="true"}` rather than
+      `kube_job_status_failed` (the latter counts failed *pods* and keeps its
+      value after the Job succeeds, so one pod lost to a reboot would page for
+      the three days the Job object survives), bounded to failures younger
+      than a day; and a sixth rule, `LonghornVolumeBackupStale`, which is
+      where 8b.10's detached-volume gap landed. It selects volumes by joining
+      `longhorn_volume_last_backup_at` against the PVCs whose class is
+      `longhorn-r3` — finding 2's own definition of the wanted set, and a
+      better selector than 8a.3's label for the trap 8a.3 names: a volume
+      restored without the label keeps its class, so it stays in the rule's
+      set and goes stale loudly instead of dropping out of it silently.
+
+      One thing this step did not have to fix and did anyway, because nothing
+      could reach the cluster until it was fixed: `infra-config` had been
+      failing its health check on an `ExternalSecret` for a camera parameter
+      that Parameter Store does not hold, which stalled every Kustomization
+      below it — data, apps and both observability layers. That is the exact
+      failure
+      [`parameters.json`](../../../scripts/secrets/parameters.json)'s own
+      schema note predicts for a `kubernetes` block over an unseeded value,
+      and the fix is the field beside it: `kubernetesDeferred` until Provision
+      2 has seeded `GO2RTC_STREAMS`. It is in this phase's manual list because
+      flipping it back is the operator's, not this phase's.
 
 - [ ] **12. Give the flows teeth, and prove it once** —
       [`kube-prometheus-stack.yaml`](../../../deploy/cluster/observability/controllers/kube-prometheus-stack.yaml),
