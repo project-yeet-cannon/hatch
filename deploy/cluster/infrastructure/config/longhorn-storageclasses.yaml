@@ -1,4 +1,7 @@
-# The cluster plan Phase 3b.11 - the two explicit Longhorn StorageClasses.
+# The cluster plan Phase 3b.11 - the explicit Longhorn StorageClasses. Two of
+# them until the photos plan's Phase 1.5 appended a third; the header below
+# describes the original pair, and longhorn-bulk carries its own argument at
+# the bottom of the file because it is not chosen on the same axis.
 #
 # The storage split in the cluster plan asks for per-volume replica counts rather
 # than one global default: 3 for the tiny critical volumes (Grafana, Kuma) and 2
@@ -123,3 +126,75 @@ parameters:
   dataEngine: "v1"
   disableRevisionCounter: "true"
   dataLocality: "disabled"
+---
+# The photos plan (docs/plans/immich.md) Phase 1.5 - the third class, and the
+# one that does not fit the axis the other two are named on.
+#
+# longhorn-r3 and longhorn-r2 are replica counts, chosen per volume by how much
+# the data's loss would cost. This one is a *placement*: one replica, on one
+# tagged disk, on whichever node that disk was physically attached to. "r1"
+# would name only the first third of that and would read as "r2 but cheaper",
+# which is the wrong thing to conclude from it.
+#
+# ---------------------------------------------------------------------------
+# Why one replica is the right number here and not a compromise
+#
+# A ~1 TB photo library at two replicas costs 2 TB of raw disk to protect data
+# whose actual protection is the offsite copy in Phase 4. Losing a replica of
+# Prometheus means losing metrics that nothing can reconstruct; losing this one
+# means restoring from S3, which is the recovery path that has to work anyway
+# and gets rehearsed. Paying twice for local redundancy on the largest volume in
+# the house, on top of an archive copy, is the expensive half of a
+# belt-and-braces the braces alone already cover.
+#
+# The consequence is worth stating rather than discovering: a volume in this
+# class is Degraded-to-Faulted, not Degraded-then-rebuilt, if its one replica is
+# lost. That is by design, and it is why Phase 4 is not optional.
+# ---------------------------------------------------------------------------
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-bulk
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+# Retain, for the same reason its two siblings use it - see longhorn-r3's note
+# above. It matters more here than anywhere else in the tree: this is the one
+# volume whose contents cannot be re-derived from a running system at all.
+reclaimPolicy: Retain
+# WaitForFirstConsumer, and **unlike** both siblings, which is the one field in
+# this file worth reading the reason for.
+#
+# Those two are Immediate because a Longhorn volume attaches over iSCSI from any
+# node, so binding before a pod exists costs nothing - the volume can follow the
+# pod wherever the scheduler puts it. Under dataLocality: strict-local that
+# stops being true: the volume's node *is* the pod's node, so binding early is
+# binding before the constraint is known. WaitForFirstConsumer makes the
+# scheduler pick the node first and the volume follow, which is the only order
+# in which the tagged disk's location can be honoured.
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  # One. See the block comment above.
+  numberOfReplicas: "1"
+  # The mechanism that keeps a node name out of this repo entirely.
+  #
+  # strict-local ties the volume to the node holding its replica and forces the
+  # consumer pod onto that node *through the volume*, rather than through a
+  # nodeSelector or a PHOTOS_NODE variable written by hand. The disk tag below
+  # is structural; the tagged disk exists on exactly one node because that is
+  # where an operator attached hardware; and Kubernetes derives the placement
+  # from those two facts. docs/ethos.md is why that distinction is worth a
+  # storage class parameter.
+  dataLocality: "strict-local"
+  # The other half of the same contract, and the entire safety mechanism for
+  # the disk itself. Longhorn schedules replicas onto any disk with capacity,
+  # and a class naming no diskSelector matches every *untagged* disk - so
+  # without this, a large empty disk is simply general capacity and Prometheus
+  # and OpenSearch replicas land on it. The literal has to match the tag
+  # scripts/k3s/Add-BulkDisk.ps1 writes into the node's node.longhorn.io CR;
+  # those two agreeing is what makes this class reach exactly one disk.
+  diskSelector: "bulk"
+  staleReplicaTimeout: "30"
+  fromBackup: ""
+  fsType: "ext4"
+  dataEngine: "v1"
+  disableRevisionCounter: "true"

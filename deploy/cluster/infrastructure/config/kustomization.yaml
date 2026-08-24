@@ -45,7 +45,9 @@ resources:
   - wildcard-certificate.yaml
   - traefik-tlsstore.yaml
   # 3b.11's two classes, in one file: they differ on a single parameter, and the
-  # argument for each count is an argument about the other one.
+  # argument for each count is an argument about the other one. The photos
+  # plan's Phase 1.5 added a third, longhorn-bulk, to the same file - it does
+  # not differ on that parameter and says so at length.
   - longhorn-storageclasses.yaml
   # 8b.10's nightly backup of the three longhorn-r3 volumes. Beside the classes
   # rather than folded into them on purpose: Longhorn selects volumes for it by

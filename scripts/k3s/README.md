@@ -7,6 +7,7 @@ The cluster's own provisioning scripts, in the order they run:
 | [`Install-K3sNode.ps1`](Install-K3sNode.ps1) | *Provision 1: Install k3s* | **once per node** |
 | [`Set-ClusterConfig.ps1`](Set-ClusterConfig.ps1) | *Provision 4: Cluster configuration* | **once per cluster** |
 | [`Initialize-NodeStorage.ps1`](Initialize-NodeStorage.ps1) | *Provision 5: Node storage* | **once per node** |
+| [`Add-BulkDisk.ps1`](Add-BulkDisk.ps1) | *Provision 7: Bulk disk* | **once, on one node** |
 | [`Test-ClusterPlatform.ps1`](Test-ClusterPlatform.ps1) | *Verify: Cluster platform* | **read-only, any time** |
 
 Between them sit [`scripts/secrets/`](../secrets/) (Provision 2) and
@@ -296,6 +297,97 @@ The original `/etc/fstab` is copied to `/etc/fstab.aerie-orig` on the first run.
 
 Everything after this is a commit under [`deploy/`](../../deploy/) — from here
 the cluster changes by commit rather than by command.
+
+## Provision 7 — the bulk disk
+
+[The photos plan](../../docs/plans/immich.md) Phase 1, steps 1.2 and 1.3.
+[`Add-BulkDisk.ps1`](Add-BulkDisk.ps1) is Provision 5's sibling and shares its
+shape almost exactly — same SSH mechanics, same probe-once-then-decide
+structure, same identify-the-disk-by-shape trick, same two hard rules. Three
+things make it a separate script rather than a flag on that one, and each is
+the reverse of something Provision 5 depends on:
+
+| | Provision 5 | Provision 7 |
+|---|---|---|
+| When | **before** Longhorn exists | **after** the cluster is up, because its last stage patches a `node.longhorn.io` CR |
+| Where | every node | **one** node — the node the operator attached the disk to |
+| Filesystem | ext4 on the bare disk | ext4 on an **LVM** logical volume |
+
+### Why LVM, when its sibling does without
+
+Provision 5's disk is a fixed 200 GB VHDX that will never change size. This one
+is sized against whatever free space the chosen host actually had — no host in
+this cluster had a contiguous 2 TB — so growing it later must not mean
+rebuilding it.
+
+With `vg_bulk` holding one physical volume today, adding a second disk later is
+`-ExtendVolumeGroup`: `pvcreate`, `vgextend`, `lvextend -l +100%FREE`,
+`resize2fs`, all online, with the volume never detaching and Longhorn never
+seeing the disk go away. Without LVM the same operation is: create a bigger
+disk, copy a terabyte of replica data, re-register. One indirection buys a
+growth path that never takes the library offline.
+
+### The tag is the entire safety mechanism
+
+The last stage patches the node's `node.longhorn.io` CR to add the disk with
+`tags: ["bulk"]`, `allowScheduling: true` and `storageReserved: 0`. That tag is
+not a label for humans. Longhorn schedules a replica onto any disk with
+capacity, and a StorageClass naming no `diskSelector` matches every *untagged*
+disk — so without the tag, a large empty disk is simply general capacity and
+Prometheus and OpenSearch replicas land on it. Tagging takes it out of the
+general pool, and only `longhorn-bulk`'s `diskSelector: "bulk"` can reach it.
+
+The literal has to match
+[`longhorn-storageclasses.yaml`](../../deploy/cluster/infrastructure/config/longhorn-storageclasses.yaml)'s.
+Those two agreeing is the whole scheduling contract, and it is why the script
+fixes the tag as a constant rather than taking it as a parameter.
+
+The patch is a **JSON merge patch**, sent over standard input rather than in
+the SSH command — `Invoke-NodeSsh` refuses a command containing a double quote,
+because Windows PowerShell 5.1 does not escape one when it builds `ssh.exe`'s
+command line and `ssh.exe`'s parser then strips it. A strategic merge patch is
+not an option either: custom resources have no patch strategy, and a replace
+would drop the chart's own `default-disk-<hex>` entry and every replica on the
+node with it.
+
+### No node name reaches the repo
+
+Which node holds the disk is an input to the workflow and a fact about where
+someone physically attached hardware. It is deliberately *not* a `PHOTOS_NODE`
+variable, a `nodeSelector`, or a line in any manifest.
+`longhorn-bulk`'s `dataLocality: strict-local` ties the volume to the node
+holding its one replica and forces the consumer pod there *through the volume*,
+so Kubernetes derives the placement from the tag rather than being told it.
+[`docs/ethos.md`](../../docs/ethos.md) is why that distinction earns a storage
+class parameter.
+
+### The one manual step
+
+Creating and attaching the VHDX, on the Hyper-V host that holds the node:
+
+```powershell
+New-VHD -Path D:\Aerie\aerie-node-N-bulk.vhdx -SizeBytes 1288490188800 -Dynamic
+Add-VMHardDiskDrive -VMName aerie-node-N -Path D:\Aerie\aerie-node-N-bulk.vhdx -ControllerType SCSI
+```
+
+**Dynamic**, unlike the fixed 200 GB data disks, and sized *under* the drive's
+free space rather than at it: a dynamic VHDX that grows to its maximum must not
+be able to fill the volume it shares with that node's Longhorn data disk.
+1288490188800 bytes is 1200 GiB, which is `-BulkDiskSizeGB`'s default.
+
+Which host that is belongs in the operator's own runbook, not here.
+
+### Re-running it
+
+Idempotent, like every other script in this directory. A re-run finds the
+volume group, reconciles the fstab entry, leaves the Longhorn CR alone if it
+already matches, and verifies. An existing physical volume is never a
+candidate disk even under `-Force` — it is either this script's own disk on a
+re-run or someone else's data, and both answers mean "not this one".
+
+`-PreflightOnly` inspects and prints the plan without touching anything, which
+is the right first run.
+
 
 ## Verify — the Phase 3 gate
 

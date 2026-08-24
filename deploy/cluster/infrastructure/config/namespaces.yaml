@@ -69,3 +69,21 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: observability
+---
+# The photos plan (docs/plans/immich.md) Phase 1.6. Here rather than in the
+# `photos` Kustomization that owns everything else in it, and the reason is the
+# third bullet above rather than the first: kustomize-controller applies
+# Namespaces in a first stage, so a namespace created by the same Kustomization
+# as its contents is not actually a problem - but Immich's HelmRelease must not
+# create it either, and one owner is the rule this file exists to keep.
+#
+# The name is the vendor's; the layer's is `photos`. That asymmetry is
+# deliberate and docs/plans/immich.md argues it: the capability outlives the
+# vendor, so the Flux Kustomization and the scripts are named for photos while
+# the namespace is named for what is actually running in it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: immich
+  labels:
+    app.kubernetes.io/part-of: aerie

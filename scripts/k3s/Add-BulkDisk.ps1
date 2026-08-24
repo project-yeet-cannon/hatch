@@ -98,18 +98,18 @@
     is the disk holding the root filesystem.
 
 .EXAMPLE
-    .\Add-BulkDisk.ps1 -VMName aerie-node-2 -IPAddress 192.168.1.238 `
-        -SshPrivateKeyPath ~\.ssh\aerie_node
+    .\Add-BulkDisk.ps1 -VMName aerie-node-N -IPAddress 10.0.0.22 `
+        -SshPrivateKeyPath ~\.ssh\id_ed25519
 
 .EXAMPLE
     # Look at what it would do, without touching the node
-    .\Add-BulkDisk.ps1 -VMName aerie-node-2 -IPAddress 192.168.1.238 `
-        -SshPrivateKeyPath ~\.ssh\aerie_node -PreflightOnly
+    .\Add-BulkDisk.ps1 -VMName aerie-node-N -IPAddress 10.0.0.22 `
+        -SshPrivateKeyPath ~\.ssh\id_ed25519 -PreflightOnly
 
 .EXAMPLE
     # Years later: a second disk was attached to the same node
-    .\Add-BulkDisk.ps1 -VMName aerie-node-2 -IPAddress 192.168.1.238 `
-        -SshPrivateKeyPath ~\.ssh\aerie_node -BulkDiskSizeGB 900 -ExtendVolumeGroup
+    .\Add-BulkDisk.ps1 -VMName aerie-node-N -IPAddress 10.0.0.22 `
+        -SshPrivateKeyPath ~\.ssh\id_ed25519 -BulkDiskSizeGB 900 -ExtendVolumeGroup
 #>
 [CmdletBinding()]
 param(
@@ -195,7 +195,7 @@ function Get-NodeLvmState {
         [Parameter(Mandatory)][hashtable]$Ssh
     )
 
-    $script = @(
+    $lvmScript = @(
         'echo ''--- pvs'''
         'command -v pvs >/dev/null 2>&1 && sudo pvs --noheadings --nosuffix --units b -o pv_name,vg_name 2>/dev/null || true'
         'echo ''--- vgs'''
@@ -205,22 +205,36 @@ function Get-NodeLvmState {
         'echo ''--- end'''
     ) -join '; '
 
-    $result = Invoke-NodeSsh @Ssh -Command $script -ConnectTimeoutSec 20
+    $result = Invoke-NodeSsh @Ssh -Command $lvmScript -ConnectTimeoutSec 20
     if ($result.ExitCode -ne 0) {
         throw "Reading the LVM state failed (exit $($result.ExitCode)):`n$($result.StdOut)$($result.StdErr)"
     }
 
-    $split = {
-        param([string]$Section)
-        @((Get-ProbeSection -Output $result.StdOut -Name $Section) -split "`n" |
-            Where-Object { $_.Trim() } |
-            ForEach-Object { , @($_.Trim() -split '\s+') })
+    # Named columns rather than positional arrays, and not only for
+    # readability: a pipeline that emits one array, wrapped in @(), is that
+    # array rather than a one-element list of it, so a single volume group
+    # would arrive as four strings. Objects do not have that failure mode.
+    $rows = {
+        param([string]$Section, [string[]]$Columns)
+        $parsed = New-Object Collections.Generic.List[psobject]
+        foreach ($line in ((Get-ProbeSection -Output $result.StdOut -Name $Section) -split "`n")) {
+            $fields = @($line.Trim() -split '\s+' | Where-Object { $_ })
+            if ($fields.Count -lt $Columns.Count) { continue }
+            $row = [ordered]@{}
+            for ($i = 0; $i -lt $Columns.Count; $i++) { $row[$Columns[$i]] = $fields[$i] }
+            $parsed.Add([pscustomobject]$row)
+        }
+        return $parsed
     }
 
+    # @() around each call, because a scriptblock returning an empty
+    # List[psobject] returns nothing at all - and $null.Count is a terminating
+    # error under Set-StrictMode, on the one path that matters most: a node
+    # with no volume groups yet, which is every node the first time.
     return [pscustomobject]@{
-        Pvs = & $split 'pvs'
-        Vgs = & $split 'vgs'
-        Lvs = & $split 'lvs'
+        Pvs = @(& $rows 'pvs' @('PvName', 'VgName'))
+        Vgs = @(& $rows 'vgs' @('VgName', 'PvCount', 'Size', 'Free'))
+        Lvs = @(& $rows 'lvs' @('VgName', 'LvName', 'Size', 'Path'))
     }
 }
 
@@ -390,7 +404,7 @@ try {
 
     if ($PreflightOnly) {
         Write-Host ''
-        Write-Host "LVM:       $(if ($lvm.Vgs.Count) { ($lvm.Vgs | ForEach-Object { $_[0] }) -join ', ' } else { 'no volume groups' })"
+        Write-Host "LVM:       $(if ($lvm.Vgs.Count) { ($lvm.Vgs | ForEach-Object { "$($_.VgName) ($($_.PvCount) PV, $(Format-Size ([int64][double]$_.Size)))" }) -join ', ' } else { 'no volume groups' })"
         Write-Host "Longhorn disk '$LonghornDiskName': $(if ($existingDiskEntry) { 'already registered' } else { 'not registered' })"
         Write-Host ''
         Write-Host '-PreflightOnly: stopping here. Nothing on the node was changed.' -ForegroundColor Yellow
@@ -431,10 +445,10 @@ try {
     # ---------------------------------------------------------------- #
 
     # --- what LVM already has ----------------------------------------- #
-    $vgEntry = @($lvm.Vgs | Where-Object { $_.Count -ge 1 -and $_[0] -eq $VolumeGroup })
-    $lvEntry = @($lvm.Lvs | Where-Object { $_.Count -ge 2 -and $_[0] -eq $VolumeGroup -and $_[1] -eq $LogicalVolume })
-    $vgPvs = @($lvm.Pvs | Where-Object { $_.Count -ge 2 -and $_[1] -eq $VolumeGroup } | ForEach-Object { $_[0] })
-    $allPvs = @($lvm.Pvs | Where-Object { $_.Count -ge 1 } | ForEach-Object { $_[0] })
+    $vgEntry = @($lvm.Vgs | Where-Object { $_.VgName -eq $VolumeGroup })
+    $lvEntry = @($lvm.Lvs | Where-Object { $_.VgName -eq $VolumeGroup -and $_.LvName -eq $LogicalVolume })
+    $vgPvs = @($lvm.Pvs | Where-Object { $_.VgName -eq $VolumeGroup } | ForEach-Object { $_.PvName })
+    $allPvs = @($lvm.Pvs | ForEach-Object { $_.PvName })
     $vgExists = $vgEntry.Count -gt 0
     $lvExists = $lvEntry.Count -gt 0
 
@@ -760,6 +774,13 @@ try {
     if ($findmntFields[2] -ne 'ext4') {
         throw "$MountPoint on $IPAddress is $($findmntFields[2]), not ext4."
     }
+    # findmnt names a logical volume by its device-mapper path rather than by
+    # the /dev/<vg>/<lv> symlink this script writes, so both spellings are
+    # accepted and anything else means something took the mount point.
+    $expectedSources = @($lvPath, "/dev/mapper/$VolumeGroup-$LogicalVolume")
+    if ($expectedSources -notcontains $findmntFields[0]) {
+        throw "$MountPoint on $IPAddress is mounted from $($findmntFields[0]), not from $lvPath. Something else claimed the mount point."
+    }
 
     $unitState = (Get-ProbeSection -Output $verify.StdOut -Name 'unit').Trim()
     if ($unitState -ne 'active') {
@@ -799,8 +820,15 @@ try {
         $read = Invoke-NodeSsh @ssh -ConnectTimeoutSec 30 -Command (
             "sudo k3s kubectl -n longhorn-system get nodes.longhorn.io $hostname -o json"
         )
+        # try/catch rather than trusting the exit code: anything on stdout that
+        # is not the object - a kubectl deprecation warning, a sudo notice -
+        # would otherwise end the run with a JSON parse error instead of being
+        # retried, on a loop whose entire job is to tolerate a slow controller.
+        $node = $null
         if ($read.ExitCode -eq 0) {
-            $node = $read.StdOut | ConvertFrom-Json
+            try { $node = $read.StdOut | ConvertFrom-Json } catch { $lastReason = "the node CR did not parse as JSON: $($_.Exception.Message)" }
+        }
+        if ($node) {
             $status = Get-Field $node 'status'
             $diskStatuses = if ($status) { Get-Field $status 'diskStatus' } else { $null }
             $diskStatus = if ($diskStatuses) { Get-Field $diskStatuses $LonghornDiskName } else { $null }

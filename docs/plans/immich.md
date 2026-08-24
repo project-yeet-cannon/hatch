@@ -338,49 +338,137 @@ Do not cancel anything until Phase 5's gate passes.
 
 ## Phase 1 — the bulk disk
 
-**Goal:** a PVC of the right size, on a disk nothing else can touch, on one node,
-with no node name anywhere in the repo.
+**Goal:** a PVC of the right size, on a disk nothing else can touch, on one
+node, with no node name anywhere in the repo.
 
 **Gate:** a test pod writes and reads a file on the PVC, and `kubectl get volume
 -n longhorn-system` shows one replica, on the tagged disk.
 
-- [ ] **1.1 — Size and attach the disk.** A 2 TB dynamic VHDX on the chosen host,
-      attached to that host's k3s VM. 2 TB against an 800 GB library is
-      deliberate: it holds the library, its ~20% of derivatives, the ingest
-      staging area if it ends up there, and the first several years of growth,
-      and a dynamic VHDX bills only what it holds. Note which host in the
-      operator's own runbook — **not in this repo**.
+**Status:** 1.2–1.6 are written and in the tree. 1.1 is the operator's, 1.7
+belongs to Phase 3, and 1.8 cannot run until 1.1 has.
 
-- [ ] **1.2 — `scripts/k3s/Add-BulkDisk.ps1`.** New script, modeled directly on
+### What the hardware actually turned out to be
+
+The plan above assumed one 2 TB disk. No host in this cluster has 2 TB of
+contiguous free space — the largest free chunk anywhere is about 1.5 TB, and it
+shares its physical drive with that node's 200 GB Longhorn data disk. Two things
+change because of it, and neither is a compromise worth apologising for.
+
+**The disk is 1200 GiB, dynamic, not 2 TB fixed.** Sized *under* the free space
+rather than at it: a dynamic VHDX that grows to its maximum must not be able to
+fill the volume it shares with a node's Longhorn disk. Which host holds it is in
+the operator's runbook, not here.
+
+**The filesystem is on LVM.** Its sibling's 200 GB disk is a fixed VHDX that
+will never change size, so `Initialize-NodeStorage.ps1` formats the bare device
+and is right to. This one is sized against whatever free space a particular host
+happened to have, which makes "grow it later" a certainty rather than a
+possibility — and growing it must not mean copying a terabyte of replica data.
+With `vg_bulk` holding one physical volume today, the second chunk of free space
+on the same host is one `vgextend`, `lvextend`, `resize2fs` away, online, with
+the volume never detaching. One indirection, bought once, for a growth path that
+never takes the library offline.
+
+### The ceiling is 75% of the disk, not 100%, and that is worth knowing now
+
+Longhorn's `storage-minimal-available-percentage` is **25** on this cluster
+(verified, alongside `storage-over-provisioning-percentage` at 100). A disk
+whose available space falls below a quarter of its capacity stops being
+schedulable. On a shared disk that guard is doing real work; on a dedicated,
+tagged, single-volume disk it strands a quarter of the capacity — and it is a
+*global* setting, so lowering it for this disk would weaken it on the 200 GB
+disks where it matters.
+
+So the arithmetic that governs Phase 1 is:
+
+| | |
+|---|---|
+| Disk | 1200 GiB |
+| Filesystem after ext4 metadata (`-m 0`) | ~1180 GiB |
+| **Comfortable ceiling before Longhorn calls the disk unschedulable** | **~885 GiB** |
+| Library after dedup, ~800 GB, plus 10–20% derivatives | ~820–894 GiB |
+
+That is close enough to the line to say out loud rather than discover: the MVP
+import fits, and the years of growth the 2 TB assumption was buying do not.
+**Crossing ~885 GiB is not an emergency, it is the trigger for
+`-ExtendVolumeGroup`** — the second free chunk on the same host raises the
+ceiling to roughly 1600 GiB, and the PVC follows with an expansion because
+`allowVolumeExpansion` is on. That path is the whole reason for the LVM layer,
+and it is now a planned step rather than a rescue.
+
+Two things this does *not* change. The PVC in 1.7 stays `1Ti`: a Longhorn volume
+is sparse, so its size is a cap rather than an allocation, and 1 TiB passes the
+over-provisioning check against a 1180 GiB disk on the day it is created. And
+nothing about the offsite design moves — Phase 4 is what protects this data, and
+it protects 800 GB exactly as well as it protects 1.5 TB.
+
+- [ ] **1.1 — Size and attach the disk.** A **1200 GiB dynamic** VHDX on the
+      chosen host, attached to that host's k3s VM, leaving the rest of that
+      drive's free space unallocated as the `-ExtendVolumeGroup` target:
+
+      ```powershell
+      New-VHD -Path D:\Aerie\aerie-node-N-bulk.vhdx -SizeBytes 1288490188800 -Dynamic
+      Add-VMHardDiskDrive -VMName aerie-node-N -Path D:\Aerie\aerie-node-N-bulk.vhdx -ControllerType SCSI
+      ```
+
+      Note which host in the operator's own runbook — **not in this repo**.
+
+- [x] **1.2 — `scripts/k3s/Add-BulkDisk.ps1`.** Written, modelled directly on
       [`Initialize-NodeStorage.ps1`](../../scripts/k3s/Initialize-NodeStorage.ps1):
       same SSH mechanics, same identify-the-disk-by-shape trick (an unpartitioned
       disk of about `-BulkDiskSizeGB`, refusing anything carrying a partition
       table without `-Force`), same two hard rules that no in-use disk and no
-      root disk is ever a candidate. Formats ext4, mounts at
-      `/var/lib/longhorn-bulk` with an fstab entry, and asserts the capacity.
-      Parameters: `-NodeAddress`, `-BulkDiskSizeGB` (default 2000),
-      `-SizeTolerancePercent`, `-Force`. Idempotent.
+      root disk is ever a candidate — plus a third, that an existing LVM physical
+      volume is never a candidate even under `-Force`. Creates `vg_bulk`/`lv_bulk`,
+      formats ext4, mounts at `/var/lib/longhorn-bulk` with an fstab entry keyed
+      by UUID, and asserts the capacity. Parameters: `-VMName`, `-IPAddress`,
+      `-BulkDiskSizeGB` (default 1200), `-SizeTolerancePercent`,
+      `-ExtendVolumeGroup`, `-Force`, `-PreflightOnly`. Idempotent.
 
-- [ ] **1.3 — Register the disk with Longhorn, tagged.** The script's last step
-      patches the node's `node.longhorn.io` CR to add the disk with
-      `tags: ["bulk"]`, `allowScheduling: true`, and
-      `storageReserved: 0`. **The tag is the entire safety mechanism**: without
-      it, Longhorn treats a large empty disk as general capacity and will place
-      Prometheus and OpenSearch replicas on it. Verify with
-      `kubectl -n longhorn-system get nodes.longhorn.io <node> -o yaml` and
-      confirm the second disk appears with the tag and its capacity.
+      It also refuses to run on a node whose `/var/lib/longhorn` is not a mount,
+      which is the node that skipped Provision 5 — adding a second disk to it
+      would paper over that rather than fix it.
 
-- [ ] **1.4 — `.github/workflows/provision-6-bulk-disk.yml`.** The Actions wrapper
-      for 1.2, matching `provision-5-node-storage.yml`'s shape:
-      `workflow_dispatch` with the node and size as inputs, the SSH key from
-      secrets, the same runner setup. Per the automation-first rule this ships
-      *with* the script, not after it. **Inline `run:` blocks stay pure ASCII** —
-      the Windows runner reads a BOM-less temp `.ps1` as CP1252 and an em dash
-      becomes a string-ending smart quote.
+      The five parsing helpers it shares with its sibling moved to
+      [`scripts/k3s/lib/AerieNodeDisk.ps1`](../../scripts/k3s/lib/AerieNodeDisk.ps1)
+      rather than being copied, so a fix to either script's reading of `lsblk` is
+      a fix to both.
 
-- [ ] **1.5 — The `longhorn-bulk` StorageClass.** Append to
+- [x] **1.3 — Register the disk with Longhorn, tagged.** The script's Longhorn
+      stage patches the node's `node.longhorn.io` CR to add the disk with
+      `tags: ["bulk"]`, `allowScheduling: true`, and `storageReserved: 0`, then
+      **waits for Longhorn to report it `Ready` and `Schedulable`** rather than
+      stopping at "the API server accepted the patch". Those are different
+      claims, and only the second is a gate.
+
+      **The tag is the entire safety mechanism**: without it, Longhorn treats a
+      large empty disk as general capacity and will place Prometheus and
+      OpenSearch replicas on it.
+
+      A **JSON merge patch**, sent on standard input rather than in the SSH
+      command — the SSH helper refuses a command containing a double quote,
+      because Windows PowerShell 5.1 does not escape one when it builds
+      `ssh.exe`'s command line and `ssh.exe`'s parser then strips it. A strategic
+      merge patch is not an option either: custom resources have no patch
+      strategy, and a replace would drop the chart's own `default-disk-<hex>`
+      entry and every replica on the node with it.
+
+- [x] **1.4 — `.github/workflows/provision-7-bulk-disk.yml`.** The Actions
+      wrapper for 1.2, matching `provision-5-node-storage.yml`'s shape:
+      `workflow_dispatch` with the node, size and mode as inputs, the SSH key
+      from secrets, the same runner setup, `runs-on: self-hosted`. Per the
+      automation-first rule this ships *with* the script, not after it.
+
+      **Provision 7, not the 6 this plan first wrote** — `provision-6` is
+      already the backup AWS resources workflow.
+
+      Inline `run:` blocks are pure ASCII, checked: the Windows runner reads a
+      BOM-less temp `.ps1` as CP1252 and an em dash becomes a string-ending
+      smart quote.
+
+- [x] **1.5 — The `longhorn-bulk` StorageClass.** Appended to
       [`longhorn-storageclasses.yaml`](../../deploy/cluster/infrastructure/config/longhorn-storageclasses.yaml),
-      alongside `longhorn-r3` and `longhorn-r2`, and carry that file's existing
+      alongside `longhorn-r3` and `longhorn-r2`, carrying that file's existing
       note about immutability into the new comment:
 
       ```yaml
@@ -395,7 +483,7 @@ with no node name anywhere in the repo.
 
       with `reclaimPolicy: Retain` and `allowVolumeExpansion: true` like its
       siblings, and `volumeBindingMode: WaitForFirstConsumer` — **unlike** its
-      siblings, and for a reason worth writing into the file: those two are
+      siblings, and for a reason written into the file: those two are
       `Immediate` because a Longhorn volume attaches over iSCSI from any node so
       binding early costs nothing. Under `strict-local` that stops being true —
       the volume's node is the pod's node, so binding before a consumer exists is
@@ -405,23 +493,31 @@ with no node name anywhere in the repo.
       `r3`/`r2` are replica counts, and one-replica-pinned-to-a-tagged-disk is a
       third thing that "r1" would understate.
 
-- [ ] **1.6 — Namespace.** Add `immich` to
+- [x] **1.6 — Namespace.** `immich` added to
       [`namespaces.yaml`](../../deploy/cluster/infrastructure/config/namespaces.yaml),
-      with `app.kubernetes.io/part-of: aerie` like its siblings.
+      with `app.kubernetes.io/part-of: aerie` like its siblings. Here rather than
+      in the `photos` Kustomization for the reason that file's third bullet
+      gives: Immich's HelmRelease must not create it, and one owner is the rule
+      that file exists to keep.
 
 - [ ] **1.7 — The PVC.** `immich-library`, `1Ti`, `ReadWriteOnce`,
       `storageClassName: longhorn-bulk`, in the `photos` layer (Phase 3). Sized
       *under* the disk deliberately: expansion is one field, and Longhorn cannot
-      shrink. Leaving headroom on the disk also leaves room for the `v+3` external
-      library to become a second PVC on the same disk rather than a resize
-      argument with a full volume.
+      shrink. `1Ti` is a cap rather than an allocation — see the ceiling section
+      above for the number that actually binds. Leaving headroom on the disk also
+      leaves room for the `v+3` external library to become a second PVC on the
+      same disk rather than a resize argument with a full volume.
 
-- [ ] **1.8 — Gate.** Schedule a throwaway pod with the PVC, write a file, read it
-      back, delete the pod, confirm the Longhorn volume shows exactly one
+- [ ] **1.8 — Gate.** Schedule a throwaway pod with the PVC, write a file, read
+      it back, delete the pod, confirm the Longhorn volume shows exactly one
       replica on the `bulk` disk and that a pod forced to another node with a
       `nodeSelector` stays `Pending` rather than attaching remotely. That last
       check is what proves `strict-local` is doing the work, and it is the one
       that fails silently if the class was created without it.
+
+      Record the `storageMaximum` Longhorn reports for the disk while here. Every
+      size in this plan downstream of Phase 1 is a projection until that number
+      is measured.
 
 ---
 
@@ -911,7 +1007,8 @@ addition only:
 | [`static-monitors-configmap.yaml`](../../deploy/cluster/observability/controllers/static-monitors-configmap.yaml) | One `photos.toml` monitor (3.5) |
 
 Plus the new files: `scripts/k3s/Add-BulkDisk.ps1`,
-`.github/workflows/provision-6-bulk-disk.yml`, `scripts/photos/*`,
+`scripts/k3s/lib/AerieNodeDisk.ps1`,
+`.github/workflows/provision-7-bulk-disk.yml`, `scripts/photos/*`,
 `scripts/secrets/iam/aerie-photos-archive.policy.json`, and
 `deploy/cluster/photos/**`.
 
