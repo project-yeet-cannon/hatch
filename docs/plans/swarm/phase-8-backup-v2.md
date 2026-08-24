@@ -1445,7 +1445,7 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       2 has seeded `GO2RTC_STREAMS`. It is in this phase's manual list because
       flipping it back is the operator's, not this phase's.
 
-- [ ] **12. Give the flows teeth, and prove it once** —
+- [x] **12. Give the flows teeth, and prove it once** —
       [`kube-prometheus-stack.yaml`](../../../deploy/cluster/observability/controllers/kube-prometheus-stack.yaml),
       Home Assistant.
 
@@ -1474,6 +1474,61 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       *Exit:* a deliberately-fired alert arrives on a phone with its summary
       text intact, and resolves when it clears (`send_resolved: true` is already
       set — this is the run that proves it does something).
+
+      **Done 2026-08-24, and the middle of the path is now measured rather
+      than assumed.** A hand-built alert (`AerieAlertPipelineTest`, severity
+      critical, one summary annotation) was POSTed to Alertmanager's
+      `/api/v2/alerts` from a throwaway pod — through the real route, not
+      through the webhook — and Home Assistant's `automation.aerie_alert`
+      recorded a trigger **34 seconds later**, which is `group_wait: 30s`
+      visible from the far end. The alert carried an `endsAt` 90 seconds out;
+      the automation recorded a second trigger at **exactly five minutes**
+      after the first. That is `send_resolved: true` working, and it is also
+      the answer to a question nobody had asked yet: a resolution is delivered
+      on the group's next flush, so `group_interval` is the floor on how long
+      "it cleared" takes to arrive. Both timings are in
+      [kube-prometheus-stack.yaml](../../../deploy/cluster/observability/controllers/kube-prometheus-stack.yaml)'s
+      Alertmanager comment.
+
+      **`severity` is not decoration on the receiving end** — checked by
+      reading the automation's own config through Home Assistant's API rather
+      than by inference. It renders `CRITICAL: <alertname>` with an iOS
+      `time-sensitive` interruption level when `commonLabels.severity` is
+      critical, `<SEVERITY>: <alertname>` at normal priority otherwise, and
+      `RESOLVED: <alertname>` when `status` is resolved; the message body is
+      `commonAnnotations.summary`, and repeated notifications collapse on a
+      per-alertname-and-severity `tag`. So this step's third option — "stop
+      setting it" — does not apply: the split between the phase's two
+      criticals and four warnings survives the trip. That automation is not in
+      this repository, which is why its shape is now written down in the
+      Alertmanager comment: nothing in the tree would otherwise tell a reader
+      the label has a consumer.
+
+      **The silencing discipline is written where the route is**, not in a
+      runbook that gets read after the fact: silence by `alertname`, never by
+      receiver, because the wrong button is the easier one — one matcher on
+      `receiver="home-assistant"` eats every alert including the backup-age
+      rule the maintenance window is the reason to keep armed.
+
+      **One finding, and it is not this phase's to fix.** The counter
+      `alertmanager_notifications_failed_total{integration="webhook",
+      reason="clientError"}` stood at 999 of 1344 notifications. Every one is
+      the Watchdog route: Kuma answers 6b.12's pinned push URL with `404
+      {"ok":false,"msg":"Monitor not found or not active."}`, every five
+      minutes since the route was created, so **the dead-man's switch has
+      never completed a cycle**. AutoKuma has logged nothing but its startup
+      migrations for three days, which points at the static-monitor sync
+      rather than at the token. It is not silent — it surfaces as the chart's
+      own `AlertmanagerFailedToSendAlerts`, firing into the route this step
+      just proved — but it means the "newer path proving itself over this
+      older one" that 6b.8's comment describes has been proving nothing. It is
+      in this phase's manual list as a Phase 6 repair.
+
+      Still owed by a person, and in the manual list: **look at the phone.**
+      Two notifications were delivered to Home Assistant at 18:05:09Z and
+      18:10:09Z on 2026-08-24 — a `CRITICAL: AerieAlertPipelineTest` and its
+      `RESOLVED:` twin. What is proved here is that the automation ran; that
+      it reached a device is 8a.5's result, not this run's.
 
 - [ ] **13. A backup row on the Delivery dashboard** —
       `deploy/cluster/observability/config/dashboards/`.

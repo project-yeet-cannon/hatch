@@ -198,6 +198,55 @@ spec:
     # -------------------------------------------------------------------
     # Alertmanager - 6b.8's receiver, route and Watchdog wiring
     # -------------------------------------------------------------------
+    #
+    # The cluster plan Phase 8b.12 - what this route was proven to do, and the
+    # one operating rule that is not expressible as configuration.
+    #
+    # **Proven 2026-08-24, through the route rather than around it.** A
+    # hand-built alert (`AerieAlertPipelineTest`, severity critical) was POSTed
+    # to /api/v2/alerts, took the default route below, and reached Home
+    # Assistant: the automation behind ${HA_ALERT_WEBHOOK_ID} recorded a
+    # trigger 34s later - `group_wait: 30s`, visible - and a second one when
+    # the alert aged past its endsAt, which is what makes `send_resolved:
+    # true` a fact rather than a setting. 8a.5 had already proved the
+    # automation notifies a phone; this is the half between Prometheus and
+    # that webhook, which 8a.5 deliberately did not cover.
+    #
+    # The resolved notification arrived **five minutes** after the firing one,
+    # to the second, rather than when the alert expired: a resolution is
+    # delivered on the group's next flush, so `group_interval` below is the
+    # floor on how long "it cleared" takes to arrive. Worth knowing before
+    # someone reads a 4-minute-old RESOLVED as a stuck alert.
+    #
+    # **severity is not decoration on the receiving end.** The automation
+    # renders `CRITICAL: <alertname>` with an iOS `time-sensitive`
+    # interruption level when commonLabels.severity is critical, `<SEVERITY>:
+    # <alertname>` at normal priority otherwise, and `RESOLVED: <alertname>`
+    # when status is resolved - so the split between ../config/alerts/'s
+    # criticals and warnings survives the trip. That automation lives in Home
+    # Assistant, not in this repository, which is why it is described here:
+    # nothing in the tree would otherwise tell a reader that the label has a
+    # consumer.
+    #
+    # **Silence by `alertname`, never by receiver.** This is the discipline
+    # Phase 7 handed to 8b.12, and the reason to write it down is that the
+    # wrong button is the easier one: silencing `receiver="home-assistant"`
+    # for a maintenance window is one matcher and it eats *every* alert,
+    # including the backup-age rule that the window is precisely when you
+    # would want to keep. A Longhorn upgrade silences
+    # `alertname=~"Longhorn.*"`; a database migration silences `alertname=~
+    # "CNPG.*"`. Both leave the other paths armed.
+    #
+    # **A standing failure worth knowing about while reading these
+    # counters.** `alertmanager_notifications_failed_total{integration=
+    # "webhook", reason="clientError"}` has been climbing every five minutes
+    # since the Watchdog route was created: Kuma answers the push URL below
+    # with `404 {"ok":false,"msg":"Monitor not found or not active."}`, so the
+    # dead-man's switch 6b.12 built has never once completed a cycle. It is
+    # not silent - it surfaces as the chart's own
+    # `AlertmanagerFailedToSendAlerts`, firing into the route above - but it
+    # is a Phase 6 repair rather than a Phase 8 one, and it is in Phase 8's
+    # manual list rather than fixed here.
     alertmanager:
       config:
         route:
