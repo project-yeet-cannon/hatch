@@ -1,0 +1,142 @@
+# Open the quarterly disaster-recovery rehearsal issue (the cluster plan Phase 8b.15)
+#
+# The rehearsal itself is a person with a terminal and
+# docs/disaster-recovery.md. This workflow is the half that survives the
+# person: a calendar entry lives in one account and dies with it, while an
+# issue in this repository is visible to whoever holds the repository next.
+# That is the whole reason 8b.15 prefers this shape over a reminder.
+#
+# Quarterly, on the first of January, April, July and October. GitHub cron has
+# no "quarterly", so the month list is the schedule - and cron here is UTC
+# with no DST, which for a job that opens an issue is a distinction without a
+# difference. Scheduled workflows only run from the repository's default
+# branch, and GitHub disables the schedule after 60 days of repository
+# inactivity; both are ordinary and neither is worth working around for a job
+# that fires four times a year.
+#
+# Billing: ubuntu-latest, a few seconds, four times a year. Not self-hosted -
+# this needs nothing from the LAN, and pinning it to a runner label would make
+# the reminder depend on a host being up, which is exactly the coupling a
+# reminder about disaster recovery should not have.
+name: DR rehearsal
+
+on:
+  schedule:
+    - cron: '0 9 1 1,4,7,10 *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Open an issue even if an unfinished rehearsal issue is already open'
+        required: false
+        default: false
+        type: boolean
+
+# The default GITHUB_TOKEN, narrowed to the one thing this needs. `issues:
+# write` also covers reading them, which is what the duplicate check below
+# does.
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: dr-rehearsal
+  cancel-in-progress: false
+
+jobs:
+  open-issue:
+    name: Open the rehearsal issue
+    runs-on: ubuntu-latest
+    steps:
+      # The duplicate guard, and it is not paranoia: a rehearsal that slipped a
+      # quarter should be *one* open issue that is three months old, not four
+      # identical ones. An issue still open when the next quarter comes around
+      # is itself the signal - the workflow says so in its own log rather than
+      # opening another.
+      - name: Check for an unfinished rehearsal
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          open=$(gh issue list --label dr-rehearsal --state open \
+            --json number,title,createdAt --jq '.[] | "#\(.number) \(.createdAt) \(.title)"')
+          if [ -n "$open" ]; then
+            echo "Unfinished rehearsal issue(s) already open:" >&2
+            echo "$open" >&2
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A label the duplicate check above can find. `gh label create` is
+      # idempotent with --force, so this costs one API call and removes the
+      # "someone deleted the label" failure mode entirely.
+      - name: Ensure the label exists
+        if: steps.existing.outputs.found == 'false' || inputs.force
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh label create dr-rehearsal --force \
+            --color 5319E7 \
+            --description 'Quarterly disaster-recovery rehearsal (docs/disaster-recovery.md)'
+
+      # The body is a checklist rather than a link, because the point of the
+      # rehearsal is that the *document* gets followed and corrected - and a
+      # rehearsal that produced no corrections was probably a re-read. The
+      # three exercises are 8b.15's scope: they cover every mechanism Phase 8
+      # built and none of the ones it did not.
+      - name: Open it
+        if: steps.existing.outputs.found == 'false' || inputs.force
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Computed rather than asked of `date`: %q is a GNU extension for
+          # the quarter, and a `date` that does not know it prints the literal
+          # characters instead of failing - so a fallback behind `||` would
+          # never fire and the title would read "2026-Q%q" forever.
+          month=$(date -u '+%-m')
+          quarter="$(date -u '+%Y')-Q$(( (month - 1) / 3 + 1 ))"
+          cat > body.md <<'BODY'
+          The quarterly disaster-recovery rehearsal. Follow
+          [`docs/disaster-recovery.md`](${{ github.server_url }}/${{ github.repository }}/blob/main/docs/disaster-recovery.md)
+          **literally**, holding only the offline `RESTIC_PASSWORD` and the
+          repositories — if a step needs something the document does not give
+          you, that is the finding.
+
+          Scope it honestly: restoring the whole cluster is not the exercise.
+          These three either work or they do not, and between them they cover
+          every mechanism Phase 8 built.
+
+          - [ ] **A database, from restic, onto a scratch Postgres.**
+                Procedure 1 of the document. Not into `aerie-pg` — the point is
+                the dump and the credential, not a production write.
+          - [ ] **One Longhorn volume, from a backup.** Procedure 3, including
+                the teardown at the end. Check the freeze setting first; the
+                argument for backing these volumes up at all depends on it.
+          - [ ] **One secret, read back out of the parameter export.**
+                Procedure 4. Names are enough for the first half; pull exactly
+                one value and then delete the file.
+          - [ ] **Correct the document.** At least one correction, or write
+                down why there was nothing to correct.
+
+          Two standing items, until they are done once:
+
+          - [ ] `restore-job.yaml` has never been run against the `restic`
+                Secret it was rewired to in 8b.10. Prove it here, onto a scratch
+                Postgres, and only then delete `aerie-pg-restore-restic`.
+          - [ ] The full-DR sequence has never been rehearsed end to end. Its
+                parts have.
+
+          Close this issue when the rehearsal is done. If it is still open when
+          the next quarter comes around, this workflow will say so in its log
+          rather than opening a second one.
+          BODY
+          gh issue create \
+            --title "DR rehearsal — $quarter" \
+            --label dr-rehearsal \
+            --body-file body.md

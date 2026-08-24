@@ -1665,6 +1665,35 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       it. A rehearsal that produced no corrections was probably a re-read rather
       than a rehearsal.
 
+      **The schedule half is done; the rehearsal half is deliberately not, and
+      the box stays unticked until a person has done it.**
+
+      [`dr-rehearsal.yml`](../../../.github/workflows/dr-rehearsal.yml) is the
+      `schedule:`-triggered workflow this step says is better than a calendar
+      entry: `0 9 1 1,4,7,10 *`, one issue per quarter, labelled
+      `dr-rehearsal`, carrying the three exercises as a checklist rather than a
+      link — because what is being rehearsed is that the *document* can be
+      followed, and a rehearsal that produced no corrections was probably a
+      re-read. It refuses to open a second issue while one is still open: a
+      rehearsal that slipped a quarter should be one issue that is three months
+      old, not four identical ones. The first issue was opened by dispatching
+      it, so the workflow is proved rather than assumed.
+
+      **Two of the three mechanisms were exercised on 2026-08-24 while 8b.14
+      was being written**, and both are written up there: a Longhorn volume
+      restored from the backup target and read (Kuma's `kuma.db`, with its
+      `-wal` and `-shm`), and the parameter export dumped out of the local
+      repository (21 parameters, the exact count of `required` entries in
+      `parameters.json`). The restic database restore ran as the weekly verify
+      Job at 03:24 the same morning.
+
+      **That is not the rehearsal.** Every one of those was run by the author of
+      the procedure, from a shell that already had the cluster's credentials —
+      which tests the mechanism and not the document. What 8b.15 asks for is
+      someone holding only the offline password, following
+      [`docs/disaster-recovery.md`](../../disaster-recovery.md) literally, and
+      finding what it left out. The issue is open and says so.
+
 - [ ] **16. Phase gate as a command** — `scripts/k3s/Test-Backup.ps1`,
       wrapped by `.github/workflows/verify-backup.yml`, in the exact shape
       3b.13, 4b.11, 5b.14, 6b.15 and 7c.11 established: read-only, **not**
