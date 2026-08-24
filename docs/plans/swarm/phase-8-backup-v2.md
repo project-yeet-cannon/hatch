@@ -1545,6 +1545,33 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       RWO volumes, and that is still true — but the sentence "neither image
       ships `sqlite3`" is wrong for this one.
 
+      **The fix had a tail, and it is the more interesting half.** Setting the
+      flag and restarting created six monitors; restarting again created six
+      *more*. AutoKuma 2.x tracks what it has created in its own SQLite
+      database at `/data/autokuma.db`, with no setting to move it, and nothing
+      mounted `/data` — so every pod start read an empty database, concluded
+      it had created nothing, and did it all again. Two Watchdog monitors then
+      shared the one pinned push token, which means one of them receives every
+      push and the other goes red on its own retry timer and notifies a phone
+      that the dead-man's switch is dead. The tell had been in the log from
+      the beginning and reads as routine: `Migrating database to version 1` on
+      *every* start is not an upgrade, it is a fresh database being built.
+      `/data` now has a 1Gi `longhorn-r2` PVC, and a restart after it landed
+      created nothing — which is the actual proof.
+
+      One consequence of the cleanup worth knowing before repeating it:
+      deleting the monitor rows while Kuma was running left it inserting
+      `stat_hourly` rows against its own pre-delete in-memory state, so every
+      beat failed with `SQLITE_CONSTRAINT: UNIQUE constraint failed:
+      stat_hourly.monitor_id, stat_hourly.timestamp` and the monitors wedged.
+      A pod restart cleared it. Delete monitors with Kuma stopped, or restart
+      it immediately afterwards.
+
+      **Armed and verified 2026-08-24 20:34Z**: six monitors, no duplicates,
+      Alertmanager logs `Notify success` for the `kuma-watchdog` receiver, and
+      `alertmanager_notifications_failed_total{reason="clientError"}` has
+      stopped climbing for the first time since the route existed.
+
       Still owed by a person, and in the manual list: **look at the phone.**
       Two notifications were delivered to Home Assistant at 18:05:09Z and
       18:10:09Z on 2026-08-24 — a `CRITICAL: AerieAlertPipelineTest` and its
