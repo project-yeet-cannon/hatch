@@ -1356,6 +1356,339 @@
         },
         "sortBy": []
       }
+    },
+    {
+      "id": 34,
+      "type": "row",
+      "title": "Backups",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "panels": []
+    },
+    {
+      "id": 35,
+      "type": "stat",
+      "title": "restic: newest snapshot",
+      "description": "Age of the last successful run of the aerie-backup CronJob - the pg_dump of both databases plus the /aerie/* parameter export, written to the S3 repository and the house share. Not the age of a snapshot read back out of either repo: this is the writer reporting success, and the verify panel to the right is the half that proves the bytes are readable. Turns orange at 26h (a run has been missed) and red at 36h, which is where ResticBackupTooOld fires.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 35
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "time() - kube_cronjob_status_last_successful_time{namespace=\"aerie\", cronjob=\"aerie-backup\"}",
+          "editorMode": "code",
+          "range": false,
+          "instant": true,
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 93600
+              },
+              {
+                "color": "red",
+                "value": 129600
+              }
+            ]
+          },
+          "mappings": [],
+          "noValue": "No data - the series is absent, which is what backup.yaml's absent() rules alert on"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 22
+        },
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      }
+    },
+    {
+      "id": 36,
+      "type": "stat",
+      "title": "CNPG: newest base backup",
+      "description": "Age of the newest completed CNPG Backup object, from its status.stoppedAt. Deliberately NOT cnpg_collector_last_available_backup_timestamp, which reads 0 forever under the barman-cloud plugin - see the CustomResourceState entry in kube-prometheus-stack.yaml. WAL archiving continues between base backups, so PITR is finer-grained than this number; what this measures is how far back the oldest recoverable point can reach.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 35
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "time() - max(aerie_cnpg_backup_stopped_at{phase=\"completed\"})",
+          "editorMode": "code",
+          "range": false,
+          "instant": true,
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 93600
+              },
+              {
+                "color": "red",
+                "value": 129600
+              }
+            ]
+          },
+          "mappings": [],
+          "noValue": "No data - the series is absent, which is what backup.yaml's absent() rules alert on"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 22
+        },
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      }
+    },
+    {
+      "id": 37,
+      "type": "stat",
+      "title": "Longhorn: stalest volume",
+      "description": "Age of the OLDEST of the three longhorn-r3 volume backups (Grafana, Uptime Kuma, Alertmanager) - the stalest volume rather than the newest, because the failure this is watching for is one volume being skipped while the other two succeed: Longhorn drops a detached volume from a recurring job with a warn log and a successful run. A volume that has never been backed up reports 0 for its last backup, so it shows here as an age of decades rather than as No data.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 35
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(time() - (longhorn_volume_last_backup_at and on (volume) label_replace(kube_persistentvolumeclaim_info{storageclass=\"longhorn-r3\"}, \"volume\", \"$1\", \"volumename\", \"(.+)\")))",
+          "editorMode": "code",
+          "range": false,
+          "instant": true,
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 93600
+              },
+              {
+                "color": "red",
+                "value": 129600
+              }
+            ]
+          },
+          "mappings": [],
+          "noValue": "No data - the series is absent, which is what backup.yaml's absent() rules alert on"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 22
+        },
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      }
+    },
+    {
+      "id": 38,
+      "type": "stat",
+      "title": "restic: last verify",
+      "description": "Age of the last successful aerie-backup-verify run - the weekly job that restores the newest snapshot, loads aerie.dump into a scratch Postgres and counts tables. This is the only number on this row that means a backup was read back rather than written. Weekly, so it is normally days old: orange at 8d, red at 10d where ResticVerifyStale fires.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 35
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "time() - kube_cronjob_status_last_successful_time{namespace=\"aerie\", cronjob=\"aerie-backup-verify\"}",
+          "editorMode": "code",
+          "range": false,
+          "instant": true,
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 691200
+              },
+              {
+                "color": "red",
+                "value": 864000
+              }
+            ]
+          },
+          "mappings": [],
+          "noValue": "No data - the series is absent, which is what backup.yaml's absent() rules alert on"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 22
+        },
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      }
     }
   ],
   "preload": false,
