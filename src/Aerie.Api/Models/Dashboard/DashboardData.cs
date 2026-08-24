@@ -60,6 +60,19 @@ public record SunEvents(DateTimeOffset Dawn, DateTimeOffset Sunrise, DateTimeOff
 public record RoutineSummary(Guid Id, string Name, string? Description, string? Icon, string? Color, bool IsToggle, bool? IsActive);
 
 /// <summary>
+/// One camera as the kiosk's button row renders it (docs/plans/cameras.md
+/// Phase 12) - a name to put under the tile, and an id to open the stream with.
+///
+/// <paramref name="IsConfigured"/> is whether this camera has an address to
+/// stream from yet, which is the same question CameraController asks before it
+/// answers 409. It is carried here so the kiosk can say "not set up yet"
+/// instead of "unavailable" without a second call: a failed WebSocket handshake
+/// reaches a browser with no status code on it, so the modal cannot tell the
+/// two apart on its own.
+/// </summary>
+public record CameraSummary(Guid Id, string Name, bool IsConfigured);
+
+/// <summary>
 /// One cached calendar event as the kiosk agenda renders it. Color is the
 /// calendar's ColorOverride when the admin set one, otherwise the provider's
 /// own color - the client never sees which of the two it got.
@@ -114,5 +127,6 @@ public record DashboardData(
     OutsideClimate Outside,
     SunEvents SunEvents,
     IReadOnlyList<RoutineSummary> Routines,
+    IReadOnlyList<CameraSummary> Cameras,
     IReadOnlyList<CalendarDay> Calendar,
     IReadOnlyList<HazardAlert> Alerts);

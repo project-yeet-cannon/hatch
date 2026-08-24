@@ -132,6 +132,8 @@ builder.Services.AddSingleton<IForecastService, ForecastService>();
 builder.Services.AddSingleton<ISiteSettingsService, SiteSettingsService>();
 builder.Services.AddScoped<IZoneService, ZoneService>();
 builder.Services.AddScoped<IRoutineService, RoutineService>();
+// The kiosk's camera button row - see CameraDirectory and docs/plans/cameras.md Phase 12.
+builder.Services.AddScoped<ICameraDirectory, CameraDirectory>();
 builder.Services.AddTransient<IHomeAssistantStateReader, HomeAssistantStateReader>();
 builder.Services.AddScoped<IWeatherService, WeatherService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();

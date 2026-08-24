@@ -1,5 +1,6 @@
 import type {
   CalendarDay,
+  CameraSummary,
   ComfortRange,
   DailyExtreme,
   DashboardData,
@@ -55,6 +56,12 @@ function xComfortRange(): ComfortRange {
 
 function xRoutine(index: number): RoutineSummary {
   return { id: `${X}-${index}`, name: X_LONG, description: X_LONG, icon: 'certificate', color: '#ff00ff', isToggle: false, isActive: null };
+}
+
+// One of each, so the "not set up yet" message is on screen next to a camera
+// that would play - the two tiles look the same until you tap them.
+function xCamera(index: number): CameraSummary {
+  return { id: `${X}-camera-${index}`, name: X_LONG, isConfigured: index % 2 === 1 };
 }
 
 // Two days, so the empty-day case and the populated one are both on screen.
@@ -172,6 +179,7 @@ export class TestDataSource implements DashboardDataSource {
       outside: xOutside(now),
       sunEvents: xSunEvents(now),
       routines: [1, 2].map((i) => xRoutine(i)),
+      cameras: [1, 2].map((i) => xCamera(i)),
       calendar: xCalendar(now),
       alerts: xAlerts(now),
     };

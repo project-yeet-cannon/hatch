@@ -22,7 +22,7 @@ const MOTION_STREAM_URL = '/api/motion-events/stream';
  * Wi-Fi blip or a rolling deploy has to heal without anyone touching it, and
  * that is the entire client-side cost of it doing so.
  */
-export function useMotionEvents(): { cameraDeviceId: string | null; dismiss: () => void } {
+export function useMotionEvents(): { cameraDeviceId: string | null; dismiss: (deviceId: string) => void } {
   const [state, setState] = useState(initialMotionState);
 
   useEffect(() => {
@@ -58,7 +58,13 @@ export function useMotionEvents(): { cameraDeviceId: string | null; dismiss: () 
     };
   }, []);
 
-  const dismiss = useCallback(() => setState(applyDismissal), []);
+  // Takes the device rather than assuming it is the one this hook would show:
+  // since Phase 12 the modal on screen may be one someone opened from its
+  // button, and closing that must not dismiss a *different* camera's motion
+  // event. See applyDismissal.
+  const dismiss = useCallback((deviceId: string) => {
+    setState((current) => applyDismissal(current, deviceId));
+  }, []);
 
   return { cameraDeviceId: visibleCameraDeviceId(state), dismiss };
 }

@@ -1,6 +1,7 @@
 import type {
   CalendarDay,
   CalendarEventSummary,
+  CameraSummary,
   ComfortRange,
   DailyExtreme,
   DashboardData,
@@ -34,6 +35,17 @@ const ZONE_CURVES: Record<string, { name: string; curve: DiurnalCurve }> = {
 
 const INDOOR_COMFORT_RANGE: ComfortRange = { lowF: 68, highF: 71 };
 const OUTSIDE_CURVE: DiurnalCurve = { meanF: 58, amplitudeF: 9, peakHour: 14 };
+
+/**
+ * Two cameras, one of them without an address, because the unconfigured tile is
+ * a state the wall will spend time in - a camera is imported from discovery
+ * before anyone fills in the admin form - and it should be visible in the mock
+ * rather than only in production.
+ */
+const CAMERAS: CameraSummary[] = [
+  { id: 'front-door', name: 'Front door', isConfigured: true },
+  { id: 'driveway', name: 'Driveway', isConfigured: false },
+];
 
 const ROUTINES: RoutineSummary[] = [
   {
@@ -269,6 +281,7 @@ export class MockDashboardDataSource implements DashboardDataSource {
       outside: buildOutside(now, zones, sunEvents),
       sunEvents,
       routines: ROUTINES,
+      cameras: CAMERAS,
       calendar: buildCalendar(now),
       alerts: buildAlerts(now),
     };

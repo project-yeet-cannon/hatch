@@ -157,7 +157,7 @@ testing reaches; that and everything downstream of it is Phase 10.
 - **The camera overlay holds the kiosk lifecycle**, alongside Gather. A deploy reload firing while someone is watching who is at the door is the same bug as one firing mid-Gather-entry.
 - **The camera name is fetched separately and never awaited.** The video socket opens on mount regardless, so a slow lookup delays a label, never the picture.
 
-### [] Phase 9 — First-camera bring-up
+### [x] Phase 9 — First-camera bring-up
 
 Everything here needs a camera on the LAN, which is the only reason it isn't
 done. Phases 7 and 8 are built and verified against a synthetic go2rtc stream;
@@ -209,7 +209,7 @@ failure could mean.
 - [ ] Whether to point HA's own integration at this go2rtc (`go2rtc: url:`), which the original Phase 7 assumed would be free. **It is not, any more.** The Service is `ClusterIP` with no Ingress and HA runs outside the cluster, so this would mean exposing go2rtc on a NodePort or Ingress — putting camera streams on a listener anything on the LAN can reach, to save one RTSP connection per camera. Worth revisiting only if the cameras turn out to be stingy with concurrent connections. **Leaning firmly to no, on a finding from bring-up:** go2rtc's API is unauthenticated by default and `GET /api/streams` returns each stream's producer URL *verbatim*, camera password included. Putting that on a NodePort or an Ingress publishes the camera credential to everything that can reach the listener. Closing this as "no" would also make one Phase 7 decision cheaper than it looks — the RTSP loopback listener exists for a transcode, and this camera's main stream turns out to be H.264 anyway.
 
 
-### [~] Phase 11 — Camera credentials in Aerie, not in git
+### [x] Phase 11 — Camera credentials in Aerie, not in git
 
 **Supersedes the streams-file half of Phase 7 and the seeding half of Phase 9.**
 Phase 7 put every camera's RTSP URL in a `go2rtc-streams` Secret, seeded from a
@@ -319,11 +319,107 @@ depends on it.
 - [ ] Add `docs/camera-devices-architecture.md` mirroring `device-architecture.md`'s phased structure, covering the schema additions, the WS listener, the dispatch seam, the SSE stream, and the video-proxy mechanism actually chosen in Phase 7
 - [ ] Write it after Phase 10, not before — the mechanism is settled, but several numbers in it (the stream naming, the resource figures, the measured latency) are Phase 10's output, and a doc written now would need rewriting with them
 
-### [] Phase 12 - Kiosk Camera View
+### [x] Phase 12 — Kiosk camera buttons
 
-First, break this user story down by asking me any clarifying questions, then implement a step by step plan here.
+The user story: a button per camera on the dashboard, tapping it shows that
+camera's live feed, reusing the motion modal's video path so there is one way a
+camera looks on the wall rather than two. Same tile size as the Routines
+buttons, in the same area.
 
-As a kiosk tablet user, I want a button on the dashboard app for each camera hooked up to aerie. When I push the button, I view the live feed from the camera. If possible, reuse the video streaming interaction from the motion auto-play so we have a unification of ux patterns. Make the camera buttons the same size as the Routines buttons and in the same area of the web app.
+**The four answers that shaped it** (asked before building, as the story asked):
+buttons get their **own row directly below the routines** rather than sharing
+that grid — same tile, same area, but tapping one does something categorically
+different from tapping its neighbour; **every enabled camera** gets a button,
+configured or not, so a camera someone forgot to fill in on the admin form says
+so out loud instead of being invisible; the tile is an **icon in a circle**,
+identical to a routine's bar the icon, rather than a live snapshot thumbnail —
+a thumbnail wants a JPEG proxy and an RTSP connection per camera per refresh,
+against cameras that cap concurrent sub-stream clients in the single digits;
+and a feed opened by hand closes on **the ✕ or the kiosk's idle reset**.
+
+#### The shape
+
+- [x] **The camera list rides on the dashboard snapshot**, as `cameras` on
+  `DashboardData`, next to `routines`. The alternative was a second fetch of
+  `/api/devices` filtered client-side, which would put every device in the
+  house on the wire to render two buttons. One poll already exists and this is
+  what a backend-for-frontend aggregate is for.
+- [x] `CameraSummary(Id, Name, IsConfigured)` — the whole tile, plus the one
+  bit the modal needs to name the unconfigured case without a round-trip.
+- [x] **`ICameraDirectory` keys on the `CameraFeed` channel and `Device.Enabled`,
+  not on `DeviceKind.Camera`** — verbatim the predicate `CameraController.Stream`
+  uses to answer or 404. Keying the button list on anything else would let the
+  two disagree, and the disagreement would show up as a button that 404s.
+- [x] `IsConfigured` is `CameraRtspUrl.TryBuild` over the connection row, which
+  is the same question the relay asks before its 409 — so it covers the
+  discovered-host-only camera (configured, nobody typed anything) and the
+  host-less one (not) without restating the rule.
+
+#### Reusing the motion modal rather than resembling it
+
+- [x] `CameraFeedModal` is the same component, with the same
+  `useCameraStream`. A tapped camera and a camera that tripped are the same
+  screen; only what put it there differs.
+- [x] **The visible camera is `manual ?? motion`.** Manual wins while it is
+  open: someone standing at the tablet deliberately watching the driveway
+  should not be shoved onto the back door because a branch moved. Motion
+  resumes on close if it is still going, which is the existing contract - the
+  thing that was moving is still moving.
+- [x] **One close button, one handler, and it does both halves.** Closing
+  clears the manual selection *and* dismisses the shown device's motion event.
+  Without the second half, closing a hand-opened feed on a camera that is also
+  in motion would clear `manual`, leave `motion` pointing at the same device,
+  and the modal would not move - a ✕ that visibly does nothing.
+- [x] That needs `applyDismissal` to take the device id rather than reading the
+  visible one out of motion state, since the visible one is now sometimes not
+  motion's to know. It no-ops on a device that is not in motion, which is the
+  ordinary manual case.
+- [x] **Name and configured-ness come from the snapshot**, passed as optional
+  props. The modal keeps its own name fetch for when they are not - a motion
+  event can arrive while the dashboard poll is failing, and the picture should
+  not wait on a label either way. `isConfigured` defaults to true, so the
+  motion path behaves exactly as it does today.
+- [x] An unconfigured camera renders its message **instead of the `<video>`**,
+  which is also what keeps the socket shut: `useCameraStream`'s effect returns
+  early when there is no element to play into. No hook change, so the admin
+  app's copy of it stays a copy.
+
+#### The idle rung
+
+- [x] A hand-opened feed **does not hold the kiosk lifecycle**; a motion-opened
+  one still does. The hold follows what is on screen, so the idle reset closes
+  a feed someone walked away from - and with it the relay's connection, and the
+  camera's - rather than leaving the wall lit on a live stream all afternoon.
+- [x] Closing on `resetToken` is `IDLE_TIMEOUT_MS`, 30s after the last touch.
+  Any touch anywhere restarts it, the overlay included. **Flagged rather than
+  hidden:** watching a feed is a hands-in-pockets activity, and 30s may prove
+  short. If it does, the other rung on the ladder - `IDLE_DIM_AFTER_MS`, 120s,
+  which is the file's existing statement of "nobody is there" - is the value to
+  move to, and it is a one-line change.
+
+#### The steps
+
+- [x] `CameraSummary` + `Cameras` on `DashboardData`; `ICameraDirectory` in
+  `Services/DeviceMapping`; registered and folded into `DashboardService`'s
+  concurrent fan-out
+- [x] Tests over the directory: the enabled filter, the channel filter, name
+  ordering, and configured vs not including the discovered-host-only camera
+- [x] `types.ts`, both mock sources, so `?source=mock` and `?source=test` still
+  render the whole screen
+- [x] `CamerasSection`, and the tile rules grouped onto the routine tile's own
+  selectors in `theme.css` - same geometry by construction rather than by two
+  numbers that have to be kept equal
+- [x] `App.tsx`: the manual selection, the precedence, the one close handler,
+  the hold, the idle close
+- [x] `applyDismissal(state, deviceId)` and its tests
+- [x] Build, lint and test all three: API, dashboard, admin - 736 API tests,
+  71 dashboard tests, both frontends building clean
+
+#### Still open
+
+- [ ] Walk it on a tablet in front of a camera. Same standing item as Phase 10
+  and Phase 13: everything here is built and tested, and nothing on this
+  machine can see a camera.
 
 ### [x] Phase 13 — Admin live view
 

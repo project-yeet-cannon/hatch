@@ -61,7 +61,7 @@ describe('applyMotionChange', () => {
 
 describe('applyDismissal', () => {
   it('closes the modal for the event now showing', () => {
-    const state = applyDismissal(fold(started(FRONT)));
+    const state = applyDismissal(fold(started(FRONT)), FRONT);
 
     expect(visibleCameraDeviceId(state)).toBeNull();
   });
@@ -69,7 +69,7 @@ describe('applyDismissal', () => {
   // The whole reason dismissal is per-event and not per-camera: a wall that
   // went silent about the front door forever would be worse than no feature.
   it('speaks up again the next time that camera sees something', () => {
-    const dismissed = applyDismissal(fold(started(FRONT)));
+    const dismissed = applyDismissal(fold(started(FRONT)), FRONT);
     const laterEvent = [ended(FRONT), started(FRONT)].reduce(applyMotionChange, dismissed);
 
     expect(visibleCameraDeviceId(laterEvent)).toBe(FRONT);
@@ -78,19 +78,28 @@ describe('applyDismissal', () => {
   // The failure this guards: without it, a repeated frame for a device already
   // active would clear the dismissal and reopen a modal the user just closed.
   it('is not undone by a repeated start for the same still-active device', () => {
-    const dismissed = applyDismissal(fold(started(FRONT)));
+    const dismissed = applyDismissal(fold(started(FRONT)), FRONT);
 
     expect(visibleCameraDeviceId(applyMotionChange(dismissed, started(FRONT)))).toBeNull();
   });
 
   it('still shows another camera that is also in motion', () => {
-    const dismissed = applyDismissal(fold(started(FRONT), started(BACK)));
+    const dismissed = applyDismissal(fold(started(FRONT), started(BACK)), BACK);
 
     expect(visibleCameraDeviceId(dismissed)).toBe(FRONT);
   });
 
   it('does nothing when no modal is showing', () => {
-    expect(applyDismissal(initialMotionState)).toBe(initialMotionState);
+    expect(applyDismissal(initialMotionState, FRONT)).toBe(initialMotionState);
+  });
+
+  // The Phase 12 case: closing a camera opened from its dashboard button, on a
+  // camera that is not in motion. Nothing to dismiss, and in particular nothing
+  // else may be dismissed in its place.
+  it('leaves another camera showing when handed a device that is not in motion', () => {
+    const state = applyDismissal(fold(started(BACK)), FRONT);
+
+    expect(visibleCameraDeviceId(state)).toBe(BACK);
   });
 });
 
@@ -99,7 +108,7 @@ describe('clearMotion', () => {
   // nobody can see, nothing claims there is something to look at. Without it a
   // modal is pinned open by an end-of-motion frame that will never arrive.
   it('closes everything when the stream drops', () => {
-    const busy = applyDismissal(fold(started(FRONT), started(BACK)));
+    const busy = applyDismissal(fold(started(FRONT), started(BACK)), BACK);
 
     expect(clearMotion()).toEqual(initialMotionState);
     expect(visibleCameraDeviceId(clearMotion())).toBeNull();

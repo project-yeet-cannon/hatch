@@ -284,12 +284,19 @@ body {
   width: 100%;
   border-radius: 12px;
 }
-.hf-routines {
+/* The camera row shares the routine tile's geometry by sharing its rules, not
+   by repeating its numbers - "the same size as the Routines buttons" is then
+   true by construction rather than by two values somebody has to keep equal.
+   Only the parts that differ get their own rules: a camera has no color, no
+   toggle state and no pending state. See components/CamerasSection.tsx. */
+.hf-routines,
+.hf-cameras {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 16px;
 }
-.hf-routine-btn {
+.hf-routine-btn,
+.hf-camera-tile {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -306,10 +313,12 @@ body {
   cursor: pointer;
   transition: transform 0.12s, background 0.15s;
 }
-.hf-routine-btn:hover:not(:disabled) {
+.hf-routine-btn:hover:not(:disabled),
+.hf-camera-tile:hover {
   background: color-mix(in srgb, var(--ink) 3%, var(--card));
 }
-.hf-routine-btn:active:not(:disabled) {
+.hf-routine-btn:active:not(:disabled),
+.hf-camera-tile:active {
   transform: scale(0.96);
 }
 .hf-routine-btn:disabled {
@@ -318,7 +327,8 @@ body {
 .hf-routine-btn.active {
   border-color: color-mix(in srgb, var(--ink) 22%, var(--line));
 }
-.hf-routine-circle {
+.hf-routine-circle,
+.hf-camera-tile-circle {
   width: 66%;
   height: 66%;
   border-radius: 50%;
@@ -328,12 +338,14 @@ body {
   box-shadow: 0 0 0 0 transparent;
   transition: box-shadow 0.2s, transform 0.2s;
 }
-.hf-routine-icon {
+.hf-routine-icon,
+.hf-camera-tile-icon {
   width: 56%;
   height: 56%;
   color: var(--ink);
 }
-.hf-routine-name {
+.hf-routine-name,
+.hf-camera-tile-name {
   font-family: var(--display);
   font-weight: 700;
   font-size: 16px;
@@ -345,6 +357,12 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 2px;
+}
+/* A camera has no color of its own, so the circle takes the same fill a routine
+   without one gets. Set here rather than inline because, unlike a routine's, it
+   never varies. */
+.hf-camera-tile-circle {
+  background: var(--line);
 }
 .hf-routine-onoff {
   font-family: var(--ui);

@@ -17,11 +17,30 @@ import { clientLogger } from '../lib/clientLogger';
  *
  * It does not close itself. Motion ending closes it, or the ✕ does; both go
  * through the reducer in lib/motionEvents.ts, so a dismissal lasts for the
- * event rather than for the camera.
+ * event rather than for the camera. Since Phase 12 the same modal also opens
+ * from a camera's button on the dashboard, where nothing closes it but the ✕
+ * and the kiosk's idle reset - what put it on screen is App's business, not
+ * this component's.
+ *
+ * `name` and `isConfigured` come from the dashboard snapshot when there is one.
+ * `isConfigured` defaults to true so the motion path - which can arrive while
+ * the dashboard poll is failing, on a different endpoint - behaves exactly as
+ * it did before there was anything to pass.
  */
-export function CameraFeedModal({ deviceId, onClose }: { deviceId: string; onClose: () => void }) {
+export function CameraFeedModal({
+  deviceId,
+  name: knownName,
+  isConfigured = true,
+  onClose,
+}: {
+  deviceId: string;
+  name?: string;
+  isConfigured?: boolean;
+  onClose: () => void;
+}) {
   const { videoRef, error } = useCameraStream(deviceId);
-  const name = useCameraName(deviceId);
+  const fetchedName = useCameraName(knownName === undefined ? deviceId : null);
+  const name = knownName ?? fetchedName;
 
   return (
     <div className="hf-camera-overlay">
@@ -32,7 +51,17 @@ export function CameraFeedModal({ deviceId, onClose }: { deviceId: string; onClo
         </button>
       </div>
       <div className="hf-camera-stage">
-        {error ? (
+        {!isConfigured ? (
+          // Instead of the <video>, not merely over it: useCameraStream's effect
+          // returns early when there is no element to play into, so this is also
+          // what keeps the socket shut. Opening one would buy a handshake the
+          // relay is certain to refuse with a 409, and a browser cannot read that
+          // status anyway - which is why this case is passed in rather than
+          // discovered.
+          <div className="hf-note" role="alert">
+            This camera isn’t set up yet.
+          </div>
+        ) : error ? (
           <div className="hf-note" role="alert">
             {error}
           </div>
@@ -48,19 +77,21 @@ export function CameraFeedModal({ deviceId, onClose }: { deviceId: string; onClo
 }
 
 /**
- * The camera's name, or null until it arrives.
+ * The camera's name, or null until it arrives. Null deviceId means the caller
+ * already knows the name and nothing is fetched.
  *
  * Fetched separately rather than carried on the motion event, and deliberately
  * not awaited before rendering: the video socket opens on mount either way, so
  * a slow lookup delays a label, never the picture. The whole point of the
  * feature is how fast the feed is up.
  */
-function useCameraName(deviceId: string): string | null {
+function useCameraName(deviceId: string | null): string | null {
   const [name, setName] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setName(null);
+    if (deviceId === null) return;
 
     fetch(`/api/devices/${deviceId}`, { headers: { Accept: 'application/json' } })
       .then((res) => (res.ok ? (res.json() as Promise<{ name?: string }>) : null))

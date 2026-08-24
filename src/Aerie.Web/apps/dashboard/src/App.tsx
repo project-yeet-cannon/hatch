@@ -9,6 +9,7 @@ import { circadianTokens } from './theme/tokens';
 import { ZoneCard } from './components/ZoneCard';
 import { OutsideCard } from './components/OutsideCard';
 import { RoutinesSection } from './components/RoutinesSection';
+import { CamerasSection } from './components/CamerasSection';
 import { CalendarSection } from './components/CalendarSection';
 import { AlertBanner } from './components/AlertBanner';
 import { DashboardSkeleton } from './components/DashboardSkeleton';
@@ -37,12 +38,37 @@ export function App() {
   const gatherOpen = gatherListId !== null;
   // The camera a motion event is asking the wall to show, if any - see
   // hooks/useMotionEvents.ts and docs/plans/cameras.md Phase 8.
-  const { cameraDeviceId, dismiss: dismissCamera } = useMotionEvents();
-  // Both overlays suspend the lifecycle, for the two halves of the same reason
-  // the hook already documents: an idle reset or a deploy reload would take a
-  // half-typed Gather item with it, and would drop a live camera feed while
-  // someone is standing there watching who is at the door.
-  const { resetToken } = useKioskLifecycle(gatherOpen || cameraDeviceId !== null);
+  const { cameraDeviceId: motionCameraId, dismiss: dismissMotion } = useMotionEvents();
+  // The camera someone asked for by tapping its button (Phase 12), which wins
+  // over motion for as long as it is open: a person standing at the tablet
+  // watching the driveway should not be shoved onto the back door because a
+  // branch moved. Motion resumes on close if it is still going.
+  const [manualCameraId, setManualCameraId] = useState<string | null>(null);
+  const cameraDeviceId = manualCameraId ?? motionCameraId;
+  // The hold follows what is on screen, not what is available. A motion-opened
+  // feed suspends the lifecycle for the same reason Gather does - an idle reset
+  // or a deploy reload would drop a live feed while someone is standing there
+  // watching who is at the door - but a feed someone opened by hand deliberately
+  // does not, so walking away from it closes it, and with it the relay's
+  // connection and the camera's.
+  const { resetToken } = useKioskLifecycle(gatherOpen || (manualCameraId === null && motionCameraId !== null));
+
+  // The idle rung for a hand-opened feed: the same reset that collapses the
+  // cards closes it. Any touch anywhere restarts that timer, this overlay
+  // included.
+  useEffect(() => {
+    setManualCameraId(null);
+  }, [resetToken]);
+
+  // One ✕, both halves. Clearing the manual selection alone would leave a
+  // camera that is *also* in motion on screen under motion's ownership - a
+  // close button that visibly does nothing - and dismissing alone would leave a
+  // hand-opened feed up. Dismissal is a no-op on a device that isn't in motion,
+  // which is the ordinary manual case.
+  const closeCamera = useCallback(() => {
+    setManualCameraId(null);
+    if (cameraDeviceId !== null) dismissMotion(cameraDeviceId);
+  }, [cameraDeviceId, dismissMotion]);
 
   const closeGather = useCallback(() => {
     setGatherListId(null);
@@ -98,6 +124,10 @@ export function App() {
     ? resolveThemeStyle(getCircadianPhase(now, data.sunEvents), circadianTokens)
     : resolveThemeStyle({ kind: 'day' }, circadianTokens);
   const clock = formatClockParts(now, timeZone);
+  // The snapshot's row for whichever camera is on screen, if it has one. A
+  // motion event can arrive while the dashboard poll is failing, so this is
+  // allowed to be missing and the modal falls back to fetching the name.
+  const shownCamera = cameraDeviceId === null ? undefined : data?.cameras.find((camera) => camera.id === cameraDeviceId);
 
   return (
     <div className="hf-page" style={themeStyle as CSSProperties}>
@@ -141,6 +171,10 @@ export function App() {
               <CalendarSection calendar={data.calendar} timeZone={data.timezone} now={now} />
             )}
             {data.routines.length > 0 && <RoutinesSection routines={data.routines} resetToken={resetToken} />}
+            {/* Its own row directly below: same tile, same band of the screen,
+                but tapping one opens a live feed rather than changing something
+                in the house, and that is worth a row break. */}
+            {data.cameras.length > 0 && <CamerasSection cameras={data.cameras} onOpen={setManualCameraId} />}
           </>
         ) : error ? (
           <div className="hf-note" role="alert" style={{ margin: 0 }}>
@@ -158,13 +192,22 @@ export function App() {
           custom properties on that element, and an overlay mounted anywhere
           else would resolve none of them. */}
       {gatherOpen && <GatherOverlay listId={gatherListId} lists={gatherLists} onClose={closeGather} />}
-      {/* Above Gather rather than instead of it: this one opens on its own,
-          with nobody's hand on the tablet, so it has to be able to interrupt.
-          Keyed on the device id so switching cameras tears the video pipeline
-          down and builds a new one, rather than feeding one camera's fragments
-          into a SourceBuffer opened for another's codec. */}
+      {/* Above Gather rather than instead of it: the motion path opens this on
+          its own, with nobody's hand on the tablet, so it has to be able to
+          interrupt. Keyed on the device id so switching cameras tears the video
+          pipeline down and builds a new one, rather than feeding one camera's
+          fragments into a SourceBuffer opened for another's codec.
+          The name and configured-ness come from the snapshot when it has them;
+          both are optional, and a motion event can arrive while the dashboard
+          poll is failing. */}
       {cameraDeviceId !== null && (
-        <CameraFeedModal key={cameraDeviceId} deviceId={cameraDeviceId} onClose={dismissCamera} />
+        <CameraFeedModal
+          key={cameraDeviceId}
+          deviceId={cameraDeviceId}
+          name={shownCamera?.name}
+          isConfigured={shownCamera?.isConfigured}
+          onClose={closeCamera}
+        />
       )}
     </div>
   );

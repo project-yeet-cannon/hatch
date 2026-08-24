@@ -97,6 +97,22 @@ export interface RoutineSummary {
 }
 
 /**
+ * One camera as the kiosk's button row renders it - a name for the tile and an
+ * id to open the stream with (docs/plans/cameras.md Phase 12).
+ *
+ * isConfigured is whether the camera has an address to stream from yet. The
+ * relay answers a camera without one with a 409, but a failed WebSocket
+ * handshake reaches the browser with no status code on it, so the modal cannot
+ * tell "not set up yet" from "unavailable" on its own - it is told, here, for
+ * free.
+ */
+export interface CameraSummary {
+  id: string;
+  name: string;
+  isConfigured: boolean;
+}
+
+/**
  * One cached calendar event as the kiosk agenda renders it. `color` is the
  * calendar's admin override when there is one and the provider's own color
  * otherwise - the client can't tell which it got, and shouldn't care.
@@ -163,6 +179,7 @@ export interface DashboardData {
   outside: OutsideClimate;
   sunEvents: SunEvents;
   routines: RoutineSummary[];
+  cameras: CameraSummary[];
   calendar: CalendarDay[];
   alerts: HazardAlert[];
 }

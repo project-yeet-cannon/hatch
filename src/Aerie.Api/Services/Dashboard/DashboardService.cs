@@ -13,7 +13,8 @@ public interface IDashboardService
 
 /// <summary>
 /// The backend-for-frontend aggregate: composes zones + outside + routines +
-/// calendar + outdoor hazards into the exact shape the dashboard app consumes.
+/// cameras + calendar + outdoor hazards into the exact shape the dashboard app
+/// consumes.
 /// Every part is fetched concurrently so the (slower) weather call doesn't
 /// serialize behind the DB reads.
 /// </summary>
@@ -22,6 +23,7 @@ public class DashboardService(
     IWeatherService weather,
     ISiteSettingsService siteSettings,
     IRoutineService routines,
+    ICameraDirectory cameras,
     ICalendarAgendaService calendar,
     IHazardService hazards,
     TimeProvider time) : IDashboardService
@@ -32,9 +34,10 @@ public class DashboardService(
         var outsideTask = weather.GetOutsideAsync(window, ct);
         var settingsTask = siteSettings.GetAsync(ct);
         var routinesTask = routines.GetRoutinesAsync(ct);
+        var camerasTask = cameras.GetCamerasAsync(ct);
         var calendarTask = calendar.GetAgendaAsync(ct);
         var alertsTask = hazards.GetAlertsAsync(ct);
-        await Task.WhenAll(zonesTask, outsideTask, settingsTask, routinesTask, calendarTask, alertsTask);
+        await Task.WhenAll(zonesTask, outsideTask, settingsTask, routinesTask, camerasTask, calendarTask, alertsTask);
 
         var settings = await settingsTask;
         var now = time.GetUtcNow();
@@ -45,6 +48,7 @@ public class DashboardService(
             Outside: await outsideTask,
             SunEvents: SolarCalculator.EventsForDay(now, settings.Latitude, settings.Longitude),
             Routines: await routinesTask,
+            Cameras: await camerasTask,
             Calendar: await calendarTask,
             Alerts: await alertsTask);
     }
