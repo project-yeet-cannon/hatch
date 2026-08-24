@@ -524,6 +524,12 @@ spec:
           - apiGroups: ["image.toolkit.fluxcd.io"]
             resources: ["imagepolicies"]
             verbs: ["get", "list", "watch"]
+          # The second CustomResourceState entry below (8b.11). Same three
+          # verbs, and `get` is here only because the informer's error path
+          # uses it - list and watch are what a dynamic informer runs.
+          - apiGroups: ["postgresql.cnpg.io"]
+            resources: ["backups"]
+            verbs: ["get", "list", "watch"]
       customResourceState:
         enabled: true
         config:
@@ -554,6 +560,80 @@ spec:
                           # field moving is the first thing to check.
                           tag: [status, latestRef, tag]
                           image: [status, latestRef, name]
+
+              # The cluster plan Phase 8b.11's fallback, and the reason it
+              # needed one. That step's table names
+              # cnpg_collector_last_available_backup_timestamp as the series
+              # the CNPGBackupTooOld rule reads, flagged as asserted from
+              # documentation rather than off this cluster - and checking it
+              # is what found this: the metric exists, is scraped, and reads
+              # **0** on all three instances while
+              # ../../data/schema/scheduledbackup.yaml has been completing a
+              # base backup every night. So does its sibling
+              # cnpg_collector_first_recoverability_point.
+              #
+              # The cause is the plugin split, not a broken backup. Both
+              # metrics are rendered from `status.lastSuccessfulBackup` and
+              # `status.firstRecoverabilityPoint` on the Cluster object, and
+              # under the barman-cloud *plugin* (the only path CNPG 1.28
+              # offers, and what ../../data/cluster/objectstore.yaml is)
+              # nothing writes those two fields: `kubectl -n aerie get cluster
+              # aerie-pg -o jsonpath='{.status.lastSuccessfulBackup}'` is
+              # empty on a cluster whose Backup objects all read
+              # `phase: completed`. A rule written against a metric that is
+              # permanently 0 does not go quiet - `time() - 0` is fifty-six
+              # years - so this one would have fired every night forever,
+              # which is the other half of 8b.11's own warning about rules
+              # that cannot mean what they say.
+              #
+              # The Backup objects themselves carry the truth
+              # (`status.stoppedAt`, RFC3339, set when the plugin reports the
+              # backup complete), so this reads them directly - the same
+              # mechanism 8b.11 pre-authorized as the fallback for Longhorn,
+              # used for CNPG instead because Longhorn's own CronJob metric
+              # turned out to be real.
+              #
+              # One label per object, `name`, which means the series count
+              # grows by one per nightly backup rather than staying flat.
+              # That is the cost of the only field that distinguishes two
+              # Backups from each other; ../config/alerts/backup.yaml takes
+              # max() over the set and never names one. If it ever matters,
+              # the fix is deleting old Backup objects (CNPG does not - its
+              # retention policy governs the object store, not the CRs), not
+              # dropping the label, because two objects reduced to the same
+              # label set are a duplicate-series error rather than a smaller
+              # metric.
+              - groupVersionKind:
+                  group: postgresql.cnpg.io
+                  version: v1
+                  kind: Backup
+                # aerie_cnpg_backup_stopped_at, matching the prefix rationale
+                # above: a name that reads as this repository's rather than
+                # as a generic kube_customresource_ series.
+                metricNamePrefix: aerie_cnpg
+                labelsFromPath:
+                  name: [metadata, name]
+                  # Both alert and dashboard filter on this. A backup that
+                  # failed still has a stoppedAt, and counting it as the
+                  # newest backup is exactly the silent gap this phase is
+                  # about - so nothing downstream reads this metric without
+                  # `phase="completed"` on it.
+                  phase: [status, phase]
+                metrics:
+                  - name: backup_stopped_at
+                    help: "Unix time at which this CNPG Backup finished, from status.stoppedAt."
+                    each:
+                      type: Gauge
+                      gauge:
+                        # No `path:` - the value is read from the object root.
+                        # kube-state-metrics parses an RFC3339 string into
+                        # unix seconds here, which is what makes `time() -`
+                        # arithmetic legal against it; a Backup still running
+                        # has no stoppedAt and is silently skipped rather than
+                        # emitted as 0 (nilIsZero left at its false default,
+                        # deliberately - a zero here would read as 1970 and
+                        # fire the staleness rule mid-run).
+                        valueFrom: [status, stoppedAt]
       resources:
         requests:
           cpu: 10m
