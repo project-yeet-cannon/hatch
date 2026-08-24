@@ -92,6 +92,7 @@ the `ExternalSecret` manifests read. Change a path there and nowhere else.
 | `/aerie/backup/s3-secret-access-key` | restic CronJob | 8 |
 | `/aerie/longhorn/backup-s3-access-key-id` | Longhorn backup target | 8 |
 | `/aerie/longhorn/backup-s3-secret-access-key` | Longhorn backup target | 8 |
+| `/aerie/cameras/go2rtc-streams` | go2rtc's streams file, one RTSP URL per camera | 5 |
 | `/aerie/kiosk/wifi-password` | kiosk provisioning QR | 3 |
 | `/aerie/tailscale/auth-key` | subnet router, if it follows the stack in | 5 |
 

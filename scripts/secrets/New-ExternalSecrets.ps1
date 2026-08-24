@@ -192,6 +192,34 @@ function Assert-Name {
     }
 }
 
+function Format-Comment {
+    <#
+    .SYNOPSIS
+        Renders one prose field from the map as YAML comment lines.
+
+    .DESCRIPTION
+        A description is prose the map's author wrote for a human, and prose
+        runs to more than one line as soon as a value is worth explaining at
+        length - go2rtc's streams file quotes its own YAML shape. Emitting it
+        with a single "# " prefix comments out the first line only, and drops
+        the rest into the manifest as bare YAML at whatever indent it happened
+        to carry. That is not a cosmetic failure: it is a document the API
+        server rejects, or worse, one it accepts with fields nobody wrote.
+
+        So every line gets its own prefix, and an empty one gets a bare '#'
+        rather than a '# ' with trailing whitespace no editor would keep.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Indent,
+        [Parameter(Mandatory)][string]$Text
+    )
+    # -split on both endings: the map is edited on Windows as well, and a lone
+    # CR left inside a comment line is invisible in review and in a diff.
+    return @($Text -split "\r?\n" | ForEach-Object {
+            if ([string]::IsNullOrWhiteSpace($_)) { "$Indent#" } else { "$Indent# $_" }
+        })
+}
+
 function New-ManifestHeader {
     param([Parameter(Mandatory)][string]$Summary)
     return @(
@@ -294,8 +322,8 @@ function New-ExternalSecretManifest {
     $lines.Add('  data:')
 
     foreach ($entry in $Entries) {
-        if ($entry.Description) { $lines.Add("    # $($entry.Description)") }
-        if ($entry.ConsumedBy) { $lines.Add("    # Consumed by: $($entry.ConsumedBy)") }
+        if ($entry.Description) { $lines.AddRange([string[]](Format-Comment -Indent '    ' -Text $entry.Description)) }
+        if ($entry.ConsumedBy) { $lines.AddRange([string[]](Format-Comment -Indent '    ' -Text "Consumed by: $($entry.ConsumedBy)")) }
         $lines.AddRange([string[]]@(
                 "    - secretKey: $($entry.SecretKey)"
                 '      remoteRef:'
