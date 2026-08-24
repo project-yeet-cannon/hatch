@@ -22,7 +22,6 @@ kind: Kustomization
 resources:
   - aerie-cnpg-wal-s3.yaml
   - aerie-ghcr-pull.yaml
-  - aerie-go2rtc-streams.yaml
   - aerie-home-assistant.yaml
   - aerie-restic.yaml
   - aerie-smb-share.yaml
