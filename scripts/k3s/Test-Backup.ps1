@@ -467,10 +467,33 @@ echo "--- resticend"
         # is the pattern AerieSsh.ps1's own note prescribes.
         $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
 
+        # ...and `tr -dc` in front of the decode, because base64 alone only
+        # moves the problem: the BOM does not land inside the payload any
+        # more, it lands in front of the base64 *text*, where `base64 -d`
+        # answers 'invalid input', decodes nothing, and kubectl reports the
+        # downstream symptom - 'no objects passed to create' - with the cause
+        # on a different stream. That is exactly how this gate failed. The
+        # filter keeps only the base64 alphabet, so a BOM, a CR, an LF, or the
+        # interleaved NULs of a UTF-16 conversion are all deleted without any
+        # of them having to be anticipated by name. Same trick, same reasoning
+        # as Bootstrap-Flux.ps1's token handoff, which is the one other place
+        # that sends base64 down this pipe.
+        #
+        # The decode lands in a temp file rather than a pipe into kubectl for
+        # the reason above: in a pipeline, a failed decode is silent and
+        # kubectl's complaint about an empty stream is the only thing the
+        # caller sees. Decoding first makes 'the manifest did not survive the
+        # trip' say so in those words.
         Write-Host "Creating Job aerie/$GateJobName from the live aerie-backup pod template..."
         $create = Invoke-NodeSsh @ssh -ConnectTimeoutSec 60 -StdIn $encoded -Command (
             'sudo k3s kubectl -n aerie delete job ' + $GateJobName + ' --ignore-not-found >/dev/null 2>&1; ' +
-            'base64 -d | sudo k3s kubectl -n aerie create -f - 2>&1'
+            'AERIE_JOB_FILE=$(mktemp /tmp/aerie-gate-job.XXXXXX); ' +
+            'trap ''rm -f $AERIE_JOB_FILE'' EXIT INT TERM; ' +
+            'tr -dc ''A-Za-z0-9+/='' | base64 -d > $AERIE_JOB_FILE 2>/dev/null || ' +
+            '{ echo ''the base64 Job manifest did not decode on this node - it was truncated or mangled in transit'' >&2; exit 1; }; ' +
+            'test -s $AERIE_JOB_FILE || ' +
+            '{ echo ''the Job manifest never arrived on standard input'' >&2; exit 1; }; ' +
+            'sudo k3s kubectl -n aerie create -f $AERIE_JOB_FILE 2>&1'
         )
         if ($create.ExitCode -ne 0) {
             $resticProbeError = "could not create the probe Job: $($create.StdOut) $($create.StdErr)".Trim()

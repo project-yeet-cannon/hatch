@@ -356,6 +356,17 @@ $Command
         # this pipe might acquire rather than a bet on one of them. See
         # Bootstrap-Flux.ps1's token handoff for the pattern.
         #
+        # base64 on its own is half the pattern, and the missing half has
+        # already cost a second debug: the BOM does not vanish because the
+        # payload is encoded, it simply lands in front of the base64 text,
+        # where `base64 -d` answers 'invalid input' and hands the consumer an
+        # empty stream. Test-Backup.ps1's probe Job failed exactly that way -
+        # kubectl reported 'no objects passed to create' while the cause sat
+        # on stderr. So the decode is always `tr -dc 'A-Za-z0-9+/=' | base64
+        # -d`: the filter deletes a BOM, a CR, an LF, or the interleaved NULs
+        # of a UTF-16 conversion without any of them being anticipated by
+        # name, and what survives is either the exact bytes or nothing.
+        #
         # Sync-AerieSecrets.ps1 sends a YAML manifest through here and is left
         # alone deliberately - the YAML spec permits a byte order mark at the
         # start of a stream, so kubectl has always accepted what this pipe

@@ -4,7 +4,9 @@
 
 # Phase 9 — Productization + docs
 
-**Status: Not started**
+When dissipating the swarm plans, turn this document into its own individual plan, just a single md doc in plans root. Add any other deferred productization/parameterization work that we didn't do previously.
+
+**Status: DEFERRED to its own new plan**
 
 - [ ] `scripts/bootstrap-node.sh` and `scripts/restore.sh`
 - [ ] Helm `values.yaml` holding domain / HA / seed data, so someone else can run
