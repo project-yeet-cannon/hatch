@@ -625,15 +625,28 @@ spec:
                     each:
                       type: Gauge
                       gauge:
-                        # No `path:` - the value is read from the object root.
-                        # kube-state-metrics parses an RFC3339 string into
-                        # unix seconds here, which is what makes `time() -`
-                        # arithmetic legal against it; a Backup still running
-                        # has no stoppedAt and is silently skipped rather than
-                        # emitted as 0 (nilIsZero left at its false default,
-                        # deliberately - a zero here would read as 1970 and
-                        # fire the staleness rule mid-run).
-                        valueFrom: [status, stoppedAt]
+                        # `path` straight at the scalar, and no `valueFrom`
+                        # beside it. That pairing is the whole of this
+                        # metric's mechanics and it is not the obvious one:
+                        # written as `valueFrom: [status, stoppedAt]` with no
+                        # path, kube-state-metrics registers the family,
+                        # names it in its startup log, and emits **zero
+                        # samples** with no error at default verbosity - which
+                        # is the same silence a wrong metric name produces.
+                        # The reason is that a Gauge whose path lands on a
+                        # *map* iterates that map's entries, so an absent path
+                        # (the object root) turns into five failed lookups
+                        # against apiVersion, kind, metadata, spec and status.
+                        # Pointed at a leaf it takes the default branch and
+                        # parses the value, and kube-state-metrics converts an
+                        # RFC3339 string to unix seconds there - which is what
+                        # makes `time() -` arithmetic legal against it.
+                        #
+                        # A Backup still running has no stoppedAt and is
+                        # skipped rather than emitted as 0 (nilIsZero left at
+                        # its false default, deliberately - a zero here reads
+                        # as 1970 and would fire the staleness rule mid-run).
+                        path: [status, stoppedAt]
       resources:
         requests:
           cpu: 10m
