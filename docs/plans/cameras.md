@@ -209,7 +209,7 @@ failure could mean.
 - [ ] Whether to point HA's own integration at this go2rtc (`go2rtc: url:`), which the original Phase 7 assumed would be free. **It is not, any more.** The Service is `ClusterIP` with no Ingress and HA runs outside the cluster, so this would mean exposing go2rtc on a NodePort or Ingress — putting camera streams on a listener anything on the LAN can reach, to save one RTSP connection per camera. Worth revisiting only if the cameras turn out to be stingy with concurrent connections. **Leaning firmly to no, on a finding from bring-up:** go2rtc's API is unauthenticated by default and `GET /api/streams` returns each stream's producer URL *verbatim*, camera password included. Putting that on a NodePort or an Ingress publishes the camera credential to everything that can reach the listener. Closing this as "no" would also make one Phase 7 decision cheaper than it looks — the RTSP loopback listener exists for a transcode, and this camera's main stream turns out to be H.264 anyway.
 
 
-### [] Phase 11 — Camera credentials in Aerie, not in git
+### [~] Phase 11 — Camera credentials in Aerie, not in git
 
 **Supersedes the streams-file half of Phase 7 and the seeding half of Phase 9.**
 Phase 7 put every camera's RTSP URL in a `go2rtc-streams` Secret, seeded from a
@@ -258,36 +258,69 @@ standard `go2rtc-deployment.yaml` holds itself to.
 
 #### The pieces
 
-- [ ] **A versioned secret envelope.** `SecretObfuscator`'s output becomes
+- [x] **A versioned secret envelope.** `SecretObfuscator`'s output becomes
   `v1:<payload>`, and the reader dispatches on the prefix. Base64 contains no
   colon, so a stored legacy value cannot collide with a scheme tag — which is
   what makes the discriminator free. v1 *is* the existing XOR, so converting
   every stored secret is prepending four characters, not re-encrypting
   anything. Adding real crypto later is a `v2:` scheme plus a lazy re-protect
   on write, with mixed rows readable throughout.
-- [ ] **Convert the existing secrets in the same pass** — the four
+- [x] **Convert the existing secrets in the same pass** — the four
   `SiteSettings` keys and the calendar OAuth tokens — so there is one format in
   the system rather than two. A data migration, since the bytes do not change.
-- [ ] **Per-camera connection settings**, on their own table keyed by device:
+- [x] **Per-camera connection settings**, on their own table keyed by device:
   host, port, stream path, and the protected username and password. The
   protected-column-on-the-owning-table shape is what `EfCalendarAccount`
   already does; the unification this phase buys is in the *format*, not in
   moving every secret into one table.
-- [ ] **The host comes from Home Assistant first.** The discovery template
+- [~] **The host comes from Home Assistant first.** The discovery template
   already calls `device_attr()`, so it gains `configuration_url` — which for a
   Reolink is `http://<ip>`, kept current by the integration's own DHCP
   handling. The admin field overrides it and is what gets used when HA has
   nothing. This is the answer to "avoid hardcoding a static IP": Aerie asks the
   system that already tracks the camera, and only falls back to being told.
-- [ ] **Registration is lazy.** `CameraController` PUTs the stream immediately
+  **Built and unit-tested, but not confirmed against the live instance:**
+  whether *this* Reolink's HA device actually carries a `configuration_url` is
+  a fact about the integration that only the real HA can answer. If it does
+  not, nothing breaks — the field is simply empty and the operator types the
+  host, which is the fallback the requirement already accepted.
+- [x] **Registration is lazy.** `CameraController` PUTs the stream immediately
   before it opens the relay socket. No reconciler, no startup pass, and a
   go2rtc restart self-heals on the next viewer — at the cost of one HTTP round
   trip per modal open, against a keyframe wait measured in seconds.
-- [ ] **Remove the file path entirely**: the `cameras/go2rtc-streams`
+- [x] **Remove the file path entirely**: the `cameras/go2rtc-streams`
   parameter, its ExternalSecret, the `GO2RTC_STREAMS` mapping in Provision 2,
   and the streams volume. One way to configure a camera.
 
-### [] Phase 10 — Docs
+#### What the conversion actually cost
+
+Less than it looks, for one reason worth remembering: **v1 is the algorithm the
+existing rows were already written with**, so relabelling every stored secret is
+prepending three characters and changing no bytes. Verified against real
+Postgres rather than reasoned about — legacy rows relabel, a non-secret with a
+slash in it is untouched, an empty value stays empty and untagged, re-running
+the `UPDATE` reports 0 rows, and `Down` strips the tags back to exactly the
+original values. The discriminator is free for a similar reason: base64 has no
+colon in its alphabet, so an untagged row cannot be mistaken for a tagged one,
+and nothing has to be ordered between the migration and the deployment that
+depends on it.
+
+#### Still open
+
+- [ ] Confirm a Reolink's HA device carries `configuration_url`. One look at the
+  discovery page answers it, and the fallback is already built either way.
+- [ ] Walk the whole thing once on the cluster: add the camera in the admin UI,
+  open the feed, confirm go2rtc gets registered on demand and the modal plays.
+  The same end-to-end item Phase 9 keeps for a human, now with one fewer system
+  in it.
+
+### [] Phase LAST — Docs
 
 - [ ] Add `docs/camera-devices-architecture.md` mirroring `device-architecture.md`'s phased structure, covering the schema additions, the WS listener, the dispatch seam, the SSE stream, and the video-proxy mechanism actually chosen in Phase 7
 - [ ] Write it after Phase 10, not before — the mechanism is settled, but several numbers in it (the stream naming, the resource figures, the measured latency) are Phase 10's output, and a doc written now would need rewriting with them
+
+### [] Phase 12 - Kiosk Camera View
+
+First, break this user story down by asking me any clarifying questions, then implement a step by step plan here.
+
+As a kiosk tablet user, I want a button on the dashboard app for each camera hooked up to aerie. When I push the button, I view the live feed from the camera. If possible, reuse the video streaming interaction from the motion auto-play so we have a unification of ux patterns. Make the camera buttons the same size as the Routines buttons and in the same area of the web app.
