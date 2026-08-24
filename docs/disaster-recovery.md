@@ -1,184 +1,392 @@
 # Disaster Recovery
 
-> **Deliberately short, and honest about it.** Phase 7 retired the Compose stack
-> and the `backup` container that ran with it, and named the resulting gap rather
-> than closing it. [Phase 8](plans/swarm/phase-8-backup-v2.md) is the rework. What
-> follows describes what is true **today** — one thing is backed up, and the rest
-> is not.
+> **Written to be followed, not read.** Every command below has been run against
+> this installation — most of them on 2026-08-24, while
+> [Phase 8](plans/swarm/phase-8-backup-v2.md) was closing. Where something has
+> *not* been exercised it says so in the same voice, because a runbook that
+> does not distinguish the two is a runbook that gets discovered to be fiction
+> at 3am.
 
 ## What is backed up
 
-**Postgres. That is the whole list.**
+Five rows, and the last one is a decision rather than an omission:
 
-CloudNativePG archives Aerie's database to S3 through the barman-cloud plugin,
-in two forms that only work together:
+| What | How | Where it lands | Cadence |
+|---|---|---|---|
+| Postgres, physical + PITR | CNPG `ScheduledBackup` through the barman-cloud plugin ([`cluster.yaml`](../deploy/cluster/data/cluster/cluster.yaml)'s `plugins:` block, [`scheduledbackup.yaml`](../deploy/cluster/data/schema/scheduledbackup.yaml)) | `s3://${WAL_BUCKET}/`, AWS | continuous WAL + a base backup at 02:00 |
+| Postgres, logical + portable | `pg_dump -Fc` of `aerie` and `quartz`, pushed by [`backup-cronjob.yaml`](../deploy/cluster/data/backup/backup-cronjob.yaml) | restic: **both** `${RESTIC_S3_REPOSITORY}` and the house share | 03:10 daily |
+| The `/aerie/*` parameter tree | `aws ssm get-parameters-by-path --with-decryption`, into the same restic snapshot | same two repositories | 03:10 daily, same snapshot |
+| Grafana / Uptime Kuma / Alertmanager volumes | Longhorn `RecurringJob` `aerie-critical-daily` against the three `longhorn-r3` volumes | `s3://${LONGHORN_BACKUP_BUCKET}@${AWS_REGION}/`, AWS | 02:00 daily, 7 retained |
+| **Prometheus TSDB, OpenSearch indices** | **nothing, deliberately** | — | — |
 
-| | What | Where it's configured |
-|---|---|---|
-| Continuous WAL archiving | Every write, streamed to S3 as it is generated | [`cluster.yaml`](../deploy/cluster/data/cluster/cluster.yaml)'s `plugins:` block, `isWALArchiver: true` |
-| Nightly base backup | 02:00 daily, a full physical copy | [`scheduledbackup.yaml`](../deploy/cluster/data/schema/scheduledbackup.yaml) |
-| Destination | `s3://${WAL_BUCKET}/`, `base/` and `wals/` prefixes, gzip | [`objectstore.yaml`](../deploy/cluster/data/cluster/objectstore.yaml) |
-| Retention | `30d`, pruned by barman itself | same |
-| Credentials | the `cnpg-wal-s3` Secret, synced by External Secrets from SSM `/aerie/postgres/wal-s3-*` | [`docs/secrets-architecture.md`](secrets-architecture.md) |
+**The last row is the one to read twice.** Metric history and log indices are
+not backed up because they are the two largest volumes in the cluster and the
+least valuable to restore: a metric series that resumes with a gap is a graph
+with a gap, and an alert fires on the present, not on last month. Backing them
+up would dominate the S3 bill and lengthen every restore to protect data whose
+absence nobody would act on. [`design.md`](plans/swarm/design.md#storage-split)
+is where that split was decided; this row exists so the decision is visible
+from the document someone reads during an outage, rather than inferred from a
+gap in a table.
 
-The pair is what makes **point-in-time recovery** possible: a base backup gives
-you a starting image, and the WAL stream replays forward from it to any moment
-inside the retention window. A base backup alone would be a nightly snapshot with
-up to 24 hours of loss behind it.
+**Replication is not backup.** `synchronous.dataDurability: required` across
+three instances means an acknowledged write is on at least two nodes and a
+primary failure loses nothing. It does nothing about a `DROP TABLE`, which
+replicates faithfully. Longhorn's three replicas of each volume are the same
+kind of protection against the same narrow kind of loss.
 
-This has been rehearsed. Phase 4b.10's exit criterion was an actual PITR against
-a throwaway Cluster with a `recoveryTarget.targetTime` before a marker change,
-confirming the marker was absent — not a claim, a run.
+## The root of trust
 
-**Replication is not backup.** `synchronous.dataDurability: required` across three
-instances means an acknowledged write is on at least two nodes and a primary
-failure loses nothing. It does nothing whatsoever about a `DROP TABLE`, which
-replicates faithfully. The S3 archive is the only thing that answers that.
+**The printed `RESTIC_PASSWORD` is the whole of it**, and after Phase 8b.7 that
+is more true than it used to be:
 
-## What is not backed up
+- restic encryption is not recoverable without that password. There is no
+  escrow, no recovery key, and no support channel.
+- The parameter tree — every secret this installation holds, including the
+  copy of `RESTIC_PASSWORD` at `/aerie/backup/restic-password` — is now
+  *inside* the restic snapshot. Which means the offline copy is the only thing
+  that can open the box that contains the copy.
+- **GitHub Actions secrets are write-only.** Provision 2 can seed SSM from
+  them; nothing can read them back out. A rebuild that has lost both AWS and
+  the offline password has lost the installation's secrets permanently, and
+  every one of them has to be reissued from its source of truth (AWS, Route53,
+  the registry, the camera passwords, and so on).
 
-Everything else. Named individually, because a list is harder to forget than a
-sentence:
+[8a.4](plans/swarm/phase-8-backup-v2.md) exists as a step because of this: the
+offline copy was read off paper and used to open a repository, on a machine
+that had never held it in an environment variable. Do that again whenever the
+paper moves.
 
-| Not backed up | What is lost with it | Where it lives |
-|---|---|---|
-| Grafana's database | dashboards created in the UI, users, alert-rule state | `longhorn-r3` PVC |
-| Uptime Kuma | monitor definitions and all history | `uptime-kuma-data`, `longhorn-r3` |
-| Alertmanager | silences and notification state | `longhorn-r3` |
-| OpenSearch | every log index | Longhorn, explicitly out of scope for HA |
-| Prometheus | the TSDB — all metric history | Longhorn, same |
-| The `/aerie/*` SSM tree | every seeded secret, if the AWS account goes | AWS Parameter Store |
+## Where the copies are
 
-Three mitigations blunt this, and none of them is a backup:
+Three destinations, deliberately not three copies of the same dependency:
 
-- **Grafana's dashboards are in git** as ConfigMaps, so the ones that matter are
-  reprovisioned on a rebuild. Anything created by hand in the UI is not.
-- **Kuma's monitors come from git**, as the `AUTOKUMA__STATIC_MONITORS`
-  ConfigMap AutoKuma syncs in, so the monitor *set* comes back. Its history does
-  not.
-- **Longhorn replicates each volume three ways**, which survives a node loss and
-  survives nothing else — see the note on replication above.
+- **`${WAL_BUCKET}`** — CNPG's WAL and base backups. AWS.
+- **`${RESTIC_S3_REPOSITORY}`** — the logical dumps and the parameter export.
+  AWS, **same account** as the bucket above.
+- **The house share** — `//${SHARE_HOST}/${SHARE_NAME}/${RESTIC_LOCAL_SUBPATH}`,
+  a machine in the house, reached over SMB by
+  [`local-repo-volume.yaml`](../deploy/cluster/data/backup/local-repo-volume.yaml)'s
+  statically-provisioned PV and mounted at `/mnt/restic-local` by the backup
+  and verify Jobs. **This copy is not in AWS.** It is the same repository the
+  pre-cluster Compose stack wrote to — moved onto the share by
+  [8a.2](plans/swarm/phase-8-backup-v2.md), history and all — so it holds both
+  the current dailies and the `cutover-final` snapshot from the Phase 7
+  cutover.
 
-Closing this is [Phase 8](plans/swarm/phase-8-backup-v2.md): a restic CronJob to
-S3, Longhorn's own backup target for the three `longhorn-r3` volumes, an export of
-the parameter tree, and a backup-age alert that actually reaches a person.
+The rule of three only holds because of the third one. If the AWS account is
+gone, the first two are gone together, and what remains is the share: both
+databases, the parameter tree, and the pre-cluster archive — encrypted with the
+password on the paper.
 
-## The recovery credentials
+## How you find out something stopped
 
-Two, and they are not interchangeable:
+Not by looking. [`backup.yaml`](../deploy/cluster/observability/config/alerts/backup.yaml)
+carries six alerts and five `absent()` siblings — one per backup path, plus one
+that fires when a *metric* disappears, because a rule whose series is missing
+is silent and silence is what a working backup looks like. The Delivery
+dashboard's **Backups** row is the same state as four numbers.
 
-- **The CNPG archive** is read with the `aerie-cnpg` IAM user's keys, seeded from
-  the `CNPG_AWS_*` repository secrets into SSM by Provision 2. A rebuild that can
-  run Provision 2 can reach the archive.
-- **The pre-cutover restic repos** are read with `RESTIC_PASSWORD`, seeded at
-  `/aerie/backup/restic-password`. It is also **stored offline**, and that copy is
-  the one that matters: restic encryption is not recoverable without it, and if
-  the AWS account is what was lost, SSM went with it.
+When you silence something for maintenance: **silence by `alertname`, never by
+receiver.** A receiver-wide silence eats the backup-age alert, which is exactly
+the one the maintenance window is a reason to keep armed.
 
-## The pre-cutover history
+---
 
-The old Compose stack's restic backups still exist and still hold everything the
-table above says is unprotected — as of the cutover, and no later. Two repos:
+# Restore procedures
 
-- **The local repo on the old Docker host's data drive** (`E:\restic-repo` on
-  this installation), on the machine that is now the third node's Hyper-V host.
-  That drive was deliberately **not** reformatted during the Phase 7c rebuild, so
-  the repo survived in place.
-- **The restic S3 bucket**, the same repo's twin. Its location was an
-  environment value on the retired `cd.yml`; Phase 8 re-establishes it as a
-  config key rather than a remembered string, and until then it is whatever
-  `RESTIC_REPOSITORY_S3` was on the old host.
+Four, in the order you are most likely to need them. Each is commands.
 
-Both carry a snapshot tagged **`cutover-final`** — the last complete image of the
-old world, tagged in [7b.3](plans/swarm/phase-7-cutover.md) specifically so that a
-future `restic forget` cannot reach it. Phase 8 inherits the obligation to pass
-`--keep-tag cutover-final` to whatever prunes these.
+## 1. One database, from restic
 
-Nothing has been written to either repo since the cutover. They are an archive,
-not a backup.
+The fastest path back to a known-good `aerie` or `quartz`, and the only one
+that works when the AWS account is what was lost. **Restore to a scratch
+Postgres first** unless you are certain: `pg_restore` into the live database is
+destructive by design (`--clean --if-exists`), and the difference between the
+two is one argument.
 
-## Restoring Postgres
+The weekly verify Job does exactly this against the local repository and is
+the thing that keeps this procedure honest —
+[`cluster-verify.sh`](../containers/backup/scripts/cluster-verify.sh) restores
+the newest snapshot, loads `aerie.dump` into a scratch instance it stands up in
+its own `/tmp`, and counts tables. To do it by hand:
+
+```sh
+# What is in the newest snapshot, and when it was taken. Host is always
+# `aerie` and the tag is always `daily`; the paths are fixed, which is what
+# makes `restic dump` below able to name a file.
+restic -r /mnt/restic-local snapshots latest --json \
+  | jq -r '.[] | "\(.short_id) \(.time) host=\(.hostname) tags=\(.tags|join(","))"'
+restic -r /mnt/restic-local ls latest --json \
+  | jq -r 'select(.struct_type=="node") | .path'
+#   /tmp/aerie-backup/aerie.dump
+#   /tmp/aerie-backup/parameters.json
+#   /tmp/aerie-backup/quartz.dump
+
+# Pull one dump out without restoring the whole snapshot.
+restic -r /mnt/restic-local dump latest /tmp/aerie-backup/aerie.dump > aerie.dump
+
+# Load it. --no-owner --no-privileges because the dump's owner role does not
+# exist on a fresh cluster; CNPG generated whatever `aerie` is now.
+pg_restore --no-owner --no-privileges -h <host> -p 5432 -U aerie -d aerie_scratch aerie.dump
+```
+
+`RESTIC_PASSWORD` comes from the offline copy. Inside the cluster it is also
+the `restic` Secret in the `aerie` namespace, which is what every Job here
+reads; a Job template that already has the credential, the repository and the
+mount is
+[`verify-cronjob.yaml`](../deploy/cluster/data/backup/verify-cronjob.yaml) —
+copy it rather than assembling one.
+
+**Onto the live cluster**, the tree carries
+[`restore-job.yaml`](../deploy/cluster/data/schema/restore-job.yaml): a
+suspended Job that restores the newest `daily` snapshot *from S3* and replays
+both dumps into `aerie-pg`. Since 8b.10 it needs nothing created by hand — the
+credential is the `restic` Secret, the repository arrives as
+`${RESTIC_S3_REPOSITORY}` from `aerie-cluster-config`. Its own header carries
+the copy-to-a-new-name command; `kubectl patch ... suspend=false` races Flux
+and is the wrong way in.
+
+> **Not yet exercised against the current Secret.** The Job was rewired in
+> 8b.10 and has not been run since — running it writes over the live
+> databases, so it is a deliberate human act, and the honest place to prove it
+> is the quarterly rehearsal against a scratch Postgres rather than a Tuesday
+> against production.
+
+## 2. Postgres, to a point in time, from CNPG
 
 **Recovery always bootstraps a new `Cluster`; it never acts in place.** That is
-CNPG's model and it is a feature — a recovery is cheap to rehearse and impossible
-to accidentally perform on the live database.
+CNPG's model and it is a feature — the rehearsal is cheap and cannot be
+performed on the live database by accident. This is the shape
+[4b.10](plans/swarm/phase-4-data-tier.md) rehearsed, in the plugin form the
+cluster actually runs:
 
-The shape, in outline:
+```yaml
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: aerie-pg-pitr          # a NEW name. Never the live one.
+  namespace: aerie
+spec:
+  instances: 1                 # a recovery target, not a production cluster
+  storage:
+    storageClass: local-path
+    size: 20Gi
+  bootstrap:
+    recovery:
+      source: aerie-pg
+      recoveryTarget:
+        # Omit the whole recoveryTarget block to recover to the end of the
+        # WAL stream. With it, any moment inside the 30d retention window.
+        targetTime: "2026-08-24 02:30:00+00"
+  externalClusters:
+    - name: aerie-pg
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: aerie-pg-wal   # ../deploy/cluster/data/cluster/objectstore.yaml
+          serverName: aerie-pg             # the *source* server's name in the bucket
+```
 
-1. Write a new `Cluster` manifest with a different `metadata.name`, a
-   `bootstrap.recovery` block, and an `externalClusters` entry naming
-   `serverName: aerie-pg` and the same `barmanObjectName: aerie-pg-wal` the live
-   cluster uses.
-2. For PITR, add `recoveryTarget.targetTime`. Omit it to recover to the end of
-   the WAL stream.
-3. Apply, and watch it bootstrap. Verify against the recovered instance directly.
-4. Only then decide what to do with it — promote it by repointing the
-   application, or extract what you need and delete it.
+```sh
+kubectl apply -f pitr.yaml
+kubectl -n aerie get cluster aerie-pg-pitr -w        # watch it bootstrap
+kubectl -n aerie exec -it aerie-pg-pitr-1 -- psql -U postgres aerie -c '<your check>'
 
-If the *live* cluster is the thing being recovered onto, the same manifest is what
-`deploy/cluster/data/cluster/` should temporarily hold; commit it, let Flux apply
-it, and remove the recovery block once the new cluster is the primary.
+# Then decide: extract what you need, or repoint the application at it.
+kubectl -n aerie delete cluster aerie-pg-pitr        # when you are done
+```
 
-## Restoring from the pre-cutover archive
+The base backup is the floor and the WAL is the resolution: PITR can reach any
+instant after the oldest surviving base backup, which is why the
+`CNPGBackupTooOld` alert is a critical and not a warning.
 
-Only relevant for data that predates the cutover, or for the non-Postgres services
-in the table above.
+## 3. One Longhorn volume, from a backup
 
-The tree still carries [`restore-job.yaml`](../deploy/cluster/data/schema/restore-job.yaml)
-— a **suspended** Job that restores the newest `daily` restic snapshot from the
-S3 repo and replays both per-database dumps into the cluster's Postgres. It was
-the one-shot migration path in Phase 4b.9, and since Phase 8b.10 it needs
-nothing created by hand first: the credential is the `restic` Secret that
-`external-secrets` syncs into the `aerie` namespace, the same one the nightly
-backup CronJob uses, and the repository path arrives as `${RESTIC_S3_REPOSITORY}`
-from `aerie-cluster-config`. The hand-made `aerie-pg-restore-restic` Secret that
-stood in for all of that until then has been deleted. Copy the Job to a new name
-to run it — the file's own header carries the command and the reason.
+**Verified end to end on 2026-08-24** — restored from the S3 backup target into
+a new volume, mounted, and read.
 
-For anything else in those repos, restic is the tool and there is no wrapper:
-mount or restore the repo from a machine that has the password, and put the files
-where the workload expects them. There is no automation for this today, which is
-the honest version of "Grafana is not backed up."
+```sh
+# 1. Find the backup. The objects carry the PVC name in their KubernetesStatus
+#    label, which is how you tell Grafana's from Kuma's.
+kubectl -n longhorn-system get backups.longhorn.io -o json \
+  | jq -r '.items[] | "\(.metadata.name)  \(.status.backupCreatedAt)  \(.status.labels.KubernetesStatus | fromjson | .pvcName)"'
 
-## Full disaster recovery
+# 2. Take that backup's restore URL verbatim - do not assemble it by hand.
+kubectl -n longhorn-system get backups.longhorn.io <backup-name> -o jsonpath='{.status.url}'
+#   s3://${LONGHORN_BACKUP_BUCKET}@${AWS_REGION}/?backup=<backup-name>&volume=<pv-name>
+```
 
-**If the cluster is gone but the S3 archive is not**, the rebuild is the ordinary
+```yaml
+# 3. A new Longhorn volume from that URL. Never the name of a live volume.
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: kuma-restore            # any new name
+  namespace: longhorn-system
+spec:
+  fromBackup: "<the URL from step 2>"
+  size: "1073741824"            # status.volumeSize of the backup, in bytes
+  numberOfReplicas: 3
+  frontend: blockdev
+  dataEngine: v1
+```
+
+```yaml
+# 4. A static PV and PVC so a pod can mount it. storageClassName: "" on both -
+#    this volume already exists, so nothing should provision one.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: kuma-restore
+spec:
+  capacity: { storage: 1Gi }
+  accessModes: ["ReadWriteOnce"]
+  volumeMode: Filesystem
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  csi:
+    driver: driver.longhorn.io
+    fsType: ext4
+    volumeHandle: kuma-restore        # the Volume's metadata.name
+    volumeAttributes:
+      numberOfReplicas: "3"
+      staleReplicaTimeout: "30"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kuma-restore
+  namespace: default
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: ""
+  volumeName: kuma-restore
+  resources:
+    requests: { storage: 1Gi }
+```
+
+Mount it from a throwaway pod and look before you promote anything. The volume
+restores lazily — it reports `state: detached` almost immediately and the data
+arrives when something attaches it, so an empty-looking volume 30 seconds in is
+normal.
+
+**What you get back is a frozen filesystem snapshot, not an application-level
+export.** `freeze-filesystem-for-snapshot` is on
+([`longhorn.yaml`](../deploy/cluster/infrastructure/controllers/longhorn.yaml)),
+so `fsfreeze` runs before the snapshot and the image is filesystem-consistent
+rather than merely crash-consistent. SQLite recovers from it exactly as it
+recovers from power loss — the restored Kuma volume came back with `kuma.db`,
+`kuma.db-wal` and `kuma.db-shm` beside each other, which is the supported path
+and not a hope. The whole argument for putting these three volumes on
+Longhorn's backup target rather than into restic rests on that setting: check
+it before trusting this procedure.
+
+```sh
+# 5. Clean up the rehearsal. In this order.
+kubectl -n default delete pod <the pod>; kubectl -n default delete pvc kuma-restore
+kubectl delete pv kuma-restore
+kubectl -n longhorn-system delete volumes.longhorn.io kuma-restore
+```
+
+## 4. The parameter tree, from the export
+
+Every secret this installation holds, readable with nothing but the offline
+password and a copy of the repository. **Verified on 2026-08-24**: 21
+parameters, which is every `required: true` entry in
+[`parameters.json`](../scripts/secrets/parameters.json).
+
+```sh
+# The export is one file inside the daily snapshot, at a fixed path - which is
+# the reason cluster-backup.sh stages into /tmp/aerie-backup rather than a
+# mktemp directory.
+restic -r <repo> dump latest /tmp/aerie-backup/parameters.json > parameters-export.json
+
+# What is in it, without putting a single value on a terminal or in a log:
+jq 'length' parameters-export.json
+jq -r '.[].Name' parameters-export.json
+
+# One value, when you actually need one. This prints a secret - do it in a
+# shell whose history you control, and not inside a CI job.
+jq -r '.[] | select(.Name=="/aerie/backup/restic-password") | .Value' parameters-export.json
+```
+
+The file is written with `umask 077` and restic preserves permissions, so a
+restore lays it back down `0600`. Keep it that way, and delete it when you are
+done: it is the one artifact in this document that is more sensitive than the
+backups themselves.
+
+To put the tree back, re-run **Provision 2** from the repository secrets rather
+than replaying this file — the seeding path is the one that is tested. This
+export is for reading a value back when Parameter Store is gone, and for
+rebuilding the repository secrets when the offline copies of *those* are gone.
+
+---
+
+# Full disaster recovery
+
+**If the cluster is gone but AWS is not**, the rebuild is the ordinary
 provisioning sequence — which is the whole argument for pull-based delivery
-([`docs/delivery-architecture.md`](delivery-architecture.md)):
+([`delivery-architecture.md`](delivery-architecture.md)):
 
 1. **Provision 0** per host — the node VM.
 2. **Provision 5** per node — the Longhorn data disk, *before* the join.
 3. **Provision 1** per node — k3s, first node then joins.
-4. **Provision 2** — seed SSM. Needs the repository secrets, from wherever they
+4. **Provision 2** — seed SSM. Needs the repository secrets from wherever they
    are stored offline; GitHub Actions will not hand them back.
 5. **Provision 3** — install Flux and point it at the repo.
 6. **Provision 4** — plant the `aerie-cluster-config` ConfigMap.
-7. **Wait.** Flux reconciles the entire tree: controllers, ingress, certificates,
-   observability, the app. Nothing here is a manual apply.
-8. **Recover Postgres** with the procedure above, against the surviving bucket.
+7. **Provision 6** — the backup bucket, the `aerie-longhorn` user, and the two
+   IAM policy documents. Only if the AWS side is being rebuilt too.
+8. **Wait.** Flux reconciles the entire tree: controllers, ingress,
+   certificates, observability, the app. Nothing here is a manual apply.
+9. **Recover Postgres** with procedure 2 against the surviving bucket, or
+   procedure 1 if the restic repositories are what survived.
+10. **Restore the three volumes** with procedure 3 — Grafana's dashboards come
+    back from git either way, but its users, its alert-rule state, Kuma's
+    monitor history and Alertmanager's silences do not.
 
-Everything in the "not backed up" table comes back empty. That is the current
-cost of a total loss, stated so nobody discovers it at 3am.
+Prometheus's metric history and OpenSearch's log indices come back empty. That
+is the cost of the decision in the table at the top, stated here so nobody
+discovers it during the rebuild.
 
-**If the AWS account is gone**, the CNPG archive and the restic S3 repo are both
-gone with it — they share an account. What survives is the local restic repo, on a
-machine in the house, holding pre-cutover data only. This is the gap Phase 8's
-finding 3 exists to close, by making that repo a live destination again.
+**If the AWS account is gone**, the CNPG archive and the restic S3 repository
+are gone with it — they share an account. What survives is the share copy:
+both databases as of last night, the parameter tree as of last night, and the
+pre-cutover archive. Procedures 1 and 4 are the two that still work, and
+`RESTIC_PASSWORD` off the paper is what opens them.
+
+## The pre-cutover archive
+
+Both restic repositories still carry a snapshot tagged **`cutover-final`** —
+the last complete image of the old Compose world, including Uptime Kuma's
+SQLite and a `pg_dumpall` that exists nowhere else. It is protected from the
+nightly `forget` by `--keep-tag cutover-final`, and
+[`cluster-backup.sh`](../containers/backup/scripts/cluster-backup.sh) asserts
+before and after every prune that the tagged set did not change — deliberately
+against the local repository *first*, so a retention change that would eat it
+aborts the run before the S3 copy is pruned too.
+
+Those snapshots are also permanently outside the retention policy for a second,
+accidental reason: they were written by the compose-era script, which staged
+into `mktemp -d`, so each has a unique path and lands in a `--group-by
+host,paths` group of one. Harmless, and worth knowing before someone
+investigates why they never expire.
 
 ## Known gaps
 
-Named, not solved. Each has an owner.
+Named, not solved.
 
-- **One copy of the only backup.** The CNPG archive is one bucket, one account,
-  one region. *[Phase 8]*
-- **Everything except Postgres.** See the table above. *[Phase 8]*
-- **No alert on backup age.** If archiving stopped, nothing would say so until
-  someone looked. This is the first alert that has to reach a person, which is why
-  it is entangled with giving the notification flows teeth at all. *[Phase 8]*
-- **The full-DR sequence above has not been rehearsed end to end** since the
-  cutover. The Postgres half has (Phase 4b.10's PITR); the rebuild half is
-  Provision workflows that have each run, but not in sequence against a cold
-  cluster. *[Phase 8's rehearsal]*
-- **Same building, same circuit.** The house's copy and the house are the same
-  blast radius, which is why S3 is the second copy rather than the third.
-  *[Design goal 6, [design.md](plans/swarm/design.md)]*
+- **`restore-job.yaml` has not been run against the `restic` Secret** it was
+  rewired to in 8b.10. Prove it in a rehearsal, onto a scratch Postgres, before
+  deleting the hand-made `aerie-pg-restore-restic` Secret it replaced.
+- **The full-DR sequence above has not been rehearsed end to end.** Its parts
+  have: PITR in 4b.10, the restic restore weekly, the Longhorn restore on
+  2026-08-24. The sequence has not.
+- **Same building, same circuit.** The share and the cluster are one blast
+  radius, which is why AWS is the second copy rather than the third —
+  [design.md](plans/swarm/design.md) goal 6.
+- **Kuma's watchdog push has never completed a cycle** (404, `Monitor not found
+  or not active`), so the dead-man's switch that would notice Alertmanager
+  itself dying is not armed. The rest of the alert path is proven end to end;
+  this one hop is not.

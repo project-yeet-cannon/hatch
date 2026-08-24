@@ -1570,7 +1570,7 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       printing `No data`, since absence is precisely what the `absent()`
       siblings exist to catch.
 
-- [ ] **14. Rewrite `docs/disaster-recovery.md`** —
+- [x] **14. Rewrite `docs/disaster-recovery.md`** —
       [`docs/disaster-recovery.md`](../../disaster-recovery.md).
 
       [7c.10](phase-7-cutover.md#phase-7c--the-old-server-docker-host--k3s-node)
@@ -1602,6 +1602,44 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       *Exit:* someone who was not in the room can restore the `aerie` database
       by following it, without reading a phase document. That is testable and
       8b.15 tests it.
+
+      **Rewritten 2026-08-24**, from 184 lines that described one backup to 393
+      that describe five and tell you how to get each one back. The wrong table
+      is gone: it promised OpenSearch and Prometheus restores that were never
+      possible, and the row that replaces it says nothing backs them up **and
+      why that is a decision** — the two largest volumes in the cluster and the
+      two whose absence nobody would act on.
+
+      Three of the four restore procedures were run rather than written:
+
+      - **The Longhorn one was rehearsed while writing it.** A new volume
+        restored from the S3 backup target, a static PV and PVC bound to it, a
+        throwaway pod mounting it — and Kuma's `kuma.db` came back at 286 KB
+        with its `-wal` and `-shm` beside it, which is finding 1's whole
+        argument arriving as evidence rather than as a citation. Every
+        procedure step in the document is a command that ran, including the
+        teardown order. Two things worth having found: the restore is **lazy**
+        (the volume reports `detached` within seconds and the data arrives on
+        attach, so an empty-looking volume is normal), and `status.url` on the
+        `backups.longhorn.io` object is the restore URL verbatim — assembling
+        it by hand from the bucket name is the way to get it wrong.
+      - **The parameter read-back was run**: `restic dump latest
+        /tmp/aerie-backup/parameters.json` out of the local repository returned
+        21 parameters, which is exactly the count of `required: true` entries in
+        `parameters.json`. The document shows how to list names and how to pull
+        one value, with the warning that the second one prints a secret.
+      - **The restic database restore** is what the weekly verify Job does, and
+        it ran successfully at 03:24 on 2026-08-24 — restore, `pg_restore` into
+        a scratch Postgres, 26 tables counted.
+
+      The fourth, `restore-job.yaml` against the live databases, is written
+      down as **not yet exercised** in the same voice as everything else,
+      because it writes over production and 8b.15 is the cheaper place to prove
+      it. The document also carries the root-of-trust paragraph this step asked
+      for (the printed password opens the box that contains the copy of
+      itself), where the three copies are and which one is not in AWS, the
+      silence-by-alertname rule, and a Known Gaps section that names the Kuma
+      watchdog rather than leaving it in a commit message.
 
 - [ ] **15. The first rehearsal, and the schedule for the rest** — *manual*
 
