@@ -22,26 +22,35 @@
 # CronJob with a schedule that never fires, which is what makes the original
 # `--from=` command legal.
 #
-# Before that command, two things this Job needs that nothing in Phase 4
-# generates automatically:
+# Before that command, one thing this Job needs that nothing here creates:
+# `aerie-pg` reporting Ready, since it runs as the `aerie` role from the
+# aerie-pg-app Secret CNPG generates.
 #
-#   1. A `aerie-pg-restore-restic` Secret in this namespace, created by hand -
-#      not through ESO/parameters.json. scripts/secrets/parameters.json's
-#      backup/* parameters are seeded and required, but Phase 8 owns the
-#      namespace and CronJob that would turn them into an ExternalSecret
-#      (kubernetesDeferred), and this Job runs before Phase 8 exists. Rather
-#      than pre-empt that boundary, this one manually-created Secret carries
-#      the same values by hand for as long as Phase 4-7 need this Job:
-#        kubectl -n aerie create secret generic aerie-pg-restore-restic \
-#          --from-literal=repository='s3:s3.amazonaws.com/<bucket>' \
-#          --from-literal=password='<restic repository password>' \
-#          --from-literal=aws-access-key-id='<aerie-restic access key id>' \
-#          --from-literal=aws-secret-access-key='<aerie-restic secret access key>' \
-#          --from-literal=aws-region='<region>'
-#      Delete it once Phase 8's own ExternalSecret exists and this Job has
-#      been updated to read that instead.
-#   2. `aerie-pg` reporting Ready, since this Job runs as the `aerie` role
-#      from the aerie-pg-app Secret CNPG generates.
+# There used to be a second, and the cluster plan Phase 8b.10 retired it. From
+# 4b.9 until then this Job read five values out of an `aerie-pg-restore-restic`
+# Secret created by hand, because scripts/secrets/parameters.json's backup/*
+# parameters were seeded but `kubernetesDeferred` - Phase 8 owned the workload
+# that would turn them into an ExternalSecret, and this Job predated it. 8b.1
+# flipped those three deferrals into
+# ../../infrastructure/config/external-secrets/aerie-restic.yaml, targeting
+# Secret `restic` in *this* namespace precisely so one object could serve both
+# the side that writes backups and the side that reads them. So the credential
+# below is now the same one ../backup/backup-cronjob.yaml uses, it arrives from
+# Parameter Store like everything else, and the hand-made Secret is deleted
+# (8b.16 asserts it is gone, because this is the kind of cleanup that gets
+# half-done).
+#
+# What that means for anyone reading this in an emergency: there is nothing to
+# create first. If `kubectl -n aerie get secret restic` exists and its
+# ExternalSecret reports SecretSynced, this Job has its credential.
+#
+# That rename was an edit to a pod template, which is immutable once the Job
+# exists - so the rule ./kustomization.yaml states for a script change and the
+# `image:` note below restates applies to it as well, and applied on the day
+# 8b.10 landed: `kubectl -n aerie delete job aerie-pg-restore` and let Flux
+# recreate it. Flux does not do this for you. It reports the failed apply and
+# leaves a Job still holding a reference to a Secret that no longer exists,
+# which is a failure that waits until the next emergency to be discovered.
 #
 # From S3, not the local restic repo: see ./restore.sh for why. What it does,
 # in order, is documented there rather than split across command args here -
@@ -114,31 +123,37 @@ spec:
                 secretKeyRef:
                   name: aerie-pg-app
                   key: password
+            # A substitution rather than a Secret key, and that is the one
+            # change here that is not just a rename. A repository path is not a
+            # credential - it is the same operator value
+            # ../backup/backup-cronjob.yaml reads as ${RESTIC_S3_REPOSITORY},
+            # and carrying a second copy of it inside a Secret meant two places
+            # to change a bucket name and no way to tell they disagreed.
+            # scripts/k3s/cluster-config.json is where its shape is enforced.
+            #
+            # The region rides inside that string's hostname
+            # (s3:s3.<region>.amazonaws.com/<bucket>), which is why the
+            # AWS_DEFAULT_REGION this Job used to set is simply gone rather
+            # than moved: restic will not take a region separately, ./restore.sh
+            # runs no aws-cli that would need one, and one value that cannot
+            # disagree with itself beats two that can.
             - name: RESTIC_REPOSITORY
-              valueFrom:
-                secretKeyRef:
-                  name: aerie-pg-restore-restic
-                  key: repository
+              value: ${RESTIC_S3_REPOSITORY}
             - name: RESTIC_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: aerie-pg-restore-restic
+                  name: restic
                   key: password
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
-                  name: aerie-pg-restore-restic
-                  key: aws-access-key-id
+                  name: restic
+                  key: access-key-id
             - name: AWS_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: aerie-pg-restore-restic
-                  key: aws-secret-access-key
-            - name: AWS_DEFAULT_REGION
-              valueFrom:
-                secretKeyRef:
-                  name: aerie-pg-restore-restic
-                  key: aws-region
+                  name: restic
+                  key: secret-access-key
           volumeMounts:
             - name: restore-script
               mountPath: /scripts

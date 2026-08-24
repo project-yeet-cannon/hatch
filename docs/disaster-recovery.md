@@ -125,12 +125,15 @@ Only relevant for data that predates the cutover, or for the non-Postgres servic
 in the table above.
 
 The tree still carries [`restore-job.yaml`](../deploy/cluster/data/schema/restore-job.yaml)
-— a **suspended** Job that restores a `pg_dumpall` from the restic S3 repo and
-replays it into the cluster's Postgres. It was the one-shot migration path in
-Phase 4b.9 and it still works, with one caveat: the `aerie-pg-restore-restic`
-Secret it reads was created **by hand** and is not in git. Recreate it from the
-`/aerie/backup/*` parameters before unsuspending the Job. (Phase 8 replaces the
-hand-made Secret with an `ExternalSecret` and deletes it.)
+— a **suspended** Job that restores the newest `daily` restic snapshot from the
+S3 repo and replays both per-database dumps into the cluster's Postgres. It was
+the one-shot migration path in Phase 4b.9, and since Phase 8b.10 it needs
+nothing created by hand first: the credential is the `restic` Secret that
+`external-secrets` syncs into the `aerie` namespace, the same one the nightly
+backup CronJob uses, and the repository path arrives as `${RESTIC_S3_REPOSITORY}`
+from `aerie-cluster-config`. The hand-made `aerie-pg-restore-restic` Secret that
+stood in for all of that until then has been deleted. Copy the Job to a new name
+to run it — the file's own header carries the command and the reason.
 
 For anything else in those repos, restic is the tool and there is no wrapper:
 mount or restore the repo from a machine that has the password, and put the files

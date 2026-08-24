@@ -1,0 +1,134 @@
+# The cluster plan Phase 8b.10 - the nightly Longhorn backup of the three
+# volumes whose loss would actually cost something.
+#
+# Layer 2, beside the StorageClasses, for the reason ./kustomization.yaml
+# gives: a RecurringJob is an instance of a type ../controllers/longhorn.yaml
+# installs. It needs no ${...} substitution - every value here is either a
+# schedule or a name this repository chose - so it is one of the few files in
+# this directory that renders identically for every installation.
+#
+# Its counterpart is ../controllers/longhorn.yaml's defaultBackupStore block:
+# without a BackupTarget that reports available, this object still applies
+# cleanly, still creates its CronJob, and still fires every night - each run
+# failing per volume against a target that is not there. An unavailable target
+# and a RecurringJob that has never run look identical from the bucket, which
+# is why note 5 in that file is 8b.10's prerequisite rather than 8b.9's detail.
+#
+# ---------------------------------------------------------------------------
+# How Longhorn actually chooses volumes, and why this file names a group
+#
+# Selection is by *label on the Volume CR*, not by StorageClass and not by
+# namespace: StartVolumeJobs looks up `recurring-job.longhorn.io/<name>` and
+# then one `recurring-job-group.longhorn.io/<group>` per entry in spec.groups,
+# and backs up the union. Finding 2 in the phase doc is the whole argument for
+# which of those two this file uses:
+#
+#   - A StorageClass's `recurringJobSelector` parameter only stamps that label
+#     at volume-creation time, and StorageClass parameters are immutable
+#     (./longhorn-storageclasses.yaml carries that argument in full), so it
+#     could not reach the volumes that already exist even if the classes were
+#     recreated.
+#   - The documented shortcut - `groups: [default]`, which Longhorn applies to
+#     any volume carrying no recurring-job label of its own - is worse than
+#     useless here. It would sweep in Prometheus's TSDB and OpenSearch's
+#     indices: the two volumes docs/plans/swarm/design.md says are not worth
+#     backing up, and the two that would dominate the S3 bill. Worse on this
+#     cluster than the doc implies, because Longhorn has stamped
+#     `recurring-job-group.longhorn.io/default=enabled` *explicitly* on all
+#     five Longhorn volumes (8a.3 found this) - so "no other label" is not even
+#     the guard it reads as. The way that trap stays shut is by never creating
+#     a job in the `default` group, not by editing labels.
+#
+# So the selection is `aerie-critical`, a group name this repository invented,
+# applied by hand in 8a.3 to exactly three Volume CRs - the ones behind
+# Grafana, uptime-kuma-data and Alertmanager, which is the set
+# ./longhorn-storageclasses.yaml's longhorn-r3 already encodes. That label is
+# the only thing connecting this file to those volumes, and a volume recreated
+# by a restore comes back **without** it and with no error anywhere, which is
+# why 8b.16 asserts the label set permanently rather than trusting 8a.3 once.
+#
+# ---------------------------------------------------------------------------
+# Five properties of this object checked against longhorn-manager v1.11.3
+# rather than taken from the docs, in the spirit note 4 of
+# ../controllers/longhorn.yaml earned the hard way
+#
+# 1. `spec.name` is required and is set here rather than left to the webhook.
+#    ValidateRecurringJob rejects an empty Spec.Name outright; the mutating
+#    webhook fills it from metadata.name a moment earlier, so omitting it does
+#    work - by way of a webhook supplying a field this manifest would then not
+#    declare. Spelling it out keeps the required field in git and keeps the two
+#    names from ever drifting apart.
+#
+# 2. Expect `kubectl get -o yaml` to show two fields this file does not.
+#    The same mutator defaults `spec.labels` and `spec.parameters` to `{}` when
+#    they are absent. That is the read-back differing from what was written,
+#    the way `freeze-filesystem-for-snapshot` answers `{"v1":"true"}` next
+#    door - not drift, and nothing to chase.
+#
+# 3. `retain: 7` governs two things, not one. Each run creates a snapshot on
+#    the volume and backs that snapshot up, and the cleanup pass keeps the
+#    newest 7 of *each*: seven backups in S3, and seven snapshots on the
+#    volume's own replicas. The snapshots are the part that costs local disk,
+#    and 7 of three small volumes is well inside what the data disk carries.
+#    Backup cleanup matches on the `RecurringJob` label, so it only ever
+#    deletes backups this job created - a hand-taken backup is not swept up.
+#
+# 4. Every backup after the first is incremental, forever. doRecurringBackup
+#    uses BackupModeIncremental unless the `full-backup-interval` parameter
+#    says otherwise, and it is deliberately not set: Longhorn's backups are
+#    individually restorable regardless (each names the blocks it needs), so a
+#    periodic full buys storage churn and no recoverability. That is what makes
+#    7 dailies of three volumes a number chosen for restore convenience rather
+#    than for cost.
+#
+#    The other parameter the validator accepts for a backup task,
+#    `volume-backup-policy`, is read by nothing on this path - only the
+#    `system-backup` task consults it. Setting it here would validate cleanly
+#    and do nothing, which is the trap this comment exists to close.
+#
+# 5. A *detached* volume is skipped, with a warn log and nothing else.
+#    filterVolumesForJob drops any volume that is not Attached unless the
+#    `allow-recurring-job-while-volume-detached` setting is on, and it is off
+#    (Longhorn's default, and ../controllers/longhorn.yaml does not change it).
+#    All three of these volumes are attached in steady state, so this is not a
+#    gap today - but scale Grafana to zero for an afternoon and that night's
+#    backup of its volume does not happen and does not fail. The thing that
+#    catches it is 8b.11's staleness alert on the newest backup, not this file.
+# ---------------------------------------------------------------------------
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: aerie-critical-daily
+  # Explicit, because ./kustomization.yaml sets no namespace transformer and
+  # longhorn-manager only watches its own namespace for these.
+  namespace: longhorn-system
+spec:
+  # Note 1 - equal to metadata.name, and required.
+  name: aerie-critical-daily
+  # `backup`, not `snapshot`: a snapshot lives on the same replicas as the
+  # volume it was taken from and survives none of the failures Phase 8 exists
+  # for. `backup-force-create` is the variant that ignores whether anything has
+  # changed since the last run, which for three volumes this small would only
+  # buy noise.
+  task: backup
+  # 8a.3's label, and not `default` - the whole of finding 2, above.
+  groups:
+    - aerie-critical
+  # 02:00, in UTC. Kubernetes CronJobs run in UTC unless given a timeZone, and
+  # longhorn-manager renders this straight into the CronJob's schedule with no
+  # zone of its own - so this is the same clock ../../data/schema/scheduledbackup.yaml
+  # and ../../data/backup/backup-cronjob.yaml are already staggered against.
+  # It deliberately shares the hour with CNPG's 02:00 base backup rather than
+  # dodging it: that stagger exists because finding 7's three restic clients
+  # contend for one repository lock, and this job shares neither a repository
+  # nor a volume with any of them. What it does share is an upload window, for
+  # three volumes measured in gigabytes.
+  cron: "0 2 * * *"
+  # Note 3 - seven backups in the bucket and seven snapshots on the volume.
+  retain: 7
+  # One volume at a time. The alternative is three filesystems frozen at once
+  # (../controllers/longhorn.yaml sets freezeFilesystemForSnapshot: true, which
+  # is what makes finding 1's argument about SQLite hold) and three concurrent
+  # uploads out of a house connection. Longhorn's own default here is 10, which
+  # is a number for a cluster with more volumes than this one has.
+  concurrency: 1

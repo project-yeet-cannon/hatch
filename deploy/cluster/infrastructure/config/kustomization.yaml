@@ -14,7 +14,9 @@
 # ExternalSecret per target Secret named in scripts/secrets/parameters.json,
 # plus the app Namespace two of them land in), 3b.9 (Traefik's HelmChartConfig),
 # 3b.10 (both ClusterIssuers, the wildcard Certificate, and the TLSStore that
-# actually serves it) and 3b.11 (the longhorn-r2 / longhorn-r3 StorageClasses).
+# actually serves it), 3b.11 (the longhorn-r2 / longhorn-r3 StorageClasses) and
+# 8b.10 (the RecurringJob that backs up three of the volumes those classes
+# provisioned).
 #
 # As in ../controllers, the order of this list is not an ordering: everything
 # here is applied together, and what sequencing exists inside the layer is the
@@ -45,3 +47,8 @@ resources:
   # 3b.11's two classes, in one file: they differ on a single parameter, and the
   # argument for each count is an argument about the other one.
   - longhorn-storageclasses.yaml
+  # 8b.10's nightly backup of the three longhorn-r3 volumes. Beside the classes
+  # rather than folded into them on purpose: Longhorn selects volumes for it by
+  # label on the Volume CR, not by class, which is the finding that file opens
+  # with.
+  - longhorn-recurringjob.yaml

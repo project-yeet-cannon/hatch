@@ -1163,7 +1163,7 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       belongs in the same pass as 8b.10, since an unavailable target and a
       `RecurringJob` that has never run look identical from the bucket.
 
-- [ ] **10. The `RecurringJob`, and the retirement of the hand-made Secret** —
+- [x] **10. The `RecurringJob`, and the retirement of the hand-made Secret** —
       `deploy/cluster/infrastructure/config/longhorn-recurringjob.yaml`,
       [`restore-job.yaml`](../../../deploy/cluster/data/schema/restore-job.yaml).
 
@@ -1191,6 +1191,99 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       `aerie-pg-restore-restic` is gone while `restore-job.yaml` still renders —
       the second half is the one that fails at 3am if it is wrong, so run the
       restore Job once against the new Secret before ticking this.
+
+      **Both files written 2026-08-23, and the step as written holds — no
+      corrections this time.** The `RecurringJob` is
+      [`longhorn-recurringjob.yaml`](../../../deploy/cluster/infrastructure/config/longhorn-recurringjob.yaml),
+      layer 2 beside the StorageClasses and needing no substitution at all; the
+      restore Job's five `secretKeyRef`s became three against `restic` plus
+      `RESTIC_REPOSITORY: ${RESTIC_S3_REPOSITORY}`, and `AWS_DEFAULT_REGION` is
+      gone rather than moved (`restore.sh` runs no aws-cli, unlike 8b.7's
+      export, so there is nothing left that needs a region outside the
+      endpoint). It validates against the extracted 1.11.3 CRD schema, all 16
+      kustomizations build, and both portability checks pass.
+
+      Six mechanical facts checked against the 1.11.3 chart and longhorn-manager
+      v1.11.3 rather than the docs — 8b.9's lesson applied prospectively rather
+      than after the fact. The first three are in the manifest's own comments
+      because they change what an operator reading the object should expect:
+
+      - **`spec.name` is required**, and the mutating webhook fills it from
+        `metadata.name` a moment before `ValidateRecurringJob` rejects an empty
+        one. It is spelled out in the file instead, so the required field is in
+        git rather than supplied by a webhook to a manifest that never declared
+        it. The same mutator defaults `spec.labels` and `spec.parameters` to
+        `{}`, so the read-back carries two fields the file does not — the same
+        genre of "compare against what Longhorn returns" as 8b.9's
+        `{"v1":"true"}`, and not drift.
+      - **`volume-backup-policy` is read by nothing on this path.** The
+        validator accepts it for a `backup` task, and only the `system-backup`
+        task ever consults it — a parameter that would apply cleanly and do
+        nothing, which is 8b.9's trap in miniature and is why it is documented
+        rather than set.
+      - **A detached volume is skipped with a warn log and nothing else.**
+        `filterVolumesForJob` drops anything not `Attached` unless
+        `allow-recurring-job-while-volume-detached` is on, and it is off
+        (Longhorn's default; `longhorn.yaml` does not change it). All three
+        volumes are attached in steady state, so this is not a gap today — but
+        Grafana scaled to zero for an afternoon means that night's backup of its
+        volume does not happen and does not fail. **8b.11 owns this**: the
+        staleness alert on the newest Longhorn backup is the only thing that
+        would catch it, which is a requirement on that step rather than a note
+        here.
+      - `retain: 7` governs *two* things — seven backups in S3 and seven
+        snapshots kept on the volume's own replicas — and backup cleanup matches
+        on the `RecurringJob` label, so it only deletes what this job created.
+        7 is comfortably under `recurring-job-max-retention`, whose default is
+        100.
+      - With `full-backup-interval` unset, `doRecurringBackup` uses
+        `BackupModeIncremental` on every run forever, which is what makes the
+        step's "incremental at the block layer" claim true rather than hopeful.
+      - The generated CronJob is `ForbidConcurrent` and carries no `timeZone`,
+        so `0 2 * * *` is **02:00 UTC** — the same clock the CNPG
+        `ScheduledBackup` and the two restic CronJobs are staggered on. It
+        deliberately shares the hour with CNPG's base backup: finding 7's
+        stagger exists for one restic repository lock, and this job shares
+        neither a repository nor a volume with any of them.
+
+      One file outside the step's list changed, because this step made its
+      instructions wrong rather than merely stale:
+      [`docs/disaster-recovery.md`](../../disaster-recovery.md) told a reader to
+      recreate `aerie-pg-restore-restic` from the `/aerie/backup/*` parameters
+      before unsuspending the Job. That is now the opposite of the truth, and it
+      is a paragraph someone reads at 3am. Corrected in place to name the
+      `restic` Secret and `${RESTIC_S3_REPOSITORY}` — along with its claim that
+      the Job replays a `pg_dumpall`, which finding 6 has been the answer to
+      since 4b.1. 8b.14 still rewrites that file; this was the minimum that
+      keeps it from lying in the meantime.
+
+      **What remains is the cluster half**, and it is the same pass 8b.9 left
+      open — an unavailable backup target and a `RecurringJob` that has never
+      run are indistinguishable from the bucket, so neither box is ticked until
+      both are done, in this order:
+
+      1. Reconcile `infra-controllers`, then restart **one** `longhorn-manager`
+         pod (`longhorn.yaml` note 5) and read the CR back:
+         `kubectl -n longhorn-system get backuptargets.longhorn.io default -o
+         jsonpath='{.spec.backupTargetURL} {.spec.credentialSecret}
+         {.status.available}'`. Not a `settings.longhorn.io` read — 8b.9's
+         correction, which **8b.16's gate bullet still has in the old shape and
+         needs updating with it.**
+      2. Reconcile `infra-config`; confirm `kubectl -n longhorn-system get
+         recurringjob` lists `aerie-critical-daily` and that a CronJob
+         `aerie-critical-daily-c` exists beside it.
+      3. `kubectl -n aerie delete job aerie-pg-restore` and let Flux recreate
+         it — a pod template is immutable, so the `secretKeyRef` rename does not
+         apply over the existing Job. Flux reports the failed apply and leaves
+         the old Job in place, still referencing a Secret that is about to stop
+         existing.
+      4. Run the restore Job once against the new Secret (the file header's copy
+         command), *then* `kubectl -n aerie delete secret
+         aerie-pg-restore-restic`. That order, not the step's: a restore proved
+         against the new credential before the old one is thrown away costs one
+         extra day and removes the only way this fails silently.
+      5. After one night, three `backups.longhorn.io` completed and a
+         `backupstore/` prefix in the bucket.
 
 - [ ] **11. The alert family** —
       `deploy/cluster/observability/config/alerts/backup.yaml`.
@@ -1397,12 +1490,12 @@ deploy/cluster/
       verify-cronjob.yaml         # 8b.8
       kustomization.yaml
     schema/
-      restore-job.yaml            # 8b.10, five secretKeyRefs repointed
+      restore-job.yaml            # 8b.10, 5 secretKeyRefs -> 3 + 1 token + 0
   infrastructure/
     controllers/
       longhorn.yaml               # 8b.9, one setting + defaultBackupStore
     config/
-      longhorn-recurringjob.yaml  # 8b.10
+      longhorn-recurringjob.yaml  # 8b.10, + one line in kustomization.yaml
       external-secrets/           # 8b.1, regenerated - two new files
   observability/config/
     alerts/backup.yaml            # 8b.11
