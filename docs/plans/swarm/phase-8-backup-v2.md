@@ -1530,7 +1530,7 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       `RESOLVED:` twin. What is proved here is that the automation ran; that
       it reached a device is 8a.5's result, not this run's.
 
-- [ ] **13. A backup row on the Delivery dashboard** —
+- [x] **13. A backup row on the Delivery dashboard** —
       `deploy/cluster/observability/config/dashboards/`.
 
       Small, and here rather than in Phase 9 because the alert above is the only
@@ -1542,6 +1542,33 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
 
       *Exit:* the row renders four numbers, all of them hours rather than
       `No data`.
+
+      **Done 2026-08-24.** A `Backups` row appended to
+      [delivery.json](../../../deploy/cluster/observability/config/dashboards/delivery.json)
+      beside `Now`, `CI`, `CD` and `Rollout` — the same ConfigMap, so nothing
+      new to register. All four expressions return a number against the live
+      Prometheus: 15.1h, 16.2h, 14.9h and 14.8h respectively, which is hours
+      rather than `No data` and is the exit condition.
+
+      Two of the four are not the panel this step described, and the
+      descriptions in the file carry the reason rather than leaving it to a
+      reader to notice:
+
+      - **Longhorn is the stalest of the three volumes, not the newest.** The
+        newest would stay green through exactly the gap 8b.10 found — one
+        detached volume skipped with a warn log while the other two succeed.
+        A single number that cannot show the failure is decoration.
+      - **CNPG reads `aerie_cnpg_backup_stopped_at`**, 8b.11's
+        CustomResourceState series, for the reason that step documents at
+        length.
+
+      Thresholds are not chosen twice: orange where a run has been missed
+      (26h, 8d), red exactly where the matching rule in `backup.yaml` fires
+      (36h, 10d). A panel that reddens before its alert teaches an operator to
+      distrust the colour; one that reddens after teaches them to distrust the
+      panel. And `noValue` says what an absent series means instead of
+      printing `No data`, since absence is precisely what the `absent()`
+      siblings exist to catch.
 
 - [ ] **14. Rewrite `docs/disaster-recovery.md`** —
       [`docs/disaster-recovery.md`](../../disaster-recovery.md).
