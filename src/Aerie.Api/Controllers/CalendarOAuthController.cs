@@ -121,7 +121,7 @@ public class CalendarOAuthController(
             {
                 Provider = CalendarProviders.Google,
                 AccountEmail = email,
-                RefreshToken = SecretObfuscator.Obfuscate(tokens.RefreshToken!),
+                RefreshToken = SecretProtector.Protect(tokens.RefreshToken!),
                 ConnectedAt = time.GetUtcNow(),
             };
             db.CalendarAccounts.Add(account);
@@ -131,10 +131,10 @@ public class CalendarOAuthController(
             // Reconnecting the same account replaces the grant but keeps the
             // row, so the calendars hanging off it keep their Included and
             // ColorOverride settings.
-            account.RefreshToken = SecretObfuscator.Obfuscate(reissued);
+            account.RefreshToken = SecretProtector.Protect(reissued);
         }
 
-        account.AccessToken = SecretObfuscator.Obfuscate(tokens.AccessToken);
+        account.AccessToken = SecretProtector.Protect(tokens.AccessToken);
         account.AccessTokenExpiresAt = tokens.ExpiresAt;
         account.NeedsReauth = false;
         account.LastSyncError = null;

@@ -102,6 +102,66 @@ public class EfDeviceChannel
     public string? AvailableOptions { get; set; }
 }
 
+/// <summary>
+/// How to reach one camera's RTSP stream: everything go2rtc needs that Home
+/// Assistant does not supply (docs/plans/cameras.md Phase 11).
+///
+/// A row per Camera device, and the reason this table exists rather than a
+/// `streams:` file in the cluster: adding a camera has to be a form in the
+/// admin UI, not a GitHub secret plus a workflow dispatch plus a pod restart.
+/// Aerie owns the camera's address and credential; go2rtc is told about a
+/// stream just before someone watches it, and holds nothing across a restart.
+///
+/// The password is protected (SecretProtector) and never leaves the API. The
+/// username is a plain column on purpose, and the reason is the one
+/// scripts/secrets/parameters.json already states about access key ids: an
+/// identifier is not credential material, and keeping it readable is what
+/// makes the form usable - an operator can see which account a camera is
+/// configured for without being handed its password back.
+/// </summary>
+[Table("CameraConnections")]
+public class EfCameraConnection
+{
+    /// <summary>The Camera device this reaches. Also the primary key - a device has one camera connection or none.</summary>
+    [Key]
+    public Guid DeviceId { get; set; }
+    public EfDevice? Device { get; set; }
+
+    /// <summary>
+    /// Operator-set address, and the override. Null means "use what Home
+    /// Assistant said" - see <see cref="DiscoveredHost"/>. A hostname is as
+    /// welcome as an address; nothing here requires an IP.
+    /// </summary>
+    public string? Host { get; set; }
+
+    /// <summary>
+    /// The host Home Assistant last reported for this device, from the device
+    /// registry's configuration_url. Written by discovery and by a refresh,
+    /// never by the operator - which is what lets it be re-read without
+    /// clobbering an override, and what makes a camera that moves on DHCP
+    /// follow along on its own, since HA's own integration is already
+    /// tracking it.
+    /// </summary>
+    public string? DiscoveredHost { get; set; }
+
+    /// <summary>RTSP port. 554 everywhere this has been seen, and a column rather than a constant because "everywhere this has been seen" is one brand.</summary>
+    public int Port { get; set; } = 554;
+
+    /// <summary>
+    /// Path of the stream to pull. Defaults to Reolink's H.264 sub-stream,
+    /// which is the one the kiosk should be decoding - 640x480 rather than
+    /// 5MP on a wall tablet, and no transcode. Editable because the path is
+    /// the most brand-specific thing here.
+    /// </summary>
+    public string StreamPath { get; set; } = "/h264Preview_01_sub";
+
+    /// <summary>Camera account name. Not protected - see this type's summary.</summary>
+    public string? Username { get; set; }
+
+    /// <summary>Camera account password, protected (SecretProtector scheme v1 - obfuscation, not encryption).</summary>
+    public string? PasswordProtected { get; set; }
+}
+
 /// <summary>Admin-editable scalar settings, replacing the "Dashboard" appsettings section. See SiteSettingKeys for the keys currently in use.</summary>
 [Table("SiteSettings")]
 public class EfSiteSetting

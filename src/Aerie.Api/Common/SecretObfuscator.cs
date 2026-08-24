@@ -3,9 +3,14 @@ using System.Text;
 namespace Aerie.Api.Common;
 
 /// <summary>
-/// Reversible XOR obfuscation for secrets stored in SiteSettings - not
-/// encryption, just enough that the token isn't sitting in the DB as
-/// cleartext. Fine for a value stored in a protected, local database.
+/// Reversible XOR obfuscation - not encryption, just enough that a token isn't
+/// sitting in the DB as cleartext.
+///
+/// This is scheme <c>v1</c>, and it is an implementation detail of
+/// <see cref="SecretProtector"/>: call that instead. Everything stored goes
+/// through the protector so that the day this is replaced with real crypto,
+/// the replacement is a new scheme beside this one rather than an edit to
+/// every call site that ever wrote a secret.
 /// </summary>
 public static class SecretObfuscator
 {

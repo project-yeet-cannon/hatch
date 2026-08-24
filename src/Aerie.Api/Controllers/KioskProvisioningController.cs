@@ -35,7 +35,7 @@ public class KioskProvisioningController(
                 || s.Key == SiteSettingKeys.TimeZone)
             .ToDictionaryAsync(s => s.Key, s => s.Value, ct);
 
-        var obfuscatedWifiPassword = settings.GetValueOrDefault(SiteSettingKeys.KioskWifiPassword, "");
+        var storedWifiPassword = settings.GetValueOrDefault(SiteSettingKeys.KioskWifiPassword, "");
 
         var filesClient = httpClientFactory.CreateClient("KioskFiles");
         var checksum = (await filesClient.GetStringAsync("signature-checksum.txt", ct)).Trim();
@@ -45,7 +45,7 @@ public class KioskProvisioningController(
             ApkDownloadUrl: $"https://files.{configuration["DOMAIN"]}/app-release.apk",
             DeviceAdminComponentName: DeviceAdminComponentName,
             WifiSsid: settings.GetValueOrDefault(SiteSettingKeys.KioskWifiSsid, ""),
-            WifiPassword: obfuscatedWifiPassword.Length == 0 ? "" : SecretObfuscator.Deobfuscate(obfuscatedWifiPassword),
+            WifiPassword: SecretProtector.Unprotect(storedWifiPassword) ?? "",
             WifiSecurityType: settings.GetValueOrDefault(SiteSettingKeys.KioskWifiSecurityType, ""),
             TimeZone: settings.GetValueOrDefault(SiteSettingKeys.TimeZone, ""));
     }

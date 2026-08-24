@@ -56,10 +56,10 @@ public class GoogleTokenProviderTests
 
         var account = await Account(db, accountId);
         Assert.NotEqual("fresh", account.AccessToken);
-        Assert.Equal("fresh", SecretObfuscator.Deobfuscate(account.AccessToken!));
+        Assert.Equal("fresh", SecretProtector.Unprotect(account.AccessToken!));
         Assert.Equal(Now.AddSeconds(3600), account.AccessTokenExpiresAt);
         // Google reissued no refresh token, so the stored grant is untouched.
-        Assert.Equal("stored-refresh", SecretObfuscator.Deobfuscate(account.RefreshToken));
+        Assert.Equal("stored-refresh", SecretProtector.Unprotect(account.RefreshToken));
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public class GoogleTokenProviderTests
 
         await provider.GetAccessTokenAsync(accountId, CancellationToken.None);
 
-        Assert.Equal("rotated", SecretObfuscator.Deobfuscate((await Account(db, accountId)).RefreshToken));
+        Assert.Equal("rotated", SecretProtector.Unprotect((await Account(db, accountId)).RefreshToken));
     }
 
     [Fact]

@@ -39,7 +39,7 @@ public class EfCalendarAccount
     /// <summary>Optional friendlier label for the admin list ("Work", "Nathan"). Null falls back to AccountEmail.</summary>
     public string? DisplayName { get; set; }
 
-    /// <summary>The long-lived OAuth refresh token, stored obfuscated (SecretObfuscator, not encryption - see docs/secrets-architecture.md).</summary>
+    /// <summary>The long-lived OAuth refresh token, stored protected (SecretProtector scheme v1 - obfuscation, not encryption; see docs/secrets-architecture.md).</summary>
     public required string RefreshToken { get; set; }
 
     /// <summary>The current access token, stored obfuscated. Null until GoogleTokenProvider first mints one.</summary>

@@ -106,7 +106,7 @@ public partial class CalendarsController(
         var account = await db.CalendarAccounts.FirstOrDefaultAsync(a => a.Id == id, ct);
         if (account is null) return NotFound();
 
-        if (SecretObfuscator.TryReveal(account.RefreshToken) is { } refreshToken)
+        if (SecretProtector.Unprotect(account.RefreshToken) is { } refreshToken)
         {
             if (!await oauth.RevokeAsync(refreshToken, ct))
                 logger.LogWarning(

@@ -141,7 +141,7 @@ public class DeviceMappingSeeder(
         db.SiteSettings.AddRange(
             new EfSiteSetting { Key = SiteSettingKeys.HomeAssistantHost, Value = host },
             new EfSiteSetting { Key = SiteSettingKeys.HomeAssistantPort, Value = port },
-            new EfSiteSetting { Key = SiteSettingKeys.HomeAssistantToken, Value = SecretObfuscator.Obfuscate(token) });
+            new EfSiteSetting { Key = SiteSettingKeys.HomeAssistantToken, Value = SecretProtector.Protect(token) });
 
         await db.SaveChangesAsync(ct);
     }

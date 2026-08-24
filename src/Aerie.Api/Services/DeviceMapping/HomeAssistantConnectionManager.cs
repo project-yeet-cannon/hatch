@@ -52,7 +52,7 @@ public class HomeAssistantConnectionManager(IDbContextFactory<AerieContext> dbFa
         // TryReveal rather than Deobfuscate: a token hand-edited into something
         // that isn't base64 reads as "not configured yet", which the callers
         // already handle, instead of throwing out of a background loop.
-        if (SecretObfuscator.TryReveal(obfuscatedToken) is not { } token)
+        if (SecretProtector.Unprotect(obfuscatedToken) is not { } token)
             return null;
 
         return new HomeAssistantConnection(host, port, token);

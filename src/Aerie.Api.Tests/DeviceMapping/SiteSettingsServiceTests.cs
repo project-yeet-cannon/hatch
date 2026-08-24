@@ -51,7 +51,7 @@ public class SiteSettingsServiceTests
     public async Task GoogleClientSecret_RoundTripsThroughObfuscation()
     {
         var snapshot = await NewService(
-                (SiteSettingKeys.GoogleClientSecret, SecretObfuscator.Obfuscate("GOCSPX-super-secret")))
+                (SiteSettingKeys.GoogleClientSecret, SecretProtector.Protect("GOCSPX-super-secret")))
             .GetAsync(CancellationToken.None);
 
         Assert.Equal("GOCSPX-super-secret", snapshot.GoogleClientSecret);

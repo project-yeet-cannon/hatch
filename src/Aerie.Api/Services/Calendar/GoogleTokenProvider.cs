@@ -52,10 +52,10 @@ public class GoogleTokenProvider(
         if (account.NeedsReauth) return null;
 
         var now = time.GetUtcNow();
-        if (SecretObfuscator.TryReveal(account.AccessToken) is { } cached && account.AccessTokenExpiresAt > now + RefreshMargin)
+        if (SecretProtector.Unprotect(account.AccessToken) is { } cached && account.AccessTokenExpiresAt > now + RefreshMargin)
             return cached;
 
-        if (SecretObfuscator.TryReveal(account.RefreshToken) is not { } refreshToken)
+        if (SecretProtector.Unprotect(account.RefreshToken) is not { } refreshToken)
         {
             await NeedsReauthAsync(account, "The stored refresh token is missing or unreadable. Reconnect the account.", ct);
             return null;
@@ -81,12 +81,12 @@ public class GoogleTokenProvider(
         }
 
         var tokens = result.Tokens;
-        account.AccessToken = SecretObfuscator.Obfuscate(tokens.AccessToken);
+        account.AccessToken = SecretProtector.Protect(tokens.AccessToken);
         account.AccessTokenExpiresAt = tokens.ExpiresAt;
         // Google normally omits refresh_token on a refresh; when it does send a
         // replacement, the one we hold is on its way out.
         if (tokens.RefreshToken is { } rotated)
-            account.RefreshToken = SecretObfuscator.Obfuscate(rotated);
+            account.RefreshToken = SecretProtector.Protect(rotated);
         account.LastSyncError = null;
         await db.SaveChangesAsync(ct);
 

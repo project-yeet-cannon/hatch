@@ -31,7 +31,7 @@ public class SettingsController(AerieContext db, IHomeAssistantConnectionManager
     public async Task<ActionResult<SiteSettingDto>> Upsert(string key, SiteSettingWriteRequest request, CancellationToken ct)
     {
         var value = IsSecret(key)
-            ? SecretObfuscator.Obfuscate(request.Value)
+            ? SecretProtector.Protect(request.Value)
             : request.Value;
 
         var setting = await db.SiteSettings.FirstOrDefaultAsync(s => s.Key == key, ct);
@@ -67,7 +67,7 @@ public class SettingsController(AerieContext db, IHomeAssistantConnectionManager
         key is SiteSettingKeys.HomeAssistantToken or SiteSettingKeys.KioskWifiPassword
             or SiteSettingKeys.GoogleClientSecret or SiteSettingKeys.AnthropicApiKey;
 
-    /// <summary>Secrets are stored obfuscated, not encrypted, so they're still redacted before leaving the API - no reason to hand back something trivially reversible.</summary>
+    /// <summary>Secrets are stored protected, not encrypted (SecretProtector), so they're still redacted before leaving the API - no reason to hand back something trivially reversible.</summary>
     private static string Redact(string key, string value) =>
-        IsSecret(key) && value.Length > 0 ? "••••••••" : value;
+        IsSecret(key) && SecretProtector.HasValue(value) ? "••••••••" : value;
 }

@@ -53,7 +53,7 @@ internal static class CalendarTestData
         $"{Base64Url("""{"alg":"none"}""")}.{Base64Url(payloadJson)}.signature";
 
     /// <summary>Obfuscates the way SettingsController and the OAuth callback do, so a seeded account looks like one Aerie wrote.</summary>
-    public static string Stored(string plaintext) => SecretObfuscator.Obfuscate(plaintext);
+    public static string Stored(string plaintext) => SecretProtector.Protect(plaintext);
 
     private static string Base64Url(string value) =>
         Convert.ToBase64String(Encoding.UTF8.GetBytes(value)).TrimEnd('=').Replace('+', '-').Replace('/', '_');

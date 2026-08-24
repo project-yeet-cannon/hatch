@@ -112,23 +112,14 @@ public class SiteSettingsService(IDbContextFactory<AerieContext> dbFactory, Time
     private static string? NullIfEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
     /// <summary>
-    /// Reverses SettingsController's obfuscation. Unlike that controller's own
+    /// Reverses SettingsController's protection. Unlike that controller's own
     /// call sites, this one is on the path of every settings read in the app,
-    /// so a value that isn't valid obfuscated text - hand-edited in the DB, say
-    /// - degrades to "unset" rather than throwing out of the snapshot.
+    /// so a value that isn't readable - hand-edited in the DB, or written by a
+    /// newer Aerie under a scheme this one doesn't know - degrades to "unset"
+    /// rather than throwing out of the snapshot. SecretProtector.Unprotect
+    /// already answers null for both, which is why this no longer catches.
     /// </summary>
-    private static string? Deobfuscated(string? value)
-    {
-        if (NullIfEmpty(value) is not { } obfuscated) return null;
-        try
-        {
-            return NullIfEmpty(SecretObfuscator.Deobfuscate(obfuscated));
-        }
-        catch (FormatException)
-        {
-            return null;
-        }
-    }
+    private static string? Deobfuscated(string? value) => SecretProtector.Unprotect(value);
 
     private static decimal ParseDecimal(IReadOnlyDictionary<string, string> values, string key, decimal fallback) =>
         values.TryGetValue(key, out var raw) && decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)

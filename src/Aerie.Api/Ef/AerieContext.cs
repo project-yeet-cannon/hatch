@@ -10,6 +10,7 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
     public DbSet<EfZone> Zones => Set<EfZone>();
     public DbSet<EfDevice> Devices => Set<EfDevice>();
     public DbSet<EfDeviceChannel> DeviceChannels => Set<EfDeviceChannel>();
+    public DbSet<EfCameraConnection> CameraConnections => Set<EfCameraConnection>();
     public DbSet<EfSiteSetting> SiteSettings => Set<EfSiteSetting>();
     public DbSet<EfMeasurement> Measurements => Set<EfMeasurement>();
     public DbSet<EfStateChange> StateChanges => Set<EfStateChange>();
@@ -50,6 +51,18 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
             .HasOne(c => c.Device)
             .WithMany(d => d.Channels)
             .HasForeignKey(c => c.DeviceId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // One-to-one, declared rather than inferred: DeviceId is both the key
+        // and the foreign key, and EfDevice carries no inverse navigation, so
+        // convention invents a second shadow FK column instead of reusing this
+        // one. Cascade is the part that matters - deleting a camera has to take
+        // its stored password with it, and an orphaned credential row is not
+        // something anything else in the app would ever notice.
+        modelBuilder.Entity<EfCameraConnection>()
+            .HasOne(c => c.Device)
+            .WithOne()
+            .HasForeignKey<EfCameraConnection>(c => c.DeviceId)
             .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<EfMeasurement>()

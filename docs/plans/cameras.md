@@ -209,6 +209,84 @@ failure could mean.
 - [ ] Whether to point HA's own integration at this go2rtc (`go2rtc: url:`), which the original Phase 7 assumed would be free. **It is not, any more.** The Service is `ClusterIP` with no Ingress and HA runs outside the cluster, so this would mean exposing go2rtc on a NodePort or Ingress — putting camera streams on a listener anything on the LAN can reach, to save one RTSP connection per camera. Worth revisiting only if the cameras turn out to be stingy with concurrent connections. **Leaning firmly to no, on a finding from bring-up:** go2rtc's API is unauthenticated by default and `GET /api/streams` returns each stream's producer URL *verbatim*, camera password included. Putting that on a NodePort or an Ingress publishes the camera credential to everything that can reach the listener. Closing this as "no" would also make one Phase 7 decision cheaper than it looks — the RTSP loopback listener exists for a transcode, and this camera's main stream turns out to be H.264 anyway.
 
 
+### [] Phase 11 — Camera credentials in Aerie, not in git
+
+**Supersedes the streams-file half of Phase 7 and the seeding half of Phase 9.**
+Phase 7 put every camera's RTSP URL in a `go2rtc-streams` Secret, seeded from a
+GitHub secret through Provision 2, and Phase 9 wired that up. It works, and it
+is the wrong shape for the product: adding a camera means editing a GitHub
+secret, dispatching a workflow and restarting a pod, which is three systems and
+an operator with repository access for something a household should do from the
+admin UI. Aerie ships to other operators (`docs/ethos.md`), and "add a camera"
+has to be a form.
+
+So the credential moves into Aerie's own database, set from the devices admin
+UI, and go2rtc stops holding any camera configuration at all.
+
+**The trade, stated plainly.** A camera password in Aerie's database is
+protected by obfuscation, not encryption — the same `SecretObfuscator` the HA
+token and the calendar refresh tokens already use. That is weaker than a
+Kubernetes Secret backed by SSM SecureString, which is what this replaces. It
+is a deliberate, temporary trade made with the values in hand: these cameras
+point at trees. What this phase owes the future is that the *upgrade* is cheap,
+which is why the protector becomes versioned here rather than when it matters.
+
+#### What was verified about go2rtc, not assumed
+
+Run against `alexxit/go2rtc:1.9.14` under Docker on 2026-08-24, the same
+standard `go2rtc-deployment.yaml` holds itself to.
+
+- `PUT /api/streams?name=<name>&src=<url>` registers a stream at runtime, and a
+  second PUT under the same name **replaces** its producer. `DELETE
+  /api/streams?src=<name>` removes it. So a running go2rtc can be told about a
+  camera without a config file and without a restart — which is the whole
+  premise of this phase.
+- **PUT tries to persist to its *first* `-config` path**, and answers **400**
+  when it cannot: `open /config/go2rtc.yaml: read-only file system`. The
+  registry is still updated — the stream works — so the failure is a lie in
+  both directions, and "400 means it worked" is not something to build on.
+  With a *writable* first `-config` on an `emptyDir` and the ConfigMap second,
+  PUT answers **200**, the ConfigMap's `api:`/`rtsp:`/`webrtc:` blocks still
+  apply, and go2rtc writes the streams into the emptyDir. That is the
+  arrangement: **Aerie is the source of truth and go2rtc's copy is a cache**
+  that dies with the pod, which is exactly the lifetime it should have.
+- go2rtc will also take a **raw RTSP URL as `src`** — `/api/ws?src=rtsp://...`
+  upgrades, no registration needed. Rejected: it registers the stream under
+  *the URL as its name*, so the password lands in the stream registry and in
+  any log line that names a stream. Named streams keep the password in the
+  producer field, which is one place instead of everywhere.
+
+#### The pieces
+
+- [ ] **A versioned secret envelope.** `SecretObfuscator`'s output becomes
+  `v1:<payload>`, and the reader dispatches on the prefix. Base64 contains no
+  colon, so a stored legacy value cannot collide with a scheme tag — which is
+  what makes the discriminator free. v1 *is* the existing XOR, so converting
+  every stored secret is prepending four characters, not re-encrypting
+  anything. Adding real crypto later is a `v2:` scheme plus a lazy re-protect
+  on write, with mixed rows readable throughout.
+- [ ] **Convert the existing secrets in the same pass** — the four
+  `SiteSettings` keys and the calendar OAuth tokens — so there is one format in
+  the system rather than two. A data migration, since the bytes do not change.
+- [ ] **Per-camera connection settings**, on their own table keyed by device:
+  host, port, stream path, and the protected username and password. The
+  protected-column-on-the-owning-table shape is what `EfCalendarAccount`
+  already does; the unification this phase buys is in the *format*, not in
+  moving every secret into one table.
+- [ ] **The host comes from Home Assistant first.** The discovery template
+  already calls `device_attr()`, so it gains `configuration_url` — which for a
+  Reolink is `http://<ip>`, kept current by the integration's own DHCP
+  handling. The admin field overrides it and is what gets used when HA has
+  nothing. This is the answer to "avoid hardcoding a static IP": Aerie asks the
+  system that already tracks the camera, and only falls back to being told.
+- [ ] **Registration is lazy.** `CameraController` PUTs the stream immediately
+  before it opens the relay socket. No reconciler, no startup pass, and a
+  go2rtc restart self-heals on the next viewer — at the cost of one HTTP round
+  trip per modal open, against a keyframe wait measured in seconds.
+- [ ] **Remove the file path entirely**: the `cameras/go2rtc-streams`
+  parameter, its ExternalSecret, the `GO2RTC_STREAMS` mapping in Provision 2,
+  and the streams volume. One way to configure a camera.
+
 ### [] Phase 10 — Docs
 
 - [ ] Add `docs/camera-devices-architecture.md` mirroring `device-architecture.md`'s phased structure, covering the schema additions, the WS listener, the dispatch seam, the SSE stream, and the video-proxy mechanism actually chosen in Phase 7
