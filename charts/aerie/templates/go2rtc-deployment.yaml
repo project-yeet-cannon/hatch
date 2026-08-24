@@ -5,10 +5,15 @@
 # connection to one origin and never learns a camera's address or password.
 #
 # Everything asserted below about how this image behaves was verified by running
-# alexxit/go2rtc:1.9.14 under Docker on 2026-08-23, not inferred from its docs.
-# What could NOT be verified without a camera on the LAN is listed in the plan's
-# first-camera bring-up phase - notably whether pod-network egress reaches the
-# cameras' RTSP port at all.
+# alexxit/go2rtc:1.9.14 under Docker - the transport on 2026-08-23, the runtime
+# stream API and the config-write behaviour on 2026-08-24 - not inferred from
+# its docs. What could NOT be verified without a camera on the LAN is listed in
+# the plan's first-camera bring-up phase - notably whether pod-network egress
+# reaches the cameras' RTSP port at all.
+#
+# Since Phase 11 this pod holds no camera configuration at rest. Aerie registers
+# each stream over go2rtc's API just before someone watches it, which is what
+# made the `go2rtc-streams` Secret - and the GitHub secret behind it - go away.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -45,9 +50,10 @@ spec:
         # Without this, editing the ConfigMap would leave the running pod on the
         # old config with every object reporting Ready - the same class of
         # silent no-op that helmrelease.yaml's reconcileStrategy: Revision
-        # exists to prevent. Changing the streams *Secret* is not covered (its
-        # content is not known to Helm); that one needs a rollout restart, which
-        # the bring-up phase calls out.
+        # exists to prevent. Nothing else needs covering here any more: since
+        # Phase 11 the only other thing go2rtc holds is the stream table Aerie
+        # writes over the API, which is rebuilt on demand and has no manifest to
+        # drift from.
         checksum/config: {{ include (print $.Template.BasePath "/go2rtc-configmap.yaml") . | sha256sum }}
     spec:
       # No imagePullSecrets: this is a public Docker Hub image, and the chart's
@@ -69,15 +75,31 @@ spec:
           # args only, with command left alone on purpose: the image's
           # entrypoint is `/sbin/tini --`, and tini is what reaps the ffmpeg
           # children a transcoding stream spawns. Overriding command would drop
-          # it and leave zombies behind every restarted stream. The second
-          # -config is the Secret below; go2rtc merges the two, and skips the
-          # path silently when no cameras have been configured yet.
+          # it and leave zombies behind every restarted stream.
+          #
+          # The ORDER of these two -config paths is load-bearing, and it is the
+          # opposite of what reads naturally (docs/plans/cameras.md Phase 11).
+          # go2rtc persists a runtime `PUT /api/streams` back to its *first*
+          # -config path, and answers 400 when that path is read-only - while
+          # still registering the stream, so the call looks failed and worked.
+          # Aerie registers every camera's stream that way, so the first path
+          # has to be the writable emptyDir and the ConfigMap has to come
+          # second. Verified against 1.9.14: in this order PUT answers 200, the
+          # ConfigMap's api/rtsp/webrtc blocks still apply, and the streams land
+          # in the emptyDir.
+          #
+          # That the emptyDir dies with the pod is the intended lifetime, not a
+          # limitation. Aerie is the source of truth for which cameras exist,
+          # and it re-registers a stream immediately before anyone watches it -
+          # so a restarted go2rtc that has forgotten everything is correct
+          # rather than broken, and there is no stale copy of a camera password
+          # to invalidate when one changes.
           args:
             - go2rtc
             - -config
-            - /config/go2rtc.yaml
+            - /runtime/go2rtc.yaml
             - -config
-            - /streams/streams.yaml
+            - /config/go2rtc.yaml
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -101,9 +123,11 @@ spec:
             - name: config
               mountPath: /config
               readOnly: true
-            - name: streams
-              mountPath: /streams
-              readOnly: true
+            # Writable, and the only writable mount here: this is where
+            # go2rtc persists what Aerie has registered. See the args above for
+            # why it is first rather than second.
+            - name: runtime
+              mountPath: /runtime
             # ffmpeg (the transcode path) writes scratch files here, and
             # readOnlyRootFilesystem makes the image's own /tmp unwritable.
             - name: tmp
@@ -112,14 +136,12 @@ spec:
         - name: config
           configMap:
             name: go2rtc-config
-        - name: streams
-          secret:
-            # optional, and that is the whole reason this ships before any
-            # camera exists: with no Secret the volume mounts empty, go2rtc
-            # skips the missing file, and the pod is Ready with zero streams.
-            # A required mount would leave the pod stuck in
-            # ContainerCreating instead.
-            secretName: {{ .Values.go2rtc.streamsSecretName }}
-            optional: true
+        - name: runtime
+          # An emptyDir rather than a Secret, and rather than anything durable.
+          # A camera's address and credential live in Aerie's database now, set
+          # from the devices admin UI; what is here is go2rtc's working copy of
+          # them, rebuilt on demand. Nothing is lost when the pod moves, and a
+          # node holding a stale camera password is not a state this can reach.
+          emptyDir: {}
         - name: tmp
           emptyDir: {}

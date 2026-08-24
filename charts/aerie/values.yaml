@@ -148,9 +148,6 @@ go2rtc:
   # info. debug logs every network interface at startup and every frame decision
   # after it, which is useful during bring-up and noise in OpenSearch afterwards.
   logLevel: info
-  # Mounted optional (go2rtc-deployment.yaml), so this naming a Secret that does
-  # not exist yet is the normal state until the first camera is configured.
-  streamsSecretName: go2rtc-streams
   # Measured, not estimated (cameras plan Phase 9, 2026-08-23): go2rtc 1.9.14
   # relaying one Reolink 640x480/10fps H.264 sub-stream, run with this chart's
   # own securityContext and args. Idle 11.7 MiB / 0% CPU; one viewer 12 MiB /

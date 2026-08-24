@@ -386,34 +386,42 @@ is the half of it a machine can answer.
 
 That split is the point. Half of Phase 9 needs a person: walking in front of a
 camera, watching a modal open on a wall tablet, judging whether the feed feels
-live. The other half is a set of yes/no facts about a cluster — is the streams
-Secret there, does go2rtc hold it, and can a *pod* reach a camera's RTSP port
-— and those facts get re-asked every time a camera is added, not once. A
-second camera is a new line in the same Secret plus a `kubectl rollout restart`
-somebody has to remember, and the failure when they don't is a kiosk feed that
-never opens. So: run it after the first camera, and after every camera after
-that. A green run also prints the four things it did *not* prove, because a
-green table is otherwise an invitation to believe cameras are done.
+live. The other half is a set of yes/no facts about a cluster, and those get
+re-asked whenever the chart changes. A green run also prints the things it did
+*not* prove, because a green table is otherwise an invitation to believe
+cameras are done.
 
-**It takes no camera name.** Where the streams Secret lands comes from
-[`parameters.json`](../secrets/parameters.json) — the same file that generated
-the ExternalSecret — and which streams to prove comes from the Secret itself.
+**It takes no camera name.** Since Phase 11 a camera's address and credential
+live in Aerie's database, set from the devices admin UI, and Aerie registers
+each stream with go2rtc just before someone watches it. So this asks go2rtc
+what it currently holds rather than reading a configuration file that no
+longer exists.
 
-**The check worth the whole script** is one JPEG frame per stream, fetched
-through the API server's service proxy. A frame means go2rtc opened an RTSP
-session *from inside the pod network* to that camera's address, the credential
-in the streams file was accepted, and a keyframe arrived and decoded. Pod
-egress to the LAN was the plan's one untested link that could have forced a
-design change; this is what closes it, and what re-opens it if a CNI upgrade
-or a firewall rule ever breaks it.
+**The check worth the whole script** is the one about argument order. go2rtc
+persists a runtime `PUT /api/streams` to its *first* `-config` path and answers
+**400** when that path is read-only — *while still registering the stream*. A
+chart that mounts every config read-only therefore produces working video and a
+steady stream of registration errors in Aerie's log, which is not a combination
+anyone diagnoses quickly. The deployment puts a writable `emptyDir` first and
+the ConfigMap second, which reads backwards, so this asserts it rather than
+trusting it to survive the next edit — and asserts the volume is an `emptyDir`
+besides, since a durable one would keep a stale copy of every camera password
+on a node.
+
+**The live-frame check is conditional, and that follows from the design.**
+Registration is lazy, so an idle go2rtc holds no streams and "none registered"
+means "nobody has watched a camera since this pod started" rather than "nothing
+is configured". The gate cannot manufacture the missing viewer either:
+registering a stream from here would put a camera password on a command line,
+where any other user's `ps` can read it — the one thing `Invoke-NodeSsh` exists
+to refuse. So it reports what it can see, and says plainly that the
+pod-to-camera hop went unexercised. Open a camera in the admin UI and re-run to
+get that proof, which is also the proof that pod egress to the LAN works at all.
 
 ### No stream source is ever printed
 
 A go2rtc stream source is an RTSP URL with the camera's password in it, and
 `GET /api/streams` returns those URLs verbatim. This script's output is a CI
-run log, so that response is fetched to `/dev/null` and only its status is
-reported. Stream *names* come from the Secret instead, decoded inside a
-pipeline on the node that keeps only the text left of the first colon — which
-for `camera.x: rtsp://user:pass@host/path` is `camera.x`, and for a
-continuation line is nothing at all. Everything else that crosses the wire is
-a byte count.
+run log, so that body is never rendered: it goes through a `python3` one-liner
+on the node that prints the response's top-level keys and nothing else, so what
+crosses the wire is stream *names*. Everything else is a byte count.

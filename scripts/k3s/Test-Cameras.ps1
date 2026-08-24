@@ -25,37 +25,38 @@
     or an unreadable response is "not proven", and a gate that reports that as
     a skip can be satisfied by a cluster that is switched off.
 
-    **Expectations come from the repository and the cluster, not from
-    parameters.** Which namespace, Secret and key to look in comes from
-    scripts/secrets/parameters.json - the same file that generated the
-    ExternalSecret - and which streams to prove comes from the Secret itself.
-    There is no camera name to pass and none to keep up to date here.
+    **It takes no camera name.** Which streams to prove comes from go2rtc
+    itself, and which cameras exist comes from Aerie's database by way of what
+    has been registered. There is nothing here to keep up to date as cameras
+    are added.
 
     **No credential leaves the node.** That constraint shapes the probe more
     than anything else. A go2rtc stream source is an RTSP URL with the camera's
     password in it, `GET /api/streams` returns those URLs verbatim, and this
-    script's output is a CI run log. So the probe never prints a stream source
-    and never prints /api/streams: it decodes the Secret on the node, pipes it
-    straight into a filter that keeps only the text left of the first colon,
-    and prints stream *names*. Everything else is a byte count.
+    script's output is a CI run log. So the probe never renders that body: it
+    pipes it through a python one-liner on the node that prints the top-level
+    keys and nothing else, so what crosses the wire is stream *names*.
+    Everything else is a byte count.
 
     Stages:
-      1. Preflight - the SSH key resolves, the client is present, the node
-                     answers 22, and parameters.json parses.
-      2. Probe     - one round trip: the ExternalSecret, the Secret's key
-                     size, the stream names, the Deployment, the pods, and one
-                     JPEG frame per stream fetched through the API server's
-                     service proxy.
+      1. Preflight - the SSH key resolves, the client is present, and the
+                     node answers 22.
+      2. Probe     - one round trip: the Deployment, the pods, whether the
+                     Service answers, which streams go2rtc currently holds,
+                     and one JPEG frame for each of them through the API
+                     server's service proxy.
       3. Checks    - evaluated against that snapshot.
       4. Report    - one table, one exit code.
 
-    What a green run does and does not prove. It proves the whole camera path
-    up to the browser: ESO holds the streams file, go2rtc is running with it,
-    the pod network reaches each camera's RTSP port, the credential in the file
-    is accepted, and the camera is producing decodable video. It says nothing
+    What a green run does and does not prove. With streams registered, it
+    proves the camera path up to the browser: go2rtc is running in the shape
+    that lets Aerie register a stream, the pod network reaches the camera's
+    RTSP port, the credential Aerie sent was accepted, and the camera is
+    producing decodable video. With none registered - which is the normal state
+    of an idle go2rtc, since registration is lazy - it proves everything except
+    that last hop, and says so rather than passing quietly. It says nothing
     about HA's motion events, the SSE hop, or whether MediaSource works in the
-    kiosk's WebView - those are the items the plan keeps for a human, and the
-    report repeats which ones they are.
+    kiosk's WebView; the report repeats which ones those are.
 
 .PARAMETER IPAddress
     A k3s server's LAN address. Any server: everything read here is cluster
@@ -78,13 +79,9 @@ param(
     [ValidatePattern('^(\d{1,3}\.){3}\d{1,3}$')]
     [string]$IPAddress,
 
-    [string]$ParametersPath = (Join-Path $PSScriptRoot '..\secrets\parameters.json'),
-
-    # The parameter whose 'kubernetes' block says where the streams file
-    # lands. Named rather than hardcoded so this script reads the same source
-    # New-ExternalSecrets.ps1 renders from - rename the key there and this
-    # follows, or fails preflight saying so.
-    [string]$StreamsParameterKey = 'cameras/go2rtc-streams',
+    # The namespace charts/aerie installs into. A parameter only so a second
+    # installation on one cluster can be checked; not something to tune.
+    [string]$Namespace = 'aerie',
 
     [int]$MinimumFrameBytes = 2000,
 
@@ -229,10 +226,6 @@ try {
 
     $failures = New-Object Collections.Generic.List[string]
 
-    if (-not (Test-Path $ParametersPath -PathType Leaf)) {
-        $failures.Add("Not found: '$ParametersPath'. Run this from a checkout of the repository the cluster reconciles from - the namespace, Secret and key below are read from it rather than hardcoded here.")
-    }
-
     if (-not $SshPrivateKey -and -not $SshPrivateKeyPath) {
         $failures.Add('No SSH private key: pass -SshPrivateKeyPath or -SshPrivateKey.')
     }
@@ -259,45 +252,14 @@ try {
         $failures.Add("$IPAddress isn't answering on port 22. Confirm the node is up and -IPAddress is right.")
     }
 
-    # Where the streams file lands, from the map rather than from memory. A
-    # gate that hardcodes this passes happily against a cluster whose Secret
-    # was renamed out from under it, which is the one thing it exists to
-    # notice.
-    $streamsNamespace = $null
-    $streamsSecretName = $null
-    $streamsSecretKey = $null
-    if (Test-Path $ParametersPath -PathType Leaf) {
-        try {
-            $parameters = Get-Content -Path $ParametersPath -Raw | ConvertFrom-Json
-            $entry = @(Get-Field $parameters 'parameters' | Where-Object { (Get-Field $_ 'key') -eq $StreamsParameterKey }) | Select-Object -First 1
-            $target = Get-Field $entry 'kubernetes'
-            # 'kubernetes' may be an array - see parameters.json. The streams
-            # file lands in exactly one namespace, so the first block is the
-            # block, but taking [0] rather than assuming a scalar keeps this
-            # working if that ever changes.
-            if ($target -is [array]) { $target = @($target)[0] }
-            $streamsNamespace = [string](Get-Field $target 'namespace')
-            $streamsSecretName = [string](Get-Field $target 'secretName')
-            $streamsSecretKey = [string](Get-Field $target 'secretKey')
-            if (-not $streamsNamespace -or -not $streamsSecretName -or -not $streamsSecretKey) {
-                $failures.Add("'$StreamsParameterKey' in $ParametersPath has no complete 'kubernetes' block, so there is nothing to look for. Add one and regenerate: pwsh ./scripts/secrets/New-ExternalSecrets.ps1")
-            }
-        }
-        catch { $failures.Add("$ParametersPath did not parse as JSON: $($_.Exception.Message)") }
-    }
-
     if ($failures.Count -gt 0) {
         $detail = ($failures | ForEach-Object { "  - $_" }) -join "`n"
         throw "Preflight failed with $($failures.Count) problem(s):`n$detail"
     }
 
-    # The ExternalSecret's name is its target Secret's name - that is how
-    # New-ExternalSecrets.ps1 names every file it renders.
-    $externalSecretName = $streamsSecretName
-
-    Write-Host "Cluster:  $IPAddress"
-    Write-Host "Repo:     $((Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path)"
-    Write-Host "Streams:  Secret '$streamsSecretName' key '$streamsSecretKey' in namespace '$streamsNamespace' (from $StreamsParameterKey)"
+    Write-Host "Cluster:   $IPAddress"
+    Write-Host "Repo:      $((Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path)"
+    Write-Host "Namespace: $Namespace"
     if ($keyFingerprint) { Write-Host "SSH key:  $keyFingerprint" }
     Write-Host 'Preflight OK. Everything below is read-only, and no stream source - which is to say no camera password - is printed.'
 
@@ -330,65 +292,49 @@ try {
     # first colon, which for `camera.x: rtsp://user:pass@host/path` is
     # `camera.x` and for a list-form value is the same. A `- rtsp://...`
     # continuation line does not match the grep at all.
-    # jsonpath treats a dot as a path separator, so a key that contains one
-    # has to escape it - and the shell eats one level of backslash on the way
-    # through, so what is written here is doubled to arrive as `\.`. This is
-    # the whole cost of `streams.yaml` being a filename rather than a name.
-    $jsonPathKey = $streamsSecretKey -replace '\.', '\\.'
-    $kubectl = "sudo k3s kubectl -n $streamsNamespace"
-    $rawBase = "/api/v1/namespaces/$streamsNamespace/services/${Go2RtcService}:$Go2RtcPort/proxy"
+    $kubectl = "sudo k3s kubectl -n $Namespace"
+    $rawBase = "/api/v1/namespaces/$Namespace/services/${Go2RtcService}:$Go2RtcPort/proxy"
 
-    # Decode on the node, filter on the node, print names. `cut -d: -f1` keeps
-    # the text left of the first colon, which for `camera.x: rtsp://u:p@h/s`
-    # is `camera.x`; a `- rtsp://...` continuation line does not match the
-    # grep at all, so no shape of this file leaks a source URL.
+    # Stream *names* only. python3 loads go2rtc's /api/streams and prints
+    # nothing but its top-level keys, so no producer URL is ever rendered -
+    # that body carries each camera's password, and this output is a CI log.
     #
-    # `[:blank:]`, not `[:space:]`: the class has to be space and tab only.
-    # `[:space:]` includes the newline, so `tr` would run every stream name
-    # into the one before it - one word, no error, and a frame loop that
-    # fetches a stream nobody configured. Caught by running the probe against
-    # a stub node with a two-camera file, which is the only way this shows up.
-    $streamNamesPipeline = "$kubectl get secret $streamsSecretName -o jsonpath={.data.$jsonPathKey} 2>/dev/null" +
-        " | base64 -d 2>/dev/null" +
-        " | grep -E '^[[:space:]]+[A-Za-z0-9_.-]+:'" +
-        " | cut -d: -f1 | tr -d '[:blank:]'"
+    # What this answers is "what has go2rtc been told about", which since
+    # Phase 11 is a question about what has been *watched* recently rather
+    # than what is configured: Aerie registers a stream lazily, immediately
+    # before it relays one, so an idle go2rtc legitimately holds none.
+    $registeredLine = "$kubectl get --raw $rawBase/api/streams --request-timeout=10s 2>/dev/null" +
+        " | python3 -c 'import json,sys" + [char]0x0A + "for k in json.load(sys.stdin): print(k)' 2>/dev/null || true"
 
     # The frame loop, built by concatenation rather than interpolation: `$(`
     # and `$S` are the *shell's* dollars, and a double-quoted PowerShell
     # string would consume them before ssh ever saw them.
-    $framesLine = 'for S in $(' + $streamNamesPipeline + '); do printf ''%s '' $S; ' +
+    $framesLine = 'for S in $(' + $registeredLine + '); do printf ''%s '' $S; ' +
         $kubectl + ' get --raw ' + $rawBase + '/api/frame.jpeg?src=$S --request-timeout=25s 2>/dev/null | wc -c; done'
 
     $probeScript = @(
         'set -f'
-        "printf '\n--- externalsecret\n'"
-        "$kubectl get externalsecrets.external-secrets.io $externalSecretName -o json 2>/dev/null || echo {}"
         "printf '\n--- deployment\n'"
         "$kubectl get deployment $Go2RtcDeployment -o json 2>/dev/null || echo {}"
         "printf '\n--- pods\n'"
         "$kubectl get pods -l $Go2RtcComponentLabel -o json 2>/dev/null || echo {}"
-        # Byte count of the key's value, never the value. `wc -c` runs on the
-        # node, so what crosses the wire is a number.
-        "printf '\n--- secretkey\n'"
-        "printf '$streamsSecretKey '; $kubectl get secret $streamsSecretName -o jsonpath={.data.$jsonPathKey} 2>/dev/null | wc -c"
-        "printf '\n--- streamnames\n'"
-        $streamNamesPipeline
         # Does the Service route to a listener at all, separately from whether
         # any camera works? A 2xx from /api/streams proves the Service, the
-        # endpoint and go2rtc's own API; its *body* is the one response in
-        # this system that must never be logged, so it goes to /dev/null and
-        # only the outcome is printed.
+        # endpoint and go2rtc's own API; its *body* goes to /dev/null for the
+        # reason above.
         "printf '\n--- apireachable\n'"
         "$kubectl get --raw $rawBase/api/streams --request-timeout=10s >/dev/null 2>&1 && echo ok || echo unreachable"
-        # The frame per stream, and the reason this script is worth having.
-        # Producing one means go2rtc opened an RTSP session from inside the
-        # pod network to the camera's address, the credential in the streams
-        # file was accepted, and a keyframe arrived and decoded. That is the
-        # plan's pod-egress item and its in-cluster frame item in one request.
+        "printf '\n--- registered\n'"
+        $registeredLine
+        # A frame per registered stream, and the reason this script is worth
+        # having. Producing one means go2rtc opened an RTSP session from inside
+        # the pod network to the camera's address, the credential Aerie sent it
+        # was accepted, and a keyframe arrived and decoded. That is the plan's
+        # pod-egress item and its in-cluster frame item in one request.
         #
-        # --request-timeout is generous on purpose: a cold stream waits for
-        # the camera's next IDR, which on the measured Reolink sub-stream is
-        # up to 4 s all by itself, on top of the RTSP connect.
+        # --request-timeout is generous on purpose: a cold stream waits for the
+        # camera's next IDR, which on the measured Reolink sub-stream is up to
+        # 4 s all by itself, on top of the RTSP connect.
         "printf '\n--- frames\n'"
         $framesLine
         "printf '\n--- end\n'"
@@ -408,14 +354,9 @@ try {
     }
     Write-Host "Collected $((@($probe.StdOut -split '--- ')).Count - 1) section(s) in one round trip."
 
-    $externalSecret = ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'externalsecret'
     $deployment = ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'deployment'
     $pods = @(Get-Items (ConvertFrom-ProbeJson -Output $probe.StdOut -Name 'pods'))
-    # "<key> <byte count>" - `wc -c` pads with leading spaces on some
-    # platforms, so match the trailing digits rather than a fixed column.
-    $secretKeyBytes = 0
-    if ((Get-ProbeSection -Output $probe.StdOut -Name 'secretkey') -match '\s(\d+)\s*$') { $secretKeyBytes = [int]$Matches[1] }
-    $streamNames = @((Get-ProbeSection -Output $probe.StdOut -Name 'streamnames') -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $streamNames = @((Get-ProbeSection -Output $probe.StdOut -Name 'registered') -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     $apiReachable = (Get-ProbeSection -Output $probe.StdOut -Name 'apireachable').Trim() -eq 'ok'
     $frames = @{}
     foreach ($line in ((Get-ProbeSection -Output $probe.StdOut -Name 'frames') -split "`r?`n")) {
@@ -426,46 +367,60 @@ try {
     Write-Stage 'Checks'
     # ---------------------------------------------------------------- #
 
-    # --- The streams Secret ------------------------------------------ #
+    # --- The arrangement that makes registration work ------------------ #
 
-    $readyCondition = Get-Condition $externalSecret 'Ready'
-    if ($null -eq $externalSecret -or -not (Get-Path $externalSecret 'metadata.name')) {
-        Add-Check -Step '9.secret' -Name "ExternalSecret $externalSecretName" -Status 'Fail' -Detail "not found in namespace $streamsNamespace - the manifest is generated from parameters.json, so either the commit hasn't reconciled or infra-config is NotReady"
-    }
-    elseif ((Get-Field $readyCondition 'status') -eq 'True') {
-        Add-Check -Step '9.secret' -Name "ExternalSecret $externalSecretName" -Status 'Pass' -Detail (Format-Condition $readyCondition -MaxLength 60)
-    }
-    else {
-        Add-Check -Step '9.secret' -Name "ExternalSecret $externalSecretName" -Status 'Fail' -Detail "$(Format-Condition $readyCondition) - SecretSyncError here usually means the parameter was never seeded: run Provision 2 with GO2RTC_STREAMS set"
-    }
-
-    if ($secretKeyBytes -gt 0) {
-        Add-Check -Step '9.secret' -Name "Secret $streamsSecretName key $streamsSecretKey" -Status 'Pass' -Detail "$secretKeyBytes base64 byte(s) - the key is a filename, because the Deployment mounts this Secret as a directory"
-    }
-    else {
-        Add-Check -Step '9.secret' -Name "Secret $streamsSecretName key $streamsSecretKey" -Status 'Fail' -Detail "absent or empty. go2rtc skips a -config path that does not exist and stays Ready with zero streams, so this fails silently everywhere except here"
+    # This is the check that exists because of a bug that hides itself.
+    # go2rtc persists a runtime `PUT /api/streams` to its *first* -config path
+    # and answers 400 when that path is read-only - while still registering the
+    # stream. So a chart that mounts every config read-only produces working
+    # video and a stream of registration errors in Aerie's log, which is a
+    # combination nobody diagnoses quickly. The order below is what keeps that
+    # from happening, and it reads backwards, so it is asserted rather than
+    # trusted to survive the next edit.
+    $container = @(Get-Path $deployment 'spec.template.spec.containers' | Where-Object { $_ }) |
+        Where-Object { (Get-Field $_ 'name') -eq 'go2rtc' } | Select-Object -First 1
+    $containerArgs = @(Get-Field $container 'args' | Where-Object { $_ })
+    $firstConfig = $null
+    for ($i = 0; $i -lt $containerArgs.Count - 1; $i++) {
+        if ($containerArgs[$i] -eq '-config') { $firstConfig = [string]$containerArgs[$i + 1]; break }
     }
 
-    if ($streamNames.Count -eq 0) {
-        Add-Check -Step '9.secret' -Name 'Streams declared' -Status 'Fail' -Detail 'no stream names found in the streams file. Expected one `  <entity id>: <rtsp url>` line per camera under a `streams:` key'
+    $volumeMounts = @(Get-Field $container 'volumeMounts' | Where-Object { $_ })
+    $firstConfigMount = $volumeMounts |
+        Where-Object { $firstConfig -and $firstConfig.StartsWith(([string](Get-Field $_ 'mountPath')).TrimEnd('/') + '/', [StringComparison]::Ordinal) } |
+        Select-Object -First 1
+
+    if ($null -eq $container) {
+        Add-Check -Step '9.config' -Name 'First -config is writable' -Status 'Fail' -Detail "no container named 'go2rtc' in the Deployment"
+    }
+    elseif ($null -eq $firstConfig) {
+        Add-Check -Step '9.config' -Name 'First -config is writable' -Status 'Fail' -Detail 'no -config argument found, so go2rtc is running on defaults'
+    }
+    elseif ($null -eq $firstConfigMount) {
+        Add-Check -Step '9.config' -Name 'First -config is writable' -Status 'Fail' -Detail "$firstConfig is not under any volumeMount - it is on the container filesystem, which readOnlyRootFilesystem makes unwritable"
+    }
+    elseif ((Get-Field $firstConfigMount 'readOnly') -eq $true) {
+        Add-Check -Step '9.config' -Name 'First -config is writable' -Status 'Fail' -Detail "$firstConfig is mounted readOnly. go2rtc will answer 400 to every stream registration Aerie makes while still registering it, so video works and the log fills with errors"
     }
     else {
-        Add-Check -Step '9.secret' -Name 'Streams declared' -Status 'Pass' -Detail "$($streamNames.Count): $($streamNames -join ', ')"
+        Add-Check -Step '9.config' -Name 'First -config is writable' -Status 'Pass' -Detail "$firstConfig on volume '$(Get-Field $firstConfigMount 'name')'"
     }
 
-    # CameraStreamTarget builds go2rtc's URL from the CameraFeed channel's
-    # HaEntityId verbatim, so a stream named anything else is a stream the
-    # kiosk can never ask for. Nothing in go2rtc objects - it takes an
-    # arbitrary string as a name - which is exactly why it is worth asserting.
-    $misnamed = @($streamNames | Where-Object { $_ -notmatch '^camera\.[a-z0-9_]+$' })
-    if ($streamNames.Count -eq 0) {
-        Add-Check -Step '9.secret' -Name 'Stream names are HA entity ids' -Status 'Fail' -Detail 'no streams to check'
+    $runtimeVolume = @(Get-Path $deployment 'spec.template.spec.volumes' | Where-Object { $_ }) |
+        Where-Object { (Get-Field $_ 'name') -eq [string](Get-Field $firstConfigMount 'name') } | Select-Object -First 1
+
+    if ($null -eq $runtimeVolume) {
+        Add-Check -Step '9.config' -Name 'Runtime config is ephemeral' -Status 'Fail' -Detail 'the writable config volume was not found'
     }
-    elseif ($misnamed.Count -eq 0) {
-        Add-Check -Step '9.secret' -Name 'Stream names are HA entity ids' -Status 'Pass' -Detail "all $($streamNames.Count) look like camera.<entity>"
+    elseif ($null -ne (Get-Field $runtimeVolume 'emptyDir')) {
+        # Ephemeral on purpose: Aerie is the source of truth and re-registers
+        # before every viewer, so a pod that forgets is correct. A durable
+        # volume here would be a second copy of every camera password, on a
+        # node, going stale.
+        Add-Check -Step '9.config' -Name 'Runtime config is ephemeral' -Status 'Pass' -Detail 'emptyDir - go2rtc forgets on restart, which is the intended lifetime'
     }
     else {
-        Add-Check -Step '9.secret' -Name 'Stream names are HA entity ids' -Status 'Fail' -Detail "$($misnamed -join ', ') - CameraStreamTarget asks go2rtc for the CameraFeed channel's HaEntityId verbatim, so a stream under any other name is unreachable from the kiosk"
+        Add-Check -Step '9.config' -Name 'Runtime config is ephemeral' -Status 'Fail' -Detail "volume '$(Get-Field $runtimeVolume 'name')' is not an emptyDir - a durable one would keep a stale copy of every camera password on a node"
     }
 
     # --- go2rtc itself ------------------------------------------------ #
@@ -512,18 +467,30 @@ try {
 
     # --- The camera, end to end --------------------------------------- #
 
+    # Conditional, and that is a consequence of the design rather than a gap in
+    # this script. Aerie registers a stream lazily - immediately before it
+    # relays one - so an idle go2rtc holds none, and "no streams registered"
+    # means "nobody has watched a camera since this pod started", not "no
+    # cameras are configured". A gate cannot manufacture the missing viewer
+    # either: registering a stream from here would put a camera password on a
+    # command line, where any other user's `ps` can read it for as long as the
+    # command runs, which is the one thing Invoke-NodeSsh exists to refuse.
+    #
+    # So this reports what it can see. Open a camera in the admin UI or walk in
+    # front of one, then re-run, and the egress proof below is available.
+    if ($streamNames.Count -eq 0) {
+        Add-Check -Step '9.frame' -Name 'Live frame' -Status 'Warn' -Detail 'no streams registered - nothing has watched a camera since this go2rtc started, so the pod-to-camera hop was not exercised. Open a camera in the admin UI and re-run'
+    }
+
     # One check per stream rather than one for all of them: with two cameras
     # and one unreachable, "1 of 2" is the answer, and which one matters.
-    if ($streamNames.Count -eq 0) {
-        Add-Check -Step '9.frame' -Name 'Live frame' -Status 'Fail' -Detail 'no streams declared, so nothing was fetched'
-    }
     foreach ($name in $streamNames) {
         $bytes = if ($frames.ContainsKey($name)) { $frames[$name] } else { 0 }
         if ($bytes -ge $MinimumFrameBytes) {
-            Add-Check -Step '9.frame' -Name "Live frame $name" -Status 'Pass' -Detail "$bytes byte JPEG - the pod reached this camera's RTSP port, the credential was accepted, and a keyframe decoded"
+            Add-Check -Step '9.frame' -Name "Live frame $name" -Status 'Pass' -Detail "$bytes byte JPEG - the pod reached this camera's RTSP port, the credential Aerie sent was accepted, and a keyframe decoded"
         }
         else {
-            Add-Check -Step '9.frame' -Name "Live frame $name" -Status 'Fail' -Detail "$bytes byte(s), want at least $MinimumFrameBytes. Either the pod network cannot reach the camera (the plan's one design-changing item - check the CNI and any LAN firewall rule for pod CIDR -> camera:554), the credential in the streams file is wrong, the camera is off, or go2rtc is running an older streams file and has never heard of this name: kubectl rollout restart deploy/$Go2RtcDeployment -n $streamsNamespace"
+            Add-Check -Step '9.frame' -Name "Live frame $name" -Status 'Fail' -Detail "$bytes byte(s), want at least $MinimumFrameBytes. Either the pod network cannot reach the camera (the plan's one design-changing item - check the CNI and any LAN firewall rule for pod CIDR -> camera:554), the credential set for this camera in the devices admin UI is wrong, or the camera is off"
         }
     }
 }
@@ -562,6 +529,7 @@ $stillManual = @(
     'The X closes it, and the *next* motion event reopens it (the per-event dismissal rule).'
     'MediaSource works in the kiosk Android WebView specifically, not just in Chrome.'
     'Motion -> first frame, measured. Tune the camera GOP first or you are measuring the camera.'
+    'A camera added in the devices admin UI streams without touching the cluster - which is the point of Phase 11.'
 )
 
 if ($env:GITHUB_STEP_SUMMARY) {
