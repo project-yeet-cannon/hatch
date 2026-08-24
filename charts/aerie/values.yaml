@@ -151,12 +151,18 @@ go2rtc:
   # Mounted optional (go2rtc-deployment.yaml), so this naming a Secret that does
   # not exist yet is the normal state until the first camera is configured.
   streamsSecretName: go2rtc-streams
-  # An estimate, not a measurement - there is no camera to measure against yet,
-  # and the bring-up phase replaces these with real numbers. Sized for the
-  # design's actual work: relaying an already-H.264 sub-stream is a copy, not a
-  # decode, so the cost is roughly per-connection buffers. A transcode (an
-  # H.265 main stream) would blow through the memory limit and is exactly why
-  # the plan puts the kiosk on the sub-stream.
+  # Measured, not estimated (cameras plan Phase 9, 2026-08-23): go2rtc 1.9.14
+  # relaying one Reolink 640x480/10fps H.264 sub-stream, run with this chart's
+  # own securityContext and args. Idle 11.7 MiB / 0% CPU; one viewer 12 MiB /
+  # 0.9% of a core; five concurrent viewers 21.4 MiB / 1.6%. So the shape is a
+  # ~12 MiB floor plus roughly 2 MiB and 1.5m CPU per viewer, and the relay is
+  # confirmed to be a copy rather than a decode - five viewers cost less than a
+  # tenth of a core. The request is deliberately well above the measurement:
+  # it has to cover every camera's producer, not just this one, and memory a
+  # pod does not use costs only schedulable headroom. The limit stays at 4x the
+  # request for the same reason it was chosen - a transcode (an H.265 main
+  # stream) would blow past it, which is the signal to notice rather than a
+  # cost to absorb, and is why the kiosk is on the sub-stream.
   resources:
     requests:
       cpu: 25m

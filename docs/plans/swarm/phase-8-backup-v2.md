@@ -1031,7 +1031,7 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       addressability here, deterministic bytes for deduplication in the export,
       and retention grouping in finding 9.
 
-- [ ] **8. The verify CronJob** —
+- [x] **8. The verify CronJob** —
       `deploy/cluster/data/backup/verify-cronjob.yaml`.
 
       Weekly, Sunday 04:00 — Phase 0's slot, and far enough from 03:10 that a
@@ -1044,6 +1044,22 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       and reports a non-zero table count. This is the cluster's replacement for
       the check Phase 0 had and the cluster has not had since 7b.2; until it
       passes once, this phase has produced backups nobody has restored.
+
+      Written, built, and unverified on the cluster — the exit condition is a
+      Sunday 04:00 run, so it is a `kubectl -n aerie create job --from` away
+      rather than a wait, and it belongs in the same pass as 8b.16's gate.
+
+      Two decisions the step did not specify, both about the lock rather than
+      the restore. **`activeDeadlineSeconds: 3600`**, which 8b.5's CronJob
+      deliberately does not carry: a slow dump that finishes is still a backup,
+      but a verify wedged on the CIFS mount leaves its restic lock in the
+      repository, and the next `forget --prune` — Monday 03:10, twenty-three
+      hours later — fails against a stale lock rather than waiting behind it.
+      The deadline kills the pod at 05:00 Sunday, inside the gap and outside
+      any honest run. And **no AWS credentials in the pod at all**, not just no
+      `RESTIC_REPOSITORY_S3`: the local-repo choice is only load-bearing if the
+      off-site copy cannot be what makes this job pass, and a workload that
+      never reads a credential should not be a place one is mounted.
 
 - [ ] **9. Longhorn's backup target, and the freeze setting finding 1 depends on** —
       [`longhorn.yaml`](../../../deploy/cluster/infrastructure/controllers/longhorn.yaml).

@@ -96,6 +96,17 @@ public class DiscoveryService(TemplateClient template, AerieContext db, IHomeAss
         if (mediaPlayerEntity is not null)
             return new KindMatch(DeviceKind.Speaker, mediaPlayerEntity);
 
+        // Checked before switch.* and light.*, for the same reason media_player is:
+        // a camera's HA device carries siblings that look like other kinds. A
+        // Reolink publishes six switch.* toggles (record, record audio, infrared
+        // lights, FTP upload, email on event, push notifications), and the
+        // spotlight models add light.*_floodlight. Sniffing for switch first
+        // imported a camera as a SmartSwitch anchored on switch.*_email_on_event -
+        // observed on the first physical camera, 2026-08-23.
+        var cameraEntity = PickCameraAnchor(entityIds);
+        if (cameraEntity is not null)
+            return new KindMatch(DeviceKind.Camera, cameraEntity);
+
         var switchEntity = entityIds.FirstOrDefault(id => id.StartsWith("switch.", StringComparison.Ordinal));
         if (switchEntity is not null)
             return new KindMatch(DeviceKind.SmartSwitch, switchEntity);
@@ -103,10 +114,6 @@ public class DiscoveryService(TemplateClient template, AerieContext db, IHomeAss
         var lightEntity = entityIds.FirstOrDefault(id => id.StartsWith("light.", StringComparison.Ordinal));
         if (lightEntity is not null)
             return new KindMatch(DeviceKind.Light, lightEntity);
-
-        var cameraEntity = PickCameraAnchor(entityIds);
-        if (cameraEntity is not null)
-            return new KindMatch(DeviceKind.Camera, cameraEntity);
 
         return null;
     }

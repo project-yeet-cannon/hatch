@@ -22,3 +22,4 @@ kind: Kustomization
 resources:
   - local-repo-volume.yaml
   - backup-cronjob.yaml
+  - verify-cronjob.yaml

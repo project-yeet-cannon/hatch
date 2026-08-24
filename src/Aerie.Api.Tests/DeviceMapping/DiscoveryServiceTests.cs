@@ -3,7 +3,7 @@ using Aerie.Api.Services.DeviceMapping;
 
 namespace Aerie.Api.Tests.DeviceMapping;
 
-/// <summary>Covers DiscoveryService.InferKind - the pure entity-id-prefix branch that BuildSuggestion dispatches on. Camera is the newest branch; the others are re-asserted here to pin the existing precedence order (climate > media_player > switch > light > camera).</summary>
+/// <summary>Covers DiscoveryService.InferKind - the pure entity-id-prefix branch that BuildSuggestion dispatches on. Camera is the newest branch; the others are re-asserted here to pin the precedence order (climate > media_player > camera > switch > light).</summary>
 public class DiscoveryServiceTests
 {
     [Fact]
@@ -82,13 +82,78 @@ public class DiscoveryServiceTests
     }
 
     [Fact]
-    public void InferKind_SwitchTakesPrecedenceOverCamera_WhenBothPresent()
+    public void InferKind_RealReolinkDevice_IsACameraNotASmartSwitch()
     {
-        // Not an expected real-world grouping, but pins that switch is checked before camera.
-        var match = DiscoveryService.InferKind(["switch.garage_light", "camera.front_door"]);
+        // The entity list of the first physical camera (HA device
+        // 6bec71b762f35cdf12246606b5a3ecdb, 2026-08-23). Its six switch.* entities
+        // are camera settings - record, record audio, infrared lights, FTP upload,
+        // email on event, push notifications - not a smart switch. With switch
+        // checked first this group imported as SmartSwitch anchored on
+        // switch.innit_email_on_event, so no CameraFeed channel was ever built and
+        // nothing downstream of Phase 2 could run.
+        var match = DiscoveryService.InferKind(ReolinkDeviceEntityIds);
+
+        Assert.Equal(new DiscoveryService.KindMatch(DeviceKind.Camera, "camera.innit_fluent"), match);
+    }
+
+    [Fact]
+    public void InferKind_CameraTakesPrecedenceOverAFloodlightSibling()
+    {
+        // The spotlight models (RLC-811A, RLC-1224A) publish light.*_floodlight,
+        // which anchors the group as a Light for the same reason switch did.
+        var match = DiscoveryService.InferKind([
+            "camera.driveway_fluent",
+            "light.driveway_floodlight",
+            "binary_sensor.driveway_motion",
+        ]);
+
+        Assert.Equal(new DiscoveryService.KindMatch(DeviceKind.Camera, "camera.driveway_fluent"), match);
+    }
+
+    [Fact]
+    public void InferKind_SwitchWithNoCameraSibling_IsStillSmartSwitch()
+    {
+        // Moving camera ahead of switch must not cost the switch branch anything.
+        var match = DiscoveryService.InferKind(["switch.garage_light", "sensor.garage_power"]);
 
         Assert.Equal(new DiscoveryService.KindMatch(DeviceKind.SmartSwitch, "switch.garage_light"), match);
     }
+
+    [Fact]
+    public void CameraChannelBuilder_RealReolinkDevice_AnchorsMotionOnThePersonSensor()
+    {
+        // Same device. Its AI sensors are _person/_vehicle/_animal (not the _pet
+        // the hardware notes predicted), so the _person preference holds and the
+        // noisy plain _motion sensor stays unmapped.
+        var channels = CameraChannelBuilder.Build("camera.innit_fluent", ReolinkDeviceEntityIds);
+
+        Assert.Collection(channels,
+            c => Assert.Equal((DeviceChannelMetric.CameraFeed, "camera.innit_fluent", (string?)null), (c.Metric, c.HaEntityId, c.HaAttribute)),
+            c => Assert.Equal((DeviceChannelMetric.MotionState, "binary_sensor.innit_person", (string?)null), (c.Metric, c.HaEntityId, c.HaAttribute)));
+    }
+
+    /// <summary>Every entity Home Assistant published for the first physical camera, verbatim.</summary>
+    private static readonly string[] ReolinkDeviceEntityIds =
+    [
+        "binary_sensor.innit_animal",
+        "binary_sensor.innit_motion",
+        "binary_sensor.innit_person",
+        "binary_sensor.innit_vehicle",
+        "camera.innit_fluent",
+        "number.innit_ai_animal_sensitivity",
+        "number.innit_ai_person_sensitivity",
+        "number.innit_ai_vehicle_sensitivity",
+        "number.innit_motion_sensitivity",
+        "select.innit_day_night_mode",
+        "sensor.innit_day_night_state",
+        "switch.innit_email_on_event",
+        "switch.innit_ftp_upload",
+        "switch.innit_infrared_lights_in_night_mode",
+        "switch.innit_push_notifications",
+        "switch.innit_record",
+        "switch.innit_record_audio",
+        "update.innit_firmware",
+    ];
 
     [Fact]
     public void CameraChannelBuilder_WithMotionSibling_EmitsFeedAndMotionChannels()

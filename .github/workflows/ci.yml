@@ -195,7 +195,7 @@ jobs:
           if [ -n "$undeclared" ]; then
             echo "Tokens substituted under deploy/ that scripts/k3s/cluster-config.json does not declare:" >&2
             echo "$undeclared" >&2
-            echo "Flux expands an undefined token to the empty string, so this reconciles cleanly and produces a manifest nobody wrote. Fix the spelling, or add the key to cluster-config.json and re-dispatch Provision 4." >&2
+            echo "kustomize-controller substitutes in strict mode, so this does not reconcile at all: the whole Kustomization fails its build and everything downstream of its dependsOn stalls behind it. Fix the spelling, or add the key to cluster-config.json and re-dispatch Provision 4." >&2
             exit 1
           fi
           echo "$(echo "$used" | grep -c . || true) token(s) used, all declared."

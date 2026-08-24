@@ -1,0 +1,135 @@
+# The cluster plan Phase 8b.8 - the weekly proof that the backups this
+# directory writes can be read back. What it runs is
+# ../../../../containers/backup/scripts/cluster-verify.sh: restore the newest
+# snapshot, load `aerie.dump` into a throwaway Postgres the image stands up in
+# its own /tmp, count tables, tear it down. The reasoning about *what* counts
+# as proof lives in that script; this file is the schedule, the credential and
+# the mount.
+#
+# This is the cluster's replacement for the check Phase 0 had and the cluster
+# has not had since 7b.2. Until it passes once, ./backup-cronjob.yaml has
+# produced backups nobody has restored.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: aerie-backup-verify
+  namespace: aerie
+spec:
+  # Sunday 04:00 - Phase 0's slot, kept. The distance from ./backup-cronjob.yaml's
+  # 03:10 is the point: restic's `forget --prune` there takes an *exclusive*
+  # repository lock, and a restore holding its shared lock when that fires
+  # makes the prune fail rather than wait. Fifty minutes is more than either
+  # job has ever needed, and activeDeadlineSeconds below is what keeps that
+  # sentence true when one of them misbehaves. UTC, for the same reason the
+  # daily is: no timeZone anywhere in this directory, so the gaps between
+  # these expressions are gaps in one reference frame.
+  schedule: "0 4 * * 0"
+  # Not because two verifies would corrupt anything - the job only reads - but
+  # because a second one would restore a second copy into a second scratch
+  # Postgres on the same node, and because a run still going a week later is a
+  # symptom that should surface as a skipped run rather than be hidden by a
+  # pile of concurrent ones.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # One retry, against the daily job's two. A verify failure is the signal
+      # this whole file exists to produce, so retrying is only worth doing for
+      # the transient case it can actually clear: a CIFS mount that was slow
+      # or briefly unavailable. A second failure is a finding, not noise, and
+      # should reach 8b.11's alert on the first Sunday rather than the second.
+      backoffLimit: 1
+      # An hour. The daily backup has no deadline because a slow dump that
+      # finishes is still a backup; here the bound is load-bearing. A verify
+      # wedged on a CIFS lock keeps its restic lock file in the repository,
+      # and the next `forget --prune` in ./backup-cronjob.yaml - Monday 03:10,
+      # twenty-three hours later - fails against it rather than waiting. This
+      # kills the pod at 05:00 Sunday, which is inside the gap and outside any
+      # honest run: the whole job is one restore of a few hundred megabytes
+      # and a `pg_restore` into a local instance.
+      activeDeadlineSeconds: 3600
+      # Three weeks, by the same arithmetic ./backup-cronjob.yaml does for
+      # three days: the TTL controller deletes a finished Job on its own timer
+      # regardless of what failedJobsHistoryLimit wants to keep, so the TTL
+      # has to cover the span that limit is asking for. Three failures of a
+      # weekly job is twenty-one days - and at one pod a week, keeping them
+      # that long costs four objects.
+      ttlSecondsAfterFinished: 1814400
+      template:
+        spec:
+          restartPolicy: Never
+          # Same private registry, same reason as ./backup-cronjob.yaml: without
+          # this the kubelet falls back to an anonymous token and reports a bare
+          # `401 Unauthorized`, which reads like a missing image rather than a
+          # missing credential.
+          imagePullSecrets:
+            - name: ghcr-pull
+          containers:
+            - name: verify
+              # The same image that wrote the snapshot, which is what makes the
+              # restore side of this meaningful: ../../../../containers/backup/Dockerfile
+              # is postgres:18.4-alpine, so the initdb/pg_ctl standing up the
+              # scratch instance and the pg_restore loading the dump are the
+              # same major version as the pg_dump that produced it and as
+              # ../cluster/cluster.yaml. A verify running against a different
+              # Postgres would be testing a restore nobody will ever perform.
+              image: ${IMAGE_REGISTRY}/aerie-backup:latest
+              command: ["sh", "/app/scripts/cluster-verify.sh"]
+              env:
+                # The `restic` Secret in this namespace - the same one
+                # ./backup-cronjob.yaml reads and, from 8b.10, the same one
+                # ../schema/restore-job.yaml reads. One Secret for the thing
+                # that writes backups, the thing that verifies them and the
+                # thing that restores them is the reason 8b.1 put all three
+                # backup/* parameters in `aerie` rather than in a namespace of
+                # their own.
+                - name: RESTIC_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: restic
+                      key: password
+                # No AWS_ACCESS_KEY_ID, no AWS_SECRET_ACCESS_KEY, no
+                # RESTIC_REPOSITORY_S3, and none of that is an oversight.
+                # 8b.8 verifies the **local** repository on two deliberate
+                # axes: it exercises the copy that is not in AWS, so an AWS
+                # account that has quietly stopped accepting writes cannot be
+                # what makes this job pass; and it exercises the CIFS mount
+                # under ./local-repo-volume.yaml, which that file's own comment
+                # names as the least-proven thing in this phase. restic
+                # coordinates through lock files and CIFS's handling of them is
+                # the corner nobody has run yet - this job runs it weekly.
+                # Handing this pod S3 credentials it has no use for would be
+                # the only copy of them in a workload that does not need them.
+                - name: RESTIC_REPOSITORY_LOCAL
+                  value: /mnt/restic-local
+              volumeMounts:
+                # Read-write, though nothing here writes a backup: `restic
+                # restore` still takes a lock, and a lock is a file in the
+                # repository. A read-only mount would fail at the lock rather
+                # than at the restore, and would also skip exactly the CIFS
+                # behaviour this job was placed on the local repo to exercise.
+                - name: restic-local
+                  mountPath: /mnt/restic-local
+              # Heavier than the backup job's floor and for a different reason:
+              # this pod runs a Postgres. initdb, a `pg_restore` and the
+              # server's own shared buffers all land inside this limit, on top
+              # of the restic restore that preceded them. The limit is where it
+              # is so that the scratch instance failing to start reads as a
+              # Postgres error in the log rather than as an OOMKill with no
+              # message - which is the one failure mode of this job that would
+              # look like a bad backup while being a bad pod spec.
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 512Mi
+                limits:
+                  memory: 2Gi
+          volumes:
+            # 8b.4's statically-provisioned SMB claim, the same PVC
+            # ./backup-cronjob.yaml mounts. ReadWriteMany, so the two never
+            # contend for the volume - only, and briefly, for restic's lock,
+            # which is what the schedule above keeps them out of.
+            - name: restic-local
+              persistentVolumeClaim:
+                claimName: aerie-restic-local
