@@ -72,11 +72,32 @@ spec:
       # ${RESTIC_LOCAL_SUBPATH} is required where ${MEDIA_LIBRARY_SUBPATH} is
       # optional (scripts/k3s/cluster-config.json): an unset media subpath
       # serves nothing, while an unset backup subpath would make the entire
-      # house share the restic repository. Required in that file does not make
-      # it present here, though - Flux expands a token the aerie-cluster-config
-      # ConfigMap does not carry to the empty string, so a Provision 4 run that
-      # predates that key leaves this a mount on the share root that reconciles
-      # perfectly. Read it back rather than trust it:
+      # house share the restic repository.
+      #
+      # That last sentence used to end "...which reconciles perfectly", on the
+      # premise that Flux expands an unknown token to the empty string and
+      # leaves this a mount on the share root - the silent failure. It does
+      # not, and the correction is worth the lines because the whole comment
+      # was written to guard against a thing that cannot happen here.
+      # kustomize-controller v1.9.4 applies post-build substitution in strict
+      # mode by default, so a token the aerie-cluster-config ConfigMap does not
+      # carry fails the build outright:
+      #
+      #   post build failed for 'PersistentVolume/aerie-restic-local':
+      #   envsubst error: variable substitution failed:
+      #   variable not set (strict mode): "RESTIC_LOCAL_SUBPATH"
+      #
+      # Observed 2026-08-23, when this file reached the cluster one Provision 4
+      # dispatch ahead of its key. The failure is loud and total rather than
+      # silent and partial - no PV is created at all - but it is not free: the
+      # whole data-schema Kustomization stops reconciling and everything
+      # downstream of it (../../apps.yaml) stops with it. **Land a
+      # cluster-config.json key and its Provision 4 dispatch before the
+      # manifest that reads it**, the same seed-then-manifest ordering 4b.3
+      # established for parameters.json.
+      #
+      # Read the resolved value back anyway - not for the unset case, which now
+      # announces itself, but for a subpath that resolved to the wrong thing:
       #   kubectl -n aerie get pv aerie-restic-local \
       #     -o jsonpath='{.spec.csi.volumeAttributes.source}'
       source: "//${SHARE_HOST}/${SHARE_NAME}/${RESTIC_LOCAL_SUBPATH}"

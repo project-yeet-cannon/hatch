@@ -151,12 +151,21 @@ jobs:
           fi
           echo "No address literals under deploy/."
 
-      # Flux expands every $VAR in a Kustomization's built output, and an
-      # *undefined* token expands to the empty string rather than failing - so
-      # ${DOMIAN} is not a failed reconciliation, it is an Ingress with no host,
-      # discovered whenever someone next visits it. The set of legal tokens is
-      # exactly the keys Provision 4 plants, which cluster-config.json already
-      # owns, so the typo is catchable here and nowhere later.
+      # Flux expands every $VAR in a Kustomization's built output, and the set
+      # of legal tokens is exactly the keys Provision 4 plants - which
+      # cluster-config.json already owns, so ${DOMIAN} is catchable here.
+      #
+      # This comment used to justify the check by saying an undefined token
+      # expands to the empty string, making the typo an Ingress with no host
+      # rather than a failed reconciliation. That is no longer true and the
+      # reason to keep the check is now a different, better one:
+      # kustomize-controller (v1.9.4 on this cluster) applies post-build
+      # substitution in *strict* mode by default, so an undefined token fails
+      # the build outright and the whole Kustomization stops reconciling -
+      # taking everything downstream of its dependsOn with it. Observed
+      # 2026-08-23 (the cluster plan Phase 8b.4's note has the transcript).
+      # A typo is no longer a quiet wrong value; it is a stalled tenant, which
+      # makes catching it here worth more than it was, not less.
       #
       # Read from the *built* output rather than the sources, which is what
       # keeps a token written inside a YAML comment - the ones in

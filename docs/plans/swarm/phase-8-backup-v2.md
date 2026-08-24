@@ -181,6 +181,28 @@
    written on the `forget` explicitly rather than left to the default, because
    the whole argument depends on it.
 
+   **The `paths` half of the same finding, seen on the real repositories.** The
+   six snapshots 8a.2's repository already holds were written by the compose-era
+   script, which staged into `mktemp -d` — so their paths are
+   `/tmp/tmp.hFmFIa/aerie.dump`, `/tmp/tmp.MlfIcE/aerie.dump`, and four more,
+   every one unique. Under `--group-by host,paths` that is six groups of one,
+   and a `forget --dry-run` with the full policy confirms it: **0 removals, 6
+   keep-groups, 6 snapshots, in both repositories.** The pre-cluster history is
+   therefore permanent rather than merely protected — `cutover-final` is
+   safe by tag *and* by being alone in its group — which is benign, since the
+   set is closed and no new `mktemp` snapshot will ever join it, but it is a
+   fixed floor (~1.7 GiB local, and in S3 a 2.634 GiB snapshot carrying the
+   OpenSearch and Prometheus data [design.md](design.md#storage-split) says is
+   not worth backing up) that should be known rather than rediscovered as "why
+   won't these expire".
+
+   Worth recording for a second reason: **8b.3's fixed `/tmp/aerie-backup`
+   staging path is what makes the going-forward case work**, and that change
+   was justified purely on `restic dump` addressability — being able to name
+   the file in a recovery. It turns out to be load-bearing for retention
+   grouping as well, which nobody knew when it was made. Two independent
+   reasons for one decision, the second discovered three steps later.
+
 ## What this phase is
 
 Three backup paths, one alert family, one rehearsal:
@@ -647,14 +669,34 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       the three tokens are declared keys in `cluster-config.json`.
 
       **What remains:** the exit condition, which needs a reconciled cluster
-      and 8b.2's Provision 4 dispatch before it — `${RESTIC_LOCAL_SUBPATH}`
-      resolves to the empty string until that variable is set, and an
-      unresolved subpath is a PV mounted on the share *root*, which is the one
-      failure mode here that looks like success. Check that first
-      (`kubectl -n aerie get pv aerie-restic-local -o jsonpath='{.spec.csi.volumeAttributes.source}'`),
-      then run the throwaway pod. And the CIFS locking question above stays
-      open on purpose: it is answered by 8b.5's first `forget`, not by this
-      mount.
+      and 8b.2's Provision 4 dispatch before it. Then run the throwaway pod.
+      The CIFS locking question above stays open on purpose: it is answered by
+      8b.5's first `forget`, not by this mount.
+
+      **Correction, 2026-08-23, from the cluster rather than from reading.**
+      This note originally said `${RESTIC_LOCAL_SUBPATH}` "resolves to the
+      empty string until that variable is set", making an unresolved subpath a
+      PV mounted on the share *root* — "the one failure mode here that looks
+      like success". **That is not what Flux does.** kustomize-controller
+      v1.9.4 applies post-build substitution in strict mode by default, and
+      when this file reached the cluster one Provision 4 dispatch ahead of its
+      key, the result was:
+
+      ```text
+      post build failed for 'PersistentVolume/aerie-restic-local':
+      envsubst error: variable substitution failed:
+      variable not set (strict mode): "RESTIC_LOCAL_SUBPATH"
+      ```
+
+      No PV was created, so the silent failure this whole note was written to
+      guard against cannot occur on this version. What happens instead is not
+      free, though, and is worth more attention than the thing it replaced:
+      **`data-schema` stops reconciling entirely**, retrying every 60s, and
+      `apps` — which `dependsOn` it — stalls behind it at whatever revision it
+      last applied. Running workloads keep running; nothing new deploys. A typo
+      in a token is therefore a stalled tenant rather than a quiet wrong value,
+      which makes [ci.yml](../../../.github/workflows/ci.yml)'s token check
+      worth more than its own comment claimed (both comments are corrected).
 
 - [x] **5. The backup CronJob** —
       `deploy/cluster/data/backup/backup-cronjob.yaml`.
@@ -754,17 +796,46 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       transformer stamps `aerie` on the CronJob while still leaving 8b.4's PV
       alone.
 
-      **What remains: the exit condition.** The sequencing hazard 8b.3 and this
+      **Exit condition met 2026-08-24**, against the real cluster and the real
+      repositories. One manual run
+      (`kubectl -n aerie create job --from=cronjob/aerie-backup aerie-backup-manual-1`)
+      completed in **38 seconds** and produced a snapshot in **both** repos —
+      `56dee9d1` local, `0618f9ce` in S3 — each carrying `aerie.dump`,
+      `quartz.dump` and `parameters.json` at `/tmp/aerie-backup/`, 74.628 MiB
+      read, 13.9 MiB and 16.9 MiB stored. `init-repos.sh` reported both repos
+      already initialized, the export reported 21 parameters, both `forget`s
+      ran, and the 8b.6 guard passed silently. Seven snapshots in each repo now,
+      six of them the pre-cluster history.
+
+      **And the CIFS locking question 8b.4 left open has its first answer: no
+      lock trouble.** A `grep -icE "lock|warn|error|fatal"` over the whole job
+      log returns **0** — the `backup` and the `forget --prune` both took and
+      released their locks on the SMB mount without a stale-lock message. One
+      run is not a season, so the note in
+      [local-repo-volume.yaml](../../../deploy/cluster/data/backup/local-repo-volume.yaml)
+      stays where it is, but the least-proven thing in this design is now the
+      least-proven thing that has worked once.
+
+      One expected line worth not mis-reading: `no parent snapshot found, will
+      read all files`, on both repos. That is correct for the *first* run under
+      `--host aerie` (finding 9) — there was no prior snapshot from that host to
+      parent against. The nightly 03:10 run is what proves the other half: it
+      should find a parent, and its `forget` should put both `aerie`-host
+      snapshots in one group, which is the first time retention will have
+      grouped anything on real data.
+
+      **What remains: nothing here.** The sequencing hazard 8b.3 and this
       step both flagged — `cluster-backup.sh` calling an
       `export-parameters.sh` that did not exist — is closed: 8b.7 landed in the
       same push, so the first 03:10 tick has a complete script to run. One env
       var was added here for it (`PARAMETER_PREFIX`), and one line of this
       file's own env list belongs to it (`AWS_DEFAULT_REGION`).
-      Before the manual run, confirm 8b.4's exit first — an unresolved
-      `${RESTIC_LOCAL_SUBPATH}` is a PV mounted on the share root, which is the
-      one failure here that looks like success — and expect the CIFS locking
-      question that mount left open to be answered by this job's first
-      `forget`, not before it.
+      Before the manual run, confirm 8b.4's exit first — not for the unset
+      case, which 8b.4's correction above shows announces itself as a failed
+      reconciliation, but for a subpath that resolved to the *wrong* directory,
+      which still looks like success. Expect the CIFS locking question that
+      mount left open to be answered by this job's first `forget`, not before
+      it.
 
 - [x] **6. `--keep-tag cutover-final`, in the same commit as the `forget`** —
       the retention half of 8b.5's script.
@@ -824,6 +895,17 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       fix; ten runs go from ten retained snapshots to three. A `--keep-tag` on
       a policy that never fires protects nothing, so 8b.6 was not finished
       until this was.
+
+      **Exit condition met 2026-08-24, on the real repositories.** After the
+      first manual run's `forget --prune` against both, `restic snapshots
+      --tag cutover-final` still reports exactly one snapshot in each and still
+      the pre-cutover date — `3bb9e508` local and `43ab5d45` in S3, both
+      `2026-08-20T03:10`. Asserted rather than read, twice over: by the
+      in-script guard that ran inside the job and said nothing, and by this
+      check afterwards. A `--dry-run` of the same policy beforehand had already
+      predicted it — 0 removals, 6 keep-groups, 6 snapshots, both repos — which
+      is how the first real `--prune` against 957 MiB of irreplaceable history
+      was made a known quantity rather than a hope.
 
       Exercised rather than asserted, against two throwaway local repos each
       seeded with a `--time 2026-08-09` snapshot tagged `cutover-final`. The
@@ -933,11 +1015,21 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       instance and counting 2 tables. `jq` reports 1.8.1 beside 8b.3's other
       three versions.
 
-      **What remains:** the exit condition proper, which needs the real tree and
-      the real repos — the count against this installation's 22, and the
-      `restic dump latest /tmp/aerie-backup/parameters.json | jq` read-back from
-      a machine holding only the offline password. That path is typeable rather
-      than elliptical because of 8b.3's fixed staging directory.
+      **Exit condition met 2026-08-24, and the count settles the arithmetic
+      above at 21.** `restic dump latest /tmp/aerie-backup/parameters.json`
+      out of the local repo returns a 21-entry array, and diffing its `.Name`
+      values against `parameters.json` gives exactly what the corrected reading
+      predicts: **all 20 required parameters present**, plus one of the two
+      optional ones (`tailscale/auth-key`), with the absent entry being the
+      other optional one (`kiosk/wifi-password`). Not 22, and nowhere near the
+      24 the original exit condition asked for. That is the shape 8b.16 should
+      assert — the required set read from `parameters.json`, with the optional
+      pair allowed to be absent — rather than any fixed total.
+
+      The `restic dump` path is typeable rather than elliptical because of
+      8b.3's fixed staging directory, which is now doing its third job:
+      addressability here, deterministic bytes for deduplication in the export,
+      and retention grouping in finding 9.
 
 - [ ] **8. The verify CronJob** —
       `deploy/cluster/data/backup/verify-cronjob.yaml`.
@@ -1256,6 +1348,21 @@ scripts/
 
 docs/disaster-recovery.md         # 8b.14, rewritten
 ```
+
+One ordering rule, learned twice in this phase and belonging to every phase
+after it. **A `cluster-config.json` key and its Provision 4 dispatch land
+before the manifest that reads the token — never in the same push, never
+after.** 4b.3 established seed-then-manifest for `parameters.json` because the
+ExternalSecret generator refuses a target on an unseeded parameter; the same
+shape applies here for a different mechanism and a worse blast radius. Flux
+substitutes in strict mode, so a manifest carrying a token no ConfigMap has
+does not degrade — it fails the whole Kustomization's build, and every
+Kustomization that `dependsOn` it stalls behind it until someone notices. 8b.1
+hit the `parameters.json` half of this and wrote down that the seed reads the
+*remote*, not the working tree; 8b.4 then hit the `cluster-config.json` half by
+committing its PV one dispatch ahead of `RESTIC_LOCAL_SUBPATH`, and `apps`
+stopped reconciling for the twenty minutes it took to spot. Two mechanisms, one
+rule: **the value reaches the cluster first.**
 
 One structural note. **`data/backup/` is a third tenant of the data layer, not a
 new Kustomization and not `observability/`.** It sits with the database it dumps
