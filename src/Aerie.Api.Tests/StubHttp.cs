@@ -4,7 +4,7 @@ using System.Text;
 namespace Aerie.Api.Tests;
 
 /// <summary>One request as the stub handler saw it, including the headers - which for some callers (NWS's mandatory User-Agent) are the thing under test.</summary>
-internal sealed record RecordedRequest(string Url, string Body, IReadOnlyDictionary<string, string> Headers);
+internal sealed record RecordedRequest(string Method, string Url, string Body, IReadOnlyDictionary<string, string> Headers);
 
 /// <summary>
 /// Records every request and answers from a queue of canned responses, so a
@@ -31,7 +31,7 @@ internal sealed class StubHttpMessageHandler(params HttpResponseMessage[] respon
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(ct);
-        Requests.Add(new RecordedRequest(request.RequestUri!.ToString(), body, HeadersOf(request)));
+        Requests.Add(new RecordedRequest(request.Method.Method, request.RequestUri!.ToString(), body, HeadersOf(request)));
         return responses[Math.Min(next++, responses.Length - 1)];
     }
 

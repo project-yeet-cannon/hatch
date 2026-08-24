@@ -255,6 +255,14 @@ builder.Services.Configure<MediaLibraryOptions>(builder.Configuration.GetSection
 // the API relays kiosk video from is fixed by how Aerie is installed.
 builder.Services.Configure<CameraStreamOptions>(builder.Configuration.GetSection(CameraStreamOptions.SectionName));
 
+// The control channel to go2rtc, separate from the relay socket CameraController
+// opens: this one is a short PUT that registers a camera's stream just before
+// it is watched (Phase 11). Timeout is deliberately small - go2rtc answers a
+// registration without touching the camera, so a slow answer means go2rtc
+// itself is wedged, and the viewer is waiting on this before any video moves.
+builder.Services.AddHttpClient(Go2RtcStreamRegistrar.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(5));
+builder.Services.AddSingleton<IGo2RtcStreamRegistrar, Go2RtcStreamRegistrar>();
+
 // API / HTTP
 
 // DataProtection: nothing here uses antiforgery tokens, cookie

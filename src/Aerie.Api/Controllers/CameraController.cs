@@ -20,6 +20,13 @@ namespace Aerie.Api.Controllers;
 /// camera's *identity* - the CameraFeed channel's HaEntityId, which is also the
 /// go2rtc stream name (see CameraStreamTarget).
 ///
+/// Since Phase 11, go2rtc is not the source of the camera's *address* either.
+/// Aerie holds that, along with the credential, in CameraConnections - set from
+/// the devices admin UI - and tells go2rtc about the stream on the way past,
+/// immediately below. go2rtc therefore knows nothing at rest, which is what
+/// lets adding a camera be a form rather than a Secret, a workflow dispatch and
+/// a pod restart.
+///
 /// This is a relay rather than a redirect on purpose. A kiosk holds one
 /// connection to one origin, gets there through the same auth as every other
 /// Aerie request, and never learns a camera's address or password - which are
@@ -28,7 +35,10 @@ namespace Aerie.Api.Controllers;
 [ApiController]
 [Route("api/devices")]
 public class CameraController(
-    AerieContext db, IOptions<CameraStreamOptions> options, ILogger<CameraController> logger
+    AerieContext db,
+    IOptions<CameraStreamOptions> options,
+    IGo2RtcStreamRegistrar registrar,
+    ILogger<CameraController> logger
 ) : ControllerBase
 {
     /// <summary>
@@ -77,6 +87,25 @@ public class CameraController(
             return;
         }
 
+        // Where this camera's video actually comes from. Aerie holds it, not
+        // go2rtc: the connection row is the operator's form, and go2rtc is told
+        // about it below. A Camera device with no connection configured is the
+        // normal state between importing it from discovery and filling that
+        // form in, so it gets a status of its own rather than being folded into
+        // the 404 above - "no such camera" and "this camera has no address yet"
+        // send an operator to different places.
+        var connection = await db.CameraConnections.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.DeviceId == deviceId, ct);
+
+        if (!CameraRtspUrl.TryBuild(connection, out var rtspUrl))
+        {
+            logger.LogInformation(
+                "Camera stream requested for device {DeviceId} ({EntityId}), which has no connection configured",
+                deviceId, entityId);
+            Response.StatusCode = StatusCodes.Status409Conflict;
+            return;
+        }
+
         if (!CameraStreamTarget.TryResolve(options.Value.Go2RtcBaseAddress, entityId, out var target))
         {
             // Not the caller's fault and not a missing camera: the configured
@@ -85,6 +114,20 @@ public class CameraController(
                 "Cameras:Go2RtcBaseAddress is not a usable http(s) address: {BaseAddress}",
                 options.Value.Go2RtcBaseAddress);
             Response.StatusCode = StatusCodes.Status500InternalServerError;
+            return;
+        }
+
+        // Lazily, on every open. go2rtc holds its stream table in memory and in
+        // an emptyDir, so it forgets across a restart by design - this is what
+        // makes that harmless. A PUT under a name it already has replaces the
+        // producer, so a password changed in the admin UI takes effect on the
+        // next viewer with nothing to invalidate.
+        if (!await registrar.EnsureAsync(entityId, rtspUrl, ct))
+        {
+            // The registrar has already logged which failure it was. 502 for
+            // the same reason the connect failure below is: the camera path is
+            // configured and something behind it is not answering.
+            Response.StatusCode = StatusCodes.Status502BadGateway;
             return;
         }
 
