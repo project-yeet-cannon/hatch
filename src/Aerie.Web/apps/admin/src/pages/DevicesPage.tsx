@@ -35,6 +35,7 @@ import {
   HomeAssistantIcon,
 } from "../components/icons";
 import { CameraConnectionForm } from "../components/CameraConnectionForm";
+import { CameraLiveViewModal } from "../components/CameraLiveViewModal";
 import { HistoryModal } from "../components/HistoryModal";
 
 const BACKFILL_PRESETS: { label: string; days: number }[] = [
@@ -211,6 +212,7 @@ export function DevicesPage() {
     isError: boolean;
   } | null>(null);
 
+  const [liveViewDeviceId, setLiveViewDeviceId] = useState<string | null>(null);
   const [historyDeviceId, setHistoryDeviceId] = useState<string | null>(null);
   const [historyChannel, setHistoryChannel] = useState<{
     deviceId: string;
@@ -756,6 +758,17 @@ export function DevicesPage() {
           )}
 
           <div className="flex gap-1 mt-2">
+            {/* Only cameras have a picture, and only an enabled one answers:
+                CameraController serves enabled devices only, so offering this
+                on a disabled camera would be a button that always fails. */}
+            {device.kind === "Camera" && device.enabled && (
+              <button
+                className="btn-secondary"
+                onClick={() => setLiveViewDeviceId(device.id)}
+              >
+                Live view
+              </button>
+            )}
             <button
               className="btn-secondary"
               onClick={() =>
@@ -1029,6 +1042,13 @@ export function DevicesPage() {
             </div>
           )}
 
+          {liveViewDeviceId === device.id && (
+            <CameraLiveViewModal
+              deviceId={device.id}
+              deviceName={device.name}
+              onClose={() => setLiveViewDeviceId(null)}
+            />
+          )}
           {historyDeviceId === device.id && (
             <HistoryModal
               open

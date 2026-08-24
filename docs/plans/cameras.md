@@ -324,3 +324,32 @@ depends on it.
 First, break this user story down by asking me any clarifying questions, then implement a step by step plan here.
 
 As a kiosk tablet user, I want a button on the dashboard app for each camera hooked up to aerie. When I push the button, I view the live feed from the camera. If possible, reuse the video streaming interaction from the motion auto-play so we have a unification of ux patterns. Make the camera buttons the same size as the Routines buttons and in the same area of the web app.
+
+### [x] Phase 13 — Admin live view
+
+Not in the original plan. Phase 11 made adding a camera a form; this is the
+other half of that — a way to see whether what you typed into the form works,
+in the place you typed it, rather than by walking to a wall tablet and waving
+at the camera.
+
+- [x] A **Live view** button on each camera row in the admin devices page,
+  opening the feed in the existing `Modal`. Shown only for an enabled `Camera`:
+  `CameraController` serves enabled devices only, so offering it otherwise
+  would be a button that always fails.
+- [x] **Reuses the kiosk's client verbatim** — `lib/cameraStream.ts` and
+  `lib/useCameraStream.ts` are copies of the dashboard's, bar import paths and
+  a header note. The apps have no shared package (`clientLogger`, `signIn` and
+  `deviceMetadata` are already carried as copies across three apps), and adding
+  a workspace for two files is more machinery than the duplication costs. Both
+  copies speak the same protocol to the same endpoint, so the note in each says
+  a change to one belongs in the other. The tests stay in the dashboard, which
+  is where the file they cover is authored — admin has no test runner.
+- [x] **The unconfigured camera gets its own message.** A camera with no address
+  is the normal state right after import and the relay answers it with a 409,
+  but a failed WebSocket handshake carries no status code to the browser — on
+  its own it would read as the same "unavailable" as a wrong password or a
+  camera that is off. The modal reads the connection alongside the stream
+  rather than before it, so the case is named without costing the picture a
+  round-trip, and it points at the form directly below.
+- [ ] Confirm against a camera. Same standing item as Phase 10: nothing on this
+  machine can reach one, so the picture itself is unverified here.

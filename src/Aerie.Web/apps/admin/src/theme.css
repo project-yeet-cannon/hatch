@@ -108,6 +108,19 @@ html, body, #root {
   color: var(--ink);
 }
 
+/* Camera live view. 16/9 rather than a height: the panel is a fixed width, and
+   reserving the frame up front keeps the modal from jumping when the first
+   fragment decodes. contain, not cover - an operator is checking aim and
+   framing here, so cropping the sides away is the one thing this must not do. */
+.camera-live-video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  background: #000;
+  border-radius: 6px;
+  display: block;
+}
+
 /* Channel history chart */
 .chart-svg {
   width: 100%;
