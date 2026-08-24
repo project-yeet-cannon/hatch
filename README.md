@@ -144,6 +144,43 @@ longitude on the Settings page, and the **Active alerts** card at the bottom of
 that page is there to confirm the configuration produced something. An empty
 card on a calm, clean-air day is a working configuration, not a broken one.
 
+## Adding a camera
+
+A camera imported from Home Assistant shows up on the wall as a button, and puts
+itself on screen when something moves in front of it. The design is in
+[docs/camera-devices-architecture.md](docs/camera-devices-architecture.md).
+
+1. Wire the camera in and adopt it in Home Assistant. **PoE, single-lens.**
+   Battery models stay awake for as long as a stream is being watched, which is
+   fatal for a display that opens a feed on every motion event, and a dual-lens
+   camera imports as half a camera.
+2. On the admin app's **Discovery** page, import it. It should suggest
+   **Camera**; the channels it proposes are the camera feed plus a motion
+   sensor, preferring the on-camera AI `_person` sensor over plain `_motion`
+   where the camera publishes one — the plain sensor fires on trees, rain and
+   headlights, and every transition opens a modal in the kitchen.
+3. On the **Devices** page, fill in **Camera connection**: username, password,
+   and the RTSP stream path. The host is usually already there — Home Assistant
+   reports the camera's own address and keeps it current across a DHCP move, so
+   the field is an override that is normally left blank. The default stream path
+   is Reolink's H.264 sub-stream, which is deliberately the low-resolution one:
+   a wall tablet should not be decoding 5MP, and the main stream on some models
+   is H.265, which no browser here plays.
+4. Click **Live view** on the device row. That is the whole check — a picture
+   means the address, the credential and the pod-to-camera network path are all
+   good. Expect the first frame to take a moment: the camera only emits a
+   keyframe every few seconds and nothing can be shown until one arrives.
+5. Walk in front of it and confirm the kiosk opens the feed by itself.
+
+If the live view says the camera has no address, step 3 is unfinished. If it
+says the feed is unavailable, dispatch the **Verify: Cameras** workflow — it
+answers the cluster half (is go2rtc healthy, can a pod actually reach the
+camera's RTSP port) without printing any camera's password into a run log.
+
+The camera's password lives in Aerie's database, protected the same way the
+Home Assistant token is, and never enters git or the cluster. Adding a camera
+touches nothing outside the admin UI.
+
 ## Making games with a child
 
 The family shell's **Game** app (`https://home.${DOMAIN}/apps/family/game`) lets

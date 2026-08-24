@@ -2,7 +2,7 @@ namespace Aerie.Api.Services.DeviceMapping;
 
 /// <summary>
 /// The host out of a Home Assistant device's configuration_url
-/// (docs/plans/cameras.md Phase 11).
+/// (docs/camera-devices-architecture.md).
 ///
 /// This is the small piece of machinery that lets a camera stop being told a
 /// static address. HA's device registry records where a device's own web UI

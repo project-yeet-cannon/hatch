@@ -10,7 +10,7 @@ Three things had to come together to make this work end-to-end without ever plug
 - **Distribution**: CI builds and signs the release APK and publishes it as a static file over the same reverse proxy every other app uses, rather than as a manual local build.
 - **Provisioning**: Android's QR-code "no-touch" provisioning flow installs the app, sets Wi-Fi, and grants Device Owner in one scan at first boot — no `adb`/USB required, unless the tablet's setup wizard doesn't offer a QR scanner.
 
-The shell is only half of it. [What the wall shows](#what-the-wall-shows) covers the two feeds that reach the tablet from outside the house — the family calendar and outdoor hazards — including the setup an operator does once and the display rules that keep a lit display from becoming a lamp at 3am. [Gather on the wall](#gather-on-the-wall) is the one thing here that takes input rather than only showing it, and [Text entry on the wall](#text-entry-on-the-wall) is what the tablets turned out to do with a soft keyboard.
+The shell is only half of it. [What the wall shows](#what-the-wall-shows) covers the two feeds that reach the tablet from outside the house — the family calendar and outdoor hazards — including the setup an operator does once and the display rules that keep a lit display from becoming a lamp at 3am. [Gather on the wall](#gather-on-the-wall) is the one thing here that takes input rather than only showing it, and [Text entry on the wall](#text-entry-on-the-wall) is what the tablets turned out to do with a soft keyboard. [Cameras on the wall](#cameras-on-the-wall) is the one thing that puts itself on screen without anyone asking.
 
 ## Runtime (`apps/kiosk/app`)
 
@@ -54,7 +54,7 @@ Zoom is the one piece of state JS cannot restore — Gecko exposes no API for th
 
 **4. Shell backstop ([`MainActivity`](../apps/kiosk/app/src/main/java/family/landis/aeriekiosk/MainActivity.kt)).** `loadDashboard()` loads with `LOAD_FLAGS_BYPASS_CACHE` on cold start and on reconnect, which is what makes a power cycle — the only recovery action available to someone standing at the tablet — a reliable fix even on a tablet that cached `index.html` before layer 1 existed. A 12-hour `geckoSession.reload(LOAD_FLAGS_BYPASS_CACHE)` puts a ceiling on staleness for the case layer 2 cannot cover by construction: a bundle broken badly enough that its own lifecycle code never runs.
 
-**Both layers suspend together while something on screen cannot survive them.** Layers 2 and 3 are actively hostile to a text field, and [Gather](#gather-on-the-wall) puts one on the wall: an idle reset is a *keyed* remount, so a half-typed item would vanish without a trace, and a drift reload would take the whole page. `hold()`/`release()` on [`kioskLifecycle.ts`](../src/Aerie.Web/apps/dashboard/src/lib/kioskLifecycle.ts) pauses the reset and the reload as one flag, deliberately — a reload that fires mid-entry is the same bug as a reset that does. `release()` then counts as a *touch* rather than as idleness: someone is standing right there, so closing the overlay re-arms the 30s timer and a deploy that drifted while held lands on that timer instead of firing immediately.
+**Both layers suspend together while something on screen cannot survive them.** Layers 2 and 3 are actively hostile to a text field, and [Gather](#gather-on-the-wall) puts one on the wall (a [motion-opened camera feed](#cameras-on-the-wall) takes the same hold, for the same reason): an idle reset is a *keyed* remount, so a half-typed item would vanish without a trace, and a drift reload would take the whole page. `hold()`/`release()` on [`kioskLifecycle.ts`](../src/Aerie.Web/apps/dashboard/src/lib/kioskLifecycle.ts) pauses the reset and the reload as one flag, deliberately — a reload that fires mid-entry is the same bug as a reset that does. `release()` then counts as a *touch* rather than as idleness: someone is standing right there, so closing the overlay re-arms the 30s timer and a deploy that drifted while held lands on that timer instead of firing immediately.
 
 That state machine is a plain factory rather than the body of the hook for one reason: a seam whose entire value is "the timer really did not fire" has to be unit-tested rather than eyeballed. Keeping it out of a `useEffect` closure lets vitest drive it with fake timers directly ([`kioskLifecycle.test.ts`](../src/Aerie.Web/apps/dashboard/src/lib/kioskLifecycle.test.ts)) instead of the dashboard taking on jsdom and a renderer to assert on a `setTimeout`; [`useKioskLifecycle.ts`](../src/Aerie.Web/apps/dashboard/src/hooks/useKioskLifecycle.ts) is then only the wiring. The tests are mutation-checked — dropping either `held` guard fails them.
 
@@ -83,7 +83,7 @@ Three things are still unconfirmed on the hardware, all cheap to check the first
 
 ## What the wall shows
 
-`GET /api/dashboard` is a backend-for-frontend: one round trip returns zones, outside conditions, routines, the calendar agenda, and outdoor hazards, and the page re-polls it every 60 seconds. Two of those five come from outside the house — Google Calendar, and a weather/air-quality provider — and both follow the rule the climate sampling already followed: **jobs fetch, Postgres caches, the endpoint reads.** Nothing in a request path calls a third party.
+`GET /api/dashboard` is a backend-for-frontend: one round trip returns zones, outside conditions, routines, cameras, the calendar agenda, and outdoor hazards, and the page re-polls it every 60 seconds. Two of those six come from outside the house — Google Calendar, and a weather/air-quality provider — and both follow the rule the climate sampling already followed: **jobs fetch, Postgres caches, the endpoint reads.** Nothing in a request path calls a third party.
 
 That split is not an optimisation. A kiosk polls forever, from three API replicas, and a display that blanks because Google is slow is worse than one showing an agenda five minutes stale. A read path cannot fail on a dependency it never calls. The endpoint-level contract is in [dashboard-api-manifest.md](dashboard-api-manifest.md); what follows is why each half is shaped the way it is, and how it reads from across the room.
 
@@ -161,6 +161,26 @@ Shared shopping lists, reachable from the kitchen and from a phone. The app itse
 **Two list pickers, not one.** The dashboard tile is the usual way in. The overlay's own picker is reachable only via its back button, and only when there is more than one list to pick.
 
 Touch targets are sized for a wall tablet read at arm's length rather than a phone at reading distance, and Gather is wired into the dashboard's mock and test data sources like everything else, so `?source=mock` and `?source=test` still render the whole screen.
+
+## Cameras on the wall
+
+A live camera feed, over the dashboard, either because something moved in front of a camera or because someone tapped its button. The whole path — the Home Assistant subscription, the motion stream, go2rtc, the relay — is [camera-devices-architecture.md](camera-devices-architecture.md); this is the kiosk-specific half.
+
+**One modal, two ways in.** A camera that tripped and a camera someone asked for are the same screen; only what put it there differs, and the visible camera is **`manual ?? motion`** — someone standing at the tablet watching the driveway should not be shoved onto the back door because a branch moved. Motion resumes on close if it is still going.
+
+**It follows the overlay idiom, not the admin app's.** `CameraFeedModal` is built on `GatherOverlay`'s shape — full-screen, one 56px touch target, mounted inside `.hf-page` so the circadian custom properties resolve. A centred dialog with a small ✕ is right for a desktop browser and wrong for a portrait tablet on a wall.
+
+**Dismissal is per *event*, not per camera.** Closing has to stop being in effect when the motion ends, or the ✕ silently mutes that camera forever. The same ✕ does both halves — clears the manual selection *and* dismisses the shown device's motion event — because closing a hand-opened feed on a camera that is *also* in motion would otherwise leave the modal exactly where it was, a button that visibly does nothing.
+
+**The camera buttons are their own row, directly below the routines.** Same tile geometry, shared through the routine tile's own selectors rather than two numbers that have to be kept equal; a separate row because tapping one does something categorically different from triggering a routine. An icon in a circle rather than a live thumbnail — a thumbnail wants a JPEG proxy and an RTSP connection per camera per refresh, against cameras that cap concurrent sub-stream clients in the single digits.
+
+**Every enabled camera gets a button, configured or not**, and tapping an unconfigured one says so. A camera missing from the wall looks identical to one that was never imported, and nobody standing in the hall can tell those apart.
+
+**Only a motion-opened feed holds the lifecycle.** A deploy reload firing while someone is watching who is at the door is the same bug as one firing mid-Gather-entry ([above](#refresh-lifecycle)). A hand-opened feed deliberately does *not* hold it, so the 30s idle reset closes it — and with it the relay's connection, and the camera's — rather than leaving the wall lit on a live stream all afternoon. Watching a feed is a hands-in-pockets activity, so if 30s proves short, the value to move to is `IDLE_DIM_AFTER_MS` (120s), the file's existing statement of "nobody is there".
+
+**No player dependency.** The relay hands over fragmented MP4 and `MediaSource` takes it directly. That is also the one thing here still unproven on the hardware: the kiosk is a GeckoView, not Chrome, and `supportedCodecs()` reports the empty case as "this display can't play the camera feed" rather than failing obscurely — visible rather than silent, but it would mean rethinking the transport.
+
+Cameras are wired into the dashboard's mock and test data sources like everything else, so `?source=mock` and `?source=test` still render the whole screen.
 
 ## Build & signing
 

@@ -5,7 +5,7 @@ using Aerie.Api.Services.DeviceMapping;
 namespace Aerie.Api.Tests.DeviceMapping;
 
 /// <summary>
-/// docs/plans/cameras.md Phase 11. These are mostly tests about characters,
+/// docs/camera-devices-architecture.md. These are mostly tests about characters,
 /// because that is where this goes wrong: a camera password is typed into a
 /// router-grade web UI by someone who has no idea it will end up between a
 /// scheme and an @.

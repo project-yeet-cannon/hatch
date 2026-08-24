@@ -60,8 +60,9 @@ public record SunEvents(DateTimeOffset Dawn, DateTimeOffset Sunrise, DateTimeOff
 public record RoutineSummary(Guid Id, string Name, string? Description, string? Icon, string? Color, bool IsToggle, bool? IsActive);
 
 /// <summary>
-/// One camera as the kiosk's button row renders it (docs/plans/cameras.md
-/// Phase 12) - a name to put under the tile, and an id to open the stream with.
+/// One camera as the kiosk's button row renders it
+/// (docs/camera-devices-architecture.md) - a name to put under the tile, and an
+/// id to open the stream with.
 ///
 /// <paramref name="IsConfigured"/> is whether this camera has an address to
 /// stream from yet, which is the same question CameraController asks before it

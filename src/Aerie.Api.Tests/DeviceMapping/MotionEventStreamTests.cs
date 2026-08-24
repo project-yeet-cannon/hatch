@@ -6,7 +6,7 @@ namespace Aerie.Api.Tests.DeviceMapping;
 
 /// <summary>
 /// Covers MotionEventStream - what one kiosk's SSE connection sees
-/// (docs/plans/cameras.md Phase 6). No HTTP here: the controller around this
+/// (docs/camera-devices-architecture.md). No HTTP here: the controller around this
 /// only turns each item into an SSE frame, so everything worth asserting -
 /// the snapshot, delivery, the heartbeat, and unsubscribing when the kiosk
 /// goes - is reachable from the sequence itself.

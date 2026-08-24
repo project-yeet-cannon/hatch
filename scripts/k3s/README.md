@@ -472,18 +472,18 @@ else. That splits in two, because the two halves need different things:
 ## Verify — the camera bring-up gate
 
 [`Test-Cameras.ps1`](Test-Cameras.ps1), dispatched as *Verify: Cameras*. Not a
-cluster-plan phase gate at all — [the cameras
-plan](../../docs/plans/cameras.md) Phase 9 is a bring-up checklist, and this
-is the half of it a machine can answer.
+cluster-plan phase gate at all — camera bring-up
+([`docs/camera-devices-architecture.md`](../../docs/camera-devices-architecture.md))
+is a checklist, and this is the half of it a machine can answer.
 
-That split is the point. Half of Phase 9 needs a person: walking in front of a
+That split is the point. Half of it needs a person: walking in front of a
 camera, watching a modal open on a wall tablet, judging whether the feed feels
 live. The other half is a set of yes/no facts about a cluster, and those get
 re-asked whenever the chart changes. A green run also prints the things it did
 *not* prove, because a green table is otherwise an invitation to believe
 cameras are done.
 
-**It takes no camera name.** Since Phase 11 a camera's address and credential
+**It takes no camera name.** A camera's address and credential
 live in Aerie's database, set from the devices admin UI, and Aerie registers
 each stream with go2rtc just before someone watches it. So this asks go2rtc
 what it currently holds rather than reading a configuration file that no

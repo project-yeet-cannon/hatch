@@ -132,7 +132,8 @@ builder.Services.AddSingleton<IForecastService, ForecastService>();
 builder.Services.AddSingleton<ISiteSettingsService, SiteSettingsService>();
 builder.Services.AddScoped<IZoneService, ZoneService>();
 builder.Services.AddScoped<IRoutineService, RoutineService>();
-// The kiosk's camera button row - see CameraDirectory and docs/plans/cameras.md Phase 12.
+// The kiosk's camera button row - see CameraDirectory and
+// docs/camera-devices-architecture.md.
 builder.Services.AddScoped<ICameraDirectory, CameraDirectory>();
 builder.Services.AddTransient<IHomeAssistantStateReader, HomeAssistantStateReader>();
 builder.Services.AddScoped<IWeatherService, WeatherService>();
@@ -146,7 +147,7 @@ builder.Services.AddTransient<IHomeAssistantCommandService, HomeAssistantCommand
 // In-memory motion state, and the seam every reaction to motion hangs off.
 // Singleton because the state is the process's, and because the WebSocket
 // listener below and a kiosk's SSE connection have to be looking at the same
-// one - see docs/plans/cameras.md Phase 5.
+// one - see docs/camera-devices-architecture.md.
 builder.Services.AddSingleton<IMotionEventDispatcher, MotionEventDispatcher>();
 
 // One WebSocket subscription to HA's state_changed stream per api replica, not
@@ -259,7 +260,7 @@ builder.Services.Configure<CameraStreamOptions>(builder.Configuration.GetSection
 
 // The control channel to go2rtc, separate from the relay socket CameraController
 // opens: this one is a short PUT that registers a camera's stream just before
-// it is watched (Phase 11). Timeout is deliberately small - go2rtc answers a
+// it is watched. Timeout is deliberately small - go2rtc answers a
 // registration without touching the camera, so a slow answer means go2rtc
 // itself is wedged, and the viewer is waiting on this before any video moves.
 builder.Services.AddHttpClient(Go2RtcStreamRegistrar.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(5));
@@ -418,8 +419,8 @@ app.UseMiddleware<AuthMiddleware>();
 // AuthController is already resolved by the time this runs.
 app.UseRateLimiter();
 
-// Camera video (CameraController, docs/plans/cameras.md Phase 7). After the
-// wall for the same reason the static file handlers are: an upgrade request
+// Camera video (CameraController, docs/camera-devices-architecture.md). After
+// the wall for the same reason the static file handlers are: an upgrade request
 // that skipped it would be a camera feed served to anyone who asked. Inert for
 // every other request - this only inspects the upgrade headers - so its cost to
 // the rest of the API is a branch.

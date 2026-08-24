@@ -1,4 +1,4 @@
-# docs/plans/cameras.md Phase 7 - go2rtc, the one thing in this system that
+# docs/camera-devices-architecture.md - go2rtc, the one thing in this system that
 # speaks to a camera. It pulls each camera's RTSP sub-stream and re-serves it as
 # fragmented MP4 over a WebSocket, which is what a browser <video> can actually
 # play; Aerie.Api's CameraController relays that socket so the kiosk holds one
@@ -7,13 +7,13 @@
 # Everything asserted below about how this image behaves was verified by running
 # alexxit/go2rtc:1.9.14 under Docker - the transport on 2026-08-23, the runtime
 # stream API and the config-write behaviour on 2026-08-24 - not inferred from
-# its docs. What could NOT be verified without a camera on the LAN is listed in
-# the plan's first-camera bring-up phase - notably whether pod-network egress
-# reaches the cameras' RTSP port at all.
+# its docs. The one link that needs a camera on the LAN is whether pod-network
+# egress reaches its RTSP port at all; scripts/k3s/Test-Cameras.ps1 is what asks
+# that.
 #
-# Since Phase 11 this pod holds no camera configuration at rest. Aerie registers
-# each stream over go2rtc's API just before someone watches it, which is what
-# made the `go2rtc-streams` Secret - and the GitHub secret behind it - go away.
+# This pod holds no camera configuration at rest. Aerie registers each stream
+# over go2rtc's API just before someone watches it, which is what made the
+# earlier `go2rtc-streams` Secret - and the GitHub secret behind it - go away.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -50,10 +50,9 @@ spec:
         # Without this, editing the ConfigMap would leave the running pod on the
         # old config with every object reporting Ready - the same class of
         # silent no-op that helmrelease.yaml's reconcileStrategy: Revision
-        # exists to prevent. Nothing else needs covering here any more: since
-        # Phase 11 the only other thing go2rtc holds is the stream table Aerie
-        # writes over the API, which is rebuilt on demand and has no manifest to
-        # drift from.
+        # exists to prevent. Nothing else needs covering here: the only other
+        # thing go2rtc holds is the stream table Aerie writes over the API,
+        # which is rebuilt on demand and has no manifest to drift from.
         checksum/config: {{ include (print $.Template.BasePath "/go2rtc-configmap.yaml") . | sha256sum }}
     spec:
       # No imagePullSecrets: this is a public Docker Hub image, and the chart's
@@ -77,8 +76,9 @@ spec:
           # children a transcoding stream spawns. Overriding command would drop
           # it and leave zombies behind every restarted stream.
           #
-          # The ORDER of these two -config paths is load-bearing, and it is the
-          # opposite of what reads naturally (docs/plans/cameras.md Phase 11).
+          # The ORDER of these two -config paths is load-bearing, and it is
+          # the opposite of what reads naturally
+          # (docs/camera-devices-architecture.md).
           # go2rtc persists a runtime `PUT /api/streams` back to its *first*
           # -config path, and answers 400 when that path is read-only - while
           # still registering the stream, so the call looks failed and worked.

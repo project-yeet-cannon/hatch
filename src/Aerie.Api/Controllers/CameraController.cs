@@ -8,10 +8,10 @@ using Microsoft.Extensions.Options;
 namespace Aerie.Api.Controllers;
 
 /// <summary>
-/// The video half of the camera path (docs/plans/cameras.md Phase 7), and the
-/// other end of the sequence MotionEventsController starts: motion on a camera
-/// reaches the kiosk as a device id over SSE, and the kiosk opens this socket
-/// for that device id to see what tripped it.
+/// The video half of the camera path (docs/camera-devices-architecture.md), and
+/// the other end of the sequence MotionEventsController starts: motion on a
+/// camera reaches the kiosk as a device id over SSE, and the kiosk opens this
+/// socket for that device id to see what tripped it.
 ///
 /// Video comes from go2rtc, not from Home Assistant. HA bundles go2rtc but binds
 /// its API to a port it does not expose, documented as debug-only; a standalone
@@ -20,12 +20,11 @@ namespace Aerie.Api.Controllers;
 /// camera's *identity* - the CameraFeed channel's HaEntityId, which is also the
 /// go2rtc stream name (see CameraStreamTarget).
 ///
-/// Since Phase 11, go2rtc is not the source of the camera's *address* either.
-/// Aerie holds that, along with the credential, in CameraConnections - set from
-/// the devices admin UI - and tells go2rtc about the stream on the way past,
-/// immediately below. go2rtc therefore knows nothing at rest, which is what
-/// lets adding a camera be a form rather than a Secret, a workflow dispatch and
-/// a pod restart.
+/// go2rtc is not the source of the camera's *address* either. Aerie holds that,
+/// along with the credential, in CameraConnections - set from the devices admin
+/// UI - and tells go2rtc about the stream on the way past, immediately below.
+/// go2rtc therefore knows nothing at rest, which is what lets adding a camera be
+/// a form rather than a Secret, a workflow dispatch and a pod restart.
 ///
 /// This is a relay rather than a redirect on purpose. A kiosk holds one
 /// connection to one origin, gets there through the same auth as every other

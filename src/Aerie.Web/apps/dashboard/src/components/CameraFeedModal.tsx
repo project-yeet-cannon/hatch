@@ -6,7 +6,7 @@ import { clientLogger } from '../lib/clientLogger';
 
 /**
  * The live camera feed, over the dashboard, for as long as something is moving
- * in front of that camera (docs/plans/cameras.md Phase 8).
+ * in front of that camera (docs/camera-devices-architecture.md).
  *
  * Built on GatherOverlay's shape rather than the admin app's Modal: this is a
  * portrait tablet on a wall, so a full-screen overlay with one 56px touch
@@ -17,7 +17,7 @@ import { clientLogger } from '../lib/clientLogger';
  *
  * It does not close itself. Motion ending closes it, or the ✕ does; both go
  * through the reducer in lib/motionEvents.ts, so a dismissal lasts for the
- * event rather than for the camera. Since Phase 12 the same modal also opens
+ * event rather than for the camera. The same modal also opens
  * from a camera's button on the dashboard, where nothing closes it but the ✕
  * and the kiosk's idle reset - what put it on screen is App's business, not
  * this component's.

@@ -46,9 +46,9 @@ public static class HomeAssistantEventParser
     /// a missing state all read as no-motion. Folding the unavailable states in
     /// with "off" rather than ignoring them is deliberate - a sensor that drops
     /// off the network mid-detection reports unavailable and never reports off,
-    /// and treating that as "still detecting" would leave the kiosk modal
-    /// (Phase 6) open until the camera came back. We can no longer see motion,
-    /// so we stop claiming there is any.
+    /// and treating that as "still detecting" would leave the kiosk modal open
+    /// until the camera came back. We can no longer see motion, so we stop
+    /// claiming there is any.
     /// </summary>
     public static MotionTransition? TryReadMotionTransition(string frame)
     {

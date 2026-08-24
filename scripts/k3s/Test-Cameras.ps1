@@ -1,21 +1,21 @@
 <#
 .SYNOPSIS
     Asserts the cluster half of the cameras plan's first-camera bring-up
-    (docs/plans/cameras.md Phase 9), in the shape scripts/k3s/Test-DataTier.ps1
+    (docs/camera-devices-architecture.md), in the shape scripts/k3s/Test-DataTier.ps1
     established for a phase gate: read-only, one round trip, one table.
 
 .DESCRIPTION
-    Phase 9 splits cleanly in two. One half needs a person - walking in front
-    of the camera, watching a modal open on a wall tablet, judging whether the
-    feed feels live. That half stays in the plan. The other half is a set of
-    yes/no facts about a cluster: is the streams Secret there, does go2rtc hold
-    it, and - the item the plan flagged as the one that could force a design
-    change - can a *pod* reach a camera's RTSP port at all.
+    Camera bring-up splits cleanly in two. One half needs a person - walking in
+    front of the camera, watching a modal open on a wall tablet, judging whether
+    the feed feels live; those items are listed under "Still needs a person"
+    below, and in the architecture doc. The other half is a set of yes/no facts
+    about a cluster: is go2rtc running in the shape that lets Aerie register a
+    stream, and - the item that could force a design change - can a *pod* reach
+    a camera's RTSP port at all.
 
     This is that other half, as a command. It exists because those facts are
-    re-asked every time a camera is added, not once at bring-up: a second
-    camera is a new line in the same Secret and a rollout restart somebody has
-    to remember, and the failure when they don't is a feed that never opens.
+    re-asked every time a camera is added, not once at bring-up, and because the
+    pod-to-camera hop is the one link no amount of local testing reaches.
 
     Three properties, the same three Test-DataTier.ps1 states:
 
@@ -284,14 +284,10 @@ try {
     # character that would survive both shells is the one this script is not
     # allowed to use.
     #
-    # The stream names come out of the Secret, not out of go2rtc's
-    # /api/streams. Both know the same names; only one of them also returns
-    # every camera's password in the same response, and this output is a CI
-    # log. The decode happens inside a pipeline on the node and its result is
-    # never a word the shell prints: `cut -d: -f1` keeps the text left of the
-    # first colon, which for `camera.x: rtsp://user:pass@host/path` is
-    # `camera.x` and for a list-form value is the same. A `- rtsp://...`
-    # continuation line does not match the grep at all.
+    # Stream names are read out of go2rtc, but never its response body: that
+    # body carries every camera's password, and this output is a CI log. The
+    # parse happens inside a pipeline on the node (see below) and only top-level
+    # keys - the stream names - are ever printed.
     $kubectl = "sudo k3s kubectl -n $Namespace"
     $rawBase = "/api/v1/namespaces/$Namespace/services/${Go2RtcService}:$Go2RtcPort/proxy"
 
@@ -300,9 +296,10 @@ try {
     # that body carries each camera's password, and this output is a CI log.
     #
     # What this answers is "what has go2rtc been told about", which since
-    # Phase 11 is a question about what has been *watched* recently rather
-    # than what is configured: Aerie registers a stream lazily, immediately
-    # before it relays one, so an idle go2rtc legitimately holds none.
+    # registration became lazy is a question about what has been *watched*
+    # recently rather than what is configured: Aerie registers a stream
+    # immediately before it relays one, so an idle go2rtc legitimately holds
+    # none.
     $registeredLine = "$kubectl get --raw $rawBase/api/streams --request-timeout=10s 2>/dev/null" +
         " | python3 -c 'import json,sys" + [char]0x0A + "for k in json.load(sys.stdin): print(k)' 2>/dev/null || true"
 
@@ -426,7 +423,7 @@ try {
     # --- go2rtc itself ------------------------------------------------ #
 
     if ($null -eq $deployment -or -not (Get-Path $deployment 'metadata.name')) {
-        Add-Check -Step '9.go2rtc' -Name "Deployment $Go2RtcDeployment" -Status 'Fail' -Detail "not found in namespace $streamsNamespace"
+        Add-Check -Step '9.go2rtc' -Name "Deployment $Go2RtcDeployment" -Status 'Fail' -Detail "not found in namespace $Namespace"
     }
     else {
         $desired = [int](Get-Path $deployment 'spec.replicas')
@@ -522,14 +519,15 @@ if ($failed -gt 0) {
     }
 }
 
-# What this gate cannot answer, named every run rather than only in the plan -
-# a green table is otherwise an invitation to believe cameras are done.
+# What this gate cannot answer, named on every run rather than only in the
+# architecture doc - a green table is otherwise an invitation to believe
+# cameras are done.
 $stillManual = @(
     'Walk in front of a camera: the kiosk modal opens with live video and closes when motion ends.'
     'The X closes it, and the *next* motion event reopens it (the per-event dismissal rule).'
     'MediaSource works in the kiosk Android WebView specifically, not just in Chrome.'
     'Motion -> first frame, measured. Tune the camera GOP first or you are measuring the camera.'
-    'A camera added in the devices admin UI streams without touching the cluster - which is the point of Phase 11.'
+    'A camera added in the devices admin UI streams without touching the cluster - which is the whole point of the form.'
 )
 
 if ($env:GITHUB_STEP_SUMMARY) {
@@ -555,7 +553,8 @@ if ($env:GITHUB_STEP_SUMMARY) {
     foreach ($item in $stillManual) { $lines += "- $item" }
     $lines += @(
         ''
-        '_docs/plans/cameras.md Phase 9. Read-only, and no stream source is printed - go2rtc returns camera passwords in its own API._'
+        '_See docs/camera-devices-architecture.md. Read-only, and no stream source is'
+        '_printed - go2rtc returns camera passwords in its own API._'
     )
     Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ($lines -join "`n")
 }
@@ -563,7 +562,8 @@ if ($env:GITHUB_STEP_SUMMARY) {
 Write-Host ''
 if ($failed -gt 0) {
     Write-Host "Camera bring-up gate FAILED: $failed check(s) of $($script:Checks.Count) in ${elapsed} min." -ForegroundColor Red
-    Write-Host 'Nothing was changed. docs/plans/cameras.md Phase 9 has the reasoning behind each check.'
+    Write-Host 'Nothing was changed. docs/camera-devices-architecture.md has the'
+    Write-Host 'reasoning behind each check.'
     exit 1
 }
 

@@ -4,7 +4,7 @@ namespace Aerie.Api.Services.DeviceMapping;
 
 /// <summary>
 /// Pumps bytes between a kiosk's WebSocket and go2rtc's, in both directions,
-/// until either end goes away (docs/plans/cameras.md Phase 7).
+/// until either end goes away (docs/camera-devices-architecture.md).
 ///
 /// Deliberately knows nothing about what it is carrying. go2rtc's stream socket
 /// is a small JSON control protocol followed by binary fragmented MP4 - the

@@ -4,8 +4,8 @@ namespace Aerie.Api.Services.DeviceMapping;
 
 /// <summary>
 /// Turns a CameraFeed channel's HA entity id into the go2rtc WebSocket URL that
-/// serves its video (docs/plans/cameras.md Phase 7). Pure, and separated from
-/// CameraController for the same reason MotionEventStream is separated from
+/// serves its video (docs/camera-devices-architecture.md). Pure, and separated
+/// from CameraController for the same reason MotionEventStream is separated from
 /// MotionEventsController: this is the part with rules in it, and it can be
 /// tested without a socket, a camera or a database.
 ///
@@ -13,10 +13,11 @@ namespace Aerie.Api.Services.DeviceMapping;
 /// channel's identity - what discovery imported, what the MotionState channel is
 /// grouped with - and go2rtc accepts an arbitrary string as a stream name, dots
 /// included (verified against 1.9.14). So a camera needs no second identifier
-/// stored anywhere in Aerie: the go2rtc streams file names its streams for the
-/// HA entity ids they correspond to, and this is the whole mapping. What that
-/// buys is that no RTSP URL and no camera password is ever in Aerie's database
-/// or its git history - only go2rtc holds those.
+/// stored anywhere: Go2RtcStreamRegistrar registers each stream under the entity
+/// id it corresponds to, and this resolves the same name back. That the two
+/// agree by construction is what lets go2rtc hold no camera configuration at
+/// rest - it is told the name and the source together, moments before a viewer
+/// asks for the name here.
 /// </summary>
 public static class CameraStreamTarget
 {

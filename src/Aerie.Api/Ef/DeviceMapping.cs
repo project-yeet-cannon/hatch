@@ -104,7 +104,7 @@ public class EfDeviceChannel
 
 /// <summary>
 /// How to reach one camera's RTSP stream: everything go2rtc needs that Home
-/// Assistant does not supply (docs/plans/cameras.md Phase 11).
+/// Assistant does not supply (docs/camera-devices-architecture.md).
 ///
 /// A row per Camera device, and the reason this table exists rather than a
 /// `streams:` file in the cluster: adding a camera has to be a form in the

@@ -5,18 +5,19 @@ public readonly record struct MotionStateChange(Guid DeviceId, bool IsActive);
 
 /// <summary>
 /// The seam between "motion happened" and "something reacts to it"
-/// (docs/plans/cameras.md Phase 5). v1 has exactly one reaction - the kiosk
-/// camera modal, driven off the SSE stream in Phase 6 - but everything that
-/// knows about Home Assistant stops here, so a real trigger/action registry can
-/// take this interface's place later without touching the listener.
+/// (docs/camera-devices-architecture.md). v1 has exactly one reaction - the
+/// kiosk camera modal, driven off MotionEventsController's SSE stream - but
+/// everything that knows about Home Assistant stops here, so a real
+/// trigger/action registry can take this interface's place later without
+/// touching the listener.
 /// </summary>
 public interface IMotionEventDispatcher
 {
     /// <summary>
     /// Raised once per actual change, never for a repeat of the state a device
     /// is already in. Handlers run on the caller's thread - the WebSocket
-    /// listener's receive loop - so they must not block: a Phase 6 subscriber
-    /// hands the change to its own connection and returns.
+    /// listener's receive loop - so they must not block: an SSE
+    /// subscriber hands the change to its own connection and returns.
     /// </summary>
     event Action<MotionStateChange>? Changed;
 

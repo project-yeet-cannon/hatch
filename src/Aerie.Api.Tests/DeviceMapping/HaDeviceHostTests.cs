@@ -3,7 +3,7 @@ using Aerie.Api.Services.DeviceMapping;
 namespace Aerie.Api.Tests.DeviceMapping;
 
 /// <summary>
-/// docs/plans/cameras.md Phase 11. This is the piece that lets a camera stop
+/// docs/camera-devices-architecture.md. This is the piece that lets a camera stop
 /// being told a static address, so what it must not do is confidently return
 /// something that is not an address.
 /// </summary>

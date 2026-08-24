@@ -35,7 +35,7 @@ namespace Aerie.Api.Migrations
                 });
 
             // Label every secret already in the database with the scheme that
-            // produced it (docs/plans/cameras.md Phase 11, SecretProtector).
+            // produced it (docs/camera-devices-architecture.md, SecretProtector).
             //
             // This changes no bytes. Scheme v1 *is* the XOR these rows were
             // written with, so the conversion is a three-character prefix, and

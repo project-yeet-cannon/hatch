@@ -98,7 +98,7 @@ export interface RoutineSummary {
 
 /**
  * One camera as the kiosk's button row renders it - a name for the tile and an
- * id to open the stream with (docs/plans/cameras.md Phase 12).
+ * id to open the stream with (docs/camera-devices-architecture.md).
  *
  * isConfigured is whether the camera has an address to stream from yet. The
  * relay answers a camera without one with a 409, but a failed WebSocket

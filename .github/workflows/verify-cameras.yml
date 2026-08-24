@@ -1,16 +1,16 @@
-# docs/plans/cameras.md Phase 9's cluster half, as something that exits 0 -
-# the same shape verify-app-tier.yml and verify-data-tier.yml established for
-# the cluster plan's phase gates.
+# The cluster half of camera bring-up (docs/camera-devices-architecture.md), as
+# something that exits 0 - the same shape verify-app-tier.yml and
+# verify-data-tier.yml established for the cluster plan's phase gates.
 #
 # Not numbered into the Provision sequence, for the same reason those two
 # aren't: it is read-only. Nothing here writes to the cluster, and nothing
 # here prints a stream source - go2rtc's own API returns every camera's RTSP
 # URL with its password in it, and this run log is not the place for that.
 #
-# Dispatch it after seeding GO2RTC_STREAMS and restarting go2rtc, and again
-# every time a camera is added: a new camera is a new line in the same Secret
-# plus a rollout restart somebody has to remember, and the failure when they
-# don't is a kiosk feed that never opens.
+# Dispatch it after adding a camera in the devices admin UI and opening its
+# feed once - registration is lazy, so an idle go2rtc holds no streams and the
+# pod-to-camera hop goes unexercised. Re-ask it every time a camera is added:
+# the hop it proves is the one link no amount of local testing reaches.
 #
 # Same thin-wrapper rule as every other workflow here: this checks out the
 # repo and hands every decision to scripts/k3s/Test-Cameras.ps1, which also

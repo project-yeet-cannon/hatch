@@ -28,7 +28,7 @@ public class DiscoveryService(TemplateClient template, AerieContext db, IHomeAss
     // filtered out here - they aren't "devices" in the sense this feature cares about.
     //
     // configuration_url comes along for the ride, and it is what a camera needs
-    // (docs/plans/cameras.md Phase 11). For a Reolink it is `http://<ip>` - the
+    // (docs/camera-devices-architecture.md). For a Reolink it is `http://<ip>` - the
     // camera's own web UI - and the integration keeps it current across a DHCP
     // move, which is what lets Aerie stop being told a static address. It is
     // null for most integrations and that costs nothing: every other kind

@@ -3,7 +3,7 @@ using Aerie.Api.Common;
 namespace Aerie.Api.Tests.Common;
 
 /// <summary>
-/// docs/plans/cameras.md Phase 11. The property these tests exist to pin is not
+/// docs/camera-devices-architecture.md. The property these tests exist to pin is not
 /// "XOR round-trips" - that was true before - but that the *format* can change
 /// under the callers: a value written by any scheme this build knows reads
 /// back, including the untagged ones written before the format existed.

@@ -85,7 +85,7 @@ export interface DeviceWriteRequest {
 }
 
 /**
- * How to reach a camera's RTSP stream (docs/plans/cameras.md Phase 11). There
+ * How to reach a camera's RTSP stream (docs/camera-devices-architecture.md). There
  * is no password field, on purpose - the API lets you set one, never read one
  * back, so `hasPassword` is what tells an empty box from an unset one.
  */

@@ -10,7 +10,7 @@ import {
 
 /**
  * Plays one camera's live video into a &lt;video&gt; element
- * (docs/plans/cameras.md Phase 8), by way of Aerie.Api's CameraController relay.
+ * (docs/camera-devices-architecture.md), by way of Aerie.Api's CameraController relay.
  *
  * Media Source Extensions rather than an npm player. The relay hands over
  * fragmented MP4 - which is what MediaSource takes - so the whole client is the

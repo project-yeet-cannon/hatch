@@ -7,7 +7,7 @@ namespace Aerie.Api.Tests.DeviceMapping;
 /// <summary>
 /// Covers CameraDirectory.GetCamerasAsync - which cameras reach the kiosk's
 /// button row, and which of them report an address to stream from
-/// (docs/plans/cameras.md Phase 12). Against an EF Core InMemory database, as
+/// (docs/camera-devices-architecture.md). Against an EF Core InMemory database, as
 /// RoutineServiceTests does for the routine row beside it.
 /// </summary>
 public class CameraDirectoryTests

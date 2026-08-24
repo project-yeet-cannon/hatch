@@ -2,7 +2,7 @@ namespace Aerie.Api.Services.DeviceMapping;
 
 /// <summary>
 /// Deployment-time config for the camera video path (the "Cameras" appsettings
-/// section) - see docs/plans/cameras.md Phase 7.
+/// section) - see docs/camera-devices-architecture.md.
 ///
 /// Deploy-time rather than an admin-editable SiteSetting, for the same reason
 /// MediaLibraryOptions.RootPath is: this names the host the API will open a

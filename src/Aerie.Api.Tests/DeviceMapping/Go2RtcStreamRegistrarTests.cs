@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 namespace Aerie.Api.Tests.DeviceMapping;
 
 /// <summary>
-/// docs/plans/cameras.md Phase 11. What matters here is the shape of the
+/// docs/camera-devices-architecture.md. What matters here is the shape of the
 /// request - go2rtc's PUT contract was verified against the real 1.9.14 image,
 /// and these pin that Aerie keeps speaking it.
 /// </summary>

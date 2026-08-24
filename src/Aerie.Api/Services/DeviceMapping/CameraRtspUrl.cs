@@ -6,7 +6,7 @@ namespace Aerie.Api.Services.DeviceMapping;
 
 /// <summary>
 /// Turns a stored <see cref="EfCameraConnection"/> into the RTSP URL go2rtc
-/// should pull from (docs/plans/cameras.md Phase 11). Pure, and separated from
+/// should pull from (docs/camera-devices-architecture.md). Pure, and separated from
 /// everything that has a socket in it for the same reason
 /// <see cref="CameraStreamTarget"/> is: this is the part with rules in it, and
 /// the rules are about characters.

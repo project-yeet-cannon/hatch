@@ -37,9 +37,9 @@ export function App() {
   // with it, and a reload would take the whole page.
   const gatherOpen = gatherListId !== null;
   // The camera a motion event is asking the wall to show, if any - see
-  // hooks/useMotionEvents.ts and docs/plans/cameras.md Phase 8.
+  // hooks/useMotionEvents.ts and docs/camera-devices-architecture.md.
   const { cameraDeviceId: motionCameraId, dismiss: dismissMotion } = useMotionEvents();
-  // The camera someone asked for by tapping its button (Phase 12), which wins
+  // The camera someone asked for by tapping its button, which wins
   // over motion for as long as it is open: a person standing at the tablet
   // watching the driveway should not be shoved onto the back door because a
   // branch moved. Motion resumes on close if it is still going.

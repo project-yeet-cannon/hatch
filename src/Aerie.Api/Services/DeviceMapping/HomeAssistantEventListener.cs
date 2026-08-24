@@ -8,12 +8,12 @@ namespace Aerie.Api.Services.DeviceMapping;
 
 /// <summary>
 /// Holds a Home Assistant WebSocket connection open and turns motion sensor
-/// state changes into motion transitions (docs/plans/cameras.md Phase 4).
+/// state changes into motion transitions (docs/camera-devices-architecture.md).
 /// HADotNet has no WebSocket client - it wraps the REST API only - so this
 /// talks to /api/websocket over a raw ClientWebSocket.
 ///
 /// Runs on every api replica, not on one elected leader. Each replica feeds its
-/// own in-process motion state, and a kiosk's SSE connection (Phase 6) lands on
+/// own in-process motion state, and a kiosk's SSE connection lands on
 /// whichever replica Traefik picked, so a replica that isn't listening is a
 /// kiosk that never sees motion. The cost of the other design - one leader plus
 /// a cross-replica fan-out - buys nothing here: three idle WebSocket
@@ -224,7 +224,7 @@ public class HomeAssistantEventListener(
         }
     }
 
-    /// <summary>Resolves the entity to the devices that own it and hands each one to the dispatcher, which is where everything Home-Assistant-shaped stops (docs/plans/cameras.md Phase 5).</summary>
+    /// <summary>Resolves the entity to the devices that own it and hands each one to the dispatcher, which is where everything Home-Assistant-shaped stops (docs/camera-devices-architecture.md).</summary>
     private async Task HandleTransitionAsync(MotionTransition transition, CancellationToken ct)
     {
         var channels = await GetMotionChannelsAsync(ct);

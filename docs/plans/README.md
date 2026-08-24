@@ -30,7 +30,6 @@ full of active work, which is how a plan directory stops being read.
 | Plan | What it covers |
 |---|---|
 | [`swarm/`](swarm/design.md) | Moving from one Windows Docker host to a 3-node k3s cluster. Split per phase; phases 0–3 complete |
-| [`cameras.md`](cameras.md) | Camera integration |
 | [`video.md`](video.md) | Video capture and streaming |
 | [`kiosk_brightness.md`](kiosk_brightness.md) | Backlight, idle dim and presence control for the wall tablets |
 | [`immich.md`](immich.md) | Photos on Aerie: Immich, the bulk-disk substrate, the offsite archive, and the historical ingest |

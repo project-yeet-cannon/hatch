@@ -162,9 +162,10 @@ must say in writing which phase adds one.
   secret follows the credential it belongs with.
 
   Protection is not encryption, and it is a deliberate parity with the existing
-  store rather than a claim about strength. What changed in
-  [cameras Phase 11](plans/cameras.md) is that it is now *versioned*: every
-  protected value carries the scheme that produced it (`v1:…`, today
+  store rather than a claim about strength. What changed when cameras arrived
+  ([`camera-devices-architecture.md`](camera-devices-architecture.md)) is that
+  it is now *versioned*: every protected value carries the scheme that
+  produced it (`v1:…`, today
   `SecretObfuscator`'s XOR) and `SecretProtector` dispatches on that prefix. So
   the upgrade — ASP.NET DataProtection with a Postgres-backed key ring, or an
   AES key from the parameter tree — is a second scheme registered beside the

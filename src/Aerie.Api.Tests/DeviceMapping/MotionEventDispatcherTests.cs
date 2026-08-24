@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Aerie.Api.Tests.DeviceMapping;
 
 /// <summary>
-/// Covers MotionEventDispatcher - the Phase 5 seam between the Home Assistant
+/// Covers MotionEventDispatcher - the seam between the Home Assistant
 /// listener and everything that reacts to motion. No HA, no DB, no clock: the
 /// whole point of the type is that it holds only in-memory state.
 /// </summary>
@@ -12,7 +12,7 @@ public class MotionEventDispatcherTests
 {
     private static MotionEventDispatcher Dispatcher() => new(NullLogger<MotionEventDispatcher>.Instance);
 
-    /// <summary>Subscribes and collects, the way a Phase 6 SSE connection will.</summary>
+    /// <summary>Subscribes and collects, the way an SSE connection does.</summary>
     private static List<MotionStateChange> Record(MotionEventDispatcher dispatcher)
     {
         var seen = new List<MotionStateChange>();

@@ -10,7 +10,7 @@ public interface ICameraDirectory
 }
 
 /// <summary>
-/// The kiosk's read path for cameras (docs/plans/cameras.md Phase 12) - the
+/// The kiosk's read path for cameras (docs/camera-devices-architecture.md) - the
 /// button row under the routines. Mirrors RoutineService: a dashboard-shaped
 /// projection, fetched alongside everything else in DashboardService's fan-out.
 ///

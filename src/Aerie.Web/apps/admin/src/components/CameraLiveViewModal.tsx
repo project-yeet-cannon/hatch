@@ -7,12 +7,12 @@ import { Modal } from './Modal';
 /**
  * One camera's live feed, in the admin app, from the device that serves it.
  *
- * The same relay and the same MSE client the kiosk uses (docs/plans/cameras.md
- * Phases 7-8) - CameraController streams fragmented MP4 from go2rtc over a
- * same-origin WebSocket, so nothing here knows a camera's address or password.
- * What differs is why someone is looking: the kiosk shows a feed because
- * something moved, this shows it because an operator just typed a host into the
- * form below it and wants to know whether it works.
+ * The same relay and the same MSE client the kiosk uses
+ * (docs/camera-devices-architecture.md) - CameraController streams fragmented
+ * MP4 from go2rtc over a same-origin WebSocket, so nothing here knows a
+ * camera's address or password. What differs is why someone is looking: the
+ * kiosk shows a feed because something moved, this shows it because an operator
+ * just typed a host into the form below it and wants to know whether it works.
  *
  * That is what the connection lookup is for. A camera with no address is the
  * normal state right after import, and the relay answers it with a 409 - but a

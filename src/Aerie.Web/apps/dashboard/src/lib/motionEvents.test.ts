@@ -93,7 +93,7 @@ describe('applyDismissal', () => {
     expect(applyDismissal(initialMotionState, FRONT)).toBe(initialMotionState);
   });
 
-  // The Phase 12 case: closing a camera opened from its dashboard button, on a
+  // Closing a camera opened from its dashboard button, on a
   // camera that is not in motion. Nothing to dismiss, and in particular nothing
   // else may be dismissed in its place.
   it('leaves another camera showing when handed a device that is not in motion', () => {

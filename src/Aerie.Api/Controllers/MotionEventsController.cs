@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Aerie.Api.Controllers;
 
 /// <summary>
-/// The kiosk end of the motion path (docs/plans/cameras.md Phase 6): Home
+/// The kiosk end of the motion path (docs/camera-devices-architecture.md): Home
 /// Assistant -> HomeAssistantEventListener -> IMotionEventDispatcher -> this
 /// stream -> the dashboard app's EventSource. Server-sent events rather than a
 /// WebSocket because the traffic only goes one way and EventSource reconnects

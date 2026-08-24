@@ -4,7 +4,7 @@ namespace Aerie.Api.Common;
 
 /// <summary>
 /// The one way a secret is written to Aerie's database, and the one way it is
-/// read back (docs/plans/cameras.md Phase 11).
+/// read back (docs/camera-devices-architecture.md).
 ///
 /// Every protected value carries the scheme that produced it:
 /// <c>v1:&lt;payload&gt;</c>. That prefix is the whole point of this type. The

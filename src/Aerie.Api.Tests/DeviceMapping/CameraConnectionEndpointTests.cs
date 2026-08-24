@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Aerie.Api.Tests.DeviceMapping;
 
 /// <summary>
-/// docs/plans/cameras.md Phase 11. The rule worth pinning here is the
+/// docs/camera-devices-architecture.md. The rule worth pinning here is the
 /// three-state password: the API can never hand a stored one back, so the form
 /// cannot pre-fill the box, so a save that did not touch it must not clear it.
 /// Get that wrong and every edit to a camera's host silently breaks its feed.

@@ -1,5 +1,5 @@
 /**
- * The rules half of the camera feed (docs/plans/cameras.md Phase 8), separated
+ * The rules half of the camera feed (docs/camera-devices-architecture.md), separated
  * from CameraFeedModal so the parts with decisions in them can be tested
  * without a MediaSource, a WebSocket or a camera - the same split
  * MotionEventStream/MotionEventsController makes on the API side.

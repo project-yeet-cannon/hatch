@@ -6,7 +6,7 @@ namespace Aerie.Api.Services.DeviceMapping;
 /// <summary>
 /// One kiosk's view of motion, as an async sequence: the devices already in
 /// motion when it connected, then every change for as long as it stays
-/// connected (docs/plans/cameras.md Phase 6). Separate from
+/// connected (docs/camera-devices-architecture.md). Separate from
 /// MotionEventsController so the part with the ordering rules in it can be
 /// tested without an HTTP connection; the controller only wraps this in SSE
 /// framing.

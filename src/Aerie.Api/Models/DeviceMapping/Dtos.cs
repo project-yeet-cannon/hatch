@@ -28,7 +28,7 @@ public record DeviceDto(Guid Id, string Name, DeviceKind? Kind, Guid? ZoneId, st
 /// <param name="DiscoveredHost">
 /// Optional, and only Discovery sends it: the host Home Assistant reports for
 /// this device. On a Camera it seeds the connection row so the stream works
-/// without anyone typing an address (docs/plans/cameras.md Phase 11). It is
+/// without anyone typing an address (docs/camera-devices-architecture.md). It is
 /// carried here rather than on the camera-connection write because that one is
 /// the *operator's* form, and the two values are deliberately separate - see
 /// EfCameraConnection.
@@ -52,7 +52,7 @@ public record ChannelPlayMediaRequest(string MediaContentId, string? MediaConten
 
 /// <summary>
 /// How to reach one camera's RTSP stream, as the admin UI sees it
-/// (docs/plans/cameras.md Phase 11).
+/// (docs/camera-devices-architecture.md).
 ///
 /// There is no Password field, and there never will be: the API's job is to
 /// let an operator *set* one, not to hand one back. <paramref name="HasPassword"/>

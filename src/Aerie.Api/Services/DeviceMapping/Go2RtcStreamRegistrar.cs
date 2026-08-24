@@ -15,7 +15,7 @@ public interface IGo2RtcStreamRegistrar
 }
 
 /// <summary>
-/// The write half of the camera video path (docs/plans/cameras.md Phase 11),
+/// The write half of the camera video path (docs/camera-devices-architecture.md),
 /// and the reason there is no longer a streams file in the cluster.
 ///
 /// Verified against go2rtc 1.9.14 rather than inferred: `PUT

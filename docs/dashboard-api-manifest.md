@@ -63,7 +63,7 @@ sub-resources under it exist for reuse, debugging, and other screens.
 
 | Method & route | Returns | Notes |
 |---|---|---|
-| `GET /api/dashboard` | `DashboardData` | **Primary.** Composes zones + outside + routines + the calendar agenda + outdoor hazards. Query: `historyHours` (9), `forecastHours` (7), `bucketMinutes` (30). |
+| `GET /api/dashboard` | `DashboardData` | **Primary.** Composes zones + outside + routines + cameras + the calendar agenda + outdoor hazards. Query: `historyHours` (9), `forecastHours` (7), `bucketMinutes` (30). |
 | `GET /api/zones` · `GET /api/zones/{id}` | `ZoneDto` | Zone CRUD for the admin app. |
 | `POST /api/zones` · `PUT /api/zones/{id}` · `DELETE /api/zones/{id}` | `ZoneDto` | |
 | `GET /api/zones/climate` · `GET /api/zones/{id}/climate` | `ZoneClimate` | Current snapshot, history, forecast. Same window query params as `/api/dashboard`. |
@@ -107,6 +107,24 @@ each of the actuation endpoints above is recorded action by action with a
 | `POST /api/routines` · `PUT /api/routines/{id}` · `DELETE /api/routines/{id}` | CRUD. A routine's actions are embedded in the write request and replaced wholesale — the action list *is* the routine. |
 | `POST /api/routines/{id}/trigger` | Runs the actions in `SortOrder`, stopping at the first that doesn't succeed. |
 | `POST /api/routines/{id}/turn-off` | The inverse for a toggle routine: `SetPower false` to every `SetPower` action's channel. |
+
+## Cameras and motion
+
+A camera is a device with two things no other kind has: motion events as they
+happen, and live video. Design and reasoning in
+[`camera-devices-architecture.md`](camera-devices-architecture.md).
+
+| Method & route | Returns | Notes |
+|---|---|---|
+| `GET /api/motion-events/stream` | `text/event-stream` | One frame per motion transition, `{"deviceId":…,"isActive":…}`. Absolute state, not a toggle — a repeat is permitted and clients must treat it as a no-op. On connect it replays whatever is already in motion, then heartbeats every 20s under `event: heartbeat` (which `EventSource` ignores by default). Per replica: each `api` pod holds its own Home Assistant subscription. |
+| `GET /api/devices/{id:guid}/camera/stream` | WebSocket | A byte-transparent relay to go2rtc: a short JSON control exchange, then fragmented MP4 forever. **`400`** without an upgrade, **`404`** no enabled camera with a `CameraFeed` channel, **`409`** the camera has no address configured yet, **`502`** go2rtc refused or is unreachable. Registers the stream with go2rtc on the way past, so a restarted go2rtc self-heals on the next viewer. |
+| `GET /api/devices/{id:guid}/camera-connection` | `CameraConnectionDto` | How to reach the camera. Answers for any device, configured or not — an unconfigured camera returns the defaults with no host, which is what the form needs to render itself. Never carries the password; `hasPassword` is the flag that keeps an empty box unambiguous. |
+| `PUT /api/devices/{id:guid}/camera-connection` | `CameraConnectionDto` | Upsert. A **null** password leaves the stored one alone, an empty string clears it — a save that only changed the host must not silently drop the credential. Blank host means "use what Home Assistant reported", not the empty string. |
+| `DELETE /api/devices/{id:guid}/camera-connection` | 204 | Forgets the connection, password included. |
+
+`GET /api/dashboard` carries the cameras too, as `CameraSummary(Id, Name,
+IsConfigured)` — the kiosk's button row is rendered off the snapshot it already
+polls rather than a second fetch of every device in the house.
 
 ## Family calendar
 

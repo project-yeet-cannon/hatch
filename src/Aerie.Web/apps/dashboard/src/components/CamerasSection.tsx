@@ -5,7 +5,7 @@ import { clientLogger } from '../lib/clientLogger';
 
 /**
  * A tap-to-watch button per camera, in its own row directly below the routines
- * (docs/plans/cameras.md Phase 12). Same tile as a routine's - literally, the
+ * (docs/camera-devices-architecture.md). Same tile as a routine's - literally, the
  * geometry rules in theme.css are shared - because it belongs to the same band
  * of the screen and the same gesture, while sitting in its own row because
  * tapping it does something categorically different from triggering a routine.

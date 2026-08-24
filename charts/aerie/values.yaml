@@ -131,12 +131,13 @@ share:
     limits:
       memory: 64Mi
 
-# go2rtc, the camera stream source (docs/plans/cameras.md Phase 7). Unlike
+# go2rtc, the camera stream source (docs/camera-devices-architecture.md). Unlike
 # every placeholder above, these are real defaults - go2rtc's address and image
 # are the same for every installation, and the one installation-specific part
 # (which cameras exist, at which RTSP URLs, with which passwords) never appears
-# in Helm values at all. It arrives as the `go2rtc-streams` Secret, so a camera
-# credential lives in the parameter store and nowhere in git.
+# in Helm values at all. It lives in Aerie's own database, set from the devices
+# admin UI, and Aerie registers each stream over go2rtc's API just before
+# someone watches it - so no camera credential is in git or in the cluster.
 go2rtc:
   image:
     # docker.io, not the chart's own registry - go2rtc is third-party. Pinned to
@@ -148,7 +149,7 @@ go2rtc:
   # info. debug logs every network interface at startup and every frame decision
   # after it, which is useful during bring-up and noise in OpenSearch afterwards.
   logLevel: info
-  # Measured, not estimated (cameras plan Phase 9, 2026-08-23): go2rtc 1.9.14
+  # Measured, not estimated (2026-08-23): go2rtc 1.9.14
   # relaying one Reolink 640x480/10fps H.264 sub-stream, run with this chart's
   # own securityContext and args. Idle 11.7 MiB / 0% CPU; one viewer 12 MiB /
   # 0.9% of a core; five concurrent viewers 21.4 MiB / 1.6%. So the shape is a

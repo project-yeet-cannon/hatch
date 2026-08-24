@@ -1,6 +1,6 @@
 /**
  * Which camera, if any, the wall should be showing right now
- * (docs/plans/cameras.md Phase 8). A pure reducer over what
+ * (docs/camera-devices-architecture.md). A pure reducer over what
  * /api/motion-events/stream says, kept apart from the EventSource wiring so the
  * rules - which are all about a person standing in front of the tablet, not
  * about SSE - can be tested directly.
@@ -63,7 +63,7 @@ export function applyMotionChange(state: MotionState, change: MotionChange): Mot
  * the next time that camera sees something the wall speaks up again.
  *
  * Takes the device it is closing rather than reading the visible one out of
- * this state, because since Phase 12 the visible camera is not always motion's
+ * this state, because the visible camera is not always motion's
  * to know - a camera opened from its button on the dashboard is on screen for
  * reasons this reducer never hears about. A device that is not in motion is
  * therefore an ordinary no-op rather than a mistake: closing a hand-opened feed

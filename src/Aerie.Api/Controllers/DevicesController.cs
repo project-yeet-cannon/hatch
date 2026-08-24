@@ -234,7 +234,7 @@ public class DevicesController(
     }
 
     /// <summary>Triggers a one-time BackfillChannelHistory job run to pull [request.From, request.To) of HA history for this device's channels.</summary>
-    // ---- Camera connection (docs/plans/cameras.md Phase 11) ---------- #
+    // ---- Camera connection (docs/camera-devices-architecture.md) ---------- #
 
     /// <summary>
     /// How to reach this camera's stream. Answers for any device, configured or

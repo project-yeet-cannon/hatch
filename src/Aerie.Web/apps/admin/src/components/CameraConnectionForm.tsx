@@ -3,7 +3,7 @@ import { getCameraConnection, saveCameraConnection } from "../api/client";
 import type { CameraConnection } from "../types";
 
 /**
- * How to reach a camera's stream, as a form (docs/plans/cameras.md Phase 11).
+ * How to reach a camera's stream, as a form (docs/camera-devices-architecture.md).
  * Before this, a camera's address and password lived in a GitHub secret that
  * reached the cluster through a workflow dispatch and a pod restart; adding a
  * camera is this panel now.

@@ -1,13 +1,13 @@
-# docs/plans/cameras.md Phase 7 and 11 - go2rtc's non-secret configuration, and
-# now the only configuration it has in git. The `streams:` block is deliberately
-# NOT here: a camera stream source is an RTSP URL with the camera's username and
-# password embedded in it, and this file is in git.
+# Camera video (docs/camera-devices-architecture.md) - go2rtc's non-secret
+# configuration, and the only configuration it has in git. The `streams:` block
+# is deliberately NOT here: a camera stream source is an RTSP URL with the
+# camera's username and password embedded in it, and this file is in git.
 #
-# Phase 7 kept streams in a Secret alongside this file. Phase 11 removed even
-# that: a camera's address and credential live in Aerie's database, set from the
-# devices admin UI, and Aerie registers each stream over go2rtc's API just
-# before someone watches it. What this pod holds at rest is the four blocks
-# below and nothing about any camera.
+# An earlier design kept the streams in a Secret alongside this file. That is
+# gone too: a camera's address and credential live in Aerie's database, set from
+# the devices admin UI, and Aerie registers each stream over go2rtc's API just
+# before someone watches it. What this pod holds at rest is the blocks below and
+# nothing about any camera.
 #
 # Verified against go2rtc 1.9.14: repeated `-config` arguments merge rather than
 # the last one winning, and a `-config` path that does not exist is skipped

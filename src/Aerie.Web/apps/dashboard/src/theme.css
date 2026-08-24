@@ -902,7 +902,7 @@ body {
 }
 
 /* ---------------------------------------------------------------------------
-   Camera feed (docs/plans/cameras.md Phase 8)
+   Camera feed (docs/camera-devices-architecture.md)
 
    Same overlay idiom as Gather above - fixed, inside .hf-page so the circadian
    custom properties resolve - with one difference that drives the rest: this

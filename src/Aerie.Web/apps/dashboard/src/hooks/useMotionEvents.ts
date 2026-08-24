@@ -14,7 +14,7 @@ const MOTION_STREAM_URL = '/api/motion-events/stream';
 
 /**
  * Subscribes to the motion stream for the life of the app and reports which
- * camera the wall should be showing (docs/plans/cameras.md Phase 8). The rules
+ * camera the wall should be showing (docs/camera-devices-architecture.md). The rules
  * live in lib/motionEvents.ts; this is the wiring.
  *
  * EventSource rather than a WebSocket or a poll, because it reconnects on its
@@ -59,7 +59,7 @@ export function useMotionEvents(): { cameraDeviceId: string | null; dismiss: (de
   }, []);
 
   // Takes the device rather than assuming it is the one this hook would show:
-  // since Phase 12 the modal on screen may be one someone opened from its
+  // the modal on screen may be one someone opened from its
   // button, and closing that must not dismiss a *different* camera's motion
   // event. See applyDismissal.
   const dismiss = useCallback((deviceId: string) => {
