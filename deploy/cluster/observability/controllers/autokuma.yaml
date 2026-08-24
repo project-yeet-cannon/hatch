@@ -199,7 +199,53 @@ spec:
             - name: static-monitors
               mountPath: /static-monitors
               readOnly: true
+            # AutoKuma 2.x tracks which monitors it created in its own SQLite
+            # database, and writes it to /data/autokuma.db with no way to
+            # move it - there is no db-path setting in its configuration. On
+            # the container's ephemeral layer that mapping dies with the pod,
+            # and the next start reads an empty database, concludes it has
+            # created nothing, and **creates all six monitors again**. Two
+            # restarts on 2026-08-24 left twelve monitors in Uptime Kuma,
+            # including two `Watchdog` push monitors sharing the pinned token
+            # from ../static-monitors-configmap.yaml - so an alert that
+            # reached the push URL would mark one of them up and leave the
+            # other going red on its own retry timer.
+            #
+            # This is also why AutoKuma logs `Migrating database to version
+            # 1`/`2` on every single start: that line is not a version
+            # upgrade, it is a fresh database being built. Seeing it twice in
+            # two different pod logs is the symptom.
+            - name: state
+              mountPath: /data
       volumes:
         - name: static-monitors
           configMap:
             name: kuma-static-monitors
+        - name: state
+          persistentVolumeClaim:
+            claimName: autokuma-state
+---
+# The cluster plan Phase 8b.12's tail. 1Gi is far more than a mapping table of
+# six rows needs and is the smallest amount worth asking Longhorn for; what is
+# actually being bought here is identity across restarts, not capacity.
+#
+# longhorn-r2, not r3: losing this volume costs a duplicate set of monitors
+# that a person deletes in the Kuma UI, not data - every monitor it describes
+# is regenerated from ../static-monitors-configmap.yaml, which is in git. That
+# is the same reasoning ../../infrastructure/config/longhorn-storageclasses.yaml
+# uses to keep the bulk class off the critical one, applied to a volume whose
+# worst-case loss is an afternoon of tidying.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: autokuma-state
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: autokuma
+    app.kubernetes.io/instance: autokuma
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: longhorn-r2
+  resources:
+    requests:
+      storage: 1Gi
