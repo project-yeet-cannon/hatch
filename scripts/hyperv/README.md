@@ -320,6 +320,7 @@ removed, or renamed.
 | [`Initialize-AerieNode.ps1`](Initialize-AerieNode.ps1) | End-to-end entry point. Start here. |
 | [`Get-GoldenImage.ps1`](Get-GoldenImage.ps1) | Builds the distro template VHDX. |
 | [`New-AerieVM.ps1`](New-AerieVM.ps1) | Creates one VM from the template. Bypasses preflight — use directly when you know better than a check. |
+| [`Move-NodeOsDisk.ps1`](Move-NodeOsDisk.ps1) | Moves a live node's OS disk to the host's fastest volume as a fixed, larger VHDX, one node at a time. Also `-Rollback` and `-RemoveSourceDisk`. See [`docs/plans/node-storage.md`](../../docs/plans/node-storage.md). |
 | [`lib/New-NoCloudIso.ps1`](lib/New-NoCloudIso.ps1) | Builds the cloud-init seed ISO via Windows' built-in IMAPI2FS — no ADK or oscdimg needed. |
 | [`lib/AerieSsh.ps1`](lib/AerieSsh.ps1) | Post-boot verification over SSH. |
 | [`lib/Register-VmConsoleLogShipper.ps1`](lib/Register-VmConsoleLogShipper.ps1) | Registers the Scheduled Task that ships one VM's serial console to OpenSearch. |

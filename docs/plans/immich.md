@@ -336,7 +336,7 @@ Do not cancel anything until Phase 5's gate passes.
 
 ---
 
-## Phase 1 — the bulk disk
+## [x] Phase 1 — the bulk disk
 
 **Goal:** a PVC of the right size, on a disk nothing else can touch, on one
 node, with no node name anywhere in the repo.
@@ -521,7 +521,12 @@ it protects 800 GB exactly as well as it protects 1.5 TB.
 
 ---
 
-## Phase 2 — the database
+
+## [] Phase 1b - await instance node SSD-ification
+
+We need to move the node OS disks off of spinning metal, which is where the bulk one is.
+
+## [] Phase 2 — the database
 
 **Goal:** a Postgres Immich will accept, backed up the way `aerie-pg` already is,
 on stock images.
@@ -597,7 +602,7 @@ cluster's own server name.
 
 ---
 
-## Phase 3 — Immich
+## [] Phase 3 — Immich
 
 **Goal:** Immich reachable at `photos.${DOMAIN}` from the LAN and the tailnet,
 monitored, with an admin account and nothing in it yet.
@@ -691,7 +696,7 @@ photo, which appears in the web UI.
 
 ---
 
-## Phase 4 — the offsite archive
+## [] Phase 4 — the offsite archive
 
 **Goal:** every original has a second copy in a different building, on a schedule,
 with an alert when the schedule stops being kept, and a rehearsed restore.
@@ -795,7 +800,7 @@ cancellations.**
 
 ---
 
-## Phase 5 — ingest, dedup, and cancelling the subscriptions
+## [] Phase 5 — ingest, dedup, and cancelling the subscriptions
 
 **Goal:** every photo from every source is in Immich, once, with the best
 available copy as the keeper — and the subscriptions are gone.

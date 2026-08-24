@@ -1,0 +1,172 @@
+# Step 8 of the provisioning pipeline, and the node storage plan
+# (docs/plans/node-storage.md) Phase 1, step 1.3: move one node's OS disk onto
+# its host's fastest volume as a fixed VHDX, and grow it.
+#
+# The plan calls this "provision-6"; 6 and 7 were taken by the backup and bulk
+# disk steps while it was being written, so it is 8.
+#
+# **Once per node, one node at a time.** Quorum is a majority of the etcd
+# membership, so exactly one node may be down at a time in a three-node
+# cluster. The script refuses to start when taking the target down would lose
+# quorum, but nothing stops two humans dispatching this twice at once - hence
+# the concurrency group below, which is keyed on the *workflow* rather than on
+# the VM. That is deliberate and is the one place this differs from Provision
+# 5 and 7.
+#
+# **`runs-on` picks the host, not just a runner.** Convert-VHD and
+# Set-VMHardDiskDrive are Hyper-V operations on the machine that holds the VM,
+# so unlike Provision 7 the `host` input is not "any runner with a route to
+# the node" - it is the host the VM lives on, and the run fails in preflight
+# if the named VM is not there.
+#
+# Same thin-wrapper rule as Provision 0-7: this file checks out the repo and
+# hands every decision to scripts/hyperv/Move-NodeOsDisk.ps1, which also runs
+# by hand from an elevated PowerShell on the host. That manual path is a
+# fallback only. Logic added here instead of the script would exist on only
+# one of the two paths and let them drift.
+#
+# Nothing here is a repository variable, and `destination_path` in particular
+# is not. Which volume on which host is the fast one was measured per host and
+# is a fact about one installation, not about Aerie - see docs/ethos.md, and
+# the plan's finding 2 for how it was measured.
+#
+# Before dispatching, and not automated because it is a judgement rather than
+# a step: silence `alertname=~"etcd.*"` and `alertname="EtcdMemberDown"` for
+# the window, by alertname and never by receiver. EtcdMemberDown fires at
+# `for: 15m` and the node is down for longer than that.
+#
+# Previous step: provision-7-bulk-disk.yml.
+name: 'Provision 8: Move node OS disk'
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: 'The Hyper-V host the VM lives on. Convert-VHD runs here, so this must be that host and not merely a runner with a route to the node'
+        required: true
+        type: choice
+        options:
+          - hyperv-host-0
+          - hyperv-host-1
+          - hyperv-host-2
+      vm_name:
+        description: 'The node VM to move (e.g. aerie-node-N). Checked against the node''s own hostname, and against the guest''s root disk size, before anything is converted'
+        required: true
+        type: string
+      ip_address:
+        description: 'That node''s LAN address'
+        required: true
+        type: string
+      mode:
+        description: 'move: the migration. rollback: repoint the VM back at the recorded source disk. remove-source: delete that source disk, after the soak (plan step 1.9)'
+        required: true
+        default: 'move'
+        type: choice
+        options:
+          - move
+          - rollback
+          - remove-source
+      destination_path:
+        description: 'move only: directory on this host''s FASTEST volume for VM disks, e.g. C:\aerie\VMs. The disk lands at <destination_path>\<vm_name>\os-disk.vhdx'
+        required: false
+        default: 'C:\aerie\VMs'
+        type: string
+      size_gb:
+        description: 'move only: virtual size of the new fixed disk, in GiB. 100 is the plan''s number; a host whose fast volume cannot hold 100 + 40 GiB takes 64 instead'
+        required: false
+        default: '100'
+        type: string
+      force:
+        description: 'move: proceed against a node that is NotReady. remove-source: waive the 7-day soak. Never widens the quorum, free-space or never-delete-on-move refusals'
+        required: false
+        default: false
+        type: boolean
+      preflight_only:
+        description: 'move only: inspect the host and the node, print what would change and the current etcd fsync p99, then stop without draining anything'
+        required: false
+        default: false
+        type: boolean
+
+# Keyed on the workflow, not on the VM. Two runs against *different* nodes are
+# exactly as dangerous as two against the same one: each takes an etcd member
+# down, and a three-member cluster survives one.
+concurrency:
+  group: provision-8-move-os-disk
+  cancel-in-progress: false
+
+jobs:
+  move:
+    name: '${{ inputs.mode }} OS disk for ${{ inputs.vm_name }}'
+    runs-on: [self-hosted, '${{ inputs.host }}']
+
+    # Convert-VHD writes size_gb of zeroes plus the data, and that is nearly
+    # all of the wall clock: ~15-25 min per node at 100 GiB on the volumes
+    # this plan measured. The rest - drain, boot, growpart, waiting for etcd
+    # to rejoin - is minutes. Failing at 180m means something hung, most
+    # likely a drain blocked on a PodDisruptionBudget.
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out provisioning scripts
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Hyper-V is already on this host by definition. What the runner needs
+      # on top is an SSH client, for everything that happens on the node.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency OpenSshClient
+
+      - name: Move the OS disk
+        shell: powershell
+        env:
+          # Same quoting hazard as provision-0-new-node.yml: every input
+          # arrives as an env var rather than being interpolated into the
+          # script body, since `${{ }}` substitution happens before PowerShell
+          # parses anything - and destination_path is a Windows path full of
+          # backslashes.
+          VM_NAME: ${{ inputs.vm_name }}
+          IP_ADDRESS: ${{ inputs.ip_address }}
+          MODE: ${{ inputs.mode }}
+          DESTINATION_PATH: ${{ inputs.destination_path }}
+          SIZE_GB: ${{ inputs.size_gb }}
+          FORCE: ${{ inputs.force }}
+          PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
+
+          # Same keypair provision-0/1/2/3/4/5/7 used.
+          NODE_SSH_PRIVATE_KEY: ${{ secrets.NODE_SSH_PRIVATE_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+
+          if (-not $env:NODE_SSH_PRIVATE_KEY) {
+            throw "NODE_SSH_PRIVATE_KEY is not set. It's the same repository secret provision-0-new-node.yml already requires."
+          }
+
+          $params = @{
+            VMName        = $env:VM_NAME
+            IPAddress     = $env:IP_ADDRESS
+            SshPrivateKey = $env:NODE_SSH_PRIVATE_KEY
+          }
+
+          switch ($env:MODE) {
+            'move' {
+              if (-not $env:DESTINATION_PATH) {
+                throw "mode 'move' needs destination_path - the directory on this host's fastest volume that the disk moves to."
+              }
+              $params.DestinationPath = $env:DESTINATION_PATH
+              $params.SizeGB = [int]$env:SIZE_GB
+              if ([bool]::Parse($env:PREFLIGHT_ONLY)) { $params.PreflightOnly = $true }
+            }
+            'rollback'      { $params.Rollback = $true }
+            'remove-source' { $params.RemoveSourceDisk = $true }
+            default         { throw "Unknown mode '$($env:MODE)'." }
+          }
+
+          if ([bool]::Parse($env:FORCE)) { $params.Force = $true }
+
+          & .\scripts\hyperv\Move-NodeOsDisk.ps1 @params

@@ -28,4 +28,5 @@ When dissipating the swarm plans, turn this document into its own individual pla
       the [SOPS objection](design.md#secrets--no-bytes-in-git) does not reach
       it — but two secret mechanisms is a cost of its own).
 - [ ] `docs/cluster-architecture.md`, in the existing phase-doc style
+- [ ] Cluster cold start, push-button solution. This is the end goal of two different lines of work - swarm and productization. Ultimately I want push-button cluster initialization for new users, as well as recovering users. It seems to me that these should be the same process; a new user is simply using a global template/baseline/seed data source rather than a personal backup. I presume this will be a lot of work and should be its own plan, but it is what we are building towards.
 
