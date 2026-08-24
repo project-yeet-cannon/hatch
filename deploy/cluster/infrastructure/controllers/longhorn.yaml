@@ -204,6 +204,93 @@ spec:
       # act on versions here, and it works on scripts/versions.json and on the
       # `version:` field above, not on a notification.
       upgradeChecker: false
+      # True, and it is the single line the backup plan's finding 1 rests on.
+      # A Longhorn backup takes a snapshot first, and an unfrozen snapshot of a
+      # live SQLite database is exactly the crash-consistent block image
+      # docs/plans/swarm/phase-0-backup-and-dr.md refused to accept. With the
+      # freeze it is a filesystem-consistent one - fsfreeze, then snapshot -
+      # which SQLite recovers from the way it recovers from power loss, a
+      # supported path rather than a hope. Grafana's database and Uptime Kuma's
+      # are the two volumes this exists for; without this line, backing them up
+      # through Longhorn rather than through restic loses its argument, and
+      # 8b.10's RecurringJob is producing images nobody should trust.
+      #
+      # The code path is worth stating because it is not the one the setting's
+      # own description implies. Longhorn describes the freeze as applying to a
+      # "user-initiated snapshot", and a RecurringJob backup does not sound like
+      # one - but the job creates a Snapshot CR, and snapshot_controller.go
+      # reads this setting (datastore.GetFreezeFilesystemForSnapshotSetting)
+      # before calling SnapshotCreate, the same as the interactive path. Checked
+      # against longhorn-manager v1.11.3 rather than assumed.
+      #
+      # Three conditions Longhorn attaches to it, all three met here and none of
+      # them enforced. It does nothing for a volume whose Kubernetes volumeMode
+      # is Block - no PVC in this tree sets one, so every volume is Filesystem.
+      # It wants ext4 or XFS, and both classes in
+      # ../config/longhorn-storageclasses.yaml set fsType: ext4 explicitly. And
+      # Longhorn ships it off by default because kernels older than 5.17 can
+      # fail to respond if a volume crashes mid-freeze, leaving a node that
+      # cannot unmount the filesystem or kill its users without a reboot - the
+      # golden images scripts/hyperv/Get-GoldenImage.ps1 builds from are Debian
+      # 13 and Ubuntu 24.04, both several years past that, which is what makes
+      # enabling this the ordinary choice here rather than a gamble.
+      #
+      # And this one *is* in note 4's data-engine-specific family, in spite of
+      # reading like a plain boolean: its definition carries DataEngineSpecific:
+      # true with a default of {"v1":"false"}, so the scalar written here is
+      # expanded into every engine in that default
+      # (types.parseSettingSingleBool) and the read-back answers {"v1":"true"},
+      # not true.
+      freezeFilesystemForSnapshot: true
+
+    # ---------------------------------------------------------------------
+    # The default backup target - the longhorn-default-resource ConfigMap
+    # ---------------------------------------------------------------------
+    # Deliberately not in defaultSettings above, and the difference is the exact
+    # trap the top of this file and note 4 describe. Longhorn 1.9 turned the
+    # backup target from a Setting into a BackupTarget CR so that a cluster can
+    # have more than one, and chart 1.11.3 moved these two keys out of
+    # defaultSettings with it. Written under defaultSettings they are not
+    # settings Longhorn rejects as unparseable - they are keys no template
+    # reads, in a values file with no schema, so the install is clean, the
+    # manager logs nothing at all, and the backup target is simply empty.
+    # v1.11.3's types/setting.go has no backup-target entry in its
+    # settingDefinitions map; the two names survive only in
+    # types/backupstore.go, as key names for the ConfigMap this block writes.
+    # Note 5 at the bottom is the other half of this, and is the half that bites
+    # on a cluster that is already running.
+    defaultBackupStore:
+      # Longhorn's own s3://bucket@region/ form, which is not a URL anything
+      # else will parse: the @region sits where a client library would expect a
+      # host, and it is not optional - a target without it applies fine and
+      # fails at first use. Assembled here from two cluster-config keys rather
+      # than carried as one string, because AWS_REGION already exists and a
+      # second copy of the region is a second thing that can disagree with the
+      # first.
+      #
+      # LONGHORN_BACKUP_BUCKET is its own bucket, not WAL_BUCKET and not the
+      # restic one: Longhorn owns the backupstore/ layout underneath it and
+      # expects to be its only writer, which is the argument
+      # ../../data/postgres/objectstore.yaml already makes for keeping the WAL
+      # bucket to itself.
+      backupTarget: s3://${LONGHORN_BACKUP_BUCKET}@${AWS_REGION}/
+      # ../config/external-secrets/longhorn-system-longhorn-backup-target.yaml,
+      # whose two keys are AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY -
+      # SCREAMING_SNAKE_CASE against every other entry in
+      # scripts/secrets/parameters.json, because Longhorn reads the Secret by
+      # those exact names and reports an unusable target rather than a missing
+      # key if they are anything else. AWS_ENDPOINTS is the third key Longhorn
+      # documents for this Secret and is deliberately absent: it exists for
+      # non-AWS S3, and setting it empty is not the same as omitting it.
+      #
+      # That ExternalSecret is layer 2 of ../../infrastructure.yaml and this
+      # release is layer 1, so on a first install this names a Secret that does
+      # not exist yet. Not an install failure and not something to reorder: the
+      # BackupTarget CR reports Unavailable until infra-config reconciles, and
+      # the target controller re-checks on its own poll timer (pollInterval,
+      # left unset for Longhorn's 300s default) and clears the condition with
+      # nothing else having to happen.
+      backupTargetCredentialSecret: longhorn-backup-target
 
     # ---------------------------------------------------------------------
     # The StorageClass the chart ships - see note 2
@@ -235,7 +322,7 @@ spec:
       # fit Postgres and the app tier into.
       replicas: 1
 # ---------------------------------------------------------------------------
-# Four properties of this release that later steps depend on, none of them
+# Five properties of this release that later steps depend on, none of them
 # visible from the values above.
 #
 #   1. defaultReplicaCount is narrower than it sounds. Longhorn's own
@@ -295,6 +382,36 @@ spec:
 #      equal to what was set, and a hand check against "2" concludes the
 #      opposite of the truth. Longhorn 1.11 is what this repository pins; a
 #      cluster that answers with a bare scalar is an older one.
+#
+#   5. The backup target does NOT reach a running cluster on its own. This is
+#      the one asymmetry between the two ConfigMaps this file writes, and it
+#      cost 8b.9 an assumption. longhorn-default-setting is watched: the manager
+#      compares the ConfigMap's resourceVersion against an annotation on each
+#      Setting CR (note 1), so freezeFilesystemForSnapshot above lands within a
+#      reconcile of the Helm upgrade and no pod restarts.
+#      longhorn-default-resource is not watched at all - it is read once, in
+#      app/daemon.go's startup path, by CreateOrUpdateDefaultBackupTarget, which
+#      writes the `default` BackupTarget CR from it. The chart puts no ConfigMap
+#      checksum annotation on the longhorn-manager pod template either, so a
+#      change to defaultBackupStore updates a ConfigMap that nothing then reads.
+#
+#      On a fresh install this is free: the manager's first start does the work.
+#      On this cluster, where those pods have been up since 3b.11, one manager
+#      pod has to restart before the BackupTarget CR moves -
+#      `kubectl -n longhorn-system delete pod -l app=longhorn-manager
+#      --field-selector spec.nodeName=<one node>` is enough, since every daemon
+#      runs the same startup sync against the same ConfigMap. That is a single
+#      pod, not the DaemonSet rollout whose 8-12 minute graceful termination the
+#      upgrade.timeout comment above documents, and it is outside Helm, so it
+#      cannot stall the HelmRelease either way.
+#
+#      The read-back is the CR and not a Setting, for the reason the
+#      defaultBackupStore block gives: `kubectl -n longhorn-system get
+#      backuptargets.longhorn.io default -o jsonpath='{.spec.backupTargetURL}
+#      {.spec.credentialSecret} {.status.available}'`. On 1.11 there is no
+#      settings.longhorn.io/backup-target to read - that object stopped existing
+#      when the CR replaced it, and `kubectl get` answers NotFound rather than
+#      an empty value, which at least fails in the honest direction.
 #
 # And one thing deliberately absent: no Ingress. The chart can publish the
 # Longhorn UI (ingress.enabled), and the wildcard certificate from 3b.10 would

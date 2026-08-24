@@ -1061,7 +1061,7 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       off-site copy cannot be what makes this job pass, and a workload that
       never reads a credential should not be a place one is mounted.
 
-- [ ] **9. Longhorn's backup target, and the freeze setting finding 1 depends on** —
+- [x] **9. Longhorn's backup target, and the freeze setting finding 1 depends on** —
       [`longhorn.yaml`](../../../deploy/cluster/infrastructure/controllers/longhorn.yaml).
 
       Three `defaultSettings` keys:
@@ -1100,6 +1100,68 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       these three are not in that family, but the habit of comparing against
       what Longhorn *returns* rather than what was set is the one that catches
       it.
+
+      **Landed 2026-08-23, and the step as written would not have worked.**
+      Three of its claims are false against chart 1.11.3 and longhorn-manager
+      v1.11.3, all checked against the extracted chart and the tagged source
+      rather than argued from the docs. The shape that shipped:
+
+      ```yaml
+      defaultSettings:
+        freezeFilesystemForSnapshot: true
+      defaultBackupStore:
+        backupTarget: s3://${LONGHORN_BACKUP_BUCKET}@${AWS_REGION}/
+        backupTargetCredentialSecret: longhorn-backup-target
+      ```
+
+      **Only one of the three is a `defaultSettings` key.** Longhorn 1.9 turned
+      the backup target from a Setting into a `BackupTarget` CR so a cluster can
+      have several, and the chart moved `backupTarget` and
+      `backupTargetCredentialSecret` out of `defaultSettings` into a top-level
+      `defaultBackupStore` map that writes a *different* ConfigMap,
+      `longhorn-default-resource` (`templates/default-resource.yaml`;
+      `templates/default-setting.yaml` renders neither key). Written where the
+      step said to write them they would not have been swallowed the way note 4
+      describes — that path at least logs at warn — they would have been keys no
+      template reads, in a values file with no schema: a clean install, a silent
+      manager, and an empty backup target. This is the same trap one layer
+      further out than the one the step quoted, and it is the reason the chart
+      was pulled and rendered before the commit.
+
+      **`settings.longhorn.io backup-target` does not exist on 1.11**, so the
+      *Exit* command above reads a NotFound rather than a value. `backup-target`
+      is absent from `types/setting.go`'s `settingDefinitions`; the name survives
+      only in `types/backupstore.go` as a key name for that ConfigMap. The
+      read-back is the CR: `kubectl -n longhorn-system get
+      backuptargets.longhorn.io default -o jsonpath='{.spec.backupTargetURL}
+      {.spec.credentialSecret} {.status.available}'`.
+
+      **The freeze setting *is* in note 4's data-engine-specific family**, in
+      spite of the step saying these three are not. Its definition carries
+      `DataEngineSpecific: true` with default `{"v1":"false"}`, so
+      `types.parseSettingSingleBool` expands the scalar and
+      `freeze-filesystem-for-snapshot` reads back `{"v1":"true"}`. The step's
+      own closing habit — compare against what Longhorn returns — is what this
+      would have cost someone otherwise.
+
+      And one thing the step assumed that is true for the wrong ConfigMap.
+      `longhorn-default-setting` is watched, so the freeze setting lands without
+      a restart and the rollout note holds: nothing rolls the DaemonSet.
+      `longhorn-default-resource` is **not** watched — it is read once, in
+      `app/daemon.go`'s startup path, by `CreateOrUpdateDefaultBackupTarget`,
+      and the chart puts no ConfigMap checksum on the manager pod template. So
+      on this cluster the Helm upgrade updates a ConfigMap nothing then reads,
+      and **one `longhorn-manager` pod has to restart** before the `BackupTarget`
+      CR moves. One pod, not a rollout, and outside Helm, so it cannot stall the
+      HelmRelease; a fresh install needs nothing. Note 5 in the file carries
+      this, because it is 8b.10's prerequisite rather than a detail of this step.
+
+      Verified locally: both ConfigMaps rendered from the committed values
+      through `helm template` against the 1.11.3 artifact, and CI's kustomize
+      build and substitution-token checks pass. **What remains** is the cluster
+      half — reconcile, restart one manager pod, and read the CR back — which
+      belongs in the same pass as 8b.10, since an unavailable target and a
+      `RecurringJob` that has never run look identical from the bucket.
 
 - [ ] **10. The `RecurringJob`, and the retirement of the hand-made Secret** —
       `deploy/cluster/infrastructure/config/longhorn-recurringjob.yaml`,
@@ -1338,7 +1400,7 @@ deploy/cluster/
       restore-job.yaml            # 8b.10, five secretKeyRefs repointed
   infrastructure/
     controllers/
-      longhorn.yaml               # 8b.9, three defaultSettings keys
+      longhorn.yaml               # 8b.9, one setting + defaultBackupStore
     config/
       longhorn-recurringjob.yaml  # 8b.10
       external-secrets/           # 8b.1, regenerated - two new files
