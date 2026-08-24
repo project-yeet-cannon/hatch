@@ -445,12 +445,32 @@ precisely what happened to the node rebuilt on 08/23.
       `data_disk_gb` in
       [`provision-0-new-node.yml`](../../.github/workflows/provision-0-new-node.yml).
 
-- [ ] **3.4 — Document the rule, once.** In
+- [ ] **3.4 — Automatic checkpoints off at VM creation.**
+      [`New-AerieVM.ps1`](../../scripts/hyperv/New-AerieVM.ps1) gains
+      `Set-VM -AutomaticCheckpointsEnabled $false` beside the
+      `Disable-VMIntegrationService` line it already carries for the same kind
+      of reason — a Hyper-V default that fights what the VM is for.
+
+      Finding 7 is per-VM and Hyper-V's default is on, so
+      [`Move-NodeOsDisk.ps1`](../../scripts/hyperv/Move-NodeOsDisk.ps1) turning
+      it off fixes the three nodes that exist and nothing else. Without this
+      step the next node built takes a checkpoint at its first boot and holds
+      it until its first clean shutdown, which on these hosts means until the
+      next Windows Update reboot cycle — the 08/09 window that produced the
+      chains on nodes 1 and 2.
+
+      This is the cheapest step in Phase 3 and the one whose absence is
+      hardest to notice: a node built without it looks identical in every
+      dashboard and is quietly paying finding 7's cost.
+
+- [ ] **3.5 — Document the rule, once.** In
       [`scripts/hyperv/README.md`](../../scripts/hyperv/README.md)'s on-disk
       layout section: **the OS disk goes on the host's fastest volume and is
       fixed; the Longhorn data disk goes on its largest and is fixed; nothing
-      Aerie creates on a host is dynamic.** One sentence, in the place someone
-      reads before building a node.
+      Aerie creates on a host is dynamic, and no Aerie VM has automatic
+      checkpoints.** One sentence, in the place someone reads before building
+      a node. The last clause is 3.4's, and belongs in the same sentence
+      because an automatic checkpoint makes the first three untrue again.
 
 ## What this plan does not cover
 

@@ -90,17 +90,17 @@ on:
         default: '100'
         type: string
       merge_checkpoints:
-        description: 'Remove any Hyper-V checkpoints on the VM, disable automatic checkpoints, and wait for the merge before touching the disk. Needed on any VM that has been running a while: an automatic checkpoint means the guest is writing to a dynamic .avhdx layered over its disk, and a fixed disk under one is a dynamic differencing disk again'
+        description: 'merge_checkpoints: Remove any Hyper-V checkpoints on the VM, disable automatic checkpoints, and wait for the merge before touching the disk. Needed on any VM that has been running a while: an automatic checkpoint means the guest is writing to a dynamic .avhdx layered over its disk, and a fixed disk under one is a dynamic differencing disk again'
         required: false
         default: false
         type: boolean
       force:
-        description: 'move: proceed against a node that is NotReady. remove-source: waive the 7-day soak. Never widens the quorum, free-space or never-delete-on-move refusals'
+        description: 'force (move only): proceed against a node that is NotReady. remove-source: waive the 7-day soak. Never widens the quorum, free-space or never-delete-on-move refusals'
         required: false
         default: false
         type: boolean
       preflight_only:
-        description: 'move only: inspect the host and the node, print what would change and the current etcd fsync p99, then stop without draining anything'
+        description: 'preflight_only (move only): inspect the host and the node, print what would change and the current etcd fsync p99, then stop without draining anything'
         required: false
         default: false
         type: boolean
