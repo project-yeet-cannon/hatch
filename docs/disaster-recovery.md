@@ -97,6 +97,39 @@ the one the maintenance window is a reason to keep armed.
 
 Four, in the order you are most likely to need them. Each is commands.
 
+## Run the script before you read any of this
+
+**Data recovery is scripted.** The two procedures below that get data back out
+of restic - the databases and the parameter tree - are exercised end to end by
+one command, against both repositories:
+
+```sh
+pwsh scripts/k3s/Invoke-DrRehearsal.ps1 -IPAddress <a k3s server> -SshPrivateKeyPath ~/.ssh/aerie_node
+```
+
+It restores the newest `daily` snapshot from each repository, loads both dumps
+into a Postgres it stands up and tears down inside its own Job, counts the
+tables against the *live* database schema by schema, reads the parameter export
+back, and proves that the copy of `RESTIC_PASSWORD` inside the snapshot is the
+credential that opened it - by SHA-256, so nothing prints a secret. Six minutes,
+one table of findings, exit 0 or 1. It writes to no repository and to no live
+database.
+
+**Why the script rather than the steps.** In an outage nobody should be reading
+a runbook; a command that is known to work is worth more than a procedure that
+is known to be correct. So this is the quarterly rehearsal *and* the first
+thing to run in an incident - if it passes, the backups are not your problem
+and you can look elsewhere.
+
+The hand procedures below stay, and they are what you need in the case the
+script cannot cover: when the cluster that runs the Job is itself gone. Read
+them then.
+
+**It does not restore anything into production.** Restoring over the live
+databases is [`restore-job.yaml`](../deploy/cluster/data/schema/restore-job.yaml),
+which stays a suspended Job that a person un-suspends deliberately, and the
+Longhorn volume restore is procedure 3 below, by hand.
+
 ## 1. One database, from restic
 
 The fastest path back to a known-good `aerie` or `quartz`, and the only one
@@ -377,6 +410,20 @@ investigates why they never expire.
 
 Named, not solved.
 
+- **A hardcoded schema list silently narrowed two sanity checks, and would
+  have again.** `cluster-verify.sh` and `restore.sh` both counted tables in
+  `('public','storage')` - right when Storage was the only module context, and
+  quietly wrong from the day `gather` and `game` were added, since a dump that
+  had lost both modules entirely would still have counted 27 tables and passed.
+  Both now count every non-system schema. **The pattern is the gap, not the
+  instance**: one schema per module
+  ([`src/Aerie.Api/Modules/README.md`](../src/Aerie.Api/Modules/README.md))
+  means every new module is a chance for some other list of names to go stale
+  the same way. The weekly verify Job still cannot catch a *backup* that never
+  contained a schema - it has `RESTIC_PASSWORD` and the repository and no
+  database credential, on purpose - so that assertion lives in
+  `Invoke-DrRehearsal.ps1`, which compares against the live database, and it
+  runs quarterly rather than weekly.
 - **`restore-job.yaml` has not been run against the `restic` Secret** it was
   rewired to in 8b.10. Prove it in a rehearsal, onto a scratch Postgres, before
   deleting the hand-made `aerie-pg-restore-restic` Secret it replaced.

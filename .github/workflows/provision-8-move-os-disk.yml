@@ -26,9 +26,23 @@
 # one of the two paths and let them drift.
 #
 # Nothing here is a repository variable, and `destination_path` in particular
-# is not. Which volume on which host is the fast one was measured per host and
-# is a fact about one installation, not about Aerie - see docs/ethos.md, and
-# the plan's finding 2 for how it was measured.
+# is not - it has no default either. Which volume on which host is the fast one
+# was measured per host and is a fact about one installation, not about Aerie -
+# see docs/ethos.md, and the plan's finding 2 for how it was measured. It is
+# not the same answer on every host: a host whose VM volume is already the
+# fastest large one it owns takes its own path here, which the script reads as
+# "convert in place" and reports as such. Nothing moves; the whole of the
+# change is dynamic -> fixed and a bigger disk, which is finding 3 alone.
+#
+# Hyper-V's automatic checkpoints matter here more than anywhere else in this
+# repo. They are created at every VM start and removed only on a clean
+# shutdown, so a node that has been up for weeks is writing to a dynamic
+# .avhdx layered over its OS disk - and a *fixed* disk underneath one is a
+# dynamic differencing disk again, which would silently undo this whole
+# migration at the next boot. The script refuses to convert a chain, disables
+# the setting on any VM it touches, and merges the chain when
+# `merge_checkpoints` says so. `preflight_only` reports both without changing
+# either.
 #
 # Before dispatching, and not automated because it is a judgement rather than
 # a step: silence `alertname=~"etcd.*"` and `alertname="EtcdMemberDown"` for
@@ -67,15 +81,19 @@ on:
           - rollback
           - remove-source
       destination_path:
-        description: 'move only: directory on this host''s FASTEST volume for VM disks, e.g. C:\aerie\VMs. The disk lands at <destination_path>\<vm_name>\os-disk.vhdx'
+        description: 'move only, and no default on purpose: the directory on this host''s fastest volume with room, e.g. C:\aerie\VMs. Run preflight_only first - it prints which volume the disk is on now. Naming the volume it is ALREADY on is valid and means convert in place, no move'
         required: false
-        default: 'C:\aerie\VMs'
         type: string
       size_gb:
         description: 'move only: virtual size of the new fixed disk, in GiB. 100 is the plan''s number; a host whose fast volume cannot hold 100 + 40 GiB takes 64 instead'
         required: false
         default: '100'
         type: string
+      merge_checkpoints:
+        description: 'Remove any Hyper-V checkpoints on the VM, disable automatic checkpoints, and wait for the merge before touching the disk. Needed on any VM that has been running a while: an automatic checkpoint means the guest is writing to a dynamic .avhdx layered over its disk, and a fixed disk under one is a dynamic differencing disk again'
+        required: false
+        default: false
+        type: boolean
       force:
         description: 'move: proceed against a node that is NotReady. remove-source: waive the 7-day soak. Never widens the quorum, free-space or never-delete-on-move refusals'
         required: false
@@ -101,8 +119,9 @@ jobs:
 
     # Convert-VHD writes size_gb of zeroes plus the data, and that is nearly
     # all of the wall clock: ~15-25 min per node at 100 GiB on the volumes
-    # this plan measured. The rest - drain, boot, growpart, waiting for etcd
-    # to rejoin - is minutes. Failing at 180m means something hung, most
+    # this plan measured, and less for a conversion in place, which never
+    # crosses a volume boundary. The rest - drain, boot, growpart, waiting for
+    # etcd to rejoin - is minutes. Failing at 180m means something hung, most
     # likely a drain blocked on a PodDisruptionBudget.
     timeout-minutes: 180
 
@@ -132,6 +151,7 @@ jobs:
           VM_NAME: ${{ inputs.vm_name }}
           IP_ADDRESS: ${{ inputs.ip_address }}
           MODE: ${{ inputs.mode }}
+          MERGE_CHECKPOINTS: ${{ inputs.merge_checkpoints }}
           DESTINATION_PATH: ${{ inputs.destination_path }}
           SIZE_GB: ${{ inputs.size_gb }}
           FORCE: ${{ inputs.force }}
@@ -167,6 +187,7 @@ jobs:
             default         { throw "Unknown mode '$($env:MODE)'." }
           }
 
+          if ([bool]::Parse($env:MERGE_CHECKPOINTS)) { $params.MergeCheckpoints = $true }
           if ([bool]::Parse($env:FORCE)) { $params.Force = $true }
 
           & .\scripts\hyperv\Move-NodeOsDisk.ps1 @params

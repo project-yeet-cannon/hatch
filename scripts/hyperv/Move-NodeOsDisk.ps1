@@ -172,6 +172,10 @@ param(
     [ValidatePattern('^(\d{1,3}\.){3}\d{1,3}$')]
     [string]$PeerIPAddress,
 
+    # Common to every mode, because every mode either converts the disk or
+    # repoints the VM at a different one, and a checkpoint makes both wrong.
+    [switch]$MergeCheckpoints,
+
     [switch]$Force,
 
     [Parameter(ParameterSetName = 'Move')]
@@ -194,6 +198,12 @@ Set-StrictMode -Version Latest
 #                        for. Keeping the name identical means the on-disk
 #                        layout in scripts/hyperv/README.md still describes a
 #                        migrated host.
+#   $FixedDiskFileName - the name the new disk takes when the destination is
+#                        the directory the old one is already in. Convert-VHD
+#                        cannot write the file it is reading, and a node whose
+#                        VM volume is already the fastest one that host owns
+#                        needs the fixed conversion without the move. The
+#                        sidecar records both names, so nothing is ambiguous.
 #   $SidecarFileName   - the record of where this disk came from. It is the
 #                        rollback path and step 1.9's only source of truth
 #                        about which file is safe to delete.
@@ -203,6 +213,7 @@ Set-StrictMode -Version Latest
 #                        volume is a smaller -SizeGB, not a thinner margin.
 #   $SoakDays          - step 1.9's soak before a source disk may be deleted.
 $OsDiskFileName = 'os-disk.vhdx'
+$FixedDiskFileName = 'os-disk-fixed.vhdx'
 $SidecarFileName = 'os-disk-migration.json'
 $FreeMarginGB = 40
 $SoakDays = 7
@@ -261,6 +272,28 @@ function Get-VmOsDisk {
     }
 
     return $bootDisks[0]
+}
+
+function Test-SamePath {
+    <#
+    .SYNOPSIS
+        Whether two paths name the same file or directory.
+
+    .DESCRIPTION
+        'D:\aerie\VMs' and 'D:\Aerie\VMs\' are the same directory, and
+        whether they are is the difference between a move and a conversion in
+        place - which is the difference between Convert-VHD working and
+        Convert-VHD being asked to write the file it is reading.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$A,
+        [Parameter(Mandatory)][string]$B
+    )
+    $separators = @([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    return [string]::Equals(
+        [IO.Path]::GetFullPath($A).TrimEnd($separators),
+        [IO.Path]::GetFullPath($B).TrimEnd($separators),
+        [StringComparison]::OrdinalIgnoreCase)
 }
 
 function Get-DestinationVolumeFree {
@@ -598,28 +631,124 @@ try {
         $failures.Add("No VM named '$VMName' on $env:COMPUTERNAME. This step runs on the Hyper-V host that holds the node, not on any host - `runs-on` picks that host in the workflow.")
     }
 
-    $currentDrive = $null
-    $currentVhd = $null
+    # Checkpoints turn one VHDX into a chain, and every mode here is wrong on
+    # one: Convert-VHD on a member of a chain produces a disk silently missing
+    # everything written since the checkpoint, and repointing a VM that has
+    # checkpoints leaves them referencing a disk the VM no longer uses.
+    $snapshots = @()
     if ($vm) {
-        # Checkpoints turn one VHDX into a chain, and Convert-VHD on a member
-        # of one produces a disk that is silently missing everything written
-        # since the checkpoint was taken. Merge or delete them first.
         $snapshots = @(Get-VMSnapshot -VMName $VMName -ErrorAction SilentlyContinue)
-        if ($snapshots.Count -gt 0) {
-            $failures.Add("VM '$VMName' has $($snapshots.Count) checkpoint(s): $(($snapshots | ForEach-Object { $_.Name }) -join ', '). Its OS disk is a differencing chain while they exist, and converting one member of a chain loses everything above it. Remove them and let the merge finish first.")
-        }
-
-        try {
-            $currentDrive = Get-VmOsDisk -VMName $VMName
-            $currentVhd = Get-VHD -Path $currentDrive.Path
-        }
-        catch {
-            $failures.Add($_.Exception.Message)
+        if ($snapshots.Count -gt 0 -and -not $MergeCheckpoints) {
+            $listed = ($snapshots | ForEach-Object { "$($_.Name) [$($_.SnapshotType)], taken $($_.CreationTime.ToString('yyyy-MM-dd HH:mm'))" }) -join '; '
+            $failures.Add("VM '$VMName' has $($snapshots.Count) checkpoint(s): $listed. Its OS disk is a differencing chain while they exist. Pass -MergeCheckpoints to have this run remove them, disable automatic checkpoints, and wait for the merge before it reads the disk - or do it by hand with Remove-VMSnapshot first.")
         }
     }
 
+    # Thrown here rather than at the end, so a bad key or a missing VM is
+    # reported before the merge below changes anything about the VM.
+    if ($failures.Count -gt 0) {
+        $detail = ($failures | ForEach-Object { "  - $_" }) -join "`n"
+        throw "Preflight failed for '$VMName' on $env:COMPUTERNAME with $($failures.Count) problem(s):`n$detail"
+    }
+
+    # -PreflightOnly promises it changes nothing, and both a merge and the
+    # setting change below are changes. So it reports and stops instead -
+    # which is the more useful answer anyway, since "this VM has been running
+    # on a differencing disk since August" is a finding, not a nuisance.
+    $autoCheckpointsOn = $null -ne $vm.PSObject.Properties['AutomaticCheckpointsEnabled'] -and $vm.AutomaticCheckpointsEnabled
+    if ($PreflightOnly -and ($snapshots.Count -gt 0 -or $autoCheckpointsOn)) {
+        Write-Host ''
+        if ($snapshots.Count -gt 0) {
+            Write-Host "'$VMName' has $($snapshots.Count) checkpoint(s), so its OS disk is a differencing chain:" -ForegroundColor Yellow
+            foreach ($snapshot in $snapshots) {
+                Write-Host "  - $($snapshot.Name) [$($snapshot.SnapshotType)], taken $($snapshot.CreationTime.ToString('yyyy-MM-dd HH:mm'))"
+            }
+            Write-Host "  Every guest write since then has gone to a dynamic .avhdx layered over the disk."
+        }
+        if ($autoCheckpointsOn) {
+            Write-Host "'$VMName' has automatic checkpoints ENABLED, which is what creates one at every VM start." -ForegroundColor Yellow
+            Write-Host '  A fixed disk underneath one of these is a dynamic differencing disk again, so this'
+            Write-Host '  has to be off before the migration means anything.'
+        }
+        Write-Host ''
+        Write-Host 'A run with -MergeCheckpoints resolves both, then continues. -PreflightOnly changes nothing, so it stops here.' -ForegroundColor Yellow
+        return
+    }
+
+    # --- automatic checkpoints, which would undo this entire plan ------- #
+    #
+    # Hyper-V's automatic checkpoints are created when a VM *starts* and
+    # removed when it shuts down cleanly, so a VM that has been up for weeks
+    # is running on a dynamic .avhdx layered over its disk - a third
+    # allocation penalty on top of the two docs/plans/node-storage.md names,
+    # and one that copies-on-write at block granularity.
+    #
+    # This is disabled unconditionally on a VM this script touches, and the
+    # reason is not tidiness: a fixed VHDX underneath an automatic checkpoint
+    # is a dynamic differencing disk again. Leaving the setting on would mean
+    # the node came back from this migration, started, and immediately
+    # reacquired the allocation cost the migration exists to remove - with
+    # every measurement in the plan's 1.6 gate taken against it.
+    if ($autoCheckpointsOn) {
+        Write-Warning "'$VMName' has automatic checkpoints enabled. Disabling: a fixed disk underneath an automatic checkpoint is a dynamic differencing disk again, so leaving this on would silently undo the migration at the next boot."
+        Set-VM -Name $VMName -AutomaticCheckpointsEnabled $false
+        $actions.Add('disabled automatic checkpoints')
+        $vm = Get-VM -Name $VMName
+    }
+
+    if ($snapshots.Count -gt 0) {
+        Write-Host "Merging $($snapshots.Count) checkpoint(s) into '$VMName''s disks ..."
+        foreach ($snapshot in $snapshots) {
+            Write-Host "  removing '$($snapshot.Name)' [$($snapshot.SnapshotType)], taken $($snapshot.CreationTime.ToString('yyyy-MM-dd HH:mm')) ..."
+            Remove-VMSnapshot -VMSnapshot $snapshot
+        }
+
+        # Remove-VMSnapshot returns as soon as Hyper-V accepts the request;
+        # the merge itself runs in the background - online, on a running VM -
+        # and the VM reports 'Merging disks' while it does. Waiting for it is
+        # the whole point, because reading the disk mid-merge reads the
+        # .avhdx.
+        #
+        # Three signals rather than one, and the third is the authoritative
+        # one. The checkpoint can disappear from Get-VMSnapshot and the status
+        # can still read Operating normally in the moment between Hyper-V
+        # accepting the request and starting the merge - so the condition that
+        # actually has to hold is that the VM's disks are no longer .avhdx
+        # files. That is the thing the next stage depends on.
+        $mergeDeadline = (Get-Date).AddMinutes(60)
+        Start-Sleep -Seconds 5
+        while ($true) {
+            $vm = Get-VM -Name $VMName
+            $remaining = @(Get-VMSnapshot -VMName $VMName -ErrorAction SilentlyContinue)
+            $merging = [string]$vm.Status -match 'Merg'
+            # A read that fails mid-merge counts as still chained rather than
+            # as finished: the one answer that must never be guessed at here
+            # is 'no longer a differencing disk'.
+            $chained = $true
+            try { $chained = @(Get-VMHardDiskDrive -VMName $VMName | Where-Object { $_.Path -like '*.avhdx' }).Count -gt 0 } catch { }
+            if ($remaining.Count -eq 0 -and -not $merging -and -not $chained) { break }
+            if ((Get-Date) -gt $mergeDeadline) {
+                throw "'$VMName' is still merging its checkpoint chain after 60 minutes (status: $($vm.Status), $($remaining.Count) checkpoint(s) left, differencing disk still attached: $chained). Nothing else has been changed. Let the merge finish and re-run."
+            }
+            Write-Host "  $($vm.Status) ..."
+            Start-Sleep -Seconds 15
+        }
+        $actions.Add("merged $($snapshots.Count) checkpoint(s)")
+        Write-Host '  merged.'
+    }
+
+    $currentDrive = $null
+    $currentVhd = $null
+    try {
+        $currentDrive = Get-VmOsDisk -VMName $VMName
+        $currentVhd = Get-VHD -Path $currentDrive.Path
+    }
+    catch {
+        $failures.Add($_.Exception.Message)
+    }
+
     if ($currentVhd -and $currentVhd.VhdType -eq 'Differencing') {
-        $failures.Add("'$($currentDrive.Path)' is a differencing disk with parent '$($currentVhd.ParentPath)'. Merge the chain before moving it.")
+        $failures.Add("'$($currentDrive.Path)' is still a differencing disk with parent '$($currentVhd.ParentPath)' after the checkpoint check. Something outside this script built that chain; merge it by hand before re-running.")
     }
 
     # --- what each mode is going to act on ----------------------------- #
@@ -628,21 +757,42 @@ try {
     $sidecarPath = $null
     $sidecar = $null
     $alreadyMigrated = $false
+    $inPlace = $false
 
     if ($mode -eq 'Move') {
         if ($DestinationPath -match '^\\\\') {
             $failures.Add("-DestinationPath '$DestinationPath' is a UNC path. A fixed VHDX on a network share is not what this plan measured and not what it recommends; give a local volume.")
         }
         $sourcePath = if ($currentDrive) { $currentDrive.Path } else { $null }
-        $newDiskPath = Join-Path (Join-Path $DestinationPath $VMName) $OsDiskFileName
+        $destinationDir = Join-Path $DestinationPath $VMName
+        $newDiskPath = Join-Path $destinationDir $OsDiskFileName
 
         if ($currentVhd) {
+            # Not all three nodes need the same operation. Where a host's VM
+            # volume already *is* the fastest large volume it owns, there is
+            # nothing to move and the whole of the win is dynamic -> fixed,
+            # done in place. Whether this run is that case is decided by
+            # comparing directories, not by an operator remembering to say so.
+            $inPlace = Test-SamePath -A (Split-Path -Parent $currentDrive.Path) -B $destinationDir
+
             # Idempotence, and the only reason a re-run is safe to type twice:
-            # a VM already booted from a fixed disk of the right size at the
-            # destination is finished, not half-done.
-            $alreadyMigrated = ($currentDrive.Path -eq $newDiskPath) -and
+            # a VM already booted from a fixed disk of the right size, in the
+            # destination directory, is finished rather than half-done -
+            # whichever of the two names that disk carries.
+            $alreadyMigrated = $inPlace -and
                                ($currentVhd.VhdType -eq 'Fixed') -and
                                ([int64]$currentVhd.Size -ge ([int64]$SizeGB * 1GB))
+
+            # Convert-VHD reads one file and writes another, so an in-place
+            # conversion needs a second name. Both are recorded in the
+            # sidecar; after step 1.9 deletes the source, the surviving disk
+            # is the -fixed one and that record is what explains the name.
+            if ($inPlace -and -not $alreadyMigrated) {
+                $newDiskPath = Join-Path $destinationDir $FixedDiskFileName
+                if (Test-SamePath -A $newDiskPath -B $currentDrive.Path) {
+                    $failures.Add("'$($currentDrive.Path)' is already the name this script converts *to*, and it is $($currentVhd.VhdType) at $(Format-Size $currentVhd.Size) rather than a finished Fixed ${SizeGB} GiB disk. That is a half-finished earlier run; sort it out by hand before re-running.")
+                }
+            }
 
             if (-not $alreadyMigrated -and [int64]$currentVhd.Size -gt ([int64]$SizeGB * 1GB)) {
                 $failures.Add("'$($currentDrive.Path)' is already $(Format-Size $currentVhd.Size), larger than the -SizeGB $SizeGB asked for. A VHDX can be grown online and shrunk only by moving data first, so this refuses rather than truncating a root filesystem.")
@@ -654,10 +804,14 @@ try {
 
         if (-not $alreadyMigrated) {
             try {
+                # Measured on the destination volume, and correct for both
+                # cases without a special case: the source disk is never
+                # deleted here, so during and after the conversion both files
+                # exist, and in the in-place case both are on this volume.
                 $volume = Get-DestinationVolumeFree -Path $DestinationPath
                 $needBytes = ([int64]$SizeGB * 1GB) + ([int64]$FreeMarginGB * 1GB)
                 if ($volume.Free -lt $needBytes) {
-                    $failures.Add("Volume $($volume.DriveLetter): has $(Format-Size $volume.Free) free; a ${SizeGB}GB fixed disk plus the ${FreeMarginGB}GB margin needs $(Format-Size $needBytes). This refusal is the plan's, and the way through it is a smaller -SizeGB, not a smaller margin - a fixed VHDX must never be the reason a Windows boot volume fills.")
+                    $failures.Add("Volume $($volume.DriveLetter): has $(Format-Size $volume.Free) free; a ${SizeGB}GB fixed disk plus the ${FreeMarginGB}GB margin needs $(Format-Size $needBytes)$(if ($inPlace) { ", and the source disk stays on this same volume until -RemoveSourceDisk runs" }). This refusal is the plan's, and the way through it is a smaller -SizeGB or a different -DestinationPath, not a smaller margin - a fixed VHDX must never be the reason a Windows volume fills.")
                 }
             }
             catch {
@@ -714,8 +868,13 @@ try {
             if ($alreadyMigrated) {
                 Write-Host "Target:    $newDiskPath - already there, already Fixed, already $(Format-Size $currentVhd.Size)."
             }
-            else {
+            elseif ($inPlace) {
                 Write-Host "Target:    $newDiskPath, Fixed, ${SizeGB} GiB"
+                Write-Host "           CONVERSION IN PLACE - the destination is the volume this disk is already on, so"
+                Write-Host "           nothing moves and the whole of the change is dynamic -> fixed and 32 -> ${SizeGB} GiB."
+            }
+            else {
+                Write-Host "Target:    $newDiskPath, Fixed, ${SizeGB} GiB (moved off $([IO.Path]::GetPathRoot($sourcePath).TrimEnd('\')))"
             }
         }
         'Rollback' { Write-Host "Rollback:  back to $sourcePath, per $sidecarPath" }
@@ -973,7 +1132,7 @@ try {
             Write-Host "'$VMName' is already booted from a fixed $(Format-Size ([int64]$currentVhd.Size)) disk at $newDiskPath. A run without -PreflightOnly would change nothing." -ForegroundColor Green
         }
         else {
-            Write-Host "Would drain '$hostname', stop '$VMName', resize '$sourcePath' to ${SizeGB} GiB, convert it to a fixed disk at '$newDiskPath', repoint the VM, boot it, grow $rootSource, and uncordon."
+            Write-Host "Would drain '$hostname', stop '$VMName', resize '$sourcePath' to ${SizeGB} GiB, convert it $(if ($inPlace) { 'in place' } else { 'and relocate it' }) to a fixed disk at '$newDiskPath', repoint the VM, boot it, grow $rootSource, and uncordon."
             Write-Host "The source disk is left in place either way - deleting it is a separate run with -RemoveSourceDisk, after a $SoakDays-day soak."
         }
         Write-Host ''
@@ -1020,10 +1179,15 @@ try {
             }
         }
 
-        # Nothing else on this host may still be pointing at the file.
-        $stillAttached = @(Get-VM | Get-VMHardDiskDrive | Where-Object { $_.Path -eq $sourcePath })
+        # Nothing else on this host may still be pointing at the file - and
+        # a checkpoint's disks are not among Get-VM's, so both are asked.
+        $stillAttached = @(Get-VM | Get-VMHardDiskDrive | Where-Object { Test-SamePath -A $_.Path -B $sourcePath })
         if ($stillAttached.Count -gt 0) {
             throw "'$sourcePath' is still attached to VM(s) $(($stillAttached | ForEach-Object { $_.VMName }) -join ', '). Refusing to delete a disk a VM references."
+        }
+        $snapshotRefs = @(Get-VM | Get-VMSnapshot | Get-VMHardDiskDrive | Where-Object { Test-SamePath -A $_.Path -B $sourcePath })
+        if ($snapshotRefs.Count -gt 0) {
+            throw "'$sourcePath' is referenced by $($snapshotRefs.Count) checkpoint(s) on this host. Deleting it would break them. Merge or remove those checkpoints first."
         }
 
         Write-Stage 'Delete'
@@ -1232,6 +1396,7 @@ $($drain.StdOut)$($drain.StdErr)
                 sourceSizeBytes      = [int64]$currentVhd.Size
                 destinationPath      = $newDiskPath
                 destinationVhdType   = 'Fixed'
+                convertedInPlace     = [bool]$inPlace
                 destinationSizeBytes = [int64]$SizeGB * 1GB
                 controllerType       = [string]$currentDrive.ControllerType
                 controllerNumber     = [int]$currentDrive.ControllerNumber
@@ -1421,7 +1586,7 @@ $($drain.StdOut)$($drain.StdErr)
 
     $elapsed = [math]::Round(((Get-Date).ToUniversalTime() - $startedUtc).TotalMinutes, 1)
     $headline = switch ($mode) {
-        'Move'         { "'$VMName' now boots from a fixed $(Format-Size ([int64]$SizeGB * 1GB)) disk on $((Get-DestinationVolumeFree -Path $newDiskPath).DriveLetter): - done in ${elapsed} min." }
+        'Move'         { "'$VMName' now boots from a fixed $(Format-Size ([int64]$SizeGB * 1GB)) disk on $((Get-DestinationVolumeFree -Path $newDiskPath).DriveLetter):$(if ($inPlace) { ' (converted in place)' }) - done in ${elapsed} min." }
         'Rollback'     { "'$VMName' is back on '$sourcePath' - done in ${elapsed} min." }
         'RemoveSource' { "'$VMName''s source disk is gone - done in ${elapsed} min." }
     }
@@ -1461,6 +1626,7 @@ $($drain.StdOut)$($drain.StdErr)
         $summary.Add("| Node | $tick$hostname$tick ($tick$IPAddress$tick) |")
         switch ($mode) {
             'Move' {
+                $summary.Add("| Operation | $(if ($inPlace) { 'converted in place - the destination volume is the one it was already on' } else { 'moved to another volume, and converted' }) |")
                 $summary.Add("| Was | $tick$sourcePath$tick - $($currentVhd.VhdType), $(Format-Size ([int64]$currentVhd.Size)) |")
                 $summary.Add("| Now | $tick$newDiskPath$tick - Fixed, $(Format-Size ([int64]$SizeGB * 1GB)) |")
                 $summary.Add("| Root filesystem | $(Format-Size $guestRootBytes) -> $(Format-Size $grownBytes) |")

@@ -49,19 +49,23 @@ pg_restore --clean --if-exists --no-owner --no-privileges -h "$PGHOST" -p "$PGPO
 echo "[restore] pg_restore quartz <- $QUARTZ_DUMP"
 pg_restore --clean --if-exists --no-owner --no-privileges -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d quartz "$QUARTZ_DUMP"
 
-echo "[restore] sanity: table count across public+storage (aerie)"
-# 'storage' is in this list because the module contexts
-# (src/Aerie.Api/Modules/README.md) put some tables outside 'public' -
-# src/Aerie.Api/Modules/Storage/StorageContext.cs is the one that does today.
-# A check that only counted 'public' would pass against a database missing
-# every module-owned table.
+echo "[restore] sanity: table count across every non-system schema (aerie)"
+# Not a list of schema names, and that is the whole point. This read
+# `IN ('public','storage')` until the 8b.15 rehearsal found the hole: one
+# schema per module (src/Aerie.Api/Modules/README.md), Storage was the only
+# module when the list was written, and `gather` and `game` were added without
+# anyone thinking to come here. A hardcoded list silently narrows every time
+# the application grows, which is the opposite of what a sanity check should
+# do.
 TABLE_COUNT=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d aerie -tAc \
-  "SELECT count(*) FROM information_schema.tables WHERE table_schema IN ('public','storage')")
+  "SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema')")
+SCHEMA_BREAKDOWN=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d aerie -tAc \
+  "SELECT string_agg(s || ':' || c, ', ' ORDER BY s) FROM (SELECT table_schema s, count(*) c FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema') GROUP BY 1) t")
 if [ "$TABLE_COUNT" -lt 1 ]; then
-  echo "[restore] FAILED: restored 'aerie' database has no tables in 'public' or 'storage'" >&2
+  echo "[restore] FAILED: restored 'aerie' database has no tables in any non-system schema" >&2
   exit 1
 fi
-echo "[restore] OK: $TABLE_COUNT table(s) across public+storage"
+echo "[restore] OK: $TABLE_COUNT table(s) across ${SCHEMA_BREAKDOWN:-no schemas}"
 
 echo "[restore] sanity: row counts on two known aerie tables"
 for TABLE in '"Devices"' '"EnvironmentReadings"'; do

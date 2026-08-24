@@ -48,17 +48,31 @@ echo "[verify] pg_restore aerie_verify <- $DUMP_FILE"
 createdb -h "$SCRATCH" -p 5433 -U verify aerie_verify
 pg_restore --no-owner --no-privileges -h "$SCRATCH" -p 5433 -U verify -d aerie_verify "$DUMP_FILE"
 
-# 'storage' alongside 'public' for the reason
-# deploy/cluster/data/schema/restore.sh gives: the module contexts
-# (src/Aerie.Api/Modules/README.md) put some tables outside 'public', so a
-# count of 'public' alone would pass against a dump missing every
-# module-owned table.
+# Every non-system schema, and deliberately not a list of the ones that
+# existed when this was written. This check used to read
+# `table_schema IN ('public','storage')` - correct in August 2026, when
+# Storage was the only module context (src/Aerie.Api/Modules/README.md: one
+# schema per module). `gather` and `game` arrived days later and nothing told
+# this line, so for a while a dump that had lost both modules entirely would
+# have counted 27 tables and passed. The 8b.15 rehearsal found that; naming
+# schemas here is what made it possible, so no schema is named here now.
 TABLE_COUNT=$(psql -h "$SCRATCH" -p 5433 -U verify -d aerie_verify -tAc \
-  "SELECT count(*) FROM information_schema.tables WHERE table_schema IN ('public','storage')")
+  "SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema')")
+
+# The per-schema breakdown, in the log rather than in an assertion, because
+# this Job has no live database to compare against: verify-cronjob.yaml gives
+# it RESTIC_PASSWORD and RESTIC_REPOSITORY_LOCAL and nothing else, on purpose.
+# So the weekly proof is "the dump restores and has tables", and "every schema
+# the live database has is in the dump" belongs to scripts/k3s/Invoke-DrRehearsal.ps1,
+# which does have both sides. Printed anyway: a module that stops appearing on
+# this line week over week is visible to anyone reading the log, and costs one
+# query to make so.
+SCHEMA_BREAKDOWN=$(psql -h "$SCRATCH" -p 5433 -U verify -d aerie_verify -tAc \
+  "SELECT string_agg(s || ':' || c, ', ' ORDER BY s) FROM (SELECT table_schema s, count(*) c FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema') GROUP BY 1) t")
 
 if [ "$TABLE_COUNT" -lt 1 ]; then
-  echo "[verify] FAILED: restored database has no tables in 'public' or 'storage'" >&2
+  echo "[verify] FAILED: restored database has no tables in any non-system schema" >&2
   exit 1
 fi
 
-echo "[verify] OK: restored database has $TABLE_COUNT table(s) across public+storage"
+echo "[verify] OK: restored database has $TABLE_COUNT table(s) across ${SCHEMA_BREAKDOWN:-no schemas}"

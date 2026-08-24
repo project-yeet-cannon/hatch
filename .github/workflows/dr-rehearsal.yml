@@ -83,11 +83,13 @@ jobs:
             --color 5319E7 \
             --description 'Quarterly disaster-recovery rehearsal (docs/disaster-recovery.md)'
 
-      # The body is a checklist rather than a link, because the point of the
-      # rehearsal is that the *document* gets followed and corrected - and a
-      # rehearsal that produced no corrections was probably a re-read. The
-      # three exercises are 8b.15's scope: they cover every mechanism Phase 8
-      # built and none of the ones it did not.
+      # The body is a checklist rather than a link, because a rehearsal that
+      # produced no corrections was probably a re-read. Since 8b.15 the first
+      # item is one command rather than two procedures read by hand: data
+      # recovery is scripted, and a path exercised by running a command is
+      # exercised the same way every quarter regardless of who is holding the
+      # pager. What is left by hand is what the script deliberately does not
+      # cover.
       - name: Open it
         if: steps.existing.outputs.found == 'false' || inputs.force
         env:
@@ -102,25 +104,30 @@ jobs:
           month=$(date -u '+%-m')
           quarter="$(date -u '+%Y')-Q$(( (month - 1) / 3 + 1 ))"
           cat > body.md <<'BODY'
-          The quarterly disaster-recovery rehearsal. Follow
-          [`docs/disaster-recovery.md`](${{ github.server_url }}/${{ github.repository }}/blob/main/docs/disaster-recovery.md)
-          **literally**, holding only the offline `RESTIC_PASSWORD` and the
-          repositories — if a step needs something the document does not give
-          you, that is the finding.
+          The quarterly disaster-recovery rehearsal. Scope it honestly:
+          restoring the whole cluster is not the exercise.
 
-          Scope it honestly: restoring the whole cluster is not the exercise.
-          These three either work or they do not, and between them they cover
-          every mechanism Phase 8 built.
+          - [ ] **Data recovery — run the script.** Both databases out of both
+                repositories, into a throwaway Postgres, plus the parameter
+                export read back:
 
-          - [ ] **A database, from restic, onto a scratch Postgres.**
-                Procedure 1 of the document. Not into `aerie-pg` — the point is
-                the dump and the credential, not a production write.
-          - [ ] **One Longhorn volume, from a backup.** Procedure 3, including
-                the teardown at the end. Check the freeze setting first; the
-                argument for backing these volumes up at all depends on it.
-          - [ ] **One secret, read back out of the parameter export.**
-                Procedure 4. Names are enough for the first half; pull exactly
-                one value and then delete the file.
+                ```
+                pwsh scripts/k3s/Invoke-DrRehearsal.ps1 -IPAddress <a k3s server> -SshPrivateKeyPath ~/.ssh/aerie_node
+                ```
+
+                About six minutes, exit 0 or 1. Paste the table it prints into
+                this issue. A warning is not a pass — read what it says.
+          - [ ] **One Longhorn volume, from a backup.** Still by hand:
+                procedure 3 of
+                [`docs/disaster-recovery.md`](${{ github.server_url }}/${{ github.repository }}/blob/main/docs/disaster-recovery.md),
+                including the teardown at the end. Check the freeze setting
+                first; the argument for backing these volumes up at all depends
+                on it.
+          - [ ] **Read the document as if the cluster were gone.** The hand
+                procedures are what is left when there is no cluster to run the
+                script's Job on, so they are the half that rots unnoticed. If a
+                step needs something the document does not give you, that is
+                the finding.
           - [ ] **Correct the document.** At least one correction, or write
                 down why there was nothing to correct.
 

@@ -1689,7 +1689,7 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       silence-by-alertname rule, and a Known Gaps section that names the Kuma
       watchdog rather than leaving it in a commit message.
 
-- [ ] **15. The first rehearsal, and the schedule for the rest** — *manual*
+- [x] **15. The first rehearsal, and the schedule for the rest**
 
       A quarterly DR rehearsal onto throwaway VMs, and **the first one happens
       in this phase** rather than being scheduled and deferred — the same
@@ -1713,34 +1713,113 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       it. A rehearsal that produced no corrections was probably a re-read rather
       than a rehearsal.
 
-      **The schedule half is done; the rehearsal half is deliberately not, and
-      the box stays unticked until a person has done it.**
+      **Done 2026-08-24, and deliberately not the way this step imagined it.**
+      The step asked for a person holding only the offline password, following
+      8b.14's document literally, finding what it left out. What was built
+      instead is [`Invoke-DrRehearsal.ps1`](../../../scripts/k3s/Invoke-DrRehearsal.ps1):
+      the two data-recovery exercises as one command. The argument for the
+      swap is the one that matters at 3am — **in a crisis nobody should be
+      reading steps.** A restore path exercised by running a command is
+      exercised identically every quarter by whoever is holding the pager; a
+      restore path exercised by reading is exercised as well as the reader is
+      rested. The document keeps all four hand procedures, because they are
+      what is left when the cluster that would run the Job is itself what was
+      lost, and it now says exactly that at the top of its restore section.
 
+      One Job, built from the live `aerie-backup` CronJob's own pod template —
+      so the image, the `restic` Secret, both repository strings and the SMB
+      mount are whatever the nightly backup actually runs with, rather than
+      restated. A rehearsal that restated any of them could pass against a
+      repository nothing writes to any more, which is the exact failure it
+      exists to catch. Per repository it restores the newest `daily` snapshot,
+      stands up a Postgres inside the Job's own `/tmp` and tears it down,
+      `pg_restore`s both dumps, counts tables **against the live database
+      schema by schema**, lists the parameter export by name, and proves the
+      copy of `RESTIC_PASSWORD` inside the snapshot is the credential that
+      opened it — by SHA-256, so neither value is ever printed into a log that
+      goes wherever `kubectl logs` goes. Read-only throughout: `snapshots` and
+      `restore` take no exclusive lock, so a run at 03:10 exactly cannot
+      collide with the nightly backup, and the only contact with production is
+      one `SELECT count(*)` over `information_schema`.
+
+      **First run: 17 checks, both repositories, 5.9 minutes.** `aerie` and
+      `quartz` came back out of the local share copy (snapshot `49a784f5`) and
+      out of S3 (`2d30c62b`), `pg_restore` clean both times; 21 parameters
+      exported covering all 20 `required: true` entries; `param_mode=600`, so
+      restic preserved the `umask 077` the export was written with; and
+      `password_match=yes` against both — the root-of-trust claim in 8b.14,
+      confirmed as an assertion rather than as a sentence.
+
+      **And it found something, which is what makes it a rehearsal rather than
+      a re-read.** The restored `aerie` had 26 tables against the live
+      database's 27, and chasing that one-table gap turned up a much larger
+      one behind it. The missing table was `CameraConnections`, from a
+      migration that landed after the 03:10 snapshot — ordinary, and gone by
+      the next morning. But listing the dump properly showed the backup also
+      carries `game` and `gather` schemas, **and that both sanity checks in
+      this design were counting `table_schema IN ('public','storage')** —
+      correct when
+      [`Storage`](../../../src/Aerie.Api/Modules/Storage/StorageContext.cs) was
+      the only module context, and quietly wrong from the moment `gather`
+      (2026-08-22) and `game` (2026-08-23) were added days before this phase
+      closed. A dump that had lost both modules entirely would have counted 27
+      tables and **passed the weekly verify Job**. That is the precise failure
+      the comment above the line claimed to prevent, defeated by naming the
+      schemas it knew about.
+
+      Fixed at the source in both places —
+      [`cluster-verify.sh`](../../../containers/backup/scripts/cluster-verify.sh)
+      and
+      [`restore.sh`](../../../deploy/cluster/data/schema/restore.sh) now count
+      every non-system schema and print the per-schema breakdown — and the
+      rehearsal asserts what neither of them can: **every schema the live
+      database has is present in the restore**, failing on an absent one and
+      only warning on a smaller count, because those two are different
+      findings and a total cannot tell them apart. `cluster-verify.sh` still
+      cannot make that assertion weekly, and the reason is deliberate:
+      `verify-cronjob.yaml` gives it `RESTIC_PASSWORD` and the repository and
+      no database credential at all. Widening the weekly Job to hold one is a
+      decision about blast radius, not a fix, so it is written down here
+      rather than taken.
+
+      **Re-run after the fix: 19 checks, exit 0, 8.8 minutes.** Both
+      repositories restore all four schemas — `game 3, gather 3, public 22,
+      storage 4` — against a live database carrying `public 23`, and the one
+      remaining warning names the difference in the terms that make it
+      readable: `restored 32 vs live 33 (public 22 vs 23)`. That is the
+      `CameraConnections` migration, and it will be gone by the next morning's
+      snapshot. Two checks more than the first run because the schema
+      assertion is new; the finding is what added them.
+
+      **The lesson is the pattern, not the instance.** One schema per module
+      ([`Modules/README.md`](../../../src/Aerie.Api/Modules/README.md)) means
+      every new module is another chance for some list of names elsewhere to
+      go stale silently. Any check that enumerates what the application
+      contains will narrow itself the next time the application grows.
+
+      Two things are deliberately outside it. **The Longhorn volume restore**
+      (8b.14's procedure 3) restores infrastructure rather than data, is the
+      one procedure already exercised end to end, and wants its own script.
+      **Restoring over the live databases** stays
+      [`restore-job.yaml`](../../../deploy/cluster/data/schema/restore-job.yaml),
+      a suspended Job a person un-suspends deliberately: a rehearsal that
+      could overwrite production by getting an argument wrong is a worse risk
+      than the one it retires. Both remain named in 8b.14's Known Gaps.
+
+      **The schedule half, which was already done, now points at the script.**
       [`dr-rehearsal.yml`](../../../.github/workflows/dr-rehearsal.yml) is the
       `schedule:`-triggered workflow this step says is better than a calendar
       entry: `0 9 1 1,4,7,10 *`, one issue per quarter, labelled
-      `dr-rehearsal`, carrying the three exercises as a checklist rather than a
-      link — because what is being rehearsed is that the *document* can be
-      followed, and a rehearsal that produced no corrections was probably a
-      re-read. It refuses to open a second issue while one is still open: a
-      rehearsal that slipped a quarter should be one issue that is three months
-      old, not four identical ones. The first issue was opened by dispatching
-      it, so the workflow is proved rather than assumed.
-
-      **Two of the three mechanisms were exercised on 2026-08-24 while 8b.14
-      was being written**, and both are written up there: a Longhorn volume
-      restored from the backup target and read (Kuma's `kuma.db`, with its
-      `-wal` and `-shm`), and the parameter export dumped out of the local
-      repository (21 parameters, the exact count of `required` entries in
-      `parameters.json`). The restic database restore ran as the weekly verify
-      Job at 03:24 the same morning.
-
-      **That is not the rehearsal.** Every one of those was run by the author of
-      the procedure, from a shell that already had the cluster's credentials —
-      which tests the mechanism and not the document. What 8b.15 asks for is
-      someone holding only the offline password, following
-      [`docs/disaster-recovery.md`](../../disaster-recovery.md) literally, and
-      finding what it left out. The issue is open and says so.
+      `dr-rehearsal`, refusing to open a second while one is still open — a
+      rehearsal that slipped a quarter should be one issue that is three
+      months old, not four identical ones. Its checklist used to be three
+      procedures read by hand; the first item is now the one command, and what
+      is left by hand is what the script deliberately does not cover. One item
+      is new, and it is the honest cost of scripting this: **read the document
+      as if the cluster were gone.** The hand procedures are what remains when
+      there is no cluster to run the Job on, which makes them the half that
+      now rots unnoticed — the script cannot exercise them, so the issue has
+      to ask a person to.
 
 - [x] **16. Phase gate as a command** — `scripts/k3s/Test-Backup.ps1`,
       wrapped by `.github/workflows/verify-backup.yml`, in the exact shape

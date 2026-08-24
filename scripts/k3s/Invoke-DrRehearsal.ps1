@@ -232,6 +232,32 @@ function Get-SectionValue {
     return $null
 }
 
+function ConvertFrom-SchemaBreakdown {
+    <#
+    .SYNOPSIS
+        `game:3,gather:3,public:23,storage:4` as an ordered hashtable of
+        schema name to table count.
+
+    .DESCRIPTION
+        The breakdown exists because a total on its own cannot tell the two
+        interesting cases apart. A restored database with fewer tables than
+        the live one is usually a migration that landed after the snapshot -
+        ordinary, and self-correcting by tomorrow. A restored database missing
+        a whole schema is a module whose tables the backup is not carrying,
+        which is silent, permanent, and the thing a rehearsal exists to find.
+    #>
+    param([Parameter(Mandatory)][AllowNull()][string]$Text)
+    $result = [ordered]@{}
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $result }
+    foreach ($pair in ($Text -split ',')) {
+        $parts = $pair -split ':'
+        if ($parts.Count -ne 2) { continue }
+        $count = 0
+        if ([int]::TryParse($parts[1], [ref]$count)) { $result[$parts[0].Trim()] = $count }
+    }
+    return $result
+}
+
 function Get-SectionInt {
     <#
     .SYNOPSIS
@@ -375,8 +401,18 @@ WANT_HASH=$(printf '%s' "$RESTIC_PASSWORD" | sha256sum | cut -d" " -f1)
 # database rather than written down here - the same rule the gates use, and
 # the reason a schema migration does not turn into a failing rehearsal three
 # months later. Read-only: one count over information_schema.
+# Every non-system schema, not a list of the ones that existed when this was
+# written. src/Aerie.Api/Modules/ grew `gather` and `game` after the
+# public+storage rule was set down, and nothing told the rule - which is the
+# finding this rehearsal produced on its first run, and the reason no schema
+# is named here.
+NONSYSTEM="table_schema NOT IN ('pg_catalog','information_schema')"
+SCHEMA_BREAKDOWN="SELECT string_agg(s || ':' || c, ',' ORDER BY s) FROM (SELECT table_schema s, count(*) c FROM information_schema.tables WHERE $NONSYSTEM GROUP BY 1) t"
+
 LIVE_TABLES=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d aerie -tAc \
-  "SELECT count(*) FROM information_schema.tables WHERE table_schema IN ('public','storage')" 2>/dev/null | tr -d " ")
+  "SELECT count(*) FROM information_schema.tables WHERE $NONSYSTEM" 2>/dev/null | tr -d " ")
+LIVE_SCHEMAS=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d aerie -tAc \
+  "$SCHEMA_BREAKDOWN" 2>/dev/null | tr -d " ")
 
 rehearse() {
   LABEL="$1"
@@ -389,6 +425,7 @@ rehearse() {
   fi
   echo "repository=$REPO"
   echo "live_aerie_tables=${LIVE_TABLES:-}"
+  echo "live_aerie_schemas=${LIVE_SCHEMAS:-}"
 
   SCRATCH=$(mktemp -d) || { echo "error:could not create a scratch directory"; return; }
   PGDATA="$SCRATCH/pgdata"
@@ -455,17 +492,16 @@ rehearse() {
         RESTORE_ERRORS=$(grep -c "^pg_restore: error" "$RESTORE_LOG" 2>/dev/null)
         echo "${NAME}_restore_errors=${RESTORE_ERRORS:-0}"
 
-        # 'storage' alongside 'public' for the reason
-        # deploy/cluster/data/schema/restore.sh gives: the module contexts put
-        # some tables outside 'public', so a count of 'public' alone would
-        # pass against a dump missing every module-owned table.
-        if [ "$NAME" = "aerie" ]; then
-          WHERE="table_schema IN ('public','storage')"
-        else
-          WHERE="table_schema NOT IN ('pg_catalog','information_schema')"
-        fi
+        # Counted the same way on both sides, and broken down per schema
+        # beside it. The breakdown is the assertion that matters: a total that
+        # is merely smaller reads as a migration, while a schema that is
+        # present live and absent from the restore is a module whose tables
+        # the backup is not carrying, and only the per-schema line can tell
+        # those two apart.
         echo "${NAME}_tables=$(psql -h "$SCRATCH" -p 5433 -U rehearsal -d "${NAME}_rehearsal" -tAc \
-          "SELECT count(*) FROM information_schema.tables WHERE $WHERE" 2>/dev/null | tr -d " ")"
+          "SELECT count(*) FROM information_schema.tables WHERE $NONSYSTEM" 2>/dev/null | tr -d " ")"
+        echo "${NAME}_schemas=$(psql -h "$SCRATCH" -p 5433 -U rehearsal -d "${NAME}_rehearsal" -tAc \
+          "$SCHEMA_BREAKDOWN" 2>/dev/null | tr -d " ")"
       done
 
       pg_ctl -D "$PGDATA" -o "-k $SCRATCH" stop -m fast >/dev/null 2>&1
@@ -590,3 +626,240 @@ rehearse() {
             Write-Host "Warning: could not delete Job aerie/$JobName - it has a 1800s TTL and will go on its own." -ForegroundColor Yellow
         }
     }
+
+    # ---------------------------------------------------------------- #
+    Write-Stage 'Checks'
+    # ---------------------------------------------------------------- #
+
+    $nowUtc = (Get-Date).ToUniversalTime()
+
+    foreach ($repository in $repositoriesToRehearse) {
+        $section = Get-RehearsalSection -Output $rehearsalOutput -Name $repository
+
+        if (-not $section.Found) {
+            Add-Check -Scope $repository -Name 'The rehearsal reached this repository' -Status 'Fail' -Detail 'the Job produced no output for it at all - it stopped before getting here, or the pod template has no environment variable naming it'
+            continue
+        }
+        foreach ($sectionError in $section.Errors) {
+            Add-Check -Scope $repository -Name 'The rehearsal ran without error' -Status 'Fail' -Detail $sectionError
+        }
+        if ((Get-SectionValue -Section $section -Key 'completed') -ne 'yes') {
+            Add-Check -Scope $repository -Name 'The rehearsal finished this repository' -Status 'Fail' -Detail 'the section is incomplete - the Job was killed or timed out part way through it'
+        }
+
+        # -- The snapshot it worked from.
+        $snapshotId = Get-SectionValue -Section $section -Key 'snapshot_id'
+        $snapshotTime = Get-SectionValue -Section $section -Key 'snapshot_time'
+        if ([string]::IsNullOrWhiteSpace($snapshotId)) {
+            Add-Check -Scope $repository -Name 'A daily snapshot exists' -Status 'Fail' -Detail 'restic reported no snapshot tagged daily - there is nothing here to restore'
+        }
+        else {
+            $ageDetail = "snapshot $snapshotId"
+            $ageHours = $null
+            try {
+                $taken = [datetimeoffset]::Parse($snapshotTime, [globalization.CultureInfo]::InvariantCulture).UtcDateTime
+                $ageHours = [math]::Round(($nowUtc - $taken).TotalHours, 1)
+                $ageDetail = "snapshot $snapshotId, taken ${ageHours}h ago"
+            }
+            catch { $ageDetail = "snapshot $snapshotId, timestamp '$snapshotTime' did not parse" }
+
+            # 36h is deploy/cluster/observability/config/alerts/backup.yaml's
+            # own threshold for this backup path. A Warn rather than a Fail:
+            # the restore under test still worked, and a stale snapshot is
+            # 8b.11's alert to raise, not this script's. Reported here so a
+            # rehearsal against week-old data cannot be mistaken for a
+            # rehearsal against last night's.
+            if ($null -ne $ageHours -and $ageHours -gt 36) {
+                Add-Check -Scope $repository -Name 'The snapshot restored is recent' -Status 'Warn' -Detail "$ageDetail - older than the 36h alert threshold, so this rehearsed a stale backup"
+            }
+            else {
+                Add-Check -Scope $repository -Name 'The snapshot restored is recent' -Status 'Pass' -Detail $ageDetail
+            }
+        }
+
+        # -- All three files, in one snapshot. 8b.7's whole claim.
+        $restoredFiles = @(([string](Get-SectionValue -Section $section -Key 'files')) -split '\s+' | Where-Object { $_ })
+        $missingFiles = @($ExpectedSnapshotFiles | Where-Object { $_ -notin $restoredFiles })
+        if ($missingFiles.Count -gt 0) {
+            Add-Check -Scope $repository -Name 'The snapshot holds all three files' -Status 'Fail' -Detail "missing $($missingFiles -join ', ') - restored $(if ($restoredFiles) { $restoredFiles -join ', ' } else { 'nothing' })"
+        }
+        else {
+            Add-Check -Scope $repository -Name 'The snapshot holds all three files' -Status 'Pass' -Detail ($ExpectedSnapshotFiles -join ', ')
+        }
+
+        # -- The restores themselves.
+        $liveTables = Get-SectionInt -Section $section -Key 'live_aerie_tables'
+        foreach ($database in @('aerie', 'quartz')) {
+            $exitCode = Get-SectionInt -Section $section -Key "${database}_restore_exit"
+            $errorCount = Get-SectionInt -Section $section -Key "${database}_restore_errors"
+            $tableCount = Get-SectionInt -Section $section -Key "${database}_tables"
+
+            if ($null -eq $tableCount) {
+                Add-Check -Scope $repository -Name "$database restores" -Status 'Fail' -Detail 'no table count came back - the dump was missing, or the scratch Postgres never started'
+            }
+            elseif ($tableCount -lt 1) {
+                Add-Check -Scope $repository -Name "$database restores" -Status 'Fail' -Detail 'the restored database has no tables, which is a backup that exists and is worth nothing'
+            }
+            elseif ($exitCode -ne 0) {
+                Add-Check -Scope $repository -Name "$database restores" -Status 'Fail' -Detail "$tableCount table(s) landed but pg_restore exited $exitCode with $errorCount error(s) - re-run with -KeepJob and read the log"
+            }
+            elseif ($errorCount -gt 0) {
+                Add-Check -Scope $repository -Name "$database restores" -Status 'Warn' -Detail "$tableCount table(s), pg_restore exited 0 with $errorCount non-fatal error(s)"
+            }
+            else {
+                Add-Check -Scope $repository -Name "$database restores" -Status 'Pass' -Detail "$tableCount table(s), pg_restore clean"
+            }
+        }
+
+        # -- The restored database against the live one, per schema. The
+        #    numbers come from the cluster rather than from this file, so a
+        #    migration that adds a table does not become a failing rehearsal
+        #    three months later - and a schema that stops being backed up
+        #    does, which is the asymmetry that matters.
+        $aerieTables = Get-SectionInt -Section $section -Key 'aerie_tables'
+        $liveSchemas = ConvertFrom-SchemaBreakdown (Get-SectionValue -Section $section -Key 'live_aerie_schemas')
+        $restoredSchemas = ConvertFrom-SchemaBreakdown (Get-SectionValue -Section $section -Key 'aerie_schemas')
+
+        if ($null -eq $liveTables -or $null -eq $aerieTables -or $liveSchemas.Count -eq 0 -or $restoredSchemas.Count -eq 0) {
+            Add-Check -Scope $repository -Name 'Every live schema is in the restore' -Status 'Fail' -Detail 'one side of the comparison is missing, so nothing was compared'
+        }
+        else {
+            $absentSchemas = @($liveSchemas.Keys | Where-Object { -not $restoredSchemas.Contains($_) })
+            $newSchemas = @($restoredSchemas.Keys | Where-Object { -not $liveSchemas.Contains($_) })
+            $liveSummary = (($liveSchemas.Keys | ForEach-Object { "$_ $($liveSchemas[$_])" }) -join ', ')
+
+            if ($absentSchemas.Count -gt 0) {
+                Add-Check -Scope $repository -Name 'Every live schema is in the restore' -Status 'Fail' -Detail "the backup carries no tables at all for: $($absentSchemas -join ', ') - a module's data is not being backed up, and a table count would not have shown it"
+            }
+            elseif ($newSchemas.Count -gt 0) {
+                Add-Check -Scope $repository -Name 'Every live schema is in the restore' -Status 'Warn' -Detail "restored $($newSchemas -join ', ') which the live database no longer has - a schema dropped since the snapshot"
+            }
+            else {
+                Add-Check -Scope $repository -Name 'Every live schema is in the restore' -Status 'Pass' -Detail "$($liveSchemas.Count) schema(s): $liveSummary"
+            }
+
+            if ($liveTables -eq $aerieTables) {
+                Add-Check -Scope $repository -Name 'Restored aerie matches the live table count' -Status 'Pass' -Detail "$aerieTables table(s) across $($restoredSchemas.Count) schema(s), same as live"
+            }
+            else {
+                $deltas = @(
+                    $liveSchemas.Keys | ForEach-Object {
+                        $restoredCount = if ($restoredSchemas.Contains($_)) { $restoredSchemas[$_] } else { 0 }
+                        if ($restoredCount -ne $liveSchemas[$_]) { "$_ $restoredCount vs $($liveSchemas[$_])" }
+                    } | Where-Object { $_ }
+                )
+                Add-Check -Scope $repository -Name 'Restored aerie matches the live table count' -Status 'Warn' -Detail "restored $aerieTables vs live $liveTables ($($deltas -join '; ')) - expected after a migration since the snapshot, a finding otherwise"
+            }
+        }
+
+        # -- The parameter export (8b.7), by name. A superset check rather
+        #    than an equality one: the export is everything under the prefix,
+        #    which legitimately includes optional parameters this installation
+        #    happens to have seeded.
+        $exportedNames = @($section.Parameters)
+        $missingParameters = @($requiredParameterNames | Where-Object { $_ -notin $exportedNames })
+        if ($exportedNames.Count -eq 0) {
+            Add-Check -Scope $repository -Name 'The parameter export holds every required name' -Status 'Fail' -Detail 'the export listed no parameters at all'
+        }
+        elseif ($missingParameters.Count -gt 0) {
+            Add-Check -Scope $repository -Name 'The parameter export holds every required name' -Status 'Fail' -Detail "$($missingParameters.Count) missing: $($missingParameters -join ', ')"
+        }
+        else {
+            $extra = $exportedNames.Count - $requiredParameterNames.Count
+            Add-Check -Scope $repository -Name 'The parameter export holds every required name' -Status 'Pass' -Detail "$($exportedNames.Count) exported, covering all $($requiredParameterNames.Count) required$(if ($extra -gt 0) { " (plus $extra optional)" })"
+        }
+
+        # -- The root-of-trust claim, as an assertion. docs/disaster-recovery.md
+        #    says the offline password opens the box that contains a copy of
+        #    itself; this is the line that would stop being true silently.
+        switch (Get-SectionValue -Section $section -Key 'password_match') {
+            'yes' { Add-Check -Scope $repository -Name "The snapshot's own copy of the password matches" -Status 'Pass' -Detail "$parameterPrefix/$SelfReferentialParameter equals the credential that opened this repository (compared by SHA-256; neither was printed)" }
+            'no' { Add-Check -Scope $repository -Name "The snapshot's own copy of the password matches" -Status 'Fail' -Detail "$parameterPrefix/$SelfReferentialParameter is NOT the credential that opened this repository - one of the two was rotated without the other, and the offline copy no longer opens what it claims to" }
+            'absent' { Add-Check -Scope $repository -Name "The snapshot's own copy of the password matches" -Status 'Fail' -Detail "$parameterPrefix/$SelfReferentialParameter is not in the export - the parameter tree is being exported without the one value that makes the export recoverable" }
+            default { Add-Check -Scope $repository -Name "The snapshot's own copy of the password matches" -Status 'Fail' -Detail 'the comparison did not run' }
+        }
+
+        # -- The permission the export is written with. A Warn: it is a
+        #    property of the restore rather than of the backup, and it does
+        #    not make anything unrecoverable.
+        $mode = Get-SectionValue -Section $section -Key 'param_mode'
+        if ($mode -eq '600') {
+            Add-Check -Scope $repository -Name 'The restored export is still 0600' -Status 'Pass' -Detail 'restic preserved the umask 077 cluster-backup.sh wrote it with'
+        }
+        elseif ([string]::IsNullOrWhiteSpace($mode)) {
+            Add-Check -Scope $repository -Name 'The restored export is still 0600' -Status 'Warn' -Detail 'could not read the mode of the restored parameters.json'
+        }
+        else {
+            Add-Check -Scope $repository -Name 'The restored export is still 0600' -Status 'Warn' -Detail "restored as $mode - every secret in the house, wider than it was written"
+        }
+    }
+
+    if (-not $ranToCompletion) {
+        Add-Check -Scope 'job' -Name 'The rehearsal Job ran to completion' -Status 'Fail' -Detail "no end marker in the log - it timed out at ${JobTimeoutSeconds}s, was evicted, or the node killed it. Re-run with -KeepJob and read the pod."
+    }
+    else {
+        Add-Check -Scope 'job' -Name 'The rehearsal Job ran to completion' -Status 'Pass' -Detail "$($repositoriesToRehearse.Count) repository(ies), one Job, torn down after"
+    }
+}
+finally {
+    if ($tempKeyFile) { Remove-Item $tempKeyFile -Force -ErrorAction SilentlyContinue }
+    if ($knownHostsFile) { Remove-Item $knownHostsFile -Force -ErrorAction SilentlyContinue }
+}
+
+# ---------------------------------------------------------------- #
+Write-Stage 'Report'
+# ---------------------------------------------------------------- #
+
+$passed = @($script:Checks | Where-Object { $_.Result -eq 'Pass' }).Count
+$warned = @($script:Checks | Where-Object { $_.Result -eq 'Warn' }).Count
+$failed = @($script:Checks | Where-Object { $_.Result -eq 'Fail' }).Count
+$elapsed = [math]::Round(((Get-Date).ToUniversalTime() - $startedUtc).TotalMinutes, 1)
+
+Write-Host ''
+$script:Checks |
+    Select-Object Scope, Check, Result, @{ Name = 'Detail'; Expression = { if ($_.Detail.Length -gt 90) { $_.Detail.Substring(0, 89) + [char]0x2026 } else { $_.Detail } } } |
+    Format-Table -AutoSize | Out-String -Width 220 | ForEach-Object { Write-Host $_.TrimEnd() }
+
+if ($failed -gt 0) {
+    Write-Host ''
+    Write-Host 'Failures in full:' -ForegroundColor Red
+    foreach ($check in ($script:Checks | Where-Object { $_.Result -eq 'Fail' })) {
+        Write-Host "  [$($check.Scope)] $($check.Check)" -ForegroundColor Red
+        Write-Host "      $($check.Detail)"
+    }
+}
+
+if ($env:GITHUB_STEP_SUMMARY) {
+    $tick = [char]0x60
+    $lines = @(
+        "## DR rehearsal - data recovery - $(if ($failed -gt 0) { 'FAILED' } else { 'passed' })"
+        ''
+        "$passed passed, $warned warning(s), $failed failed, against $tick$IPAddress$tick in ${elapsed} min."
+        ''
+        '| Repository | Check | Result | Detail |'
+        '|---|---|---|---|'
+    )
+    foreach ($check in $script:Checks) {
+        $mark = switch ($check.Result) { 'Pass' { [char]0x2705 } 'Warn' { [char]0x26A0 } default { [char]0x274C } }
+        $detail = ($check.Detail -replace '\|', '\|')
+        $lines += "| $($check.Scope) | $($check.Check) | $mark $($check.Result) | $detail |"
+    }
+    $lines += @(
+        ''
+        '_The cluster plan, Phase 8b.15. Both databases restored into a throwaway Postgres and the parameter tree read back, out of one snapshot per repository. Nothing was written to a repository or to a live database._'
+    )
+    Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ($lines -join "`n")
+}
+
+Write-Host ''
+if ($failed -gt 0) {
+    Write-Host "DR rehearsal FAILED: $failed check(s) of $($script:Checks.Count) in ${elapsed} min." -ForegroundColor Red
+    Write-Host 'Nothing was changed. docs/disaster-recovery.md has the by-hand form of every procedure above - which is what you want if what failed is this script rather than the backup.'
+    exit 1
+}
+
+Write-Host "DR rehearsal passed: $($script:Checks.Count) check(s) in ${elapsed} min." -ForegroundColor Green
+Write-Host 'Both databases came back out of every repository rehearsed, and the parameter tree with them.'
+if ($warned -gt 0) {
+    Write-Host "$warned advisory warning(s) above - they do not fail the run, and each says why."
+}
