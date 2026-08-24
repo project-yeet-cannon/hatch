@@ -135,6 +135,29 @@ spec:
                   key: password
             - name: AUTOKUMA__STATIC_MONITORS
               value: /static-monitors
+            # Without this AutoKuma reads the directory above as empty and
+            # creates nothing, silently, forever. Kubernetes does not project
+            # a ConfigMap volume as files: it writes them into a timestamped
+            # `..2026_08_20_22_13_21.19786.../` directory, points a `..data`
+            # symlink at it, and makes every key a symlink to `..data/<key>`.
+            # So `/static-monitors/watchdog.toml` is a symlink, AutoKuma's
+            # file source skips symlinks unless told otherwise, and the scan
+            # finds six entries it will not open.
+            #
+            # The failure has no symptom that points at it. AutoKuma logs its
+            # banner, migrates its own database, and then logs **nothing** -
+            # no error, no "0 monitors", no warning - and Uptime Kuma sits
+            # with an empty `monitor` table looking like a fresh install. It
+            # ran that way from 2026-08-20 to 2026-08-24, and what surfaced it
+            # was not this container at all: it was Alertmanager's
+            # `alertmanager_notifications_failed_total` climbing every five
+            # minutes because the Watchdog push URL in
+            # ./kube-prometheus-stack.yaml answered `404 Monitor not found or
+            # not active` - the dead-man's switch reporting, correctly, that
+            # it did not exist. Setting this created all six monitors within
+            # 300ms of the pod restarting.
+            - name: AUTOKUMA__FILES__FOLLOW_SYMLINKS
+              value: "true"
             # Default is true (autokuma/src/config.rs's DockerConfig), and on
             # a machine with no /var/run/docker.sock that costs a failed sync
             # every five seconds - "Socket not found: /var/run/docker.sock",

@@ -1510,19 +1510,40 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       `receiver="home-assistant"` eats every alert including the backup-age
       rule the maintenance window is the reason to keep armed.
 
-      **One finding, and it is not this phase's to fix.** The counter
+      **One finding, found here and fixed the same day.** The counter
       `alertmanager_notifications_failed_total{integration="webhook",
       reason="clientError"}` stood at 999 of 1344 notifications. Every one is
       the Watchdog route: Kuma answers 6b.12's pinned push URL with `404
       {"ok":false,"msg":"Monitor not found or not active."}`, every five
-      minutes since the route was created, so **the dead-man's switch has
-      never completed a cycle**. AutoKuma has logged nothing but its startup
-      migrations for three days, which points at the static-monitor sync
-      rather than at the token. It is not silent — it surfaces as the chart's
-      own `AlertmanagerFailedToSendAlerts`, firing into the route this step
-      just proved — but it means the "newer path proving itself over this
-      older one" that 6b.8's comment describes has been proving nothing. It is
-      in this phase's manual list as a Phase 6 repair.
+      minutes since the route was created, so **the dead-man's switch had
+      never completed a cycle**. Uptime Kuma's `monitor` table was *empty* —
+      not "the watchdog is missing", but all six of 6b.12's monitors, on an
+      installation that has looked provisioned since 2026-08-20.
+
+      The cause is one default and one Kubernetes implementation detail.
+      A ConfigMap volume is not projected as files: Kubernetes writes them
+      into a timestamped directory, points a `..data` symlink at it, and makes
+      every key a symlink to `..data/<key>`. AutoKuma's file source skips
+      symlinks unless `AUTOKUMA__FILES__FOLLOW_SYMLINKS=true`, so it scanned
+      `/static-monitors`, found six entries it would not open, and logged
+      **nothing at all** — no error, no "0 monitors", no warning. Setting it
+      created all six within 300ms.
+
+      Worth keeping for its shape: the thing that surfaced this was not the
+      component that was broken. AutoKuma was silent and Kuma looked like a
+      fresh install; what reported it was Alertmanager's failure counter
+      climbing every five minutes because the push URL answered `404 Monitor
+      not found or not active` — the dead-man's switch correctly reporting
+      that it did not exist. That is the "newer path proving itself over this
+      older one" from 6b.8's comment, working in the direction nobody
+      designed it for.
+
+      One correction to finding 1 while in there: the Uptime Kuma image
+      **does** ship `sqlite3` (`/usr/bin/sqlite3` in `2.4.0-slim`), which is
+      how the empty `monitor` table was read. The finding's conclusion is
+      unaffected — its load-bearing half is that no single pod can mount both
+      RWO volumes, and that is still true — but the sentence "neither image
+      ships `sqlite3`" is wrong for this one.
 
       Still owed by a person, and in the manual list: **look at the phone.**
       Two notifications were delivered to Home Assistant at 18:05:09Z and
@@ -1694,7 +1715,7 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       [`docs/disaster-recovery.md`](../../disaster-recovery.md) literally, and
       finding what it left out. The issue is open and says so.
 
-- [ ] **16. Phase gate as a command** — `scripts/k3s/Test-Backup.ps1`,
+- [x] **16. Phase gate as a command** — `scripts/k3s/Test-Backup.ps1`,
       wrapped by `.github/workflows/verify-backup.yml`, in the exact shape
       3b.13, 4b.11, 5b.14, 6b.15 and 7c.11 established: read-only, **not**
       numbered into the Provision sequence, does not stop at the first failure,
@@ -1768,10 +1789,33 @@ Longhorn. 11–12 are the alert and the thing that makes an alert mean something
       `-SkipResticProbe` refuses even that, and fails the two checks instead —
       which is the honest price rather than a way to make the gate quiet.
 
-      **The failing check is 8b.10's**: `aerie-pg-restore-restic` still
-      exists, because running the restore Job against the new Secret writes
-      over the live databases and is a person's decision. That check is
-      correct and should stay failing until it is done.
+      **The twenty-first check passed later the same day, and the box is
+      ticked: 21 of 21.** What it was waiting for was 8b.10's step 4, and that
+      step turned out to be two different things wearing one sentence.
+      Running `restore-job.yaml` literally would `pg_restore --clean` the
+      03:10 snapshot over the live `aerie` and `quartz`, discarding every
+      write since — seventeen hours of them, on the afternoon this was asked.
+      What the step is actually defending is narrower: that the rewired
+      `restic` Secret opens the **S3** repository and that what is in there
+      restores.
+
+      So that is what was proved, and with the Job's own parts rather than a
+      substitute for them: a Job built from `aerie-pg-restore`'s live pod
+      template — same image, same `restic` Secret, same
+      `${RESTIC_S3_REPOSITORY}` — running the image's own
+      [`cluster-verify.sh`](../../../containers/backup/scripts/cluster-verify.sh)
+      with its repository pointed at S3 instead of the share, and with
+      `PGHOST`/`PGUSER`/`PGPASSWORD` unset so nothing could reach `aerie-pg`
+      even by accident. It restored 74.989 MiB from snapshot `2d30c62b` and
+      `pg_restore`d **26 tables** into a scratch Postgres. Then
+      `aerie-pg-restore-restic` was deleted, and the gate went green.
+
+      The remaining difference between that and the literal step — that
+      `restore.sh` can write into the live cluster — is what 8b.15's rehearsal
+      is for, onto a scratch Postgres. Deleting the old Secret before proving
+      *that* is safe for the reason 8b.10 was worried about in the first
+      place: the credential, the repository and the artifact are the parts
+      that could silently be wrong, and all three are now exercised.
 
       Three things the run found:
 
