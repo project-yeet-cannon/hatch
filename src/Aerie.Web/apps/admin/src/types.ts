@@ -80,6 +80,35 @@ export interface DeviceWriteRequest {
   zoneId: string | null;
   haDeviceId: string | null;
   enabled: boolean;
+  /** Only Discovery sends this: the host HA reports for the device, which seeds a camera's connection so nobody has to type an address. */
+  discoveredHost?: string | null;
+}
+
+/**
+ * How to reach a camera's RTSP stream (docs/plans/cameras.md Phase 11). There
+ * is no password field, on purpose - the API lets you set one, never read one
+ * back, so `hasPassword` is what tells an empty box from an unset one.
+ */
+export interface CameraConnection {
+  /** The operator's override. Null means "use whatever Home Assistant reports". */
+  host: string | null;
+  /** What Home Assistant last reported. Shown as a hint, never edited here. */
+  discoveredHost: string | null;
+  /** Which of the two is actually in use, resolved server-side. */
+  effectiveHost: string | null;
+  port: number;
+  streamPath: string;
+  username: string | null;
+  hasPassword: boolean;
+}
+
+export interface CameraConnectionWriteRequest {
+  host: string | null;
+  port: number | null;
+  streamPath: string | null;
+  username: string | null;
+  /** Omit (undefined) to leave the stored password alone; '' clears it; a value replaces it. */
+  password?: string | null;
 }
 
 export interface BackfillRequest {
@@ -131,6 +160,8 @@ export interface UnmappedHaDevice {
   suggestedKind: DeviceKind | null;
   entityIds: string[];
   suggestedChannels: DeviceChannelWriteRequest[];
+  /** Host from HA's device registry, when it has one. Only a camera uses it. */
+  discoveredHost: string | null;
 }
 
 export interface ChannelHistoryPoint {

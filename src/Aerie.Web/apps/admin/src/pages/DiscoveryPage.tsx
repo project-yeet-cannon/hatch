@@ -55,6 +55,10 @@ export function DiscoveryPage() {
         zoneId: null,
         haDeviceId: device.haDeviceId,
         enabled: true,
+        // A camera imported this way arrives already knowing where it lives, so
+        // the only thing left to fill in is the credential. Ignored for every
+        // other kind.
+        discoveredHost: device.discoveredHost,
       });
       for (const channel of device.suggestedChannels) {
         await addChannel(created.id, channel);

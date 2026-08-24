@@ -25,7 +25,15 @@ public record ChannelSetpointRequest(decimal Temperature);
 
 public record DeviceDto(Guid Id, string Name, DeviceKind? Kind, Guid? ZoneId, string? HaDeviceId, bool Enabled, IReadOnlyList<DeviceChannelDto> Channels);
 
-public record DeviceWriteRequest(string Name, DeviceKind? Kind, Guid? ZoneId, string? HaDeviceId, bool Enabled);
+/// <param name="DiscoveredHost">
+/// Optional, and only Discovery sends it: the host Home Assistant reports for
+/// this device. On a Camera it seeds the connection row so the stream works
+/// without anyone typing an address (docs/plans/cameras.md Phase 11). It is
+/// carried here rather than on the camera-connection write because that one is
+/// the *operator's* form, and the two values are deliberately separate - see
+/// EfCameraConnection.
+/// </param>
+public record DeviceWriteRequest(string Name, DeviceKind? Kind, Guid? ZoneId, string? HaDeviceId, bool Enabled, string? DiscoveredHost = null);
 
 /// <summary>Time range for a BackfillChannelHistory job run (DevicesController.Backfill).</summary>
 public record BackfillRequest(DateTimeOffset From, DateTimeOffset To);
@@ -42,6 +50,44 @@ public record ChannelPowerRequest(bool On);
 /// </summary>
 public record ChannelPlayMediaRequest(string MediaContentId, string? MediaContentType = null);
 
+/// <summary>
+/// How to reach one camera's RTSP stream, as the admin UI sees it
+/// (docs/plans/cameras.md Phase 11).
+///
+/// There is no Password field, and there never will be: the API's job is to
+/// let an operator *set* one, not to hand one back. <paramref name="HasPassword"/>
+/// is what the form needs instead - it is the difference between an empty box
+/// meaning "none set" and an empty box meaning "set, and not shown".
+/// </summary>
+/// <param name="Host">The operator's override, or null when Home Assistant's value is being used.</param>
+/// <param name="DiscoveredHost">What Home Assistant last reported for this device. Shown as a hint under the Host field, so the override can be left empty on purpose and it is clear what that means.</param>
+/// <param name="EffectiveHost">Which of the two is actually being used, resolved server-side so the form and the stream can never disagree about it.</param>
+public record CameraConnectionDto(
+    string? Host,
+    string? DiscoveredHost,
+    string? EffectiveHost,
+    int Port,
+    string StreamPath,
+    string? Username,
+    bool HasPassword);
+
+/// <summary>
+/// A write to a camera's connection settings.
+/// </summary>
+/// <param name="Password">
+/// Three-state, and the states matter. Null leaves the stored password alone -
+/// which is what a form submits when the operator edited the host and never
+/// touched the password box. An empty string clears it, for a camera whose RTSP
+/// is anonymous. Anything else replaces it. Without the null case, every save
+/// from a form that cannot show the current value would wipe it.
+/// </param>
+public record CameraConnectionWriteRequest(
+    string? Host,
+    int? Port,
+    string? StreamPath,
+    string? Username,
+    string? Password);
+
 public record SiteSettingDto(string Key, string Value);
 
 public record SiteSettingWriteRequest(string Value);
@@ -52,7 +98,9 @@ public record UnmappedHaDevice(
     string SuggestedName,
     DeviceKind? SuggestedKind,
     IReadOnlyList<string> EntityIds,
-    IReadOnlyList<DeviceChannelWriteRequest> SuggestedChannels);
+    IReadOnlyList<DeviceChannelWriteRequest> SuggestedChannels,
+    /// <summary>Host from the HA device registry's configuration_url, when it has one. Only a camera does anything with it - see CameraConnection - but it is carried for every device because the template that produces it is one template.</summary>
+    string? DiscoveredHost = null);
 
 /// <summary>One bucketed (averaged) numeric sample for a channel history graph.</summary>
 public record ChannelHistoryPoint(DateTimeOffset Time, decimal Value);

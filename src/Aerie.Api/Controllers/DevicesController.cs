@@ -1,4 +1,5 @@
 using System.Globalization;
+using Aerie.Api.Common;
 using Aerie.Api.Ef;
 using Aerie.Api.Jobs;
 using Aerie.Api.Models.DeviceMapping;
@@ -51,6 +52,19 @@ public class DevicesController(
         };
         db.Devices.Add(device);
         await db.SaveChangesAsync(ct);
+
+        // A camera imported from discovery arrives already knowing where it
+        // lives, so the operator only has to supply the credential. Seeded here
+        // rather than in the browser because DiscoveredHost is not the
+        // operator's field to write - the whole point of keeping it separate
+        // from Host is that a refresh can update one without touching the
+        // other.
+        if (device.Kind == DeviceKind.Camera && NullIfBlank(request.DiscoveredHost) is { } discoveredHost)
+        {
+            db.CameraConnections.Add(new EfCameraConnection { DeviceId = device.Id, DiscoveredHost = discoveredHost });
+            await db.SaveChangesAsync(ct);
+        }
+
         return CreatedAtAction(nameof(Get), new { id = device.Id }, ToDto(device, new Dictionary<Guid, ChannelLatestValue>()));
     }
 
@@ -220,6 +234,93 @@ public class DevicesController(
     }
 
     /// <summary>Triggers a one-time BackfillChannelHistory job run to pull [request.From, request.To) of HA history for this device's channels.</summary>
+    // ---- Camera connection (docs/plans/cameras.md Phase 11) ---------- #
+
+    /// <summary>
+    /// How to reach this camera's stream. Answers for any device, configured or
+    /// not: an unconfigured Camera returns the defaults with no host, which is
+    /// what the form needs to render itself, and is the normal state between
+    /// importing a camera from discovery and filling this in.
+    /// </summary>
+    [HttpGet("{id:guid}/camera-connection")]
+    public async Task<ActionResult<CameraConnectionDto>> GetCameraConnection(Guid id, CancellationToken ct)
+    {
+        if (!await db.Devices.AnyAsync(d => d.Id == id, ct)) return NotFound();
+
+        var connection = await db.CameraConnections.AsNoTracking().FirstOrDefaultAsync(c => c.DeviceId == id, ct);
+        return ToCameraDto(connection);
+    }
+
+    /// <summary>
+    /// Creates or replaces this camera's connection settings. Upsert rather
+    /// than POST-then-PUT because the client already knows the id - the same
+    /// reasoning SettingsController's key-addressed upsert uses.
+    /// </summary>
+    [HttpPut("{id:guid}/camera-connection")]
+    public async Task<ActionResult<CameraConnectionDto>> UpsertCameraConnection(
+        Guid id, CameraConnectionWriteRequest request, CancellationToken ct)
+    {
+        if (!await db.Devices.AnyAsync(d => d.Id == id, ct)) return NotFound();
+
+        var connection = await db.CameraConnections.FirstOrDefaultAsync(c => c.DeviceId == id, ct);
+        if (connection is null)
+        {
+            connection = new EfCameraConnection { DeviceId = id };
+            db.CameraConnections.Add(connection);
+        }
+
+        // Blank means "no override", not the empty string - so clearing the box
+        // hands the camera back to whatever Home Assistant reports, which is
+        // the behaviour the hint under the field promises.
+        connection.Host = NullIfBlank(request.Host);
+        connection.Username = NullIfBlank(request.Username);
+
+        // A port of 0 or a cleared number field falls back rather than being
+        // stored; CameraRtspUrl guards this too, but storing a usable value
+        // means the form shows what the stream will actually use.
+        connection.Port = request.Port is > 0 and <= 65535 ? request.Port.Value : 554;
+        connection.StreamPath = NullIfBlank(request.StreamPath) ?? DefaultStreamPath;
+
+        // Null leaves it alone. See CameraConnectionWriteRequest.Password: the
+        // form cannot show the current value, so a save that did not touch the
+        // password box must not clear it.
+        if (request.Password is not null)
+            connection.PasswordProtected = SecretProtector.Protect(request.Password);
+
+        await db.SaveChangesAsync(ct);
+        return ToCameraDto(connection);
+    }
+
+    /// <summary>Forgets this camera's connection settings, password included.</summary>
+    [HttpDelete("{id:guid}/camera-connection")]
+    public async Task<IActionResult> DeleteCameraConnection(Guid id, CancellationToken ct)
+    {
+        var connection = await db.CameraConnections.FirstOrDefaultAsync(c => c.DeviceId == id, ct);
+        if (connection is null) return NotFound();
+        db.CameraConnections.Remove(connection);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    /// <summary>Reolink's H.264 sub-stream - see EfCameraConnection.StreamPath for why that is the default.</summary>
+    private const string DefaultStreamPath = "/h264Preview_01_sub";
+
+    private static CameraConnectionDto ToCameraDto(EfCameraConnection? c) =>
+        c is null
+            ? new CameraConnectionDto(null, null, null, 554, DefaultStreamPath, null, false)
+            : new CameraConnectionDto(
+                Host: c.Host,
+                DiscoveredHost: c.DiscoveredHost,
+                // Resolved here rather than in the browser, so the form and the
+                // stream cannot disagree about which host is in use.
+                EffectiveHost: NullIfBlank(c.Host) ?? NullIfBlank(c.DiscoveredHost),
+                Port: c.Port,
+                StreamPath: c.StreamPath,
+                Username: c.Username,
+                HasPassword: SecretProtector.HasValue(c.PasswordProtected));
+
+    private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
     [HttpPost("{id:guid}/backfill")]
     public async Task<IActionResult> Backfill(Guid id, BackfillRequest request, CancellationToken ct)
     {

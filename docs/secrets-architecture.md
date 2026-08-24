@@ -150,20 +150,28 @@ must say in writing which phase adds one.
   trust: a backup password that only exists in the account you're trying to
   recover from is not a recovery plan. Phase 8 closes the loop from the other
   direction by exporting the `/aerie/*` tree *into* the restic repos.
-- **The Google OAuth client secret, and the calendar refresh tokens behind
-  it** — they are `SiteSettings` rows in Postgres, obfuscated at rest with
-  `SecretObfuscator` and redacted on read, alongside `HomeAssistantToken` and
+- **The Google OAuth client secret, the calendar refresh tokens behind it, and
+  every camera's RTSP password** — they are rows in Postgres, protected at rest
+  and redacted on read, alongside `HomeAssistantToken` and
   `KioskWifiPassword`. Said explicitly here so nobody goes looking for a
-  `/aerie/google/*` path that was never meant to exist. The refresh tokens
-  could not live in the tree in any case: they are minted at runtime by an
-  admin completing a consent screen, so a store an operator seeds by hand is
-  the wrong shape for them, and the client secret follows the credential it
-  belongs with. Obfuscation is not encryption, and it is a deliberate parity
-  with the existing store rather than a claim about strength — the upgrade
-  path, if it is ever wanted, is ASP.NET DataProtection with a Postgres-backed
-  key ring (the ring is deliberately ephemeral today, which is exactly what
-  would have to change). Backups cover them: they are ordinary rows in the
-  database restic already snapshots.
+  `/aerie/google/*` or `/aerie/cameras/*` path that was never meant to exist.
+  Two of them could not live in the tree in any case: the refresh tokens are
+  minted at runtime by an admin completing a consent screen, and a camera
+  password is typed into the devices admin UI by whoever set the camera up — a
+  store an operator seeds by hand is the wrong shape for both, and the client
+  secret follows the credential it belongs with.
+
+  Protection is not encryption, and it is a deliberate parity with the existing
+  store rather than a claim about strength. What changed in
+  [cameras Phase 11](plans/cameras.md) is that it is now *versioned*: every
+  protected value carries the scheme that produced it (`v1:…`, today
+  `SecretObfuscator`'s XOR) and `SecretProtector` dispatches on that prefix. So
+  the upgrade — ASP.NET DataProtection with a Postgres-backed key ring, or an
+  AES key from the parameter tree — is a second scheme registered beside the
+  first plus a re-protect on next write, with rows in both formats readable
+  throughout. It is no longer a change that has to happen everywhere at once,
+  which is the thing that kept it from happening. Backups cover them either
+  way: they are ordinary rows in the database restic already snapshots.
 - **The ESO bootstrap credential** — it is the key to the store, so it cannot
   live in the store.
 - **`AERIE_TEST_GRANT_TOKEN`** — optional, and a GitHub Actions secret because

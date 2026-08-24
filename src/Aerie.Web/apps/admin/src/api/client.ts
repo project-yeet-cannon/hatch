@@ -4,6 +4,8 @@ import type {
   AuthGrant,
   AuthInvite,
   BackfillRequest,
+  CameraConnection,
+  CameraConnectionWriteRequest,
   Calendar,
   CalendarAccount,
   CalendarDiscovery,
@@ -74,6 +76,11 @@ export const createDevice = (request: DeviceWriteRequest) =>
 export const updateDevice = (id: string, request: DeviceWriteRequest) =>
   fetchJson<Device>(`/api/devices/${id}`, { method: 'PUT', ...asJson(request) });
 export const deleteDevice = (id: string) => fetchJson<void>(`/api/devices/${id}`, { method: 'DELETE' });
+
+export const getCameraConnection = (deviceId: string) =>
+  fetchJson<CameraConnection>(`/api/devices/${deviceId}/camera-connection`);
+export const saveCameraConnection = (deviceId: string, request: CameraConnectionWriteRequest) =>
+  fetchJson<CameraConnection>(`/api/devices/${deviceId}/camera-connection`, { method: 'PUT', ...asJson(request) });
 
 export const addChannel = (deviceId: string, request: DeviceChannelWriteRequest) =>
   fetchJson<DeviceChannel>(`/api/devices/${deviceId}/channels`, { method: 'POST', ...asJson(request) });

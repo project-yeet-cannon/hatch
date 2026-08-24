@@ -26,12 +26,20 @@ public class DiscoveryService(TemplateClient template, AerieContext db, IHomeAss
     // fetched entity-by-entity, since the HA REST API has no bulk device-registry
     // endpoint. Entities with no owning device (helpers, sun.sun, etc.) are
     // filtered out here - they aren't "devices" in the sense this feature cares about.
+    //
+    // configuration_url comes along for the ride, and it is what a camera needs
+    // (docs/plans/cameras.md Phase 11). For a Reolink it is `http://<ip>` - the
+    // camera's own web UI - and the integration keeps it current across a DHCP
+    // move, which is what lets Aerie stop being told a static address. It is
+    // null for most integrations and that costs nothing: every other kind
+    // ignores it, and a camera whose device has none falls back to the operator
+    // typing a host into the admin UI.
     private const string GroupingTemplate = """
         {% set ns = namespace(items=[]) %}
         {% for s in states %}
           {% set did = device_id(s.entity_id) %}
           {% if did %}
-            {% set ns.items = ns.items + [{'entity_id': s.entity_id, 'device_id': did, 'device_name': device_attr(did, 'name')}] %}
+            {% set ns.items = ns.items + [{'entity_id': s.entity_id, 'device_id': did, 'device_name': device_attr(did, 'name'), 'configuration_url': device_attr(did, 'configuration_url')}] %}
           {% endif %}
         {% endfor %}
         {{ ns.items | tojson }}
@@ -60,6 +68,8 @@ public class DiscoveryService(TemplateClient template, AerieContext db, IHomeAss
     {
         var entityIds = group.Select(r => r.EntityId).OrderBy(id => id, StringComparer.Ordinal).ToList();
         var name = group.Select(r => r.DeviceName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n)) ?? group.Key;
+        var host = HaDeviceHost.FromConfigurationUrl(
+            group.Select(r => r.ConfigurationUrl).FirstOrDefault(u => !string.IsNullOrWhiteSpace(u)));
 
         if (InferKind(entityIds) is { } match)
         {
@@ -73,13 +83,13 @@ public class DiscoveryService(TemplateClient template, AerieContext db, IHomeAss
                 DeviceKind.Camera => CameraChannelBuilder.Build(match.AnchorEntityId, entityIds),
                 _ => throw new InvalidOperationException($"InferKind returned unhandled kind {match.Kind}"),
             };
-            return new UnmappedHaDevice(group.Key, name, match.Kind, entityIds, channels);
+            return new UnmappedHaDevice(group.Key, name, match.Kind, entityIds, channels, host);
         }
 
         var sensorChannels = entityIds.Select(SensorChannel).OfType<DeviceChannelWriteRequest>().ToList();
         var kind = sensorChannels.Count > 0 ? DeviceKind.Hygrometer : (DeviceKind?)null;
 
-        return new UnmappedHaDevice(group.Key, name, kind, entityIds, sensorChannels);
+        return new UnmappedHaDevice(group.Key, name, kind, entityIds, sensorChannels, host);
     }
 
     /// <summary>Which entity-id-prefix-based DeviceKind a group of HA entities suggests, and the "anchor" entity that kind's channel builder is built around. Pure function of the entity-id list (no HA/DB calls) so the branch order and matches are directly unit-testable; the Hygrometer/no-kind fallback lives in BuildSuggestion since it depends on SensorChannel's per-entity mapping rather than a single anchor entity.</summary>
@@ -156,5 +166,6 @@ public class DiscoveryService(TemplateClient template, AerieContext db, IHomeAss
     private sealed record EntityDeviceRow(
         [property: JsonProperty("entity_id")] string EntityId,
         [property: JsonProperty("device_id")] string DeviceId,
-        [property: JsonProperty("device_name")] string? DeviceName);
+        [property: JsonProperty("device_name")] string? DeviceName,
+        [property: JsonProperty("configuration_url")] string? ConfigurationUrl);
 }

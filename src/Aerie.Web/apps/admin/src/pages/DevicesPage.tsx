@@ -34,6 +34,7 @@ import {
   ExternalLinkIcon,
   HomeAssistantIcon,
 } from "../components/icons";
+import { CameraConnectionForm } from "../components/CameraConnectionForm";
 import { HistoryModal } from "../components/HistoryModal";
 
 const BACKFILL_PRESETS: { label: string; days: number }[] = [
@@ -853,6 +854,13 @@ export function DevicesPage() {
 
           {expandedId === device.id && (
             <div className="mt-2">
+              {/* Cameras carry one thing no other kind does: where their video
+                  comes from. Kept inside the expanded panel rather than on the
+                  device form, because it is per-camera configuration rather
+                  than a device scalar, and it loads its own data. */}
+              {device.kind === "Camera" && (
+                <CameraConnectionForm deviceId={device.id} />
+              )}
               {device.channels.length === 0 && (
                 <p className="text-muted">No channels.</p>
               )}
