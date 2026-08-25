@@ -6,46 +6,44 @@ import java.time.temporal.ChronoUnit
 
 /**
  * The backlight's half of the circadian cycle, and a deliberate port of
- * `getCircadianPhase` from
- * src/Aerie.Web/apps/dashboard/src/lib/circadianTheme.ts.
+ * `getCircadianPhase` / the keyframe table from
+ * src/Aerie.Web/apps/dashboard/src/lib/circadianTheme.ts and
+ * src/Aerie.Web/apps/dashboard/src/theme/tokens.ts.
  *
  * ## Why this is duplicated rather than shared
  *
- * The dashboard already fades its *palette* from daylight through amber to
- * near-black across a night. CSS cannot reach the backlight, so on an LCD that
- * produces a very dark page lit by a very bright lamp. The panel has to travel
- * the same curve as the pixels, and only the native shell can move it.
+ * The dashboard fades its *palette* across the day. CSS cannot reach the
+ * backlight, so on an LCD that produces a very dark page lit by a very bright
+ * lamp. The panel has to travel the same curve as the pixels, and only the
+ * native shell can move it.
  *
  * The shell can't ask the page what phase it's in: GeckoView has no
  * `addJavascriptInterface`, so a shell/page bridge means bundling a
- * WebExtension with native messaging. Against that, ~40 lines of arithmetic
+ * WebExtension with native messaging. Against that, a table of keyframe times
  * duplicated behind a stable server contract (`SunEvents`) is the cheaper
  * trade - see docs/plans/kiosk_brightness.md.
  *
- * **The constants below are load-bearing on both sides.** If the transition
- * lead or duration changes in circadianTheme.ts, it has to change here too, or
- * the screen starts dimming at a visibly different moment from the page drawn
- * on it. That divergence is the failure mode this comment exists to prevent;
- * CircadianBrightnessTest mirrors circadianTheme.test.ts case for case so it
- * surfaces as a red test rather than as a wrong-looking wall.
+ * **[CIRCADIAN_TIMELINE] is load-bearing on both sides.** Its rows mirror the
+ * `circadianTimeline` table in tokens.ts one for one, in order, by name, and
+ * the `brightness`/`idleBrightness` columns *there* are the source those two
+ * floats are copied from - the palette author picks them next to the colors
+ * they belong with. If a keyframe moves, is added, or is dropped in tokens.ts
+ * it has to move here too, or the screen starts dimming at a visibly different
+ * moment from the page drawn on it. That divergence is the failure mode this
+ * comment exists to prevent; CircadianBrightnessTest mirrors
+ * circadianTheme.test.ts case for case so it surfaces as a red test rather than
+ * as a wrong-looking wall.
  */
 
-/** How long before actual sunset the evening transition begins. */
-private const val EVENING_TRANSITION_LEAD_MINUTES = 35L
-
-/** How long the evening transition takes, start to full night. */
-private const val EVENING_TRANSITION_DURATION_HOURS = 2L
-
 private const val MINUTE_MS = 60_000L
-private const val HOUR_MS = 3_600_000L
 
 /**
  * The day's four sun events as epoch milliseconds, mirroring the server's
  * `SunEvents` record (src/Aerie.Api/Models/Dashboard/DashboardData.cs).
  *
- * [duskMs] is carried but unread: the phase function needs only three of the
- * four, and the type stays whole so it maps 1:1 onto what the endpoint returns
- * rather than being a lossy subset a future reader has to reconcile.
+ * All four are read now. [duskMs] in particular is civil dusk, which is where
+ * the palette inverts from dark ink on light cards to the reverse - so it is
+ * also where the backlight makes its steepest move of the evening.
  */
 data class SunEvents(
     val dawnMs: Long,
@@ -54,54 +52,113 @@ data class SunEvents(
     val duskMs: Long,
 )
 
-sealed interface CircadianPhase {
-    data object Day : CircadianPhase
-    data object Night : CircadianPhase
-    data class EveningTransition(val progress: Float) : CircadianPhase
-    data class MorningTransition(val progress: Float) : CircadianPhase
-}
+/** Which sun event a keyframe hangs off. */
+enum class SunEvent { DAWN, SUNRISE, SUNSET, DUSK }
 
 /**
- * Backlight levels at the three keyframes, named to match `CircadianTokenSets`
- * in the dashboard's theme so the two are obviously the same curve sampled for
- * different purposes.
+ * One keyframe: when it happens, and where the panel sits when it does.
+ *
+ * The web side's row carries a palette here as well; this half needs only the
+ * two floats, and keeps [name] so a log line and a scrubber readout name the
+ * same moment.
  */
-data class BrightnessCurve(
-    val day: Float,
-    val amber: Float,
-    val night: Float,
+data class MoodStop(
+    val name: String,
+    val event: SunEvent,
+    val offsetMinutes: Long,
+    val brightness: Float,
+    val idleBrightness: Float,
 )
 
-/** Which phase of the cycle [nowMs] falls in, and how far through a transition it is. */
-fun circadianPhase(nowMs: Long, events: SunEvents): CircadianPhase {
-    val eveningStart = events.sunsetMs - EVENING_TRANSITION_LEAD_MINUTES * MINUTE_MS
-    val eveningEnd = eveningStart + EVENING_TRANSITION_DURATION_HOURS * HOUR_MS
+/**
+ * Phase 1 defaults, hardcoded here and destined for a per-kiosk profile on the
+ * server (docs/plans/kiosk_brightness.md, Phase 3). A hallway and a kitchen
+ * want different night floors and this cannot express that yet - what it can do
+ * is stop every tablet being a full-brightness lamp at 3am, which is the larger
+ * half of the problem and needs none of that machinery.
+ *
+ * **The idle column bottoms out at a true 0**, which on this window means
+ * `BRIGHTNESS_OVERRIDE_OFF` - documented as the panel's *lowest* backlight, not
+ * a powered-off display. The screen stays on and stays touch-responsive; only
+ * the lamp goes away. docs/plans/kiosk_brightness.md pairs that with a
+ * full-black view to hide whatever the panel still leaks at its minimum, and
+ * that half is deliberately not built yet.
+ */
+val CIRCADIAN_TIMELINE: List<MoodStop> = listOf(
+    MoodStop("deepNight", SunEvent.DAWN, -210, 0.04f, 0.0f),
+    MoodStop("lateNight", SunEvent.DAWN, -45, 0.05f, 0.0f),
+    MoodStop("firstLight", SunEvent.DAWN, 0, 0.10f, 0.04f),
+    MoodStop("dawnGlow", SunEvent.DAWN, 0, 0.12f, 0.05f),
+    MoodStop("sunriseGlow", SunEvent.SUNRISE, 0, 0.30f, 0.12f),
+    MoodStop("morning", SunEvent.SUNRISE, 80, 0.62f, 0.28f),
+    MoodStop("day", SunEvent.SUNRISE, 200, 1.0f, 0.45f),
+    MoodStop("dayHold", SunEvent.SUNSET, -165, 1.0f, 0.45f),
+    MoodStop("goldenHour", SunEvent.SUNSET, -45, 0.68f, 0.30f),
+    MoodStop("sunsetGlow", SunEvent.SUNSET, 0, 0.40f, 0.17f),
+    MoodStop("afterglow", SunEvent.DUSK, 0, 0.20f, 0.08f),
+    MoodStop("duskFall", SunEvent.DUSK, 0, 0.16f, 0.06f),
+    MoodStop("night", SunEvent.DUSK, 75, 0.06f, 0.0f),
+    MoodStop("deepNightEnd", SunEvent.DUSK, 225, 0.04f, 0.0f),
+)
 
-    return when {
-        nowMs < events.dawnMs -> CircadianPhase.Night
-        nowMs < events.sunriseMs ->
-            CircadianPhase.MorningTransition(progressBetween(nowMs, events.dawnMs, events.sunriseMs))
-        nowMs < eveningStart -> CircadianPhase.Day
-        nowMs < eveningEnd ->
-            CircadianPhase.EveningTransition(progressBetween(nowMs, eveningStart, eveningEnd))
-        else -> CircadianPhase.Night
-    }
-}
+/** Where `nowMs` falls on the timeline: the keyframe at or before it, and how far past. */
+data class CircadianPhase(val index: Int, val progress: Float, val name: String)
 
 /**
- * The backlight level for a phase. Transitions blend *through* the amber
- * keyframe rather than straight from day to night, exactly as the palette does
- * - the point of the amber midpoint is that the fade is not linear, and a
- * linear backlight under a non-linear palette would read as the screen and the
- * page disagreeing about what time it is.
+ * Absolute times for each keyframe, in epoch ms.
+ *
+ * Clamped to be non-decreasing rather than sorted, exactly as the web side is:
+ * at extreme latitudes the sun events can bunch up or invert, and a *sort*
+ * would reorder keyframes. Clamping can only collapse a segment to zero length,
+ * which is already the normal case - the two pairs that share `dawn` and `dusk`
+ * are where the page's palette inverts.
  */
-fun brightnessFor(phase: CircadianPhase, curve: BrightnessCurve): Float = when (phase) {
-    is CircadianPhase.Day -> curve.day
-    is CircadianPhase.Night -> curve.night
-    is CircadianPhase.EveningTransition ->
-        blendThroughAmber(curve.day, curve.amber, curve.night, phase.progress)
-    is CircadianPhase.MorningTransition ->
-        blendThroughAmber(curve.night, curve.amber, curve.day, phase.progress)
+fun timelineTimes(events: SunEvents, timeline: List<MoodStop> = CIRCADIAN_TIMELINE): LongArray {
+    val times = LongArray(timeline.size)
+    timeline.forEachIndexed { i, stop ->
+        val anchor = when (stop.event) {
+            SunEvent.DAWN -> events.dawnMs
+            SunEvent.SUNRISE -> events.sunriseMs
+            SunEvent.SUNSET -> events.sunsetMs
+            SunEvent.DUSK -> events.duskMs
+        }
+        val at = anchor + stop.offsetMinutes * MINUTE_MS
+        times[i] = if (i == 0) at else maxOf(at, times[i - 1])
+    }
+    return times
+}
+
+/** Which keyframes [nowMs] sits between, and how far across. */
+fun circadianPhase(
+    nowMs: Long,
+    events: SunEvents,
+    timeline: List<MoodStop> = CIRCADIAN_TIMELINE,
+): CircadianPhase {
+    val times = timelineTimes(events, timeline)
+
+    // The *last* keyframe at or before now, which is what makes the shared
+    // instants resolve to their far side - the same rule as the web side, so
+    // the panel and the page agree about which keyframe they are on.
+    var index = 0
+    for (i in times.indices) {
+        if (times[i] <= nowMs) index = i
+    }
+
+    val last = timeline.size - 1
+    if (index >= last) return CircadianPhase(last, 0f, timeline[last].name)
+    return CircadianPhase(index, progressBetween(nowMs, times[index], times[index + 1]), timeline[index].name)
+}
+
+/** The backlight level for a phase, 0..1. */
+fun brightnessFor(
+    phase: CircadianPhase,
+    idle: Boolean,
+    timeline: List<MoodStop> = CIRCADIAN_TIMELINE,
+): Float {
+    val from = timeline[phase.index]
+    val to = timeline[minOf(phase.index + 1, timeline.size - 1)]
+    val level = { stop: MoodStop -> if (idle) stop.idleBrightness else stop.brightness }
+    return lerp(level(from), level(to), phase.progress).coerceIn(0f, 1f)
 }
 
 /**
@@ -111,10 +168,10 @@ fun brightnessFor(phase: CircadianPhase, curve: BrightnessCurve): Float = when (
  * The dashboard never needs this - it is handed fresh events on every
  * `/api/dashboard` poll and a failed poll just leaves the page as it was. The
  * shell does, because it holds a *cached* set across reboots and network
- * outages, and stale events don't degrade gracefully here: yesterday's sunset
- * is more than a day behind `now`, so [circadianPhase] reads the far side of
- * the evening transition and returns Night. A tablet rebooting at noon on a
- * dead network would dim itself to a night floor in full daylight.
+ * outages, and stale events don't degrade gracefully here: yesterday's dusk is
+ * more than a day behind `now`, so [circadianPhase] reads past the end of the
+ * timeline and returns the night floor. A tablet rebooting at noon on a dead
+ * network would dim itself to that floor in full daylight.
  *
  * Rolling by whole days works because the cycle is ~24h periodic; the residual
  * drift is a couple of minutes per day, which a backlight cannot show.
@@ -135,11 +192,6 @@ fun alignToDay(events: SunEvents, nowMs: Long, zone: ZoneId, maxRollForwardDays:
         duskMs = events.duskMs + shift,
     )
 }
-
-/** First half of a transition blends start->amber, second half blends amber->end. */
-private fun blendThroughAmber(start: Float, amber: Float, end: Float, progress: Float): Float =
-    if (progress <= 0.5f) lerp(start, amber, progress / 0.5f)
-    else lerp(amber, end, (progress - 0.5f) / 0.5f)
 
 private fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
 

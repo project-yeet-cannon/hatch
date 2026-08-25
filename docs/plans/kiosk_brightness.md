@@ -13,8 +13,9 @@ two shows up at 3am as a glowing rectangle in a dark hallway.
 ## The gap
 
 [`circadianTheme.ts`](../../src/Aerie.Web/apps/dashboard/src/lib/circadianTheme.ts)
-already dims the dashboard from a daylight palette through amber to near-black
-across a night, and
+already travels a keyframed day — deep night through first light, daylight,
+golden hour and afterglow, and back — generating every token from the light at
+that hour, and
 [kiosk-architecture.md](../kiosk-architecture.md#what-the-wall-shows) treats
 that as the rule no restyle is allowed to break. It is the right half of the
 problem, thoroughly solved — and it is *only* the color half. **CSS cannot
@@ -119,8 +120,8 @@ and assigns a zone in the admin app.
 **`KioskDisplayProfiles`** — a named curve, shared by any number of devices, so
 "every hallway" is one edit:
 
-- `DayBrightness` / `AmberBrightness` / `NightBrightness` — the three keyframes,
-  mirroring `CircadianTokenSets`' `day`/`amber`/`night` exactly, so the backlight
+- `Brightness` / `IdleBrightness` per keyframe — mirroring `circadianTimeline`'s
+  two brightness columns exactly, so the backlight
   interpolates on the same phase function and through the same midpoint as the
   palette. The panel and the pixels move together or the effect falls apart.
 - `IdleDimAfterSeconds`, and `IdleDay`/`IdleAmber`/`IdleNightBrightness` — the
@@ -240,7 +241,7 @@ Kills the 3am lamp on its own. Everything after this makes it adjustable.
 - [x] Native idle timer off `dispatchTouchEvent`; dim to an idle floor, restore
       instantly on touch. Ramp the dim (4s, 10 steps a second), snap the restore
       — a slow brighten reads as an unresponsive screen. The idle floor is a
-      second `BrightnessCurve` rather than one number
+      second brightness column rather than one number
       ([`DisplayController.kt`](../../apps/kiosk/app/src/main/java/family/landis/aeriekiosk/DisplayController.kt)),
       sampled on the same phase function as the active one, so "dimmer than
       now" tracks the day instead of being too dark at noon and too bright at

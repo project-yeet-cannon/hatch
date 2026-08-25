@@ -147,14 +147,16 @@ had to re-derive a readable version of whatever a phone picked. A name defers
 the colour to CSS, where each client already knows how to answer:
 
 - The **phone** resolves the name to a light/dark pair in `gather.css`.
-- The **wall** has no two modes to resolve into. The six landed in the
-  dashboard's [`theme/tokens.ts`](../src/Aerie.Web/apps/dashboard/src/theme/tokens.ts)
-  as `--tint-*` tokens and blend through the day like `--ink` and `--card` do,
-  per the rule that no colour on that page is ever stated absolutely
+- The **wall** has no two modes to resolve into, so it answers the name
+  *continuously*. The six are a hue and a chroma scale in
+  [`circadianTheme.ts`](../src/Aerie.Web/apps/dashboard/src/lib/circadianTheme.ts)'s
+  `TINT` table, rendered at whatever lightness the hour calls for and pushed
+  clear of the surface under them by the same contrast floor every other token
+  gets, per the rule that no colour on that page is ever stated absolutely
   ([`kiosk-architecture.md`](kiosk-architecture.md#what-the-wall-shows)). The
-  phone's light values became the day palette and its dark values the amber and
-  night ones, so a `moss` list is recognisably the same list on both clients at
-  both ends of the day.
+  hues were measured off the phone's own values, and they do not move: a `moss`
+  list is the same green at noon and at 3am, only dimmer. That is the point of
+  storing a name rather than a hex — the wall can dim a colour it understands.
 
 An unrecognised value falls back to the first name rather than rendering
 untinted, so a hand-edited row is never the odd one out by accident. The six

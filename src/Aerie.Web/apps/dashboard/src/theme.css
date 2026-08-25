@@ -28,6 +28,23 @@ body {
   transition: background 0.6s;
 }
 
+/* The cover for a polarity inversion (useCircadianTheme.ts). Fixed rather than
+   absolute so it covers the viewport regardless of how far the column has
+   scrolled, and painted with the hour's own near-black rather than a stated
+   one - nothing on this page names a color the circadian phase did not supply.
+   The duration is set inline, because the two directions are not the same
+   length. */
+.hf-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  background: var(--veil);
+  opacity: 0;
+  transition-property: opacity;
+  transition-timing-function: ease-in-out;
+}
+
 .hfdev {
   width: 100%;
   max-width: clamp(480px, 75vw, 960px);

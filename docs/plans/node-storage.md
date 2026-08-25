@@ -19,7 +19,7 @@ belongs in the operator's own runbook, the same way
 |---|---|
 | What is actually wrong | **Disk latency, not etcd.** The DB is 64 MB and takes 4.6 commits/s |
 | Fix or tune the alert | **Fix.** The thresholds are correct and the cluster has no margin |
-| Where the OS disk goes | **The fastest volume with room on each host, measured per host.** That is the boot volume on two of three; the third is already on its fastest and only converts |
+| Where the OS disk goes | **The fastest volume with room, measured per host.** The boot volume on two of three; on the third that volume is too small, so its OS disk goes to a third volume instead |
 | Dynamic or fixed VHDX | **Fixed** — *and* automatic checkpoints off. A fixed disk under an automatic checkpoint is a dynamic differencing disk again (finding 7) |
 | Root disk size | **100 GB** on all three, up from the template's 32 GB. Capacity is not the constraint on any host once the destination is chosen correctly |
 | Bigger disk alone | **No.** Without bounding image accumulation, a bigger disk is a bigger treadmill |
@@ -71,31 +71,44 @@ windows_exporter, averaged over 7 days:
 |---|---|---|---|
 | A | 6.8 ms / 2.1 ms | 1.80 ms / 0.45 ms | ~880 GB |
 | B | 5.7 ms / 3.1 ms | 0.10 ms / 0.78 ms | ~885 GB |
-| C | **1.85 ms** (see below) | 0.11 ms | ~106 GB |
+| C | **49 ms** (its VM is here); a third volume measures **1.81 ms**, ~822 GB free | 0.11 ms | ~106 GB |
 
 Hosts A and B's VM volumes are not spinning disks — 2–3 ms reads rule that out
 — but at 5.7–6.8 ms per write under etcd's flush-heavy pattern they are still
 30–60× their own boot volumes, which take 3–4 writes/s and are otherwise doing
 nothing.
 
-**Host C is not that shape and this row first said it was.** An earlier
-reading of 34.5 ms took the documented `D:\aerie\VMs` default to be where its
-VM lives; it is not. Host C carries three volumes — a 237 GB boot volume at
-0.11 ms with only ~106 GB free, a 931 GB spinning volume at 52 ms, and a
-931 GB SSD at **1.85 ms with ~822 GB free** — and its node's VM is on the SSD
-already. So for host C there is no volume to move to and none needed: its
-whole problem is finding 3, and the fix is the conversion without the move.
+**Host C is a different shape, and this row went through two wrong readings
+before it settled.** It carries three volumes, not two: a 237 GB boot volume at
+0.11 ms with only ~106 GB free, a 931 GB volume at **49 ms** with ~705 GB free,
+and a 931 GB volume at **1.81 ms** with ~822 GB free. Its VM lives on the 49 ms
+one. The boot volume is out on size — 100 GB fixed plus the 40 GB margin does
+not fit in 106 GB — so host C's destination is its third volume, and it is the
+only one of the three hosts whose OS disk does not end up on C:.
 
-That correction is the strongest evidence in this document rather than a
-footnote to it. **Host C's node runs on 1.85 ms storage and posts the worst
-fsync p99 of the three, at 1130 ms.** Whatever is costing three orders of
-magnitude there is not the volume.
+Both wrong readings are worth recording, because the same two mistakes are
+available to the next person. The first assumed the documented `D:\aerie\VMs`
+default without checking, and measured a volume the VM was not on. The second
+took "it is already on an SSD" at face value and concluded no move was needed.
 
-The claim to hold this to is therefore not "SSDs are faster", and not even
-"the fastest storage in each machine is idle" — though on hosts A and B it is.
-It is that **the one workload in the house that is latency-bound is paying a
-cost that has nothing to do with the hardware underneath it**, and on host C
-that is all it is paying.
+What settles it is a comparison rather than a datasheet. All three hosts' VM
+volumes carry the same thing right now — a dynamic parent under a differencing
+`.avhdx` under an etcd node, per finding 7 — and two of them measure 7.7 and
+10.3 ms. Host C's measures 49. Same workload shape, five times the latency,
+which is a statement about the media and not about the VHDX.
+
+It is not proof: host C's node is the freshest rebuild and so does the most
+block allocation per write, which is finding 3's mechanism and would push the
+same number up on its own. But the cost of being wrong is asymmetric — a wrong
+"convert in place" leaves the node on the slow volume and buys a second
+maintenance window on an etcd member — and the 1.81 ms volume has 822 GB free
+and sits in the same band as host A's boot volume at 2.20 ms. There is nothing
+to trade away by choosing it.
+
+The claim to hold this to is not "SSDs are faster". It is that **the fastest
+storage in each of these three machines is idle, and the one workload in the
+house that is latency-bound is not on it** — and that which volume that is has
+to be measured per host, not inferred from a default path or from a label.
 
 ### 3. The OS disk is dynamic, which is both a second penalty and a standing hazard
 
@@ -174,18 +187,19 @@ residue of that former life.
 volume is 237 GB in total; a 100 GB fixed disk plus the 40 GB margin needs 140,
 and freeing 34 GB of Compose-era images to fit 140 GB into 237 GB leaves a
 Windows boot volume with almost nothing spare. It is the wrong destination on
-size grounds before it is the wrong destination on any other. Host C's node
-should stay exactly where it is, on the 1.85 ms volume with 822 GB free, and be
-converted in place.
+size grounds before it is the wrong destination on any other.
 
-What is left of the ordering question is smaller than it looked. Two of the
-three nodes are a move plus a conversion; the third is a conversion alone, on
-the host with the most slack of any of them. The argument for proving the
-procedure on a roomy host still holds — but the argument for saving the *worst*
-node until last was an argument about a constrained host on a spinning disk,
-and there is no such host. Host C is now the cheapest of the three to do and
-the most informative: if 1130 ms falls to single digits with nothing moved,
-finding 3 is proved on its own, with none of finding 2 mixed into the result.
+So host C's node is a move like the other two, just to its third volume rather
+than to its boot volume, per finding 2. Every node in Phase 1 runs the same
+procedure to a different address — a simpler plan than this section originally
+described, and one that does not need the audit it originally called for.
+
+What is left of the ordering question is disk pressure, not risk. Host C's node
+is at 48% used against 83–84% on the other two, which makes it both the safest
+node to drain *onto* and, once it has a 100 GB disk, the biggest sink for the
+two drains that follow it. Doing it first lowers the peak root-filesystem usage
+on the two nodes that are one point from kubelet's image-GC threshold; doing it
+last, as this plan originally said, raises it.
 
 ### 7. There is a third dynamic layer, and it is a Hyper-V default
 
@@ -226,11 +240,11 @@ touches rather than reporting it: it is a precondition, not a tidy-up.
 
 ## Phase 1 — the OS disk moves to the fast volume, fixed, at 100 GB
 
-One node at a time, and not the same operation on each: two nodes move to a
-faster volume *and* convert to fixed, the third only converts, in place, for
-the reasons in findings 2 and 6. The script decides which from the destination
-it is given and reports it in preflight; the operator's only job is to name the
-right volume per host.
+One node at a time, the same operation on each — move to the fastest volume
+with room on that host, and convert to fixed — but to a *different volume per
+host*, and on one of the three that is not the boot volume (findings 2 and 6).
+The script reports which volume it read and which it is writing before it
+drains anything; the operator's only job is to name the right one.
 
 Quorum is 2 of 3, so a single node down is survivable; it is
 also long enough to trip [`cluster.yaml`](../../deploy/cluster/observability/config/alerts/cluster.yaml)'s
@@ -297,6 +311,12 @@ is for.
       the size that VHDX says — a node's 200 GB Longhorn disk fails the second
       test.
 
+      It also converts in place — same volume, no move — when the destination
+      it is given is the directory the disk is already in, reported as such in
+      preflight. Phase 1 does not end up using that path on any of the three
+      nodes, but it is what makes "name the volume you want" a complete
+      instruction rather than one with an unstated exception.
+
       Finding 7 is its work: it refuses a checkpoint chain rather than
       converting one, merges it on `-MergeCheckpoints` and waits for the
       merge to finish, and disables automatic checkpoints on any VM it
@@ -351,18 +371,18 @@ is for.
       Whether 131 GB of a hypervisor-only machine's boot volume is worth
       cleaning up on its own merits is a separate and much smaller question.
 
-- [ ] **1.8 — Third node, converted in place.** No `-DestinationPath` change:
-      it is given the directory the disk is already in, which
-      `Move-NodeOsDisk.ps1` reads as a conversion rather than a move and says
-      so in preflight. Nothing crosses a volume boundary, so this is the
-      shortest window of the three.
+- [ ] **1.8 — Third node.** The same move the other two get, to host C's third
+      volume rather than to its boot volume — 1.81 ms, ~822 GB free, in the
+      same band as host A's boot volume. Finding 2 for why not C:, and why not
+      the volume it is on now.
 
-      Expect the largest single improvement here — 1130 ms to single digits —
-      and note what it proves. This node's storage is not changing; only the
-      VHDX's allocation behaviour is. A large fall here is finding 3 on its
-      own, uncontaminated by finding 2, and a *small* one falsifies finding 3
-      rather than excusing it. That makes this the one run in Phase 1 worth
-      treating as an experiment and not only as a change.
+      Expect the largest single improvement here: 1130 ms to single digits.
+      Note what this run can and cannot tell you. Because it both moves and
+      converts, a *small* improvement would not distinguish finding 2 from
+      finding 3. The experiment that would have separated them was an in-place
+      conversion on the volume this node is already on, and it was given up
+      deliberately: it would have been informative, and it would have risked a
+      second maintenance window on an etcd member to find out.
 
 - [ ] **1.9 — Soak, then delete the sources.** Leave the original
       `os-disk.vhdx` files in place for a week as the rollback path — repointing

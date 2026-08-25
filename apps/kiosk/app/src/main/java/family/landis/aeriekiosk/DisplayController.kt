@@ -70,32 +70,6 @@ private const val ACTIVITY_THROTTLE_MS = 250L
 private const val RAMP_DURATION_MS = 4_000L
 private const val RAMP_FRAME_MS = 100L
 
-/**
- * Phase 1 defaults, hardcoded here and destined for a per-kiosk profile on the
- * server (docs/plans/kiosk_brightness.md, Phase 3). A hallway and a kitchen
- * want different night floors and this cannot express that yet - what it can
- * do is stop every tablet being a full-brightness lamp at 3am, which is the
- * larger half of the problem and needs none of that machinery.
- */
-private val DEFAULT_CURVE = BrightnessCurve(day = 1.0f, amber = 0.35f, night = 0.05f)
-
-/**
- * Where the backlight sits once nobody has touched the tablet for
- * [IDLE_DIM_AFTER_MS]. The same three keyframes as [DEFAULT_CURVE], sampled on
- * the same phase function, so the idle floor travels the day rather than being
- * one number that is too dark at noon and too bright at midnight.
- *
- * **Night is a true 0**, which on this window means
- * `BRIGHTNESS_OVERRIDE_OFF` - documented as the panel's *lowest* backlight, not
- * a powered-off display. The screen stays on and stays touch-responsive; only
- * the lamp goes away. docs/plans/kiosk_brightness.md pairs that with a
- * full-black view to hide whatever the panel still leaks at its minimum, and
- * that half is deliberately not built yet: a few nights of watching what 0
- * actually looks like in an unlit hallway answers whether it is needed at all,
- * and answers the plan's open question about where this hardware clamps.
- */
-private val DEFAULT_IDLE_CURVE = BrightnessCurve(day = 0.45f, amber = 0.15f, night = 0.0f)
-
 /** Below this, re-applying window attributes is churn nobody can see. */
 private const val BRIGHTNESS_EPSILON = 0.004f
 
@@ -141,13 +115,15 @@ private const val MAX_ROLL_FORWARD_DAYS = 7L
 class DisplayController(
     private val activity: Activity,
     private val sunEventsUrl: String,
-    private val curve: BrightnessCurve = DEFAULT_CURVE,
-    private val idleCurve: BrightnessCurve = DEFAULT_IDLE_CURVE,
+    private val timeline: List<MoodStop> = CIRCADIAN_TIMELINE,
 ) {
     private val handler = Handler(Looper.getMainLooper())
     private val prefs = activity.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     private var events: SunEvents? = null
+
+    /** Which keyframe the last log line named, so the ones in between stay quiet. */
+    private var loggedKeyframe = -1
     private var appliedBrightness = Float.NaN
     private var fetchInFlight = false
 
@@ -280,8 +256,8 @@ class DisplayController(
             releaseOverride()
             return
         }
-        val phase = circadianPhase(now, current)
-        val target = brightnessFor(phase, if (idle) idleCurve else curve).coerceIn(0f, 1f)
+        val phase = circadianPhase(now, current, timeline)
+        val target = brightnessFor(phase, idle, timeline)
 
         val first = appliedBrightness.isNaN()
         if (!first && (ramp || rampActive)) {
@@ -291,13 +267,14 @@ class DisplayController(
 
         if (!setBrightness(target)) return
 
-        // Only the arrival at a phase is worth a log line; the ~120 steps
-        // inside a transition are not, and would bury everything else in the
+        // Only *crossing into* a keyframe is worth a log line; the steps
+        // between two of them are not, and would bury everything else in the
         // shared aerie-logs index. Idle and wake log at their own call sites.
-        if (first || phase is CircadianPhase.Day || phase is CircadianPhase.Night) {
+        if (first || phase.index != loggedKeyframe) {
+            loggedKeyframe = phase.index
             KioskLogger.info(
                 "Display: backlight set",
-                mapOf("phase" to phase.javaClass.simpleName, "brightness" to target, "idle" to idle),
+                mapOf("phase" to phase.name, "brightness" to target, "idle" to idle),
             )
         }
     }

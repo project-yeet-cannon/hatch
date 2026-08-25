@@ -274,6 +274,43 @@ function Get-VmOsDisk {
     return $bootDisks[0]
 }
 
+function Get-BaseVhd {
+    <#
+    .SYNOPSIS
+        Walks a VHDX's parent chain to the disk at the bottom of it, and
+        reports the value -DestinationPath would need for a conversion in
+        place.
+
+    .DESCRIPTION
+        Two questions an operator has to answer before dispatching, and both
+        are easy to get wrong by hand. What is the real disk under a
+        checkpoint - the drive Hyper-V reports is the .avhdx, not the file
+        that matters. And what does -DestinationPath have to say to mean
+        "where it already is" - the answer is the *grandparent* of the disk
+        file, since this script appends <VMName> to it, and a path that is
+        one component off is a move nobody asked for rather than an error.
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+
+    $path = $Path
+    $vhd = Get-VHD -Path $path
+    $depth = 0
+    while ($vhd.VhdType -eq 'Differencing' -and $vhd.ParentPath -and $depth -lt 32) {
+        $path = $vhd.ParentPath
+        $vhd = Get-VHD -Path $path
+        $depth++
+    }
+    $diskDir = Split-Path -Parent $path
+    return [pscustomobject]@{
+        Path               = $path
+        Vhd                = $vhd
+        ChainDepth         = $depth
+        # What to type into -DestinationPath / the workflow's
+        # destination_path to mean "leave it on this volume".
+        InPlaceDestination = Split-Path -Parent $diskDir
+    }
+}
+
 function Test-SamePath {
     <#
     .SYNOPSIS
@@ -670,6 +707,25 @@ try {
             Write-Host '  A fixed disk underneath one of these is a dynamic differencing disk again, so this'
             Write-Host '  has to be off before the migration means anything.'
         }
+
+        # Reported here too, because this return is the one an operator hits
+        # *first* on a node that has been up a while - and the disk path and
+        # the in-place destination are what they came for. Best effort: the
+        # chain is intact and readable at this point, but nothing below this
+        # line is worth failing a report over.
+        try {
+            $peek = Get-BaseVhd -Path (Get-VmOsDisk -VMName $VMName).Path
+            Write-Host ''
+            Write-Host "OS disk:   $($peek.Path)"
+            Write-Host "           $($peek.Vhd.VhdType), $(Format-Size ([int64]$peek.Vhd.Size)) virtual$(if ($peek.ChainDepth -gt 0) { ", under $($peek.ChainDepth) differencing layer(s)" })"
+            Write-Host "To convert it in place, pass:  -DestinationPath '$($peek.InPlaceDestination)'"
+            Write-Host "                                (destination_path in the workflow; it is the parent of the"
+            Write-Host "                                 per-VM folder, because <VMName> is appended to it)"
+        }
+        catch {
+            Write-Warning "Couldn't read the OS disk chain to report its path: $($_.Exception.Message)"
+        }
+
         Write-Host ''
         Write-Host 'A run with -MergeCheckpoints resolves both, then continues. -PreflightOnly changes nothing, so it stops here.' -ForegroundColor Yellow
         return
@@ -875,6 +931,8 @@ try {
             }
             else {
                 Write-Host "Target:    $newDiskPath, Fixed, ${SizeGB} GiB (moved off $([IO.Path]::GetPathRoot($sourcePath).TrimEnd('\')))"
+                Write-Host "           This is a MOVE. To convert in place on the volume it is already on instead,"
+                Write-Host "           re-run with -DestinationPath '$(Split-Path -Parent (Split-Path -Parent $sourcePath))'."
             }
         }
         'Rollback' { Write-Host "Rollback:  back to $sourcePath, per $sidecarPath" }
@@ -914,6 +972,8 @@ try {
         'command -v k3s || echo missing'
         'echo ''--- nodes'''
         'sudo k3s kubectl get nodes -o json 2>/dev/null || echo {}'
+        'echo ''--- lhvolumes'''
+        'sudo k3s kubectl -n longhorn-system get volumes.longhorn.io -o json 2>/dev/null || echo {}'
         'echo ''--- end'''
     ) -join '; '
 
@@ -1016,6 +1076,52 @@ try {
         }
         $targetNode = $targetMatch[0]
         $etcdNodes = @($clusterNodes | Where-Object { $_.IsEtcdMember -and $_.InternalIp })
+
+        # --- Longhorn, which is the real constraint between two runs ---- #
+        #
+        # etcd quorum decides whether this node may go down at all. Longhorn
+        # decides whether it may go down *now*: draining a node while a volume
+        # is still rebuilding the replica it lost to the previous run can take
+        # that volume to zero healthy replicas. The drain would usually be
+        # refused by Longhorn's own PodDisruptionBudget, which is a safe
+        # failure but an opaque one - a timeout 10 minutes into a maintenance
+        # window rather than a sentence before it starts.
+        #
+        # This is also the answer to "how long do I wait between nodes?".
+        # Nothing here is a fixed interval, because a rebuild's duration is a
+        # function of how much data moved, not of the clock. Re-run, and it
+        # either proceeds or names the volume it is waiting on.
+        #
+        # Only attached volumes are judged. A detached volume reports
+        # robustness 'unknown', which is not a complaint about anything.
+        $lhJson = (Get-ProbeSection -Output $probe.StdOut -Name 'lhvolumes').Trim()
+        $degradedVolumes = @()
+        if ($lhJson -and $lhJson -ne '{}') {
+            foreach ($item in @(Get-Field ($lhJson | ConvertFrom-Json) 'items' | Where-Object { $_ })) {
+                $vmeta = Get-Field $item 'metadata'
+                $vstatus = Get-Field $item 'status'
+                if (-not $vstatus) { continue }
+                $state = [string](Get-Field $vstatus 'state')
+                $robustness = [string](Get-Field $vstatus 'robustness')
+                if ($state -eq 'attached' -and $robustness -ne 'healthy') {
+                    $degradedVolumes += [pscustomobject]@{
+                        Name       = [string](Get-Field $vmeta 'name')
+                        State      = $state
+                        Robustness = if ($robustness) { $robustness } else { 'unknown' }
+                    }
+                }
+            }
+        }
+
+        if ($degradedVolumes.Count -gt 0) {
+            $listed = ($degradedVolumes | ForEach-Object { "  - $($_.Name): $($_.State), robustness $($_.Robustness)" }) -join "`n"
+            if ($Force) {
+                Write-Warning "$($degradedVolumes.Count) Longhorn volume(s) are attached but not healthy, and -Force was passed. Proceeding.`n$listed"
+            }
+            else {
+                throw "$($degradedVolumes.Count) Longhorn volume(s) are attached but not healthy, so this is not the moment to take a node down:`n$listed`n`nThis is usually the previous node's rebuild still running - wait for robustness to read healthy and re-run, there is no fixed interval to wait. Watch it with:`n  sudo k3s kubectl -n longhorn-system get volumes.longhorn.io -o custom-columns=NAME:.metadata.name,STATE:.status.state,ROBUSTNESS:.status.robustness`n`nPass -Force only if you know why a volume is degraded and that it does not depend on '$hostname'."
+            }
+        }
     }
 
     # --- the peer that will speak for the cluster ---------------------- #

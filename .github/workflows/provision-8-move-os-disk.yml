@@ -81,7 +81,7 @@ on:
           - rollback
           - remove-source
       destination_path:
-        description: 'move only, and no default on purpose: the directory on this host''s fastest volume with room, e.g. C:\aerie\VMs. Run preflight_only first - it prints which volume the disk is on now. Naming the volume it is ALREADY on is valid and means convert in place, no move'
+        description: 'move only, no default on purpose. The PARENT of the per-VM folder on this host''s fastest volume with room, e.g. C:\aerie\VMs for a disk at C:\aerie\VMs\<vm_name>\os-disk.vhdx. Run preflight_only first: it prints the disk''s current path and the exact value to paste here for a convert-in-place. There is no separate in-place mode - naming the location it is already in IS the in-place run'
         required: false
         type: string
       size_gb:

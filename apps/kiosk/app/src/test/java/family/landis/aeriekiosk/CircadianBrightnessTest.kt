@@ -1,6 +1,7 @@
 package family.landis.aeriekiosk
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -17,80 +18,131 @@ class CircadianBrightnessTest {
 
     private fun at(iso: String): Long = OffsetDateTime.parse(iso).toInstant().toEpochMilli()
 
+    /** Dawn 05:30, sunrise 06:00, sunset 20:00, dusk 20:30 - the web fixture. */
     private val events = SunEvents(
-        dawnMs = at("2026-06-21T10:00:00Z"),
-        sunriseMs = at("2026-06-21T10:30:00Z"),
-        sunsetMs = at("2026-06-22T00:00:00Z"),
-        duskMs = at("2026-06-22T00:30:00Z"),
+        dawnMs = at("2026-06-21T05:30:00Z"),
+        sunriseMs = at("2026-06-21T06:00:00Z"),
+        sunsetMs = at("2026-06-21T20:00:00Z"),
+        duskMs = at("2026-06-21T20:30:00Z"),
     )
 
-    private val curve = BrightnessCurve(day = 1.0f, amber = 0.4f, night = 0.05f)
+    /** Every sun event at once, as polar latitudes can produce. */
+    private val degenerate = SunEvents(
+        dawnMs = at("2026-06-21T12:00:00Z"),
+        sunriseMs = at("2026-06-21T12:00:00Z"),
+        sunsetMs = at("2026-06-21T12:00:00Z"),
+        duskMs = at("2026-06-21T12:00:00Z"),
+    )
+
+    private fun phaseAt(iso: String) = circadianPhase(at(iso), events)
+
+    // --- the table, which has to stay in step with tokens.ts ---
 
     @Test
-    fun `is night before dawn`() {
-        assertEquals(CircadianPhase.Night, circadianPhase(at("2026-06-21T09:00:00Z"), events))
+    fun `names the same keyframes in the same order as the palette table`() {
+        assertEquals(
+            listOf(
+                "deepNight", "lateNight", "firstLight", "dawnGlow", "sunriseGlow", "morning",
+                "day", "dayHold", "goldenHour", "sunsetGlow", "afterglow", "duskFall",
+                "night", "deepNightEnd",
+            ),
+            CIRCADIAN_TIMELINE.map { it.name },
+        )
     }
 
     @Test
-    fun `is night at and after the evening transition ends`() {
-        // The transition starts 35min before sunset (23:25) and runs 2h, to 01:25.
-        assertEquals(CircadianPhase.Night, circadianPhase(at("2026-06-22T01:25:00Z"), events))
-        assertEquals(CircadianPhase.Night, circadianPhase(at("2026-06-22T05:00:00Z"), events))
+    fun `opens and closes on the same level, so midnight is not a seam`() {
+        val first = CIRCADIAN_TIMELINE.first()
+        val last = CIRCADIAN_TIMELINE.last()
+        assertEquals(first.brightness, last.brightness, 0f)
+        assertEquals(first.idleBrightness, last.idleBrightness, 0f)
     }
 
     @Test
-    fun `is day between sunrise and the start of the evening transition`() {
-        assertEquals(CircadianPhase.Day, circadianPhase(at("2026-06-21T15:00:00Z"), events))
-        assertEquals(CircadianPhase.Day, circadianPhase(at("2026-06-21T23:24:59Z"), events))
+    fun `anchors the palette's two inversions to civil dawn and civil dusk`() {
+        val times = timelineTimes(events)
+        assertEquals(events.dawnMs, times[CIRCADIAN_TIMELINE.indexOfFirst { it.name == "dawnGlow" }])
+        assertEquals(events.duskMs, times[CIRCADIAN_TIMELINE.indexOfFirst { it.name == "duskFall" }])
     }
 
     @Test
-    fun `computes morning transition progress between dawn and sunrise`() {
-        val phase = circadianPhase(at("2026-06-21T10:15:00Z"), events)
-        assertTrue(phase is CircadianPhase.MorningTransition)
-        assertEquals(0.5f, (phase as CircadianPhase.MorningTransition).progress, 1e-5f)
+    fun `holds keyframe times non-decreasing when the sun events collapse`() {
+        val times = timelineTimes(degenerate)
+        for (i in 1 until times.size) {
+            assertTrue("times[$i] < times[${i - 1}]", times[i] >= times[i - 1])
+        }
+    }
+
+    // --- phase, case for case with circadianTheme.test.ts ---
+
+    @Test
+    fun `clamps to the first keyframe in the small hours before it`() {
+        val phase = phaseAt("2026-06-21T00:30:00Z")
+        assertEquals(0, phase.index)
+        assertEquals(0f, phase.progress, 1e-5f)
     }
 
     @Test
-    fun `starts the evening transition 35 minutes before sunset`() {
-        val phase = circadianPhase(at("2026-06-21T23:25:00Z"), events)
-        assertTrue(phase is CircadianPhase.EveningTransition)
-        assertEquals(0f, (phase as CircadianPhase.EveningTransition).progress, 1e-5f)
+    fun `is mid-day and flat through the afternoon`() {
+        assertEquals("day", phaseAt("2026-06-21T13:00:00Z").name)
+        assertEquals("dayHold", phaseAt("2026-06-21T17:20:00Z").name)
+        // day and dayHold carry the same level, so the whole span between them
+        // is flat rather than merely starting and ending at full.
+        assertEquals(1.0f, brightnessFor(phaseAt("2026-06-21T13:00:00Z"), idle = false), 1e-5f)
+        assertEquals(1.0f, brightnessFor(phaseAt("2026-06-21T16:00:00Z"), idle = false), 1e-5f)
     }
 
     @Test
-    fun `computes evening transition progress across its 2-hour span`() {
-        val phase = circadianPhase(at("2026-06-21T23:55:00Z"), events)
-        assertTrue(phase is CircadianPhase.EveningTransition)
-        assertEquals(0.25f, (phase as CircadianPhase.EveningTransition).progress, 1e-5f)
+    fun `is still on the dark side in the last instant before civil dawn`() {
+        assertEquals("lateNight", phaseAt("2026-06-21T05:29:59Z").name)
     }
 
     @Test
-    fun `uses the day and night levels unblended outside a transition`() {
-        assertEquals(1.0f, brightnessFor(CircadianPhase.Day, curve), 1e-5f)
-        assertEquals(0.05f, brightnessFor(CircadianPhase.Night, curve), 1e-5f)
+    fun `lands on the far side of the inversion at civil dawn itself`() {
+        assertEquals("dawnGlow", phaseAt("2026-06-21T05:30:00Z").name)
     }
 
     @Test
-    fun `lands exactly on the amber level at the midpoint of a transition`() {
-        assertEquals(0.4f, brightnessFor(CircadianPhase.EveningTransition(0.5f), curve), 1e-5f)
-        assertEquals(0.4f, brightnessFor(CircadianPhase.MorningTransition(0.5f), curve), 1e-5f)
+    fun `is still on the light side in the last instant before civil dusk`() {
+        assertEquals("sunsetGlow", phaseAt("2026-06-21T20:29:59Z").name)
     }
 
     @Test
-    fun `runs a transition from the from-phase level to the to-phase level`() {
-        assertEquals(1.0f, brightnessFor(CircadianPhase.EveningTransition(0f), curve), 1e-5f)
-        assertEquals(0.05f, brightnessFor(CircadianPhase.EveningTransition(1f), curve), 1e-5f)
-        // Morning runs the same blend in reverse.
-        assertEquals(0.05f, brightnessFor(CircadianPhase.MorningTransition(0f), curve), 1e-5f)
-        assertEquals(1.0f, brightnessFor(CircadianPhase.MorningTransition(1f), curve), 1e-5f)
+    fun `lands on the far side of the inversion at civil dusk itself`() {
+        assertEquals("duskFall", phaseAt("2026-06-21T20:30:00Z").name)
     }
 
     @Test
-    fun `blends through amber rather than straight from day to night`() {
-        // A quarter through the evening is halfway from day to amber (0.7),
-        // which a straight day-to-night lerp would have put at ~0.76.
-        assertEquals(0.7f, brightnessFor(CircadianPhase.EveningTransition(0.25f), curve), 1e-5f)
+    fun `runs the golden hour into sunset over the 45 minutes before it`() {
+        val phase = phaseAt("2026-06-21T19:37:30Z")
+        assertEquals("goldenHour", phase.name)
+        assertEquals(0.5f, phase.progress, 1e-5f)
+    }
+
+    // --- brightness ---
+
+    @Test
+    fun `blends between the two keyframes it sits between`() {
+        // Halfway from goldenHour (0.68) to sunsetGlow (0.40).
+        assertEquals(0.54f, brightnessFor(phaseAt("2026-06-21T19:37:30Z"), idle = false), 1e-5f)
+    }
+
+    @Test
+    fun `bottoms out at a true zero when idle at night`() {
+        assertEquals(0f, brightnessFor(phaseAt("2026-06-21T02:00:00Z"), idle = true), 0f)
+        assertTrue(brightnessFor(phaseAt("2026-06-21T02:00:00Z"), idle = false) > 0f)
+    }
+
+    @Test
+    fun `never leaves the zero-to-one range across a whole day`() {
+        val dayStart = at("2026-06-21T00:00:00Z")
+        for (minute in 0 until 24 * 60) {
+            val phase = circadianPhase(dayStart + minute * 60_000L, events)
+            for (idle in listOf(true, false)) {
+                val level = brightnessFor(phase, idle)
+                assertTrue("minute $minute idle=$idle -> $level", level in 0f..1f)
+            }
+        }
     }
 
     // --- alignToDay: the shell's problem, not the dashboard's ---
@@ -99,29 +151,29 @@ class CircadianBrightnessTest {
 
     @Test
     fun `leaves events for today untouched`() {
-        val aligned = alignToDay(events, at("2026-06-21T15:00:00Z"), utc, 7)
-        assertEquals(events, aligned)
+        assertEquals(events, alignToDay(events, at("2026-06-21T15:00:00Z"), utc, 7))
     }
 
     @Test
     fun `rolls yesterday's events forward onto today`() {
         val aligned = alignToDay(events, at("2026-06-22T15:00:00Z"), utc, 7)!!
-        assertEquals(at("2026-06-22T10:00:00Z"), aligned.dawnMs)
-        assertEquals(at("2026-06-22T10:30:00Z"), aligned.sunriseMs)
-        assertEquals(at("2026-06-23T00:00:00Z"), aligned.sunsetMs)
-        assertEquals(at("2026-06-23T00:30:00Z"), aligned.duskMs)
+        assertEquals(at("2026-06-22T05:30:00Z"), aligned.dawnMs)
+        assertEquals(at("2026-06-22T06:00:00Z"), aligned.sunriseMs)
+        assertEquals(at("2026-06-22T20:00:00Z"), aligned.sunsetMs)
+        assertEquals(at("2026-06-22T20:30:00Z"), aligned.duskMs)
     }
 
     /**
      * The regression this function exists for: without the roll, a midday
-     * `now` sits past a day-old sunset's transition and reads as Night, so a
-     * tablet rebooting on a dead network dims itself in full daylight.
+     * `now` sits past the end of a day-old timeline and reads as the night
+     * floor, so a tablet rebooting on a dead network dims itself in full
+     * daylight.
      */
     @Test
     fun `day-old events would read as night at midday without rolling`() {
-        val noonTomorrow = at("2026-06-22T15:00:00Z")
-        assertEquals(CircadianPhase.Night, circadianPhase(noonTomorrow, events))
-        assertEquals(CircadianPhase.Day, circadianPhase(noonTomorrow, alignToDay(events, noonTomorrow, utc, 7)!!))
+        val noonTomorrow = at("2026-06-22T13:00:00Z")
+        assertEquals("deepNightEnd", circadianPhase(noonTomorrow, events).name)
+        assertEquals("day", circadianPhase(noonTomorrow, alignToDay(events, noonTomorrow, utc, 7)!!).name)
     }
 
     @Test
@@ -131,7 +183,7 @@ class CircadianBrightnessTest {
 
     @Test
     fun `rolls up to the limit inclusive`() {
-        assertTrue(alignToDay(events, at("2026-06-28T15:00:00Z"), utc, 7) != null)
+        assertNotNull(alignToDay(events, at("2026-06-28T15:00:00Z"), utc, 7))
     }
 
     /** A clock correction backwards shouldn't roll events into the past. */

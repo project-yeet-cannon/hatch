@@ -109,3 +109,60 @@
   width: 100%;
   max-width: 480px;
 }
+
+/* The whole cycle as one row of slices - see the comment at its build site in
+   DevThemePage.tsx. Each frame is that minute's sky with a card on it and three
+   bars of text (ink, muted, an accent), so a stretch where any of them stops
+   separating from the card is visible as a flat run rather than as a minute
+   somebody has to land on while scrubbing. */
+.devtheme-filmstrip {
+  display: flex;
+  gap: 1px;
+  margin: 14px 0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.devtheme-frame {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 56px;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.devtheme-frame-card {
+  width: 70%;
+  height: 60%;
+  border-radius: 2px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 2px;
+  box-sizing: border-box;
+}
+
+.devtheme-frame-ink {
+  height: 3px;
+  width: 100%;
+  border-radius: 1px;
+}
+
+.devtheme-frame-muted {
+  width: 70%;
+}
+
+.devtheme-frame-accent {
+  width: 40%;
+}
+
+.devtheme-keyframes {
+  font-size: 11px;
+  line-height: 1.7;
+  opacity: 0.75;
+}

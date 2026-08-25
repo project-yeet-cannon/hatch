@@ -1,8 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { DashboardData, SunEvents } from '../types';
-import { type CircadianPhase, getCircadianPhase, resolveThemeStyle } from '../lib/circadianTheme';
-import { circadianTokens } from '../theme/tokens';
+import {
+  backlightAt,
+  type CircadianPhase,
+  getCircadianPhase,
+  moodAt,
+  paletteFor,
+  resolveThemeStyle,
+  styleForMood,
+  timelineTimes,
+} from '../lib/circadianTheme';
+import { circadianTimeline, FALLBACK_MOOD } from '../theme/tokens';
 import { DEFAULT_TIME_ZONE } from '../config';
 import { MockDashboardDataSource } from '../mock/mockDataSource';
 import { ZoneCard } from '../components/ZoneCard';
@@ -27,17 +36,11 @@ function formatZonedTime(date: Date, timeZone: string): string {
 }
 
 function describePhase(phase: CircadianPhase): string {
-  switch (phase.kind) {
-    case 'day':
-      return 'Full light';
-    case 'night':
-      return 'Full dark';
-    case 'eveningTransition':
-      return `Evening transition — ${Math.round(phase.progress * 100)}%`;
-    case 'morningTransition':
-      return `Morning transition — ${Math.round(phase.progress * 100)}%`;
-  }
+  if (phase.from === phase.to) return `${phase.from} (held)`;
+  return `${phase.from} → ${phase.to} — ${Math.round(phase.progress * 100)}%`;
 }
+
+const FILMSTRIP_STEP_MINUTES = 10;
 
 /**
  * Dev-only theme scrubber. Fetches the day's real sun events for the site's
@@ -107,8 +110,28 @@ export function DevThemePage() {
     [date, minuteOfDay],
   );
 
-  const phase = events ? getCircadianPhase(simulatedNow, events) : null;
-  const style = phase ? resolveThemeStyle(phase, circadianTokens) : {};
+  const phase = events ? getCircadianPhase(simulatedNow, events, circadianTimeline) : null;
+  const style = phase
+    ? resolveThemeStyle(phase, circadianTimeline)
+    : styleForMood(circadianTimeline, FALLBACK_MOOD);
+
+  // The whole cycle at a glance. The failure this page exists to catch is a
+  // palette that is fine on the keyframes and unreadable between two of them,
+  // and that is invisible while scrubbing one minute at a time: each slice
+  // below shows a card and its ink over that minute's sky, so a stretch where
+  // they converge shows up as a run of flat slices rather than as a moment
+  // someone has to happen to land on.
+  const filmstrip = useMemo(() => {
+    if (!events) return [];
+    const dayStart = Date.parse(`${date}T00:00:00.000Z`);
+    const slices = [];
+    for (let m = 0; m < MINUTES_PER_DAY; m += FILMSTRIP_STEP_MINUTES) {
+      const at = getCircadianPhase(new Date(dayStart + m * 60_000), events, circadianTimeline);
+      const palette = paletteFor(moodAt(at, circadianTimeline));
+      slices.push({ minute: m, palette, mood: at.from });
+    }
+    return slices;
+  }, [date, events]);
 
   return (
     <div className="hf-page devtheme-page" style={style as CSSProperties}>
@@ -160,8 +183,47 @@ export function DevThemePage() {
           <p className="devtheme-readout">
             Phase: <b>{describePhase(phase)}</b>
             <br />
+            <br />
+            Polarity: <b>{phase.polarity}</b> · Panel{' '}
+            <b>{Math.round(backlightAt(phase, circadianTimeline, false) * 100)}%</b> active,{' '}
+            <b>{Math.round(backlightAt(phase, circadianTimeline, true) * 100)}%</b> idle
+            <br />
             Dawn {formatTime(events.dawn)} · Sunrise {formatTime(events.sunrise)} · Sunset {formatTime(events.sunset)}{' '}
             · Dusk {formatTime(events.dusk)}
+          </p>
+        )}
+
+        {filmstrip.length > 0 && (
+          <div className="devtheme-filmstrip">
+            {filmstrip.map(({ minute, palette, mood }) => (
+              <button
+                key={minute}
+                type="button"
+                className="devtheme-frame"
+                title={`${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')} UTC — ${mood}`}
+                onClick={() => setMinuteOfDay(minute)}
+                style={{
+                  background: `linear-gradient(180deg, ${palette.bgTop}, ${palette.bgBottom})`,
+                }}
+              >
+                <span className="devtheme-frame-card" style={{ background: palette.card }}>
+                  <span className="devtheme-frame-ink" style={{ background: palette.ink }} />
+                  <span className="devtheme-frame-ink devtheme-frame-muted" style={{ background: palette.muted }} />
+                  <span className="devtheme-frame-ink devtheme-frame-accent" style={{ background: palette.warm }} />
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {events && (
+          <p className="devtheme-readout devtheme-keyframes">
+            {circadianTimeline.map((mood, i) => (
+              <span key={mood.name}>
+                {i > 0 && ' · '}
+                {mood.name} {formatTime(new Date(timelineTimes(events, circadianTimeline)[i]).toISOString())}
+              </span>
+            ))}
           </p>
         )}
 

@@ -4,8 +4,7 @@ import type { DashboardData } from './types';
 import { getDashboardDataSource } from './dataSource';
 import { DEFAULT_TIME_ZONE } from './config';
 import { formatClockParts, formatMonthDay, formatWeekday } from './lib/format';
-import { getCircadianPhase, resolveThemeStyle } from './lib/circadianTheme';
-import { circadianTokens } from './theme/tokens';
+import { useCircadianTheme } from './hooks/useCircadianTheme';
 import { ZoneCard } from './components/ZoneCard';
 import { OutsideCard } from './components/OutsideCard';
 import { RoutinesSection } from './components/RoutinesSection';
@@ -120,9 +119,7 @@ export function App() {
   // so fall back to the configured default — it's only used for a couple of
   // seconds' worth of header rendering and gets replaced once `data` loads.
   const timeZone = data?.timezone ?? DEFAULT_TIME_ZONE;
-  const themeStyle = data
-    ? resolveThemeStyle(getCircadianPhase(now, data.sunEvents), circadianTokens)
-    : resolveThemeStyle({ kind: 'day' }, circadianTokens);
+  const theme = useCircadianTheme(now, data?.sunEvents);
   const clock = formatClockParts(now, timeZone);
   // The snapshot's row for whichever camera is on screen, if it has one. A
   // motion event can arrive while the dashboard poll is failing, so this is
@@ -130,7 +127,16 @@ export function App() {
   const shownCamera = cameraDeviceId === null ? undefined : data?.cameras.find((camera) => camera.id === cameraDeviceId);
 
   return (
-    <div className="hf-page" style={themeStyle as CSSProperties}>
+    <div className="hf-page" style={theme.style as CSSProperties}>
+      {/* The two polarity inversions a day, covered. See useCircadianTheme.ts
+          for why they are a cut to dark rather than a fade. aria-hidden and
+          pointer-events:none: it is a lighting effect, not a scrim - a tap
+          during it still reaches whatever is underneath. */}
+      <div
+        className="hf-veil"
+        aria-hidden="true"
+        style={{ opacity: theme.veilOpacity, transitionDuration: `${theme.veilDurationMs}ms` }}
+      />
       <div className="hfdev">
         <div className="hf-head">
           <div className="hf-hl">
