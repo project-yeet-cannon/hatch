@@ -44,6 +44,14 @@
 # `merge_checkpoints` says so. `preflight_only` reports both without changing
 # either.
 #
+# **The merge happens after the drain, with the VM off**, and that ordering was
+# bought the hard way. Merging rewrites every block the .avhdx holds; against a
+# running node, on a host whose VM volume backs both the OS disk and the node's
+# Longhorn data disk, it starves the guest badly enough to kill Longhorn's
+# instance-manager, stop its replicas, and start a rebuild storm on the same
+# saturated disk. With the VM off there is no guest to starve, and the node is
+# already down for the conversion that follows.
+#
 # Before dispatching, and not automated because it is a judgement rather than
 # a step: silence `alertname=~"etcd.*"` and `alertname="EtcdMemberDown"` for
 # the window, by alertname and never by receiver. EtcdMemberDown fires at
@@ -90,7 +98,7 @@ on:
         default: '100'
         type: string
       merge_checkpoints:
-        description: 'merge_checkpoints: Remove any Hyper-V checkpoints on the VM, disable automatic checkpoints, and wait for the merge before touching the disk. Needed on any VM that has been running a while: an automatic checkpoint means the guest is writing to a dynamic .avhdx layered over its disk, and a fixed disk under one is a dynamic differencing disk again'
+        description: 'Merge any Hyper-V checkpoints - AFTER the drain, with the VM off, never against a serving node. Needed on any VM that has been up a while: an automatic checkpoint means the guest writes to a dynamic .avhdx over its disk, and a fixed disk under one is a dynamic differencing disk again. preflight_only reports a chain without needing this'
         required: false
         default: false
         type: boolean

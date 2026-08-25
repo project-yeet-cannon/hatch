@@ -1,6 +1,7 @@
 # Node storage — the volume etcd lives on, and the disk that is filling
 
-**Status:** Phase 1 tooling built (1.2, 1.3); no node migrated yet. Two
+**Status:** Phase 1 tooling built (1.2, 1.3); **one node migrated, 1130 ms ->
+14 ms** (see 1.6). Two to go. Two
 symptoms, one cause: every node's OS disk is a *dynamic* VHDX, on the *slow*
 volume, sized from a template rather than from the workload. Three phases. Phase 1 stops the alerts and is the only one with a
 maintenance window; Phase 2 stops the root filesystem from filling again; Phase 3
@@ -238,6 +239,45 @@ correctly and delivered a fraction of what it claims, with nothing in the
 output to say so. That is why the script disables the setting on every VM it
 touches rather than reporting it: it is a precondition, not a tidy-up.
 
+### 7a. Postscript: merging a chain against a live node takes the node down
+
+The first version of `Move-NodeOsDisk.ps1` merged the checkpoint chain in
+preflight, against a running node, before the drain. That was wrong, and the
+second node's migration is how it was found out.
+
+Merging rewrites every block the `.avhdx` holds. On these hosts the VM volume
+backs *both* the node's OS disk and its 200 GB Longhorn data disk, so a merge
+saturates the volume the guest is living on. What followed, in order: the guest
+went to 53% iowait with ext4 journal threads blocked in `D` state, kubelet
+stalled, pods hung in `Terminating`, Longhorn's instance-manager was killed,
+its replicas stopped, the node was marked down, and Longhorn began rebuilding
+the stale replicas — onto the same saturated disk. Then the load shifted and
+the *other* unmigrated node did the same thing, and briefly reported
+`Ready=Unknown`, taking the cluster to bare etcd quorum.
+
+Nothing was lost. Every Longhorn volume in this cluster is in `observability`,
+and the one that reached `faulted` was Prometheus' own history; the application
+database is on `local-path` and kept 2 of 3 instances throughout. But the
+cluster was one node away from a read-only API server, on a maintenance
+operation that was supposed to be routine.
+
+Three things this establishes, beyond the ordering fix:
+
+**The merge belongs after `Stop-VM`.** With the VM off there is no guest to
+starve, the node is already down for the conversion that follows, and the merge
+is faster for having no concurrent writes. This costs nothing and was available
+from the start.
+
+**The two unmigrated nodes have no headroom for *any* extra I/O.** At 82-85%
+root on a dynamic VHDX under a differencing disk, they do not absorb a
+disturbance — they amplify it into a cluster-wide event. That is finding 4 and
+finding 5 arriving as an incident rather than as a graph, and it raises the
+priority of Phase 2 relative to the rest of Phase 1.
+
+**The Longhorn gate in 1.2 is what stopped this being worse.** It refused to
+drain into a degraded cluster, which is the only reason the second node was not
+also drained and powered off in the middle of its own storm.
+
 ## Phase 1 — the OS disk moves to the fast volume, fixed, at 100 GB
 
 One node at a time, the same operation on each — move to the fastest volume
@@ -349,19 +389,48 @@ is for.
       space-constrained, so a failure here is a failure of the procedure and
       nothing else.
 
-      Pass `merge_checkpoints` where 1.1's sweep found one. The merge is online
-      and runs before the drain, so it costs wall clock but no availability; on
-      a chain that has been accumulating since August it can take a while,
-      which is what the workflow's 180-minute ceiling is for.
+      Pass `merge_checkpoints` where 1.1's sweep found one. **The merge runs
+      after the drain, with the VM off** — see finding 7's postscript for why
+      that ordering is not a detail.
+
+      **Not the first node run.** Host C's node went first, for finding 6's
+      reasons: roomiest destination (~822 GB free), least full node at 48% and
+      so the safest to drain onto, and once migrated a 100 GB sink for the two
+      drains that follow. So the order executed was 1.8, then these two. The
+      step numbers name nodes, not sequence.
 
 - [ ] **1.5 — Second node, other roomy host.** Only after 1.4's node has been
       `Ready` and serving for long enough to trust.
 
-- [ ] **1.6 — Gate: the number moved.** p99 wal fsync on both migrated nodes
+- [ ] **1.6 — Gate: the number moved.** *One of two nodes measured; see the
+      result below.* p99 wal fsync on both migrated nodes
       **under 10 ms**, sustained over an hour, off the live Prometheus. If it
       lands in the tens of ms rather than single digits, stop and find out why
       before touching the third node — the whole plan rests on the boot volume
       being as fast under etcd's flush pattern as it measures under the host's.
+
+      **Result on the first node: 1130 ms -> 14.1 ms p99, and 1.7 ms p50.**
+      Backend commit 1526 ms -> 13.3 ms. Slow-apply warnings 0.32/s against
+      1.05-1.21/s on the two unmigrated nodes, and zero leader changes. Stable
+      to within 0.2 ms across 5-, 15- and 30-minute windows, so this is the
+      steady state and not post-boot catch-up.
+
+      **It misses the number and passes the question.** The gate asked whether
+      the destination volume is as fast under etcd's flush pattern as it
+      measures under the host's, and p50 of 1.7 ms against that volume's
+      measured 1.81 ms says it is, exactly. There is no overhead left to
+      remove; a p99 at eight times the median is ordinary filesystem tail. The
+      10 ms figure was written against destinations measuring 0.1-2.2 ms and
+      this node's is the slowest of the three at 1.81 ms, with no better option
+      on that host — its boot volume cannot hold the disk (finding 6).
+
+      What is left open is narrow and the next node closes it for free: if a
+      node landing on a 0.11 ms volume comes in under 10 ms, this node is
+      media-limited and the procedure is sound. If it also lands near 14 ms,
+      something common is in the way and *that* is the stop this gate is for.
+
+      For scale: the alerts that started this fire at 250 ms fsync, 500 ms
+      commit, 1 s critical. Nothing is near them at 14 ms.
 
 - [x] **1.7 — ~~Reclaim host C's boot volume.~~ Dropped, per finding 6.** The
       audit was scoped against a destination host C should not use: 140 GB into
@@ -371,18 +440,20 @@ is for.
       Whether 131 GB of a hypervisor-only machine's boot volume is worth
       cleaning up on its own merits is a separate and much smaller question.
 
-- [ ] **1.8 — Third node.** The same move the other two get, to host C's third
-      volume rather than to its boot volume — 1.81 ms, ~822 GB free, in the
+- [x] **1.8 — Third node, run first.** The same move the other two get, to
+      host C's third volume rather than to its boot volume — 1.81 ms, ~822 GB free, in the
       same band as host A's boot volume. Finding 2 for why not C:, and why not
       the volume it is on now.
 
-      Expect the largest single improvement here: 1130 ms to single digits.
-      Note what this run can and cannot tell you. Because it both moves and
-      converts, a *small* improvement would not distinguish finding 2 from
-      finding 3. The experiment that would have separated them was an in-place
-      conversion on the volume this node is already on, and it was given up
-      deliberately: it would have been informative, and it would have risked a
-      second maintenance window on an etcd member to find out.
+      **Done. 1130 ms -> 14.1 ms p99, 1.7 ms p50** — the largest single
+      improvement in the plan, and the whole of it in one 15-minute window.
+      Root filesystem went 32 GB at 48% to 99 GB at 16%. Full reading in 1.6.
+
+      Because this run both moved and converted, it cannot apportion the win
+      between findings 2 and 3. The experiment that would have separated them
+      was an in-place conversion on the volume this node was already on; it was
+      given up deliberately, because it would have risked a second maintenance
+      window on an etcd member to learn something the plan does not act on.
 
 - [ ] **1.9 — Soak, then delete the sources.** Leave the original
       `os-disk.vhdx` files in place for a week as the rollback path — repointing
