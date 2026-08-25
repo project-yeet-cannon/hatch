@@ -23,12 +23,14 @@
     for the first server (forms the single-node etcd cluster); use
     -JoinServer <node1-ip> for every server after that.
 
-    This is also how the cluster plan's Phase 6b.1 lands: re-dispatching
-    against a node that is already active reconciles vm.max_map_count and
-    etcd-expose-metrics without a full reinstall, restarting k3s only if the
-    config file actually changed. Dispatch one node at a time and wait for
-    every node to show Ready before reconfiguring the next - with two
-    servers, quorum is 2 of 2 until Phase 7.
+    This is also how the cluster plan's Phase 6b.1 and the node-storage
+    plan's Phase 2 land: re-dispatching against a node that is already active
+    reconciles all four node-level settings - vm.max_map_count,
+    etcd-expose-metrics, kubelet's image-GC thresholds and journald's size cap
+    - without a full reinstall, restarting k3s only if a file k3s reads at
+    start actually changed. Dispatch one node at a time and wait for every
+    node to show Ready before reconfiguring the next: each restart takes an
+    etcd member down for its duration.
 
     Stages:
       1. Preflight - SSH key resolves, the OpenSSH client is present, the
@@ -39,13 +41,17 @@
       2. Inspect   - checks whether k3s is already active on the node. If so,
                      the install is skipped (idempotent re-run) unless
                      -Reinstall forces a clean uninstall/reinstall.
-      3. Node configuration - writes the vm.max_map_count sysctl drop-in
-                     (applied live too) and /etc/rancher/k3s/config.yaml's
-                     etcd-expose-metrics, both from the cluster plan Phase
-                     6b.1. Idempotent, and restarts k3s only when it is
-                     already active and the config file actually changed -
-                     a fresh install below picks the file up on its own
-                     first start. Also symlinks /root/.kube/config to k3s's
+      3. Node configuration - writes four node-level settings: the
+                     vm.max_map_count sysctl drop-in (applied live too) and
+                     /etc/rancher/k3s/config.yaml's etcd-expose-metrics from
+                     the cluster plan Phase 6b.1, plus kubelet's image-GC
+                     thresholds at 70/55 and journald's 512M cap from the
+                     node-storage plan Phase 2. Idempotent, and restarts k3s
+                     only when it is already active and a file k3s reads at
+                     start actually changed - a fresh install below picks
+                     both up on its own first start; journald is restarted
+                     and vacuumed in place instead, since k3s does not read
+                     it. Also symlinks /root/.kube/config to k3s's
                      own kubeconfig, so kubectl and flux both work for root
                      with no KUBECONFIG to remember while debugging from the
                      node's own console - operator ergonomics, not a
@@ -56,8 +62,10 @@
                      NOPASSWD:ALL sudo).
       5. Verify    - polls until the k3s.service is active and this node's
                      own name shows Ready in `k3s kubectl get nodes`, checks
-                     vm.max_map_count and etcd's :2381 metrics endpoint, then
-                     prints the full node list.
+                     vm.max_map_count, etcd's :2381 metrics endpoint and the
+                     image-GC thresholds the running kubelet actually
+                     resolved (not the file it was handed), reports journald's
+                     size against its cap, then prints the full node list.
 
 .PARAMETER K3sVersion
     Optional override. The pin normally comes from scripts/versions.json
@@ -194,10 +202,12 @@ function ConvertFrom-RemoteFileProbe {
     return [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Encoded))
 }
 
-# Phase 6b.1's two node-level settings. Fixed, not parameters: both values are
-# structural - OpenSearch's bootstrap check and k3s's own default are what set
-# them, not this installation's preference - so a knob here would just be a
-# second place either could drift from the plan.
+# The node's managed settings - two from the cluster plan Phase 6b.1, two from
+# the node-storage plan Phase 2. Fixed, not parameters: every value here is
+# structural - OpenSearch's bootstrap check, k3s's own default, a ratio against
+# the disk size Move-NodeOsDisk.ps1 gives a node - not this installation's
+# preference, so a knob would just be a second place any of them could drift
+# from its plan.
 $sysctlDropInPath = '/etc/sysctl.d/60-aerie-opensearch.conf'
 $desiredSysctlFile = @(
     '# Managed by Aerie: scripts/k3s/Install-K3sNode.ps1 (the cluster plan Phase 6b.1).'
@@ -212,6 +222,67 @@ $desiredK3sConfig = @(
     '# k3s defaults this to false, leaving etcd metrics on :2381 unreachable - the'
     '# quorum alert in 6b.8 has nothing to evaluate without it.'
     'etcd-expose-metrics: true'
+    ''
+) -join "`n"
+
+# The node-storage plan's 2.1, and the one place this script departs from what
+# that plan sketched. It asked for `kubelet-arg: image-gc-high-threshold=70` in
+# config.yaml above; --image-gc-high-threshold and its low twin have been
+# deprecated kubelet flags since 1.15 ("set this via the config file"), and
+# k3s already runs kubelet with --config-dir pointed at the directory below -
+# so the drop-in is the supported spelling of the same setting, on a mechanism
+# these nodes are demonstrably already using. Same restart cost either way:
+# kubelet reads both at start and neither is live-reloadable.
+#
+# k3s writes 00-k3s-defaults.conf into this directory on every start and leaves
+# anything else alone - its own documentation calls a drop-in placed here the
+# recommended way to change a kubelet default. Kubelet merges them in lexical
+# order, and the 50- prefix is chosen to land after every name k3s reserves for
+# itself: 00- for those defaults, and 10-cli-config.conf / 20-cli-config-dir/
+# for the copies it makes of a kubelet config passed on the command line. The
+# directory is k3s's, but this file is not - k3s-uninstall.sh takes the whole
+# tree with it, which is why -Reinstall runs before this stage rather than
+# after.
+$kubeletDropInDir = '/var/lib/rancher/k3s/agent/etc/kubelet.conf.d'
+$kubeletDropInPath = "$kubeletDropInDir/50-aerie-image-gc.conf"
+# Named once and used three times - written into the file, and asserted against
+# the running kubelet in Verify. The percentages are the whole of 2.1, so they
+# should not be able to disagree with themselves.
+$imageGcHighTarget = 70
+$imageGcLowTarget = 55
+$desiredKubeletDropIn = @(
+    '# Managed by Aerie: scripts/k3s/Install-K3sNode.ps1 (the node-storage plan 2.1).'
+    "# kubelet's defaults are 85/80, so the first image GC of a node's life runs at"
+    '# the same threshold that gates eviction - housekeeping arriving as pressure.'
+    "# $imageGcHighTarget/$imageGcLowTarget against the 100 GB OS disk trims at 70 GB, twice the ~32 GB"
+    '# steady state, and leaves the eviction threshold something to be a'
+    '# threshold for.'
+    'apiVersion: kubelet.config.k8s.io/v1beta1'
+    'kind: KubeletConfiguration'
+    "imageGCHighThresholdPercent: $imageGcHighTarget"
+    "imageGCLowThresholdPercent: $imageGcLowTarget"
+    ''
+) -join "`n"
+
+# The node-storage plan's 2.2. Written here for the three nodes that already
+# exist and by cloud-init for every node built after - byte-identical in both
+# places on purpose, so a new node's first Provision 1 run reports this as
+# already matching rather than rewriting a file it agrees with. Change one and
+# change the other: scripts/hyperv/cloud-init/user-data.tmpl.yaml.
+$journaldDropInPath = '/etc/systemd/journald.conf.d/60-aerie-journal-cap.conf'
+# One number, three uses: the file, the vacuum that makes an existing node
+# match it, and the size Verify reports against. systemd's M is a MiB, which
+# is also what PowerShell's 1MB is, so the two agree without a conversion.
+$journaldCapMiB = 512
+$journaldCap = "${journaldCapMiB}M"
+$desiredJournaldDropIn = @(
+    '# Managed by Aerie: scripts/k3s/Install-K3sNode.ps1 and'
+    '# scripts/hyperv/cloud-init/user-data.tmpl.yaml (the node-storage plan 2.2).'
+    "# journald's default ceiling is 10% of the filesystem capped at 4G, so the"
+    '# 100 GB OS disk raised it rather than bounding it. This is a fixed ceiling'
+    '# instead: enough journal to debug from, and it cannot grow into the disk.'
+    '[Journal]'
+    "SystemMaxUse=$journaldCap"
     ''
 ) -join "`n"
 
@@ -330,10 +401,16 @@ try {
             'test -f {0} && {{ base64 -w0 {0}; echo; }} || echo NONE'
             'echo ''--- k3s-config'''
             'test -f {1} && {{ base64 -w0 {1}; echo; }} || echo NONE'
+            'echo ''--- kubelet-dropin'''
+            'sudo test -f {3} && {{ sudo base64 -w0 {3}; echo; }} || echo NONE'
+            'echo ''--- journald-dropin'''
+            'test -f {4} && {{ base64 -w0 {4}; echo; }} || echo NONE'
+            'echo ''--- journal-usage'''
+            'sudo journalctl --disk-usage 2>/dev/null || echo unknown'
             'echo ''--- kubeconfig-link'''
             'sudo test -L {2} && sudo readlink {2} || echo NONE'
             'echo ''--- end'''
-        ) -join '; ') -f $sysctlDropInPath, $k3sConfigPath, $kubeconfigLinkPath
+        ) -join '; ') -f $sysctlDropInPath, $k3sConfigPath, $kubeconfigLinkPath, $kubeletDropInPath, $journaldDropInPath
 
     $probe = Invoke-NodeSsh @ssh -Command $probeScript -ConnectTimeoutSec 15
     if ($probe.ExitCode -ne 0) {
@@ -348,6 +425,9 @@ try {
     $liveMaxMapCount = (Get-ProbeSection -Output $probe.StdOut -Name 'sysctl').Trim()
     $currentSysctlFile = ConvertFrom-RemoteFileProbe -Encoded (Get-ProbeSection -Output $probe.StdOut -Name 'sysctl-file')
     $currentK3sConfig = ConvertFrom-RemoteFileProbe -Encoded (Get-ProbeSection -Output $probe.StdOut -Name 'k3s-config')
+    $currentKubeletDropIn = ConvertFrom-RemoteFileProbe -Encoded (Get-ProbeSection -Output $probe.StdOut -Name 'kubelet-dropin')
+    $currentJournaldDropIn = ConvertFrom-RemoteFileProbe -Encoded (Get-ProbeSection -Output $probe.StdOut -Name 'journald-dropin')
+    $currentJournalUsage = (Get-ProbeSection -Output $probe.StdOut -Name 'journal-usage').Trim()
     $currentKubeconfigLinkTarget = (Get-ProbeSection -Output $probe.StdOut -Name 'kubeconfig-link').Trim()
 
     Write-Host "k3s.service: $serviceState"
@@ -356,8 +436,8 @@ try {
     $alreadyActive = $serviceState -eq 'active'
     # Captured before -Reinstall can flip $alreadyActive below - it gates the
     # Phase 2 checklist at the very end, which makes no sense to print for a
-    # run that only reconciled Phase 6b.1's node settings on an already-active
-    # node and never touched the install pipeline at all.
+    # run that only reconciled the node settings on an already-active node and
+    # never touched the install pipeline at all.
     $wasAlreadyActive = $alreadyActive
     if ($alreadyActive -and $Reinstall) {
         Write-Warning "-Reinstall: k3s is active on '$VMName' - running its uninstall script before reinstalling with today's inputs. If this is a server node and other servers are still up, it will not have removed itself from the etcd member list first."
@@ -373,10 +453,11 @@ try {
     Write-Stage 'Node configuration'
     # ---------------------------------------------------------------- #
     #
-    # The cluster plan Phase 6b.1's two node-level settings, applied here so
-    # they exist before k3s ever starts on a fresh node - see the doc for why
-    # neither can be a chart-side or in-cluster fix. Idempotent: a re-run
-    # against a node that already has both settings reports nothing changed.
+    # The cluster plan Phase 6b.1's two node-level settings and the
+    # node-storage plan Phase 2's two, applied here so they exist before k3s
+    # ever starts on a fresh node - see those docs for why none of them can be
+    # a chart-side or in-cluster fix. Idempotent: a re-run against a node that
+    # already has all four reports nothing changed.
 
     $configActions = New-Object Collections.Generic.List[string]
 
@@ -423,8 +504,51 @@ try {
         Write-Host "$k3sConfigPath written."
     }
 
-    # Not a Phase 6b.1 setting - tracked in its own list so the phase-gate
-    # messaging below stays about what that step actually asserts.
+    $kubeletDropInChanged = $currentKubeletDropIn -ne $desiredKubeletDropIn
+    if (-not $kubeletDropInChanged) {
+        Write-Host "$kubeletDropInPath already matches - not rewriting."
+    }
+    else {
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($desiredKubeletDropIn))
+        # mkdir -p rather than assuming the directory: on a node that has never
+        # run k3s, nothing has created it yet. The chmod is on the leaf alone
+        # and matches the 0700 k3s gives it, so a node configured before its
+        # first install does not end up with a laxer directory than one
+        # configured after - while the parents k3s also owns keep whatever
+        # mkdir's umask gives them. k3s does not mind finding the file already
+        # there when it writes its own defaults beside it.
+        $writeKubeletDropIn = Invoke-NodeSsh @ssh -ConnectTimeoutSec 30 -Command (
+            'sudo mkdir -p {0} && sudo chmod 0700 {0} && echo {1} | base64 -d | sudo tee {2} >/dev/null' -f $kubeletDropInDir, $encoded, $kubeletDropInPath
+        )
+        if ($writeKubeletDropIn.ExitCode -ne 0) {
+            throw "Writing $kubeletDropInPath on $IPAddress failed (exit $($writeKubeletDropIn.ExitCode)):`n$($writeKubeletDropIn.StdOut)$($writeKubeletDropIn.StdErr)"
+        }
+        $configActions.Add("wrote $kubeletDropInPath (image GC $imageGcHighTarget/$imageGcLowTarget)")
+        Write-Host "$kubeletDropInPath written (image GC high $imageGcHighTarget / low $imageGcLowTarget)."
+    }
+
+    if ($currentJournaldDropIn -eq $desiredJournaldDropIn) {
+        Write-Host "$journaldDropInPath already matches - not rewriting.$(if ($currentJournalUsage -and $currentJournalUsage -ne 'unknown') { " Journal now: $currentJournalUsage" })"
+    }
+    else {
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($desiredJournaldDropIn))
+        # Three commands, because the cap alone changes nothing that already
+        # exists: journald reads its configuration at start, and then only
+        # enforces SystemMaxUse when it next rotates. The vacuum is what makes
+        # the node match the file today rather than at some later write - the
+        # existing journals are the 1.3-1.9 GB the plan's finding 5 counted.
+        $writeJournald = Invoke-NodeSsh @ssh -ConnectTimeoutSec 60 -Command (
+            'sudo mkdir -p /etc/systemd/journald.conf.d && echo {0} | base64 -d | sudo tee {1} >/dev/null && sudo systemctl restart systemd-journald && sudo journalctl --vacuum-size={2}' -f $encoded, $journaldDropInPath, $journaldCap
+        )
+        if ($writeJournald.ExitCode -ne 0) {
+            throw "Writing $journaldDropInPath on $IPAddress failed (exit $($writeJournald.ExitCode)):`n$($writeJournald.StdOut)$($writeJournald.StdErr)"
+        }
+        $configActions.Add("wrote $journaldDropInPath (SystemMaxUse=$journaldCap), restarted systemd-journald and vacuumed")
+        Write-Host "$journaldDropInPath written (SystemMaxUse=$journaldCap); journald restarted and vacuumed$(if ($currentJournalUsage -and $currentJournalUsage -ne 'unknown') { " (was: $currentJournalUsage)" })."
+    }
+
+    # Not one of the plans' settings - tracked in its own list so the
+    # messaging below stays about what those steps actually assert.
     $kubeconfigActions = New-Object Collections.Generic.List[string]
     if ($currentKubeconfigLinkTarget -eq $k3sYamlPath) {
         Write-Host "$kubeconfigLinkPath already links to $k3sYamlPath - not rewriting."
@@ -443,23 +567,29 @@ try {
         Write-Host "$kubeconfigLinkPath -> $k3sYamlPath."
     }
 
-    if ($alreadyActive -and $k3sConfigChanged) {
-        # k3s only reads config.yaml at start, so a value change on a node
-        # that is already running does nothing until the service comes back -
-        # a restart, not the heavier -Reinstall (which also churns etcd
+    # Both of these are read once, at start: config.yaml by k3s itself and the
+    # kubelet drop-in by the kubelet k3s launches. Neither is live-reloadable,
+    # so a change to either on a running node does nothing until the service
+    # comes back.
+    $restartReasons = New-Object Collections.Generic.List[string]
+    if ($k3sConfigChanged) { $restartReasons.Add("$k3sConfigPath") }
+    if ($kubeletDropInChanged) { $restartReasons.Add("$kubeletDropInPath") }
+
+    if ($alreadyActive -and $restartReasons.Count -gt 0) {
+        # A restart, not the heavier -Reinstall (which also churns etcd
         # membership, per its own notes above). A fresh install below picks
-        # the file up on its own first start, so this only fires when
+        # both files up on its own first start, so this only fires when
         # reconfiguring a node that joined in an earlier phase.
-        Write-Warning "Restarting k3s on '$VMName' to apply etcd-expose-metrics. With two servers, quorum is 2 of 2 until Phase 7 - wait for every node to show Ready (kubectl get nodes) before reconfiguring the next one."
+        Write-Warning "Restarting k3s on '$VMName' to apply $($restartReasons -join ' and '). This takes one etcd member down for the length of the restart - wait for every node to show Ready (kubectl get nodes) before reconfiguring the next one."
         $restart = Invoke-NodeSsh @ssh -Command 'sudo systemctl restart k3s' -ConnectTimeoutSec 30
         if ($restart.ExitCode -ne 0) {
             throw "systemctl restart k3s failed on $IPAddress (exit $($restart.ExitCode)):`n$($restart.StdOut)$($restart.StdErr)"
         }
-        $configActions.Add('restarted k3s to apply etcd-expose-metrics')
+        $configActions.Add("restarted k3s to apply $($restartReasons -join ' and ')")
     }
 
     if ($configActions.Count -eq 0) {
-        Write-Host 'Node configuration already matched Phase 6b.1 - nothing changed.'
+        Write-Host 'Node configuration already matched - nothing changed.'
     }
 
     if ($alreadyActive) {
@@ -526,11 +656,11 @@ try {
     }
     Write-Host '  node Ready.'
 
-    # Phase 6b.1's own exit criteria - checked here rather than left to the
-    # Phase 6 gate script, so a run that reports success actually satisfies
-    # them instead of finding out at 6b.5/6b.9, several steps and possibly
-    # days later.
-    Write-Host 'Verifying Phase 6b.1 node settings ...'
+    # Each managed setting's own exit criterion - checked here rather than
+    # left to a later gate script, so a run that reports success actually
+    # satisfies them instead of finding out at 6b.5/6b.9, or a week into the
+    # node-storage plan's 2.3, several steps and possibly days later.
+    Write-Host 'Verifying node settings ...'
     # sudo, not a bare 'sysctl': /usr/sbin (where Debian keeps the binary)
     # isn't on the non-root $Username's non-interactive SSH PATH, so a bare
     # call fails with 'command not found' and an empty StdOut - read as the
@@ -558,6 +688,52 @@ try {
     }
     Write-Host '  etcd metrics endpoint (:2381): answering.'
 
+    # The node-storage plan 2.1's exit criterion, asked of the kubelet that is
+    # actually running rather than of the file it was supposed to read - the
+    # whole failure mode this guards is a drop-in that is present and ignored.
+    # Same short retry window as :2381 above and for the same reason: this
+    # goes through the apiserver to kubelet's own :10250, which is up a moment
+    # after the node reports Ready rather than at the same instant.
+    $gcDeadline = (Get-Date).AddSeconds(60)
+    $imageGcHigh = $null
+    $imageGcLow = $null
+
+    while ($true) {
+        $configz = Invoke-NodeSsh @ssh -ConnectTimeoutSec 20 -Command (
+            "sudo k3s kubectl get --raw /api/v1/nodes/$hostname/proxy/configz"
+        )
+        if ($configz.ExitCode -eq 0 -and $configz.StdOut -match '"imageGCHighThresholdPercent"\s*:\s*(\d+)') {
+            $imageGcHigh = [int]$Matches[1]
+            if ($configz.StdOut -match '"imageGCLowThresholdPercent"\s*:\s*(\d+)') { $imageGcLow = [int]$Matches[1] }
+            break
+        }
+        if ((Get-Date) -gt $gcDeadline) {
+            throw "kubelet's live configuration on $IPAddress could not be read after 60s (/api/v1/nodes/$hostname/proxy/configz). Confirm $kubeletDropInPath is valid YAML and that kubelet started: ssh $Username@$IPAddress sudo journalctl -u k3s -n 100"
+        }
+        Start-Sleep -Seconds 5
+    }
+    if ($imageGcHigh -ne $imageGcHighTarget -or $imageGcLow -ne $imageGcLowTarget) {
+        throw "kubelet on $IPAddress reports image GC thresholds $imageGcHigh/$imageGcLow, not $imageGcHighTarget/$imageGcLowTarget. $kubeletDropInPath was written but not taken - check it parses (kubelet ignores a drop-in it cannot read) and that k3s restarted after it landed: ssh $Username@$IPAddress sudo journalctl -u k3s -n 100"
+    }
+    Write-Host "  kubelet image GC: high $imageGcHigh / low $imageGcLow."
+
+    # Reported rather than asserted: journald enforces SystemMaxUse when it
+    # rotates, so a node can sit legitimately above the cap for a while after
+    # the file lands. The write path above vacuums when it changes the file,
+    # which is what makes this normally already true on the first run.
+    $journalCheck = Invoke-NodeSsh @ssh -ConnectTimeoutSec 15 -Command 'sudo du -sb /var/log/journal 2>/dev/null | cut -f1'
+    $journalRaw = $journalCheck.StdOut.Trim()
+    if ($journalCheck.ExitCode -eq 0 -and $journalRaw -match '^\d+$') {
+        $journalBytes = [int64]$journalRaw
+        $journalMiB = [math]::Round($journalBytes / 1MB, 1)
+        if ($journalBytes -gt ($journaldCapMiB * 1MB)) {
+            Write-Warning "journald is holding ${journalMiB} MiB against a $journaldCap cap on $IPAddress. It trims on its next rotation; force it with: ssh $Username@$IPAddress sudo journalctl --vacuum-size=$journaldCap"
+        }
+        else {
+            Write-Host "  journald: ${journalMiB} MiB of a $journaldCap cap."
+        }
+    }
+
     $nodeList = Invoke-NodeSsh @ssh -Command 'sudo k3s kubectl get nodes -o wide' -ConnectTimeoutSec 15
     Write-Host ''
     Write-Host $nodeList.StdOut.TrimEnd()
@@ -572,10 +748,10 @@ try {
         Write-Warning 'Two-node embedded etcd has worse availability than one node (tolerates zero losses, not one) - the cluster plan flags this build window as non-production until the third server rejoins in Phase 7.'
     }
     if ($configActions.Count -eq 0) {
-        Write-Host 'Phase 6b.1 node settings: already matched - nothing changed.'
+        Write-Host 'Node settings: already matched - nothing changed.'
     }
     else {
-        Write-Host 'Phase 6b.1 node settings changed:'
+        Write-Host 'Node settings changed:'
         foreach ($action in $configActions) { Write-Host "  - $action" }
     }
     if ($kubeconfigActions.Count -eq 0) {
@@ -614,7 +790,7 @@ try {
             "| Reinstalled | $Reinstall |"
             "| Elapsed | ${elapsed} min |"
             ''
-            "**Phase 6b.1 node settings:** $(if ($configActions.Count -eq 0) { 'already matched - nothing changed' } else { ($configActions -join '; ') })"
+            "**Node settings:** $(if ($configActions.Count -eq 0) { 'already matched - nothing changed' } else { ($configActions -join '; ') })"
             ''
             "**Root's kubeconfig:** $(if ($kubeconfigActions.Count -eq 0) { "already linked ($kubeconfigLinkPath -> $k3sYamlPath)" } else { ($kubeconfigActions -join '; ') })"
             ''

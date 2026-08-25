@@ -32,6 +32,26 @@ ntp:
   servers:
     - __NTP_SERVER__
 
+# journald's size cap (the node-storage plan 2.2), for nodes built after that
+# plan. The existing three get the identical file from
+# scripts/k3s/Install-K3sNode.ps1's node-configuration stage, which compares
+# byte-for-byte - so keep the two in step, or every Provision 1 run on a new
+# node will rewrite a file it already agrees with. No reload needed here:
+# power_state below reboots at the end of first boot, and journald reads this
+# on the way back up.
+write_files:
+  - path: /etc/systemd/journald.conf.d/60-aerie-journal-cap.conf
+    owner: 'root:root'
+    permissions: '0644'
+    content: |
+      # Managed by Aerie: scripts/k3s/Install-K3sNode.ps1 and
+      # scripts/hyperv/cloud-init/user-data.tmpl.yaml (the node-storage plan 2.2).
+      # journald's default ceiling is 10% of the filesystem capped at 4G, so the
+      # 100 GB OS disk raised it rather than bounding it. This is a fixed ceiling
+      # instead: enough journal to debug from, and it cannot grow into the disk.
+      [Journal]
+      SystemMaxUse=512M
+
 runcmd:
 __RUNCMD__
 

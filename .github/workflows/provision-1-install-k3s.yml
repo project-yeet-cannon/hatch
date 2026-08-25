@@ -20,13 +20,17 @@
 # GitHub-hosted runner (which has no route to these LAN addresses anyway) and
 # never consume Actions minutes.
 #
-# Also the mechanism behind the cluster plan's Phase 6b.1: re-dispatching this
-# workflow against a node that already joined reconciles vm.max_map_count and
-# etcd-expose-metrics without a full reinstall (Install-K3sNode.ps1's "Node
-# configuration" stage), restarting k3s only if the config actually changed.
+# Also the mechanism behind the cluster plan's Phase 6b.1 and the node-storage
+# plan's Phase 2: re-dispatching this workflow against a node that already
+# joined reconciles all four node-level settings - vm.max_map_count,
+# etcd-expose-metrics, kubelet's image-GC thresholds and journald's size cap -
+# without a full reinstall (Install-K3sNode.ps1's "Node configuration" stage),
+# restarting k3s only if a file k3s reads at start actually changed.
 # Dispatch it once per node, one at a time, waiting for `kubectl get nodes` to
-# show every node Ready before reconfiguring the next - see
-# docs/plans/swarm/phase-6-observability.md (6b.1) for why.
+# show every node Ready before reconfiguring the next - a restart takes that
+# node's etcd member down for its duration, and three members survive one.
+# See docs/plans/swarm/phase-6-observability.md (6b.1) and
+# docs/plans/node-storage.md (2.1, 2.2) for why each setting is what it is.
 #
 # Previous step: provision-0-new-node.yml, once the node answers SSH.
 # Next step: provision-2-seed-secrets.yml, then provision-3-bootstrap-flux.yml.

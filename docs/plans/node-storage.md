@@ -1,11 +1,29 @@
 # Node storage — the volume etcd lives on, and the disk that is filling
 
-**Status:** Phase 1 tooling built (1.2, 1.3); **one node migrated, 1130 ms ->
-14 ms** (see 1.6). Two to go. Two
-symptoms, one cause: every node's OS disk is a *dynamic* VHDX, on the *slow*
-volume, sized from a template rather than from the workload. Three phases. Phase 1 stops the alerts and is the only one with a
-maintenance window; Phase 2 stops the root filesystem from filling again; Phase 3
-stops the next node built from reintroducing both.
+**Status:** **Phase 1 complete and its gate passed** (2026-08-25). All three
+nodes boot from a fixed 100 GB VHDX on their host's fastest volume with room.
+Root filesystems went from 80-85% of 32 GB to 24-27% of 99 GB; guest iowait
+from 47-75% under load to 0-1.8%; and etcd's write-ahead-log fsync from p99s of
+243/204/1130 ms to a distribution entirely under 32 ms, with ~90% of fsyncs at
+or under 8 ms. The gate as originally written ("under 10 ms") turned out not to
+be expressible in the metric it was written against — see 1.6's postscript, and
+read finding 1's figures as bucket ranges rather than measurements.
+
+All that is left of Phase 1 is 1.9's soak: three source VHDXs are still on disk
+as the rollback path until 2026-09-01. **Phase 2 is written and not yet
+dispatched** — both settings are reconciled by
+[`Install-K3sNode.ps1`](../../scripts/k3s/Install-K3sNode.ps1)'s node
+configuration stage, so rolling it out is *Provision 1* once per node, one at a
+time, with no maintenance window; see 2.1 and 2.2 for what was built and where
+each departs from the sketch. Phase 3 is untouched, and finding 7a argues for
+bringing Phase 2 forward.
+
+The problem this plan was written against: two symptoms, one cause — every
+node's OS disk was a *dynamic* VHDX, on the *slow* volume, sized from a
+template rather than from the workload. Three phases. Phase 1 stopped the
+alerts and was the only one with a maintenance window; Phase 2 stops the root
+filesystem from filling again; Phase 3 stops the next node built from
+reintroducing both.
 
 Everything below was measured against the live cluster on **2026-08-24**. The
 per-host numbers are observations of one installation, not facts about Aerie —
@@ -168,7 +186,9 @@ at 85% of 32 GB. `/etc/rancher/k3s/config.yaml` is already a file
 [`Install-K3sNode.ps1`](../../scripts/k3s/Install-K3sNode.ps1) writes and
 reconciles, with an established "apply, restart k3s only if the value changed"
 path from the `etcd-expose-metrics` work. `kubelet-arg` goes in beside it; nothing
-new is invented.
+new is invented. (It ended up as a kubelet config drop-in written by the same
+stage of the same script rather than as a `kubelet-arg` — the reconcile path
+this paragraph is about is the part that held. See 2.1.)
 
 **Sizing the disk.** Today's steady state is ~25 GB. Immich adds a server image,
 a machine-learning image and its model cache — call it 5 GB — for ~32 GB
@@ -291,7 +311,7 @@ also long enough to trip [`cluster.yaml`](../../deploy/cluster/observability/con
 `EtcdMemberDown` at `for: 15m`, which is expected and is what the silence in 1.1
 is for.
 
-- [ ] **1.1 — Window and silence.** Silence `alertname=~"etcd.*"` and
+- [x] **1.1 — Window and silence.** Silence `alertname=~"etcd.*"` and
       `alertname="EtcdMemberDown"` for the duration, by alertname and never by
       receiver — the discipline
       [`kube-prometheus-stack.yaml`](../../deploy/cluster/observability/controllers/kube-prometheus-stack.yaml)
@@ -384,7 +404,7 @@ is for.
       different nodes are exactly as dangerous as two against the same one:
       each takes an etcd member down, and three members survive one.
 
-- [ ] **1.4 — First node, on a roomy host.** Run it against one of the two hosts
+- [x] **1.4 — First node, on a roomy host.** Run it against one of the two hosts
       with ~880 GB free. This is the proving run: nothing about it is
       space-constrained, so a failure here is a failure of the procedure and
       nothing else.
@@ -399,11 +419,25 @@ is for.
       drains that follow. So the order executed was 1.8, then these two. The
       step numbers name nodes, not sequence.
 
-- [ ] **1.5 — Second node, other roomy host.** Only after 1.4's node has been
+- [x] **1.5 — Second node, other roomy host.** Only after 1.4's node has been
       `Ready` and serving for long enough to trust.
 
-- [ ] **1.6 — Gate: the number moved.** *One of two nodes measured; see the
-      result below.* p99 wal fsync on both migrated nodes
+      **Done, and the fastest of the three at about 7 minutes** — because its
+      checkpoint chain had already been merged by the run that then refused at
+      the Longhorn gate, and because Prometheus, OpenSearch and autokuma were
+      parked so the drain had little to evict. Worth recording so the duration
+      is not mistaken for a step having been skipped: the merge is most of the
+      variance between a 7-minute run and a 40-minute one.
+
+      Its two `longhorn-r2` volumes had replicas on this node and one other,
+      and none on the node migrated before it, so draining would have taken
+      both to a single replica. They were scaled to zero for the window rather
+      than given a third replica - detached volumes have nothing to degrade,
+      and it kept the heaviest Longhorn writer out of the window entirely.
+
+- [x] **1.6 — Gate: the number moved, and the gate was mis-specified.** *See
+      the postscript below: the criterion as written cannot be measured, and
+      has been restated.* p99 wal fsync on both migrated nodes
       **under 10 ms**, sustained over an hour, off the live Prometheus. If it
       lands in the tens of ms rather than single digits, stop and find out why
       before touching the third node — the whole plan rests on the boot volume
@@ -431,6 +465,52 @@ is for.
 
       For scale: the alerts that started this fire at 250 ms fsync, 500 ms
       commit, 1 s critical. Nothing is near them at 14 ms.
+
+      **Postscript, after all three nodes: the 14 ms was an artifact, and so
+      was the reasoning built on it.** With all three migrated to volumes
+      measuring 0.11, 1.81 and 2.20 ms, every node reports the same p99 —
+      14.94, 14.90 and 15.43 ms. Three destinations spanning a 20x range in
+      measured latency producing one number is not a coincidence, and it is
+      not the storage.
+
+      `etcd_disk_wal_fsync_duration_seconds` has power-of-two buckets, and the
+      99th percentile falls in the 8→16 ms bucket on all three nodes.
+      `histogram_quantile` interpolates linearly inside a bucket, so with ~93%
+      of fsyncs at 8 ms and ~99.8% at 16 ms it lands near 15 whatever the
+      truth is. **There is no bucket between 8 and 16, so a 10 ms gate is not
+      expressible in this metric** — 9 ms and 15 ms are the same reading. The
+      target was written against a number that cannot be resolved to the
+      precision it demands.
+
+      What the histogram *can* say, at exact bucket boundaries rather than by
+      interpolation:
+
+      | | <= 8 ms | <= 16 ms | > 32 ms |
+      |---|---|---|---|
+      | node on host A | 93.27% | 99.85% | 0.01% |
+      | node on host B | 93.09% | 99.97% | 0.00% |
+      | node on host C | 88.45% | 99.76% | 0.00% |
+
+      **The gate, restated so it can be checked: over 85% of fsyncs at or
+      under 8 ms, over 99% at or under 16 ms, and nothing above 32 ms.** All
+      three nodes pass. Before the migration the same nodes sat at 243, 204
+      and 1130 ms p99, in the 128-2048 ms buckets; now the entire distribution
+      is below 32 ms.
+
+      Two things follow. The first is that finding 2's premise held —
+      the change worked, by two orders of magnitude — but its *ordering* of
+      destinations is unsupported by the outcome: the node on the 1.81 ms
+      volume has the best median of the three at 1.74 ms, and the node on the
+      0.11 ms volume is at 3.43 ms. Whatever now sets the median is not the
+      volume, and this plan has stopped being the right instrument for
+      finding out.
+
+      The second is a caution about the original numbers. 243 / 204 / 1130 ms
+      were read from the same interpolating quantile, and are equally
+      quantised. Their *magnitude* is sound - those samples were genuinely in
+      buckets two to three orders of magnitude up - but the precise figures in
+      finding 1 should be read as "the 128-256 and 1024-2048 ms buckets", not
+      as measurements.
 
 - [x] **1.7 — ~~Reclaim host C's boot volume.~~ Dropped, per finding 6.** The
       audit was scoped against a destination host C should not use: 140 GB into
@@ -478,17 +558,11 @@ is for.
 
 Independent of Phase 1 and safe to land first. Neither step needs a window.
 
-- [ ] **2.1 — kubelet image GC, moved down.** Add to
-      `/etc/rancher/k3s/config.yaml` via
+- [ ] **2.1 — kubelet image GC, moved down.** *Built; not yet dispatched to the
+      three nodes.* Written by
       [`Install-K3sNode.ps1`](../../scripts/k3s/Install-K3sNode.ps1)'s existing
       config-reconcile path, reusing its "restart k3s only if the value changed"
-      behaviour:
-
-      ```yaml
-      kubelet-arg:
-        - image-gc-high-threshold=70
-        - image-gc-low-threshold=55
-      ```
+      behaviour.
 
       On a 100 GB disk that trims at 70 GB against a ~32 GB projected steady
       state — routine housekeeping with a wide margin, rather than the current
@@ -496,18 +570,88 @@ Independent of Phase 1 and safe to land first. Neither step needs a window.
       The values are structural (a ratio, not an operator's number); the disk
       size they are chosen against is 1.2's `-SizeGB`.
 
-- [ ] **2.2 — Cap journald.** `SystemMaxUse=512M` in a
-      `/etc/systemd/journald.conf.d/` drop-in, placed by
+      **As built, it is a kubelet config drop-in rather than the `kubelet-arg`
+      this step asked for.** The sketch was:
+
+      ```yaml
+      kubelet-arg:
+        - image-gc-high-threshold=70
+        - image-gc-low-threshold=55
+      ```
+
+      Those two kubelet flags have been deprecated since Kubernetes 1.15 — "set
+      this via the config file" — and the nodes settle the question themselves:
+      k3s already launches kubelet with
+      `--config-dir=/var/lib/rancher/k3s/agent/etc/kubelet.conf.d`, writes its
+      own `00-k3s-defaults.conf` into that directory on every start, and leaves
+      anything else there alone — k3s's own documentation calls a drop-in
+      placed there the recommended way to change a kubelet default. So the
+      script writes `50-aerie-image-gc.conf` beside it — kubelet merges
+      drop-ins in lexical order, and `50-` lands after every prefix k3s
+      reserves for itself, including the `10-`/`20-` copies it makes of a
+      kubelet config passed on the command line — with
+      `imageGCHighThresholdPercent: 70` and `imageGCLowThresholdPercent: 55`.
+      Same setting, same restart cost (kubelet reads both at start and neither
+      is live-reloadable), on the mechanism that is not on a deprecation
+      timeline.
+
+      Two measurements from the live nodes while building it, both narrowing
+      finding 4. kubelet is at its defaults of **85/80**, so the plan's 85 was
+      right. But k3s's hard eviction threshold is `imagefs.available: 5%` and
+      `nodefs.available: 5%`, not the 10% finding 4 assumed — the node has
+      *more* room before eviction than that finding credited it with, and the
+      case for 2.1 is unchanged either way, because what 70/55 buys is that GC
+      stops being the same event as pressure.
+
+      Verified against the running kubelet rather than against the file: the
+      script reads kubelet's own `/configz` through the apiserver after the node
+      reports Ready and refuses the run unless it reports 70/55. A drop-in that
+      is present and ignored — the failure mode of any merged-config mechanism —
+      would otherwise look exactly like success.
+
+- [ ] **2.2 — Cap journald.** *Built; not yet dispatched to the three nodes.*
+      `SystemMaxUse=512M` in a `/etc/systemd/journald.conf.d/` drop-in, placed by
       [`cloud-init/user-data.tmpl.yaml`](../../scripts/hyperv/cloud-init/user-data.tmpl.yaml)
       for new nodes and applied in place on the existing three. 1.3–1.9 GB
       uncapped is not itself a crisis, but it is unbounded, and most of what is
       in it right now is finding 1's slow-apply warnings — which is to say the
       cap and Phase 1 fix the same 1.5 GB from opposite ends.
 
+      **As built**, the file is byte-identical in both places, and deliberately
+      so: `Install-K3sNode.ps1` compares what it finds on the node against what
+      it would write, so a node built from cloud-init reports this as already
+      matching on its first Provision 1 run rather than rewriting a file it
+      agrees with. The two have to be edited together, and each names the other.
+
+      Writing the file is not enough on a node that already exists, so the
+      script does three things where it does one for the other settings:
+      writes, `systemctl restart systemd-journald`, then
+      `journalctl --vacuum-size=512M`. journald reads its configuration at
+      start and only enforces `SystemMaxUse` when it next rotates — without the
+      vacuum the existing journals sit there until something else triggers
+      rotation, which is the difference between a node that matches the file
+      today and one that matches it eventually. The new node path needs none of
+      that: cloud-init's `power_state` reboot at the end of first boot means
+      journald reads the drop-in on the way back up, before there is anything
+      to trim.
+
+      **What the default actually was**, since the plan never said: journald's
+      ceiling is 10% of the filesystem capped at 4G, so it is a fraction of the
+      disk rather than a number. Phase 1's 100 GB OS disk *raised* that ceiling
+      from ~3.2 GB to the 4 GB cap. The measured 883 MB on the first node read
+      here is well inside both, which is the point — this step is against the
+      unboundedness, not against today's figure.
+
 - [ ] **2.3 — Gate.** A week after 2.1, root filesystem used is flat rather than
       climbing, and no `ImageGCFailed` or `EvictionThresholdMet` events on any
       node. Flat is the whole point: the slope in finding 4, not the absolute
       number, is what this phase is against.
+
+      The week starts when the last node has been dispatched, not when 2.1 and
+      2.2 were written — and "flat" is now measured from a different baseline
+      than finding 4's: the three nodes came out of Phase 1 at 16–27% of 99 GB
+      rather than 83–85% of 32 GB, so a climbing line has much further to run
+      before it is an incident and much longer to hide in.
 
 ## Phase 3 — stop provisioning it wrong
 

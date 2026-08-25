@@ -87,6 +87,10 @@ workflow from its branch.
 2. **Inspect.** Checks whether k3s is already active on the node. If so, the
    install is skipped (safe to rerun this workflow) unless `reinstall` is
    checked, which runs the node's own `k3s-uninstall.sh` first.
+2a. **Node configuration.** Reconciles the four settings below, before k3s
+   ever starts on a fresh node. Idempotent — a re-run against a node that
+   already has all four reports nothing changed, and k3s is restarted only
+   when one of the two files k3s reads *at start* actually changed.
 3. **Install.** Downloads the pinned install script to `/tmp/k3s-install.sh`
    on the node and runs it via `sudo env INSTALL_K3S_VERSION=... sh
    /tmp/k3s-install.sh server [--cluster-init | --server https://<node1>:6443]
@@ -94,8 +98,50 @@ workflow from its branch.
    prefix, because most sudoers policies reset the environment before exec
    and would otherwise silently drop the version pin.
 4. **Verify.** Polls until `k3s.service` is active and the node's own name
-   shows `Ready` in `k3s kubectl get nodes`, then prints the full node list
-   to the job summary.
+   shows `Ready` in `k3s kubectl get nodes`, checks `vm.max_map_count`, etcd's
+   `:2381` and the image-GC thresholds the *running kubelet* resolved (asked of
+   kubelet's own `/configz` through the apiserver, not of the file it was
+   handed — a drop-in that is present and ignored is the failure this catches),
+   reports journald's size against its cap, then prints the full node list to
+   the job summary.
+
+### The four node settings it reconciles
+
+Each is structural rather than an operator's preference, so none of them is a
+workflow input — the value lives in
+[`Install-K3sNode.ps1`](Install-K3sNode.ps1) beside the reasoning for it.
+
+| Setting | File on the node | Why | Restart |
+|---|---|---|---|
+| `vm.max_map_count=262144` | `/etc/sysctl.d/60-aerie-opensearch.conf` | OpenSearch refuses to start below it ([the cluster plan](../../docs/plans/swarm/phase-6-observability.md) 6b.1) | applied live, none needed |
+| `etcd-expose-metrics: true` | `/etc/rancher/k3s/config.yaml` | without it the quorum alert has nothing to evaluate (6b.1) | k3s, if it changed |
+| image GC at `70`/`55` | `/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/50-aerie-image-gc.conf` | kubelet's own 85/80 makes the first image GC of a node's life happen under pressure ([node storage](../../docs/plans/node-storage.md) 2.1) | k3s, if it changed |
+| `SystemMaxUse=512M` | `/etc/systemd/journald.conf.d/60-aerie-journal-cap.conf` | journald's default ceiling scales with the disk (10% capped at 4G), so a bigger OS disk raises it rather than bounding it ([node storage](../../docs/plans/node-storage.md) 2.2) | journald only, restarted and vacuumed in place |
+
+Two things worth knowing about that third row. It is a **kubelet config
+drop-in**, not the `kubelet-arg: image-gc-high-threshold=…` the plan sketched:
+those flags have been deprecated since Kubernetes 1.15, and k3s already runs
+kubelet with `--config-dir` pointed at that directory, so the drop-in is the
+supported spelling of the same setting on a mechanism these nodes already use.
+And the directory is k3s's — it rewrites `00-k3s-defaults.conf` there on every
+start and leaves everything else alone, k3s's own documentation calling a
+drop-in placed there the recommended way to change a kubelet default. Kubelet
+merges them in lexical order, and `50-` lands after every prefix k3s reserves
+for itself (`00-` for the defaults, `10-`/`20-` for copies of a kubelet config
+passed on the command line).
+
+The journald file is written **byte-identically** by
+[`cloud-init/user-data.tmpl.yaml`](../hyperv/cloud-init/user-data.tmpl.yaml) on
+nodes built after that plan, so a new node is capped from its first boot and its
+first Provision 1 run finds the file already matching. Change one, change the
+other.
+
+> **Rolling Phase 2 out to the nodes that already exist:** dispatch this
+> workflow once per node with the node's existing `role`/`join_server`, one node
+> at a time, waiting for every node to show `Ready` in between. The image-GC
+> change restarts k3s, which takes that node's etcd member down for the length
+> of the restart; three members survive one. Nothing here needs a maintenance
+> window.
 
 ### Still manual
 
