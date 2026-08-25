@@ -18,6 +18,10 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
     public DbSet<EfRoutine> Routines => Set<EfRoutine>();
     public DbSet<EfRoutineAction> RoutineActions => Set<EfRoutineAction>();
 
+    public DbSet<EfPanel> Panels => Set<EfPanel>();
+    public DbSet<EfPanelItem> PanelItems => Set<EfPanelItem>();
+    public DbSet<EfPanelControlBinding> PanelControlBindings => Set<EfPanelControlBinding>();
+
     public DbSet<EfCalendarAccount> CalendarAccounts => Set<EfCalendarAccount>();
     public DbSet<EfCalendar> Calendars => Set<EfCalendar>();
     public DbSet<EfCalendarEvent> CalendarEvents => Set<EfCalendarEvent>();
@@ -87,6 +91,39 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
             .HasOne(a => a.Channel)
             .WithMany()
             .HasForeignKey(a => a.ChannelId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // A Panel's items are the panel - they're replaced wholesale on write
+        // and mean nothing on their own, so they go with it. Same for a
+        // Control's bindings, and for the channel a binding points at: a
+        // deleted channel takes the binding with it rather than leaving a
+        // control half-bound to a channel id that resolves to nothing.
+        modelBuilder.Entity<EfPanelItem>()
+            .HasOne(i => i.Panel)
+            .WithMany(p => p.Items)
+            .HasForeignKey(i => i.PanelId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Cascade rather than SetNull despite the nullable FK: a Routine item
+        // with no RoutineId is not a degraded item, it's an item that renders
+        // nothing and can never be tapped. Deleting the routine deletes the
+        // entry that pointed at it.
+        modelBuilder.Entity<EfPanelItem>()
+            .HasOne(i => i.Routine)
+            .WithMany()
+            .HasForeignKey(i => i.RoutineId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<EfPanelControlBinding>()
+            .HasOne(b => b.Item)
+            .WithMany(i => i.Bindings)
+            .HasForeignKey(b => b.ItemId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<EfPanelControlBinding>()
+            .HasOne(b => b.Channel)
+            .WithMany()
+            .HasForeignKey(b => b.ChannelId)
             .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<EfOAuthState>();

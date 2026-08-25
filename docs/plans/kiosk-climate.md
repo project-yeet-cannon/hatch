@@ -1,6 +1,6 @@
 # Kiosk Climate
 
-**Status:** Phase 0 complete (naming and model settled). Phases 1–8 not started.
+**Status:** Phases 0–1 complete (naming, model, and schema). Phases 2–8 not started.
 
 New kiosk dashboard UI for house climate controls, and the two new domain
 concepts that make it possible: **Panels** and **Controls**.
@@ -151,24 +151,32 @@ touched, not just that a person touched something.
 
 ## Phase 1 — Schema
 
-**Status:** not started
+**Status:** complete
 
-- [ ] Add `EfPanel`, `EfPanelItem`, `EfPanelControlBinding` and the
+- [x] Add `EfPanel`, `EfPanelItem`, `EfPanelControlBinding` and the
       `PanelItemKind` / `ControlKind` / `ControlRole` enums to a new
-      `src/Aerie.Api/Ef/Panels.cs`, with the append-only comment each existing
-      enum carries.
-- [ ] Document every nullable column on `EfPanelItem` with what makes it null —
+      [`src/Aerie.Api/Ef/Panels.cs`](../../src/Aerie.Api/Ef/Panels.cs), with the
+      append-only comment each existing enum carries.
+- [x] Document every nullable column on `EfPanelItem` with what makes it null —
       the discriminator is only honest if the reader can tell which columns
       belong to which kind.
-- [ ] Register `Panels`, `PanelItems`, `PanelControlBindings` DbSets on
+- [x] Register `Panels`, `PanelItems`, `PanelControlBindings` DbSets on
       [`AerieContext`](../../src/Aerie.Api/Ef/AerieContext.cs).
-- [ ] Configure relationships in `OnModelCreating`: item → panel cascade,
+- [x] Configure relationships in `OnModelCreating`: item → panel cascade,
       binding → item cascade, binding → channel cascade (a deleted channel takes
       the binding that pointed at it), item → routine **cascade** (a deleted
       routine must not leave an item referencing nothing).
-- [ ] `make ef-migration migration=AddPanels`.
-- [ ] `make db` then `make ef-database-update`; confirm the three tables exist
-      via `make db-shell`.
+- [x] `make ef-migration migration=AddPanels` → `20260825223359_AddPanels`.
+- [x] `make db` then `make ef-database-update`; all three tables present, and
+      `\d` confirms every FK carries `ON DELETE CASCADE` — including
+      `PanelItems.RoutineId`, where the nullable column would otherwise have
+      defaulted to `SET NULL`.
+
+**What the apply showed.** `EfPanelItem.ControlKind` is a property whose name
+matches its own enum type; C#'s color-color rule resolves it and the build is
+clean, but any later code that needs the *type* inside that class must qualify
+it. `make test-api` stayed at 736 passing — Phase 1 adds tables and touches no
+behavior.
 
 ## Phase 2 — Domain rules
 
