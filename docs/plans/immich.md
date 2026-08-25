@@ -1,6 +1,9 @@
 # Photos — Immich on Aerie
 
-**Status:** Not started. Five phases to MVP, each independently useful and
+**Status:** Phases 1, 1b and 2 are done — the bulk disk exists, the node OS
+disks are off the slow volumes, and `immich-pg` is running with its extensions,
+its WAL archiving and a nightly base backup. Phase 3 installs Immich itself.
+Five phases to MVP, each independently useful and
 independently revertible; two scaffolded follow-ons (`v+1` sharing, `v+2` kiosk)
 that are deliberately *not* built yet but are named here so the MVP does not
 close their doors; and one long-horizon pathway (the photography workflow) that
@@ -531,7 +534,7 @@ the one 1.1 already carries — put the bulk disk on a volume that carries no OS
 disk. See [`scripts/hyperv/README.md`](../../scripts/hyperv/README.md)'s on-disk
 layout.
 
-## [] Phase 2 — the database
+## [x] Phase 2 — the database
 
 **Goal:** a Postgres Immich will accept, backed up the way `aerie-pg` already is,
 on stock images.
@@ -540,70 +543,122 @@ on stock images.
 `earthdistance`, and a base backup exists in the WAL bucket under the new
 cluster's own server name.
 
-- [ ] **2.1 — Verify the two prerequisites before writing any manifest.**
-      `kubectl explain cluster.spec.postgresql.extensions` must return a schema
-      (CNPG ≥ 1.27), and `kubectl get --raw /api/v1 | grep -i imagevolume` /
-      a trivial pod with an `image` volume must work (Kubernetes `ImageVolume`,
-      beta from 1.33; the pin is `v1.35.7+k3s1`). **If either fails, stop.** The
-      fallback is a community operand image carrying the extension, which
-      Finding 3 rejects — reopen that decision explicitly rather than drifting
-      into it.
+**Status:** done 2026-08-25. Gate passed on first apply — the cluster reported
+`Cluster in healthy state` 32 seconds after the Kustomization went Ready, all
+four extensions came back `applied: true`, and the immediate base backup
+completed in 32 seconds and landed under `immich-pg/base/` and `immich-pg/wals/`
+in the WAL bucket, disjoint from `aerie-pg/`.
 
-- [ ] **2.2 — `deploy/cluster/photos/database/cluster.yaml`.** A CNPG `Cluster`
-      named `immich-pg` in `immich`, modeled on
-      [`data/cluster/cluster.yaml`](../../deploy/cluster/data/cluster/cluster.yaml):
-      `local-path` storage, resource requests and limits (goal 2 of
-      [design.md](swarm/design.md) — no workload without requests), a
-      `PodDisruptionBudget`, and the operand/extension block from Finding 3.
-      Differences from `aerie-pg`, each deliberate:
-      - **`instances: 1`.** Immich is not on the HA list, and a second instance
-        doubles the local-path footprint to protect data that has WAL archiving
-        and a nightly dump. Make it a variable (`IMMICH_POSTGRES_INSTANCES`,
-        default `1`) rather than a literal, so raising it is a variable change.
-      - **Pin the operand to a patch version** — `18.4-standard-trixie`, not
-        `18-standard-trixie` — matching the reasoning already in `cluster.yaml`
-        about unpinned major-version images. Same for the extension image, which
-        upstream already pins.
-      - **`shared_preload_libraries: ["vchord.so"]`**, which `aerie-pg` must not
-        get.
+- [x] **2.1 — Verify the two prerequisites before writing any manifest.**
+      Both pass, and neither needed the fallback Finding 3 rejects. CNPG is
+      **1.30.0** and `kubectl explain cluster.spec.postgresql.extensions`
+      returns the full schema. `ImageVolume` is live on `v1.35.7+k3s1`
+      (containerd 2.2.5-k3s2) — verified with a throwaway pod rather than from
+      the API schema alone, since the field existing and the kubelet honouring
+      it are different claims. That pod mounted
+      `ghcr.io/tensorchord/vchord-scratch:pg18-v1.1.1` and listed `vchord.so`
+      under `/usr/lib/postgresql/18/lib` and `vchord.control` under
+      `/usr/share/postgresql/18/extension`, which is what pinned the two search
+      paths in 2.2 to values read off the image rather than copied from a doc.
 
-- [ ] **2.3 — `deploy/cluster/photos/database/database.yaml`.** The CNPG
-      `Database` CR creating the extensions declaratively — `vector`, `vchord`,
-      `cube`, `earthdistance`, all `ensure: present`. Declaring them here rather
-      than in `postInitSQL` means an extension added by a later Immich release is
-      a manifest line rather than a bootstrap-only edit that a running cluster
-      would ignore.
+- [x] **2.2 — [`deploy/cluster/photos/database/cluster.yaml`](../../deploy/cluster/photos/database/cluster.yaml).**
+      `immich-pg` in `immich`, on `local-path`, with the operand pinned to
+      `ghcr.io/cloudnative-pg/postgresql:18.4-standard-trixie` and `vchord`
+      mounted as an extension image. Four notes on how it landed:
+      - **`instances: ${IMMICH_POSTGRES_INSTANCES:=1}`**, with the key added to
+        [`cluster-config.json`](../../scripts/k3s/cluster-config.json) as
+        `required: false`. The `:=` default is the difference from
+        `POSTGRES_INSTANCES`, and it is deliberate: an installation that never
+        sets the variable must get a working cluster rather than a
+        Kustomization that fails strict substitution. Same treatment
+        `AERIE_REPO_OWNER` already gets.
+      - **The operand flavour matters as much as the pin.** `-standard-trixie`,
+        not the default minimal image the data tier runs — the declarative
+        extension mechanism points `extension_control_path` at a Debian-layout
+        tree, and the minimal image is not one. Live proof:
+        `SHOW extension_control_path` on the running primary returns
+        `$system:/extensions/vchord/usr/share/postgresql/18`.
+      - **No `synchronous:` block**, and this is the omission worth naming.
+        `aerie-pg` sets `dataDurability: required` with `number: 1`, which at
+        one instance would block every write forever because nothing can ever
+        acknowledge. Raising `IMMICH_POSTGRES_INSTANCES` means adding the block
+        at the same time, and the file says so where it would be added.
+      - **The `PodDisruptionBudget` is `enablePDB: true`, not a manifest.** CNPG
+        owns the PDB for a Cluster and creates it from that flag — a
+        hand-written one would be a second object fighting the controller over
+        the same pods. What comes out is `immich-pg-primary`, `minAvailable: 1`,
+        allowed disruptions 0, which is the same shape `aerie-pg-primary`
+        already has and the same drain caveat, not a new one.
 
-- [ ] **2.4 — WAL archiving into the existing bucket.** An `ObjectStore` named
-      `immich-pg-wal` in `immich`, copying
-      [`objectstore.yaml`](../../deploy/cluster/data/cluster/objectstore.yaml)
-      exactly, including its `retentionPolicy: "30d"` and sidecar resources. Same
-      `${WAL_BUCKET}`, same IAM user: barman namespaces by the cluster's server
-      name, so two clusters in one bucket do not collide, and a second bucket
-      would be a second thing to create, scope and pay for with no isolation
-      benefit — both clusters' backups are already reachable by one credential's
-      blast radius.
+- [x] **2.3 — [`deploy/cluster/photos/database/database.yaml`](../../deploy/cluster/photos/database/database.yaml).**
+      All four extensions `ensure: present`, and **`cube` is listed before
+      `earthdistance` on purpose**: `earthdistance` is implemented in terms of
+      `cube`'s type and `CREATE EXTENSION` fails outright without it, and CNPG
+      applies the list in order — so the dependency is expressed by position and
+      nothing else. Live: `vector` 0.8.6, `vchord` 1.1.1, `cube` 1.5,
+      `earthdistance` 1.2, all in `public`.
 
-- [ ] **2.5 — The credential reaches a second namespace.** The three
+- [x] **2.4 — WAL archiving into the existing bucket.**
+      [`objectstore.yaml`](../../deploy/cluster/photos/database/objectstore.yaml),
+      a copy of the data tier's including `retentionPolicy: "30d"` and the
+      512Mi sidecar limit that file's own comment explains. One thing checked
+      rather than assumed: [`aerie-cnpg.policy.json`](../../scripts/secrets/iam/aerie-cnpg.policy.json)
+      is scoped to the whole bucket, not to an `aerie-pg/*` prefix, so the
+      existing credential reaches the new server name with no IAM change.
+
+- [x] **2.5 — The credential reaches a second namespace.** All three
       `/aerie/postgres/wal-s3-*` parameters in
-      [`parameters.json`](../../scripts/secrets/parameters.json) currently carry
-      one `kubernetes` block each, targeting `aerie`. The generator **already
-      accepts an array of blocks** (`New-ExternalSecrets.ps1` header, "may be a
-      single block or an array of them"), so this is a data edit: add the
-      `immich`/`cnpg-wal-s3` target to each of the three, then
-      `pwsh ./scripts/secrets/New-ExternalSecrets.ps1` and commit the generated
-      files. **Do not hand-write the ExternalSecret** — `ci.yml` runs the
-      generator with `-Check` and will fail the build.
+      [`parameters.json`](../../scripts/secrets/parameters.json) now carry an
+      array of two `kubernetes` blocks, and
+      [`immich-cnpg-wal-s3.yaml`](../../deploy/cluster/infrastructure/config/external-secrets/immich-cnpg-wal-s3.yaml)
+      is the generator's output, not a hand-written file. `SecretSynced` in
+      `immich` 33 seconds after the reconcile.
 
-- [ ] **2.6 — `ScheduledBackup`.** Nightly base backup, modeled on
-      [`scheduledbackup.yaml`](../../deploy/cluster/data/schema/scheduledbackup.yaml),
-      at a time that does not collide with either the existing 03:10 window or
-      Phase 4's archive run.
+- [x] **2.6 — [`ScheduledBackup`](../../deploy/cluster/photos/database/scheduledbackup.yaml).**
+      `0 0 1 * * *` — 01:00, six fields. The time is chosen against what else
+      already runs on these nodes: 02:00 is `aerie-pg`'s base backup, 03:10 the
+      restic backup, 04:00 Sundays the restic verify. 01:00 leaves the whole
+      04:00-and-later window free for Phase 4's `photos-archive`, which has to
+      start after Immich's own nightly dump and then hold the house uplink for
+      as long as it takes.
 
-- [ ] **2.7 — Gate.** `kubectl cnpg psql immich-pg -n immich -- -c '\dx'` lists
-      all four extensions; the cluster reports `Cluster in healthy state`; a
-      first base backup completes and is visible in the bucket under the
-      `immich-pg` server name.
+- [x] **2.7 — Gate.** `\dx` lists all four; `Cluster in healthy state`;
+      `ContinuousArchiving=True` and `LastBackupSucceeded=True`; and the bucket
+      holds `immich-pg/base/20260825T215306/` beside four WAL segments under
+      `immich-pg/wals/`.
+
+### The Flux layer arrived a phase early, and the path split is why
+
+Phase 3.1 is where [`photos.yaml`](../../deploy/cluster/photos.yaml) was meant
+to be written. It could not be: 2.7's gate asks for a *running* cluster, and
+nothing under `deploy/` runs without a Kustomization pointing at it. So the
+layer ships here, and the shape it ships in is the one 3.1 asked for — depends
+on `infra-config` and on nothing else, `wait: true`, `prune: true`,
+`postBuild.substituteFrom` the `aerie-cluster-config` ConfigMap — with two
+differences worth knowing before Phase 3 opens the file:
+
+- **It is named `photos-database`, not `photos`, and its path is
+  `./deploy/cluster/photos/database`.** Phase 3's HelmRelease belongs in a
+  sibling `photos` Kustomization over `./deploy/cluster/photos/app` with
+  `dependsOn: photos-database`, for exactly the reason
+  [`data.yaml`](../../deploy/cluster/data.yaml) splits `data-cluster` from
+  `data-schema`: a HelmRelease applied in the same pass as the database it
+  connects to starts against a primary that is not up. Doing the split now is
+  what keeps Phase 3 from moving files.
+- **The `Database` CR and the `ScheduledBackup` sit in the *database* layer
+  anyway**, even though both assume the cluster answers. The data tier's split
+  exists for a *Job*, which burns its `backoffLimit` failing to connect and
+  then stays failed; these two are reconciled by the operator, which retries
+  forever. There is no Job in this layer, so there is nothing for a second
+  boundary to protect.
+
+One thing Phase 3 inherits rather than discovers: `monitoring.enablePodMonitor`
+is `false` on the Cluster, matching the data tier, because the live pattern is a
+hand-written PodMonitor in the observability layer. The one in
+[`scrape/cloudnative-pg.yaml`](../../deploy/cluster/observability/config/scrape/cloudnative-pg.yaml)
+selects `cnpg.io/cluster: aerie-pg` in namespace `aerie` and therefore does not
+see this cluster. Widening it belongs with 3.5 and 3.8's monitoring work; until
+then `immich-pg` has no metrics in Grafana.
 
 ---
 
