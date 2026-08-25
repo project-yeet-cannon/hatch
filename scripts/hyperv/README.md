@@ -129,14 +129,80 @@ never booted: it stays dynamic so it is ~2GB to copy between hosts rather than
 100GB, and `New-AerieVM.ps1` converts it to fixed when it cuts a VM's OS disk
 from it. Its provenance JSON records which it is.
 
-Why this is a rule rather than a preference, and what it cost to learn:
-[`docs/plans/node-storage.md`](../../docs/plans/node-storage.md).
+Why this is a rule rather than a preference: every node built before it had
+a *dynamic* OS disk on the slowest volume its host owned, sized 32 GB from a
+template rather than from the workload. That put etcd's write-ahead-log fsync
+p99 in the hundreds of milliseconds — one node at 1130 ms — against a healthy
+target of single-digit ms, and left root filesystems at 80-85% and climbing.
+Migrating all three onto fixed disks on measured-fast volumes put the entire
+fsync distribution under 32 ms, with ~90% at or under 8 ms.
 
 All three roots are defaults, not assumptions. `-VMStoragePath` (the
 workflow's `vm_storage_path`) sets where both disks go; `-OsDiskPath` and
 `-DataDiskPath` (`os_disk_path` / `data_disk_path`) override it one at a time,
 which is what a host whose fastest volume is not its largest needs. Missing
 directories are created on first run.
+
+## Choosing the OS disk's volume — measure, don't infer
+
+The rule above says "the host's fastest volume with room". Which one that is
+has to be **measured per host**, and it is not the same answer on every
+machine. Three nodes were migrated onto three different volumes, one of which
+was not the boot volume.
+
+Read per-physical-disk latency from `windows_exporter`, which every host
+already runs (Provision 0 installs and converges it). Average over days rather
+than minutes — a spot reading catches whatever the host was doing at the time:
+
+```promql
+rate(windows_logical_disk_write_latency_seconds_total[7d])
+  / rate(windows_logical_disk_writes_total[7d])
+```
+
+(Read latency is the same pair with `read` for `write`. The exact metric names
+track the `windows_exporter` version — if that query returns nothing, list what
+this installation actually exposes with
+`curl -s http://<host>:9182/metrics | grep logical_disk` and adjust. The shape
+is always a latency-seconds counter over an operations counter.)
+
+Then check free space on the candidate: a fixed OS disk needs its own size
+**plus a 40 GB margin**, and `Move-NodeOsDisk.ps1` refuses a destination that
+does not have it. A fixed VHDX must never be the reason a Windows boot volume
+fills. On one of the three hosts the boot volume was the fastest by a wide
+margin and still lost, on size alone.
+
+**Two wrong readings are available here, and both were made.** The first
+assumed the documented `D:\aerie\VMs` default without checking, and so
+measured a volume the VM was not on — read the layout from the host, never
+from this file's defaults. The second took "it is already on an SSD" at face
+value and concluded no move was needed.
+
+What settles it is a **comparison, not a datasheet**. Point the same question
+at every volume on the host and compare the answers: identical workloads
+measuring 6.8, 5.7 and 49 ms is a statement about the media, where any one of
+those numbers alone is not. The claim worth holding to is not "SSDs are
+faster" — it is that the fastest storage in a machine is usually idle while
+the one latency-bound workload in the house is somewhere else.
+
+### Maintenance on a live node: never merge a checkpoint chain
+
+If a VM has an automatic checkpoint, its OS disk is an `.avhdx` differencing
+disk and the chain has to be merged before anything can convert it. **Merge
+only with the VM off**, which is what `Move-NodeOsDisk.ps1` does and why its
+merge happens after the drain rather than in preflight.
+
+That ordering was bought the hard way. Merging rewrites every block the
+`.avhdx` holds. On a host whose volume backs both the node's OS disk and its
+200 GB Longhorn disk, a merge against the *running* node saturated the volume
+the guest was living on: 53% iowait, ext4 journal threads blocked in `D`
+state, kubelet stalled, pods stuck `Terminating`, Longhorn's instance-manager
+killed and its replicas rebuilding onto the same saturated disk. The load then
+shifted to another node, which briefly reported `Ready=Unknown` — taking the
+cluster to bare etcd quorum on what was supposed to be routine maintenance.
+
+Nothing was lost, and the lesson is cheap to keep: with the VM off there is no
+guest to starve, the node is already down for the conversion that follows, and
+the merge is faster for having no concurrent writes.
 
 ## Flow B — GitHub Actions (primary)
 
@@ -339,7 +405,7 @@ removed, or renamed.
 | [`Initialize-AerieNode.ps1`](Initialize-AerieNode.ps1) | End-to-end entry point. Start here. |
 | [`Get-GoldenImage.ps1`](Get-GoldenImage.ps1) | Builds the distro template VHDX. |
 | [`New-AerieVM.ps1`](New-AerieVM.ps1) | Creates one VM from the template. Bypasses preflight — use directly when you know better than a check. |
-| [`Move-NodeOsDisk.ps1`](Move-NodeOsDisk.ps1) | Moves a live node's OS disk to the host's fastest volume as a fixed, larger VHDX, one node at a time. Also `-Rollback` and `-RemoveSourceDisk`. See [`docs/plans/node-storage.md`](../../docs/plans/node-storage.md). |
+| [`Move-NodeOsDisk.ps1`](Move-NodeOsDisk.ps1) | Moves a live node's OS disk to the host's fastest volume as a fixed, larger VHDX, one node at a time. Also `-Rollback` and `-RemoveSourceDisk`. For a node built before the layout rule above; new nodes never need it. |
 | [`lib/New-NoCloudIso.ps1`](lib/New-NoCloudIso.ps1) | Builds the cloud-init seed ISO via Windows' built-in IMAPI2FS — no ADK or oscdimg needed. |
 | [`lib/AerieSsh.ps1`](lib/AerieSsh.ps1) | Post-boot verification over SSH. |
 | [`lib/Register-VmConsoleLogShipper.ps1`](lib/Register-VmConsoleLogShipper.ps1) | Registers the Scheduled Task that ships one VM's serial console to OpenSearch. |

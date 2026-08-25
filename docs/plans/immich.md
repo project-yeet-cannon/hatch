@@ -522,9 +522,14 @@ it protects 800 GB exactly as well as it protects 1.5 TB.
 ---
 
 
-## [] Phase 1b - await ./node-storage.md
+## [x] Phase 1b - node OS disks are off the slow volume
 
-We need to move the node OS disks off of spinning metal, which is where the bulk one is.
+Done 2026-08-25. All three node OS disks were moved onto their hosts' measured-
+fastest volumes as fixed VHDXs, which unblocks 1.1: the bulk disk no longer
+shares a volume with an etcd write-ahead log. The constraint that remains is
+the one 1.1 already carries — put the bulk disk on a volume that carries no OS
+disk. See [`scripts/hyperv/README.md`](../../scripts/hyperv/README.md)'s on-disk
+layout.
 
 ## [] Phase 2 — the database
 

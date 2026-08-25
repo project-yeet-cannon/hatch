@@ -48,7 +48,7 @@
         why port 22 there is a preflight check for agents.
       - there is no etcd, so the :2381 metrics probe is skipped.
 
-    This is also how the cluster plan's Phase 6b.1 and the node-storage
+    This is also how the cluster plan's Phase 6b.1 and the node-settings
     plan's Phase 2 land: re-dispatching against a node that is already active
     reconciles all four node-level settings - vm.max_map_count,
     etcd-expose-metrics, kubelet's image-GC thresholds and journald's size cap
@@ -76,7 +76,7 @@
                      /etc/rancher/k3s/config.yaml's etcd-expose-metrics from
                      the cluster plan Phase 6b.1, plus kubelet's image-GC
                      thresholds at 70/55 and journald's 512M cap from the
-                     node-storage plan Phase 2. Idempotent, and restarts k3s
+                     ceilings in scripts/k3s/README.md. Idempotent, and restarts k3s
                      only when it is already active and a file k3s reads at
                      start actually changed - a fresh install below picks
                      both up on its own first start; journald is restarted
@@ -305,7 +305,7 @@ function ConvertFrom-RemoteFileProbe {
 }
 
 # The node's managed settings - two from the cluster plan Phase 6b.1, two from
-# the node-storage plan Phase 2. Fixed, not parameters: every value here is
+# scripts/k3s/README.md's node settings. Fixed, not parameters: every value here is
 # structural - OpenSearch's bootstrap check, k3s's own default, a ratio against
 # the disk size Move-NodeOsDisk.ps1 gives a node - not this installation's
 # preference, so a knob would just be a second place any of them could drift
@@ -327,7 +327,7 @@ $desiredK3sConfig = @(
     ''
 ) -join "`n"
 
-# The node-storage plan's 2.1, and the one place this script departs from what
+# The image-GC ceiling, and the one place this script departs from what
 # that plan sketched. It asked for `kubelet-arg: image-gc-high-threshold=70` in
 # config.yaml above; --image-gc-high-threshold and its low twin have been
 # deprecated kubelet flags since 1.15 ("set this via the config file"), and
@@ -353,7 +353,7 @@ $kubeletDropInPath = "$kubeletDropInDir/50-aerie-image-gc.conf"
 $imageGcHighTarget = 70
 $imageGcLowTarget = 55
 $desiredKubeletDropIn = @(
-    '# Managed by Aerie: scripts/k3s/Install-K3sNode.ps1 (the node-storage plan 2.1).'
+    '# Managed by Aerie: scripts/k3s/Install-K3sNode.ps1 - see scripts/k3s/README.md.'
     "# kubelet's defaults are 85/80, so the first image GC of a node's life runs at"
     '# the same threshold that gates eviction - housekeeping arriving as pressure.'
     "# $imageGcHighTarget/$imageGcLowTarget against the 100 GB OS disk trims at 70 GB, twice the ~32 GB"
@@ -366,8 +366,8 @@ $desiredKubeletDropIn = @(
     ''
 ) -join "`n"
 
-# The node-storage plan's 2.2. Written here for the three nodes that already
-# exist and by cloud-init for every node built after - byte-identical in both
+# The journald cap - see scripts/k3s/README.md. Written here for nodes that
+# already exist and by cloud-init for every node built after - byte-identical in both
 # places on purpose, so a new node's first Provision 1 run reports this as
 # already matching rather than rewriting a file it agrees with. Change one and
 # change the other: scripts/hyperv/cloud-init/user-data.tmpl.yaml.
@@ -379,7 +379,7 @@ $journaldCapMiB = 512
 $journaldCap = "${journaldCapMiB}M"
 $desiredJournaldDropIn = @(
     '# Managed by Aerie: scripts/k3s/Install-K3sNode.ps1 and'
-    '# scripts/hyperv/cloud-init/user-data.tmpl.yaml (the node-storage plan 2.2).'
+    '# scripts/hyperv/cloud-init/user-data.tmpl.yaml - see scripts/k3s/README.md.'
     "# journald's default ceiling is 10% of the filesystem capped at 4G, so the"
     '# 100 GB OS disk raised it rather than bounding it. This is a fixed ceiling'
     '# instead: enough journal to debug from, and it cannot grow into the disk.'
@@ -602,7 +602,7 @@ If $otherServiceName is a server that is still an etcd member, remove it from th
     # ---------------------------------------------------------------- #
     #
     # The cluster plan Phase 6b.1's two node-level settings and the
-    # node-storage plan Phase 2's two, applied here so they exist before k3s
+    # The two growth ceilings, applied here so they exist before k3s
     # ever starts on a fresh node - see those docs for why none of them can be
     # a chart-side or in-cluster fix. Idempotent: a re-run against a node that
     # already has all four reports nothing changed.
@@ -903,8 +903,7 @@ Read the file, move what belongs elsewhere, and delete it before re-dispatching:
     # Each managed setting's own exit criterion - checked here rather than
     # left to a later gate script, so a run that reports success actually
     # satisfies them instead of finding out at 6b.5/6b.9, or a week later when
-    # the node-storage plan's 4.2 is read, several steps and possibly days
-    # later.
+    # the image-GC gate is read, several steps and possibly days later.
     Write-Host 'Verifying node settings ...'
     # sudo, not a bare 'sysctl': /usr/sbin (where Debian keeps the binary)
     # isn't on the non-root $Username's non-interactive SSH PATH, so a bare
@@ -941,7 +940,7 @@ Read the file, move what belongs elsewhere, and delete it before re-dispatching:
         Write-Host '  etcd metrics endpoint (:2381): answering.'
     }
 
-    # The node-storage plan 2.1's exit criterion, asked of the kubelet that is
+    # The image-GC ceiling's exit criterion, asked of the kubelet that is
     # actually running rather than of the file it was supposed to read - the
     # whole failure mode this guards is a drop-in that is present and ignored.
     # Same short retry window as :2381 above and for the same reason: this

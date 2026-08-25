@@ -113,7 +113,7 @@ param(
     # Virtual size of the fixed OS disk, and of the golden image when this
     # run is the one that builds it — one number, so a host that already has
     # a differently-sized template still produces the disk that was asked
-    # for. See docs/plans/node-storage.md finding 4.
+    # for. See scripts/hyperv/README.md's on-disk layout rule.
     [int]$OsDiskSizeGB = 100,
     [int]$DataDiskSizeGB = 200,
 
@@ -390,8 +390,8 @@ try {
     Write-Host "Expecting: $(if ($ExpectedIPAddress) { $ExpectedIPAddress } else { '(not verifying - -SkipWaitForReady)' })"
     Write-Host "Template:  $GoldenImagePath"
     # Printed separately even when they're the same path, because "which
-    # volume is etcd's WAL on" is the question docs/plans/node-storage.md was
-    # written about, and the answer should be on screen before the build
+    # volume is etcd's WAL on" is the question the whole on-disk layout rule
+    # was written about, and the answer should be on screen before the build
     # rather than inferred from a default afterwards.
     Write-Host "OS disk:   $OsDiskPath\$VMName\os-disk.vhdx (fixed, ${OsDiskSizeGB}GB - put this on the host's FASTEST volume)"
     if ($DataDiskSizeGB -gt 0) {

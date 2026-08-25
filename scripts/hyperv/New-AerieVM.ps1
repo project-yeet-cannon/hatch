@@ -18,14 +18,6 @@
         VMs already built from it
       - creates a second, fixed-size VHDX for Longhorn (Phase 1) / left
         unused (Phase 0 scratch VM)
-
-    Where those two disks land is two arguments, not one: -OsDiskPath for the
-    host's fastest volume and -DataDiskPath for its largest, both defaulting
-    to -VMStoragePath so a single-volume host still passes one path. Neither
-    disk is ever dynamic, and (see the Set-VM call below) no VM this creates
-    has automatic checkpoints — an automatic checkpoint layers a dynamic
-    differencing disk over a fixed one and makes that untrue again. See
-    docs/plans/node-storage.md.
       - renders a NoCloud cloud-init seed ISO with this VM's hostname/SSH
         key/NTP server/packages baked in, plus a break-glass console password
         for -Username (see -ConsolePassword)
@@ -41,6 +33,14 @@
         Task that ships this VM's serial console to Aerie.Api's
         /api/vm-console-logs, from where it flows into OpenSearch alongside
         every other Aerie log line (see lib/Send-VmConsoleLog.ps1)
+
+    Where those two disks land is two arguments, not one: -OsDiskPath for the
+    host's fastest volume and -DataDiskPath for its largest, both defaulting
+    to -VMStoragePath so a single-volume host still passes one path. Neither
+    disk is ever dynamic, and (see the Set-VM call below) no VM this creates
+    has automatic checkpoints — an automatic checkpoint layers a dynamic
+    differencing disk over a fixed one and makes that untrue again.
+    scripts/hyperv/README.md carries the rule and how to choose the volume.
 
 .EXAMPLE
     # Phase 0 scratch VM for the DR-restore gate
@@ -115,9 +115,9 @@ param(
 
     # Where the OS disk and the VM's configuration go: the host's *fastest*
     # volume. This is the disk etcd's write-ahead log fsyncs to, and the one
-    # docs/plans/node-storage.md Phase 1 moved on all three existing nodes —
-    # off the bulk volume they had been provisioned onto by a -VMStoragePath
-    # that decided both. Nothing here guesses which volume is fastest; it is
+    # all three existing nodes were migrated onto in August 2026 - off the
+    # bulk volume they had been provisioned onto by a -VMStoragePath that
+    # decided both. Nothing here guesses which volume is fastest; it is
     # an argument, measured per host.
     [string]$OsDiskPath,
 
@@ -130,8 +130,9 @@ param(
     # build time and cloud-init's growpart expands the root filesystem into
     # it on first boot; a template that is already some other size is resized
     # here, so this number wins over whatever a host's template happens to
-    # be. See docs/plans/node-storage.md finding 4 for why the old 32 was not
-    # enough.
+    # be. 32 was a template default nothing measured, and it put every node's
+    # root filesystem at 80-85% used and climbing; see scripts/k3s/README.md's
+    # node-settings section for what was actually filling it.
     [int]$OsDiskSizeGB = 100,
 
     [int]$MemoryGB = 16,
@@ -195,7 +196,8 @@ New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
 # a disk-latency alert that was telling the truth. Convert-VHD reads the
 # template and writes a fixed disk in one pass, so this costs no more I/O
 # than the Copy-Item it replaces; it costs the destination volume the disk's
-# full size up front, which is the point. docs/plans/node-storage.md finding 3.
+# full size up front, which is the point. scripts/hyperv/README.md, On-disk
+# layout.
 $osDiskFile = Join-Path $vmDir 'os-disk.vhdx'
 Write-Host "Converting golden image to a ${OsDiskSizeGB}GB fixed OS disk at $osDiskFile ..."
 Convert-VHD -Path $GoldenImagePath -DestinationPath $osDiskFile -VHDType Fixed
@@ -309,7 +311,7 @@ Disable-VMIntegrationService -VMName $VMName -Name 'Time Synchronization'
 # goes. Off at creation, because a node built without this looks identical in
 # every dashboard and is quietly paying for it; the three nodes that predate
 # it were fixed by Move-NodeOsDisk.ps1, which turns the same flag off.
-# docs/plans/node-storage.md finding 7.
+# scripts/hyperv/README.md, On-disk layout.
 #
 # Guarded because the property does not exist on Windows Server 2016's
 # Hyper-V, where automatic checkpoints were not a feature and so are not a

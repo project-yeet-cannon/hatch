@@ -42,6 +42,30 @@
 # variable and not an edit here - the exact caveat the cluster plan's own text
 # flags for a hardcoded threshold, sidestepped by templating against the same
 # key deploy/cluster/data/cluster/cluster.yaml already uses.
+#
+# BEFORE ADDING A LATENCY THRESHOLD HERE, read this. Prometheus histograms
+# have coarse buckets, and `histogram_quantile` interpolates linearly *inside*
+# the bucket the quantile falls in - so a percentile can report a precision the
+# metric does not have. etcd_disk_wal_fsync_duration_seconds uses power-of-two
+# buckets, and there is **no bucket between 8 ms and 16 ms**: with ~93% of
+# fsyncs at or under 8 ms and ~99.8% at or under 16 ms, p99 computes to ~15 ms
+# whatever the truth is. Three nodes on destination volumes spanning a 20x
+# range in measured latency all reported 14.90/14.94/15.43 ms, which is not a
+# coincidence and is not the storage.
+#
+# The consequence, learned by writing a gate that could not be checked: a
+# threshold like "p99 under 10 ms" is **not expressible** against that metric -
+# 9 ms and 15 ms are the same reading. State a latency gate at exact bucket
+# boundaries instead, as a fraction of samples under a `le` the histogram
+# actually has:
+#
+#   sum(rate(etcd_disk_wal_fsync_duration_seconds_bucket{le="0.008"}[30m])) by (instance)
+#     / sum(rate(etcd_disk_wal_fsync_duration_seconds_count[30m])) by (instance)
+#
+# The same caution applies when reading a percentile someone else recorded.
+# kube-prometheus-stack's own etcdHighFsyncDurations fires at 500 ms, two to
+# three orders of magnitude above any of this, so it is unaffected either way -
+# the trap is only there for a tight threshold written against a loose metric.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:

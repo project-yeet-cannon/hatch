@@ -23,8 +23,7 @@ measurements, and it is Longhorn. See finding 3.
 
 Per [`ethos.md`](../ethos.md), the host is **D** here and its measurements are
 observations of one installation. Which physical machine that is belongs in the
-operator's runbook. Hosts A, B and C are the same three
-[`node-storage.md`](node-storage.md) names.
+operator's runbook. Hosts A, B and C are the three that already carry nodes.
 
 ## The brief, as decisions
 
@@ -36,7 +35,7 @@ operator's runbook. Hosts A, B and C are the same three
 | Can stateful pods run there | **Yes.** A Longhorn engine attaches over the network; the replicas stay on A/B/C. This is how observability gets the RAM without the data following it |
 | What moves there | Observability first (the singletons that hold the most memory and are already `HA not required`), then surge replicas and batch |
 | Memory | **16 GB static**, of 32. Not Dynamic Memory — see finding 5 |
-| Disk | One fixed OS disk, sized by [`node-storage.md`](node-storage.md)'s rules. **No second disk** |
+| Disk | One fixed OS disk on the host's fastest volume, per the rule in [`scripts/hyperv/README.md`](../../scripts/hyperv/README.md). **No second disk** |
 | GPU | **Not now, but not designed out.** Placement keys off capability labels, never node names, so a GPU-bearing node slots in later. Hyper-V DDA needs Windows Server; GPU-P is the only consumer path and is its own plan |
 | Personal mode depth | **VM stops; hypervisor stays.** One tier, seconds not reboots |
 | Who may enter personal mode | The **desktop user, unelevated**, via a Scheduled Task registered by an administrator once |
@@ -291,11 +290,45 @@ and DNS survive it with no gap.
 
 **Exit:** four nodes Ready; D holds no Longhorn replicas; the house is unchanged.
 
-- [ ] 3.1 **Measure D's disk before choosing anything**, with
-      [`node-storage.md`](node-storage.md) Phase 1's method. "A few hundred GB
-      free" does not say whether it is spinning or solid-state, and this plan
-      should not guess: the answer sets the OS disk's destination volume and
-      confirms (or overturns) finding 3's no-data-disk decision.
+**This build is also the first exercise of the changed provisioning path.**
+Provision 0 was rewritten in August 2026 to lay out disks differently — fixed OS
+disk, its own volume argument, a 100 GB default, automatic checkpoints off at
+creation — and *nothing has been dispatched through it since*. Every node that
+exists was retrofitted by `Move-NodeOsDisk.ps1` rather than built correctly in
+the first place, so "a node built today comes out right" is a claim nobody has
+observed. The steps below verify it rather than assuming it, and a surprise
+here is a finding about the tooling, not about host D.
+
+The rule those changes encode, in one sentence: **the OS disk goes on the
+host's fastest volume and is fixed; the Longhorn data disk goes on its largest
+and is fixed; nothing Aerie creates on a host is dynamic, and no Aerie VM has
+automatic checkpoints.** [`scripts/hyperv/README.md`](../../scripts/hyperv/README.md)
+carries it, along with how to measure which volume is which.
+
+- [ ] 3.1 **Measure D's disk before choosing anything**, with the method in
+      [`scripts/hyperv/README.md`](../../scripts/hyperv/README.md)'s "Choosing
+      the OS disk's volume". "A few hundred GB free" does not say whether it is
+      spinning or solid-state, and this plan should not guess: the answer sets
+      the OS disk's destination volume and confirms (or overturns) finding 3's
+      no-data-disk decision.
+
+      Two cautions that section records from the three hosts already done, both
+      of which cost a wrong reading there: do not measure the volume the
+      documented default *says* the VM will be on, and do not accept "it is an
+      SSD" as the answer. Compare every volume on the host against the same
+      query — 6.8, 5.7 and 49 ms from the same workload shape is a statement
+      about the media in a way any one of those numbers alone is not.
+
+      Note that D needs `windows_exporter` running to be measurable this way,
+      which 3.3's runner and a first Provision 0 dispatch install. Either
+      dispatch `preflight_only` first to get the exporter on the box (that
+      step runs before the provisioning step and is not skipped by the flag),
+      or read the same underlying counter directly and take the Prometheus
+      comparison later:
+
+      ```powershell
+      Get-Counter '\LogicalDisk(*)\Avg. Disk sec/Write' -SampleInterval 5 -MaxSamples 60
+      ```
 - [ ] 3.2 Host prerequisites, per
       [`scripts/hyperv/README.md`](../../scripts/hyperv/README.md): Hyper-V role,
       an External switch bound to the physical NIC with
@@ -306,21 +339,122 @@ and DNS survive it with no gap.
       account a local Administrator. Add it to
       [`stagger-update-reboots.yml`](../../.github/workflows/stagger-update-reboots.yml)'s
       matrix and to every provisioning workflow's `host` choice list.
-- [ ] 3.4 Dispatch **Provision 0** for `aerie-node-3`: 16 GB static memory,
-      fixed OS disk on the volume 3.1 chose, **`-DataDiskSizeGB 0`**. Checked
-      while doing Phase 1: `0` already means "no data disk" all the way through
+- [ ] 3.4 **Dispatch Provision 0 with `preflight_only` first.** Cheap, and it
+      exercises the rewritten free-space check before anything is built. That
+      check now charges each volume separately rather than summing everything
+      onto one — it has to, because `os_disk_path` and `data_disk_path` may be
+      different volumes — and it charges the OS disk its **full fixed size**
+      rather than the template's sparse bytes. With `data_disk_gb: 0` it should
+      ask for `os_disk_gb` + ~2 GB on D's chosen volume and nothing anywhere
+      else. A refusal here is a real answer about D's free space; a refusal
+      that looks arithmetically wrong is a bug in that check, and worth
+      stopping for.
+
+- [ ] 3.5 Dispatch **Provision 0** for `aerie-node-3`: 16 GB static memory,
+      `os_disk_path` set to the volume 3.1 chose, `os_disk_gb: 100`, and
+      **`data_disk_gb: 0`**. Checked while doing Phase 1: `0` already means "no
+      data disk" all the way through
       [`New-AerieVM.ps1`](../../scripts/hyperv/New-AerieVM.ps1),
       `Initialize-AerieNode.ps1` and `provision-0-new-node.yml` — the Phase 0
       scratch VM has always used it. Nothing to add.
-- [ ] 3.5 Set `-AutomaticStartAction Nothing` on the VM (finding 6). Everything
-      else about the VM stays as the script builds it.
-- [ ] 3.6 Dispatch **Provision 1** with `role: agent`, joining any permanent
+
+      With no data disk, `data_disk_path` is irrelevant; leave it blank so it
+      inherits `vm_storage_path` rather than implying a placement that never
+      happens.
+
+      D is a **fresh host with no golden image**, so this run builds the
+      template rather than reusing one — which means it builds it at 100 GB
+      directly and the per-VM resize below is a no-op. That is the *untested*
+      half of the pairing: the three existing hosts all carry 32 GB templates,
+      so a build on any of them exercises the resize instead. Note which one
+      happened here.
+
+- [ ] 3.6 **Verify the disk is what the rule says**, on the host, before the
+      node is doing anything worth disturbing. This is the step that observes
+      the claim nobody has observed yet:
+
+      ```powershell
+      Get-VHD <os_disk_path>\aerie-node-3\os-disk.vhdx |
+        Select-Object Path, VhdType, @{n='SizeGB';e={$_.Size/1GB}}, FileSize
+      Get-VM aerie-node-3 |
+        Select-Object Name, AutomaticCheckpointsEnabled, AutomaticStartAction, State
+      Get-VM aerie-node-3 | Get-VMSnapshot
+      ```
+
+      Expected: `VhdType` **Fixed**, `SizeGB` **100**, `FileSize` at or near
+      the full 100 GB rather than a sparse fraction of it,
+      `AutomaticCheckpointsEnabled` **False**, and **no snapshots at all**.
+
+      The checkpoint line is the one whose absence is hardest to notice: a node
+      built with it left on looks identical in every dashboard and is quietly
+      running on a dynamic differencing disk over its fixed one, which is the
+      whole cost the fixed disk was meant to remove. It was a Hyper-V default
+      that caught all three existing nodes.
+
+      Also read the template's provenance, which now records its own
+      subformat — it should say `dynamic` (the template is the one deliberate
+      exception to the rule, because it is copied and never booted) and
+      `sizeGB: 100`:
+
+      ```powershell
+      Get-Content <template_path>\debian-13-genericcloud.vhdx.provenance.json |
+        ConvertFrom-Json | Select-Object sizeGB, vhdxSubformat, builtUtc
+      ```
+
+- [ ] 3.7 Set `-AutomaticStartAction Nothing` on the VM (finding 6). Everything
+      else about the VM stays as the script builds it — including the
+      automatic-checkpoint setting 3.6 just confirmed, which is *not* the same
+      flag and must stay off.
+
+- [ ] 3.8 **Confirm the guest actually got the space.** Over SSH once cloud-init
+      has finished and rebooted:
+
+      ```bash
+      df -h /
+      lsblk
+      ```
+
+      Expect ~99 GB on `/` — growpart runs on first boot and expands the root
+      filesystem into whatever the disk turned out to be, so this is the
+      end-to-end check that the size survived template → convert → resize →
+      boot. A root filesystem near 32 GB means the resize did not happen and
+      `os_disk_gb` was silently ignored, which is the exact failure the
+      per-VM resize exists to prevent.
+
+- [ ] 3.9 Dispatch **Provision 1** with `role: agent`, joining any permanent
       node's address.
-- [ ] 3.7 In Longhorn, set the node's `allowScheduling: false`. Confirm by
+
+      Two of the four node settings it reconciles have never been observed on a
+      node built this way, and this run is where both are answered. The
+      **journald cap** is written by
+      [`cloud-init/user-data.tmpl.yaml`](../../scripts/hyperv/cloud-init/user-data.tmpl.yaml)
+      on new nodes and byte-identically by
+      [`Install-K3sNode.ps1`](../../scripts/k3s/Install-K3sNode.ps1) on existing
+      ones — so on this node the script should report the file as **already
+      matching** rather than rewriting it. If it rewrites, the two copies have
+      drifted and they are supposed to be edited together. The **image GC**
+      drop-in was confirmed during Phase 1 to apply to agents unchanged (k3s
+      runs kubelet from the same tree on both roles); this is the first time
+      that is true on a running agent rather than in a reading of the code.
+
+      Both are verified by the run itself — it reads kubelet's own `/configz`
+      through the apiserver and refuses unless it reports 70/55 — so a green
+      run *is* the check. Read the log for the journald line rather than
+      assuming it.
+
+- [ ] 3.10 In Longhorn, set the node's `allowScheduling: false`. Confirm by
       reading back `nodes.longhorn.io/aerie-node-3` — and then confirm the thing
       that actually matters, that an existing `longhorn-r3` volume still reports
       three healthy replicas across A, B and C only.
-- [ ] 3.8 Leave it empty for a few days and watch. Nothing is moved yet.
+
+- [ ] 3.11 Leave it empty for a few days and watch. Nothing is moved yet.
+
+      Watch the root filesystem specifically. This node starts at ~100 GB with
+      the image-GC ceiling already in place from its first boot, which is the
+      condition the three existing nodes only reached by retrofit — so its slope
+      over the first week is the cleanest reading anyone will get of whether
+      that ceiling holds. If it is flat here while the node is doing real work,
+      that is worth more than the deferred gate the older nodes produced.
 
 ## [] Phase 4 — Personal mode
 

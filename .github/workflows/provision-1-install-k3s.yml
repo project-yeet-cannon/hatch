@@ -28,7 +28,7 @@
 # GitHub-hosted runner (which has no route to these LAN addresses anyway) and
 # never consume Actions minutes.
 #
-# Also the mechanism behind the cluster plan's Phase 6b.1 and the node-storage
+# Also the mechanism behind the cluster plan's Phase 6b.1 and the node-setting
 # plan's Phase 2: re-dispatching this workflow against a node that already
 # joined reconciles all four node-level settings - vm.max_map_count,
 # etcd-expose-metrics, kubelet's image-GC thresholds and journald's size cap -
@@ -38,7 +38,7 @@
 # show every node Ready before reconfiguring the next - a restart takes that
 # node's etcd member down for its duration, and three members survive one.
 # See docs/plans/swarm/phase-6-observability.md (6b.1) and
-# docs/plans/node-storage.md (2.1, 2.2) for why each setting is what it is.
+# scripts/k3s/README.md for why each setting is what it is.
 #
 # An agent reconciles three of those four: etcd-expose-metrics is a
 # server-only key, and `k3s agent` exits at start on it rather than ignoring

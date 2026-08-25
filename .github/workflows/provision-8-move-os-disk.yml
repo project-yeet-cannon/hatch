@@ -1,9 +1,9 @@
-# Step 8 of the provisioning pipeline, and the node storage plan
-# (docs/plans/node-storage.md) Phase 1, step 1.3: move one node's OS disk onto
-# its host's fastest volume as a fixed VHDX, and grow it.
+# Step 8 of the provisioning pipeline: move one node's OS disk onto its host's
+# fastest volume as a fixed VHDX, and grow it.
 #
-# The plan calls this "provision-6"; 6 and 7 were taken by the backup and bulk
-# disk steps while it was being written, so it is 8.
+# For a node built before scripts/hyperv/README.md's on-disk layout rule, or
+# one whose host has gained a faster volume since. Nodes built by Provision 0
+# already land this way and never need this.
 #
 # **Once per node, one node at a time.** Quorum is a majority of the etcd
 # membership, so exactly one node may be down at a time in a three-node
@@ -28,11 +28,12 @@
 # Nothing here is a repository variable, and `destination_path` in particular
 # is not - it has no default either. Which volume on which host is the fast one
 # was measured per host and is a fact about one installation, not about Aerie -
-# see docs/ethos.md, and the plan's finding 2 for how it was measured. It is
+# see docs/ethos.md, and scripts/hyperv/README.md's "Choosing the OS disk's
+# volume" for how to measure it. It is
 # not the same answer on every host: a host whose VM volume is already the
 # fastest large one it owns takes its own path here, which the script reads as
 # "convert in place" and reports as such. Nothing moves; the whole of the
-# change is dynamic -> fixed and a bigger disk, which is finding 3 alone.
+# change is dynamic -> fixed and a bigger disk.
 #
 # Hyper-V's automatic checkpoints matter here more than anywhere else in this
 # repo. They are created at every VM start and removed only on a clean
@@ -80,7 +81,7 @@ on:
         required: true
         type: string
       mode:
-        description: 'move: the migration. rollback: repoint the VM back at the recorded source disk. remove-source: delete that source disk, after the soak (plan step 4.1)'
+        description: 'move: the migration. rollback: repoint the VM back at the recorded source disk. remove-source: delete that source disk, after the 7-day soak'
         required: true
         default: 'move'
         type: choice
@@ -93,7 +94,7 @@ on:
         required: false
         type: string
       size_gb:
-        description: 'move only: virtual size of the new fixed disk, in GiB. 100 is the plan''s number; a host whose fast volume cannot hold 100 + 40 GiB takes 64 instead'
+        description: 'move only: virtual size of the new fixed disk, in GiB. 100 matches what Provision 0 builds; a host whose fast volume cannot hold 100 + 40 GiB takes 64 instead'
         required: false
         default: '100'
         type: string

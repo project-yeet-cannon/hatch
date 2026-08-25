@@ -89,7 +89,8 @@ param(
     # to fill whatever it is given. 100 rather than 32 because 32 was a
     # template default that nothing measured: it put every node's root
     # filesystem at 80-85% used and climbing 4-5 points a day on image
-    # accumulation alone. See docs/plans/node-storage.md findings 4 and 5.
+    # accumulation alone - see scripts/k3s/README.md's node-settings section,
+    # which bounds the growth this size accommodates.
     #
     # Costs nothing here: the template stays a dynamic VHDX, so a bigger
     # virtual size is a bigger number in a header, not bigger bytes on disk.
@@ -231,7 +232,8 @@ try {
     # conversion to fixed belongs at VM-create time, in New-AerieVM.ps1,
     # where the destination volume is known and the disk is the one the guest
     # will actually run on. Aerie runs no VM off a dynamic disk — see
-    # docs/plans/node-storage.md finding 3 — and this file is not one.
+    # scripts/hyperv/README.md's on-disk layout rule — and this file is not
+    # one.
     $vhdxSubformat = 'dynamic'
 
     $rawVhdx = Join-Path $work 'image-raw.vhdx'

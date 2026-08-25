@@ -194,8 +194,30 @@ agent reconciles three of the four; the second row is server-only.
 |---|---|---|---|
 | `vm.max_map_count=262144` | `/etc/sysctl.d/60-aerie-opensearch.conf` | OpenSearch refuses to start below it ([the cluster plan](../../docs/plans/swarm/phase-6-observability.md) 6b.1) | applied live, none needed |
 | `etcd-expose-metrics: true` | `/etc/rancher/k3s/config.yaml` | without it the quorum alert has nothing to evaluate (6b.1). **Servers only** — see "Servers and agents" above | k3s, if it changed |
-| image GC at `70`/`55` | `/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/50-aerie-image-gc.conf` | kubelet's own 85/80 makes the first image GC of a node's life happen under pressure ([node storage](../../docs/plans/node-storage.md) 2.1) | k3s, if it changed |
-| `SystemMaxUse=512M` | `/etc/systemd/journald.conf.d/60-aerie-journal-cap.conf` | journald's default ceiling scales with the disk (10% capped at 4G), so a bigger OS disk raises it rather than bounding it ([node storage](../../docs/plans/node-storage.md) 2.2) | journald only, restarted and vacuumed in place |
+| image GC at `70`/`55` | `/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/50-aerie-image-gc.conf` | kubelet's own 85/80 makes the first image GC of a node's life happen under pressure — see below | k3s, if it changed |
+| `SystemMaxUse=512M` | `/etc/systemd/journald.conf.d/60-aerie-journal-cap.conf` | journald's default ceiling scales with the disk (10% capped at 4G), so a bigger OS disk raises it rather than bounding it — see below | journald only, restarted and vacuumed in place |
+
+**Why these two exist at all.** A node's root filesystem was found filling at
+4-5 percentage points a day, and of 25 GB used, containerd was 20-21 GB (15 GB
+of overlayfs snapshots, 5.6 GB of content) against under 2 GB for the OS, k3s
+and etcd combined. 124 images on a node, and the mechanism visible in them: one
+first-party image carried **five tags of the same 174 MB layer set, one per CI
+build, none ever removed**. Journald was a further 1.3-1.9 GB, uncapped.
+
+So a bigger disk fixes neither leak — it buys about three weeks. The disk needs
+a ceiling that is not "85% of whatever the disk happens to be", and the cheapest
+correct ceiling is kubelet's own, moved down: at 70/55 on a 100 GB disk a node
+trims itself at 70 GB against a ~32 GB projected steady state, routinely and
+with no eviction risk, instead of emergency-trimming at 85% of 32 GB. **What
+70/55 buys is that GC stops being the same event as pressure.** Measured while
+building it: kubelet's defaults really are 85/80, but k3s's hard eviction
+threshold is `imagefs.available: 5%` / `nodefs.available: 5%` rather than the
+10% assumed — the node has more room before eviction than that, and the case is
+unchanged either way.
+
+The image-tag leak itself is *bounded* by this, not fixed. If image
+accumulation ever becomes the binding constraint again, the thing to change is
+the retention of per-build tags, not these thresholds.
 
 Two things worth knowing about that third row. It is a **kubelet config
 drop-in**, not the `kubelet-arg: image-gc-high-threshold=…` the plan sketched:
@@ -215,12 +237,21 @@ nodes built after that plan, so a new node is capped from its first boot and its
 first Provision 1 run finds the file already matching. Change one, change the
 other.
 
-> **Rolling Phase 2 out to the nodes that already exist:** dispatch this
-> workflow once per node with the node's existing `role`/`join_server`, one node
-> at a time, waiting for every node to show `Ready` in between. The image-GC
-> change restarts k3s, which takes that node's etcd member down for the length
-> of the restart; three members survive one. Nothing here needs a maintenance
-> window.
+The journald file also needs more than writing on a node that already exists,
+which is why the script writes, then `systemctl restart systemd-journald`, then
+`journalctl --vacuum-size=512M`. journald reads its configuration at start and
+only enforces `SystemMaxUse` when it next rotates — without the vacuum the
+existing journals sit there until something else triggers rotation, which is the
+difference between a node that matches the file today and one that matches it
+eventually. A node built from cloud-init needs none of that: the `power_state`
+reboot at the end of first boot means journald reads the drop-in on the way back
+up, before there is anything to trim.
+
+> **Rolling these out to nodes that already exist:** dispatch this workflow once
+> per node with the node's existing `role`/`join_server`, one node at a time,
+> waiting for every node to show `Ready` in between. The image-GC change
+> restarts k3s, which takes that node's etcd member down for the length of the
+> restart; three members survive one. Nothing here needs a maintenance window.
 
 ### Still manual
 

@@ -5,8 +5,11 @@
     at a time, with the cluster kept at quorum throughout.
 
 .DESCRIPTION
-    The node storage plan (docs/plans/node-storage.md) Phase 1, step 1.2, and
-    the operation steps 1.4, 1.5 and 1.8 each run once. Three findings meet in
+    Written for a one-off migration of three existing nodes (completed
+    2026-08-25) and kept because the operation recurs: any node whose OS disk
+    is on the wrong volume, or is dynamic, is fixed by this. New nodes are
+    built correctly by New-AerieVM.ps1 and never need it - see
+    scripts/hyperv/README.md's on-disk layout rule. Three facts meet in
     this script: etcd fsyncs its write-ahead log before acknowledging any
     Kubernetes API write, that log is on the node's root filesystem, and that
     filesystem is a *dynamic* VHDX on the slowest volume each host owns. The
@@ -84,7 +87,8 @@
 .PARAMETER DestinationPath
     The directory on the host's *fastest* volume that VM disks go under - the
     counterpart of New-AerieVM.ps1's -OsDiskPath, and normally the boot
-    volume rather than the bulk one. The disk lands at
+    volume rather than the bulk one. scripts/hyperv/README.md's "Choosing the
+    OS disk's volume" is how to decide which. The disk lands at
     <DestinationPath>\<VMName>\os-disk.vhdx.
 
     Nothing here guesses which volume is fastest. The plan measured it per
@@ -752,8 +756,9 @@ try {
     # Hyper-V's automatic checkpoints are created when a VM *starts* and
     # removed when it shuts down cleanly, so a VM that has been up for weeks
     # is running on a dynamic .avhdx layered over its disk - a third
-    # allocation penalty on top of the two docs/plans/node-storage.md names,
-    # and one that copies-on-write at block granularity.
+    # allocation penalty on top of the two this script exists to remove (a
+    # dynamic disk, and a slow volume), and one that copies-on-write at block
+    # granularity.
     #
     # Disabling it is unconditional on a VM this script touches, and the
     # reason is not tidiness: a fixed VHDX underneath an automatic checkpoint
@@ -1557,7 +1562,7 @@ $($drain.StdOut)$($drain.StdErr)
             $sidecarPath = Join-Path (Split-Path -Parent $newDiskPath) $SidecarFileName
             $record = [ordered]@{
                 script               = 'scripts/hyperv/Move-NodeOsDisk.ps1'
-                plan                 = 'docs/plans/node-storage.md Phase 1'
+                rule                 = 'scripts/hyperv/README.md - On-disk layout'
                 vmName               = $VMName
                 hyperVHost           = $env:COMPUTERNAME
                 movedUtc             = (Get-Date).ToUniversalTime().ToString('o')
