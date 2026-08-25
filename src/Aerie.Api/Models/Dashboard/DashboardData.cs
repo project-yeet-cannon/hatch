@@ -1,3 +1,5 @@
+using Aerie.Api.Models.Panels;
+
 namespace Aerie.Api.Models.Dashboard;
 
 // These records are the server side of the dashboard's data contract. They must
@@ -129,5 +131,6 @@ public record DashboardData(
     SunEvents SunEvents,
     IReadOnlyList<RoutineSummary> Routines,
     IReadOnlyList<CameraSummary> Cameras,
+    IReadOnlyList<PanelSummary> Panels,
     IReadOnlyList<CalendarDay> Calendar,
     IReadOnlyList<HazardAlert> Alerts);

@@ -1,6 +1,6 @@
 # Kiosk Climate
 
-**Status:** Phases 0–2 complete (naming, model, schema, and domain rules). Phases 3–8 not started.
+**Status:** Phases 0–3 complete (naming, model, schema, domain rules, and the read path). Phases 4–8 not started.
 
 New kiosk dashboard UI for house climate controls, and the two new domain
 concepts that make it possible: **Panels** and **Controls**.
@@ -229,34 +229,68 @@ gather also collapsed into `SelectMany(RoutineToggleState.PowerChannelIds)`, so
 the "which channels decide this toggle" question now has exactly one answer in
 the codebase instead of two that happened to agree.
 
-## [] Phase 3 — Read path
+## [x] Phase 3 — Read path
 
-**Status:** not started
+**Status:** complete
 
-- [ ] Add `src/Aerie.Api/Models/Panels/Dtos.cs`: `PanelSummary`,
-      `PanelDto`/`PanelItemDto`/`PanelControlBindingDto`, the matching
-      `*WriteRequest` records, and `PanelStateDto` / `PanelItemStateDto`.
-- [ ] `PanelItemStateDto` carries, per item: id, kind, label, icon, color, and
+- [x] Add [`src/Aerie.Api/Models/Panels/Dtos.cs`](../../src/Aerie.Api/Models/Panels/Dtos.cs):
+      `PanelSummary`, `PanelDto`/`PanelItemDto`/`PanelControlBindingDto`, the
+      matching `*WriteRequest` records, and `PanelStateDto` / `PanelItemStateDto`.
+- [x] `PanelItemStateDto` carries, per item: id, kind, label, icon, color, and
       for a control — controlKind, `isOn: bool?`, `setpointF: decimal?`,
       `ambientF: decimal?`, `mode: string?`, minF, maxF, stepF; for a routine —
       isToggle, isActive.
-- [ ] Add `IPanelService` / `PanelService` under `Services/Panels/`:
-      `GetPanelsAsync` (Included + SortOrder, mirroring `RoutineService`) and
-      `GetStateAsync(panelId)`.
-- [ ] `GetStateAsync` collects only the opened panel's bound channel ids plus its
+- [x] Add `IPanelService` / [`PanelService`](../../src/Aerie.Api/Services/Panels/PanelService.cs)
+      under `Services/Panels/`: `GetPanelsAsync` (Included + SortOrder, mirroring
+      `RoutineService`) and `GetStateAsync(panelId)`.
+- [x] `GetStateAsync` collects only the opened panel's bound channel ids plus its
       routine items' `SetPower` channels, and makes exactly one
       `ChannelLatestValues.GetLatestAsync` call for the union.
-- [ ] Derive `isOn`: `Power` binding's state `== "on"` when bound; otherwise the
+- [x] Derive `isOn`: `Power` binding's state `== "on"` when bound; otherwise the
       `Mode` channel's state `!= "off"`. Null when neither is bound.
-- [ ] Register `IPanelService` in [`Program.cs`](../../src/Aerie.Api/Program.cs)
+- [x] Register `IPanelService` in [`Program.cs`](../../src/Aerie.Api/Program.cs)
       next to `IRoutineService`.
-- [ ] Add `Panels` to `DashboardData` and compose it into
+- [x] Add `Panels` to `DashboardData` (after `Cameras`, where the tile row sits)
+      and compose it into
       [`DashboardService`](../../src/Aerie.Api/Services/Dashboard/DashboardService.cs)'s
       concurrent fan-out.
-- [ ] `PanelServiceTests`: Included/SortOrder filtering; on/off derived from
-      `Power`; on/off derived from `Mode` with no `Power`; setpoint and ambient
-      reads; a routine item's isActive matching `RoutineService`'s; a control
-      whose channels have no samples yet reading all-null rather than throwing.
+- [x] [`PanelServiceTests`](../../src/Aerie.Api.Tests/Panels/PanelServiceTests.cs):
+      Included/SortOrder filtering; on/off derived from `Power`; on/off derived
+      from `Mode` with no `Power`; setpoint and ambient reads; a routine item's
+      isActive matching `RoutineService`'s; a control whose channels have no
+      samples yet reading all-null rather than throwing.
+
+**`isOn` and `isActive` treat "never reported" differently, on purpose.** A
+control whose `Power` channel has no samples reads `isOn: null` — the plan's
+own all-null requirement, and the honest answer, since a wall tablet showing a
+confident "off" for a device nobody has heard from is worse than one showing
+nothing. A toggle routine with no samples reads `isActive: false`, because that
+is what `RoutineService` already returns for the same routine's dashboard tile,
+and the panel disagreeing with the tile beside it would be the worse bug. Both
+behaviors are pinned by tests, including one that asserts the routine answer
+equals `RoutineService`'s for the same database.
+
+**A `Power` binding wins over `Mode` even when both are bound.** Phase 2 requires
+`OnMode` whenever `Mode` is bound, so a thermostat can carry both; the read path
+takes `Power` as the direct answer and falls back to `Mode` only when there is no
+`Power` binding. `mode` is reported raw ("cool", "off") rather than compared
+against `OnMode`, so the kiosk can show what the device actually says.
+
+**`minF`/`maxF`/`stepF` are resolved server-side, not passed through.** The state
+DTO carries `PanelDefaults`-resolved numbers for a thermostat and nulls for a
+switch, so the kiosk's client-side clamp and Phase 4's server-side clamp are
+working from the same values rather than each re-deriving "null means 60".
+
+**`Read` distinguishes "role not bound" from "bound but silent".** Both would be
+an absent dictionary entry if the service looked up channel ids directly, and
+`isOn` needs the difference: unbound is null-forever, silent is null-for-now.
+
+**What the apply showed.** `make test-api` went 758 → 777. `DashboardData` now
+carries a `panels` field that `dashboard/src/types.ts` does not declare yet —
+harmless (an extra JSON key is invisible to TypeScript) and deliberate, because
+adding it to the TS type also means updating the mock and test data sources,
+which is Phase 6's first two bullets. Phase 3 is service-only: `GetStateAsync`
+has no route in front of it until `PanelsController` lands in Phase 4.
 
 ## [] Phase 4 — Write path and admin API
 

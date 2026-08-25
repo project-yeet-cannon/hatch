@@ -2,6 +2,7 @@ using Aerie.Api.Models.Dashboard;
 using Aerie.Api.Services.Calendar;
 using Aerie.Api.Services.DeviceMapping;
 using Aerie.Api.Services.Hazards;
+using Aerie.Api.Services.Panels;
 using Aerie.Api.Services.Routines;
 
 namespace Aerie.Api.Services.Dashboard;
@@ -13,8 +14,8 @@ public interface IDashboardService
 
 /// <summary>
 /// The backend-for-frontend aggregate: composes zones + outside + routines +
-/// cameras + calendar + outdoor hazards into the exact shape the dashboard app
-/// consumes.
+/// cameras + panels + calendar + outdoor hazards into the exact shape the
+/// dashboard app consumes.
 /// Every part is fetched concurrently so the (slower) weather call doesn't
 /// serialize behind the DB reads.
 /// </summary>
@@ -24,6 +25,7 @@ public class DashboardService(
     ISiteSettingsService siteSettings,
     IRoutineService routines,
     ICameraDirectory cameras,
+    IPanelService panels,
     ICalendarAgendaService calendar,
     IHazardService hazards,
     TimeProvider time) : IDashboardService
@@ -35,9 +37,11 @@ public class DashboardService(
         var settingsTask = siteSettings.GetAsync(ct);
         var routinesTask = routines.GetRoutinesAsync(ct);
         var camerasTask = cameras.GetCamerasAsync(ct);
+        // Tiles only - an open panel's live state is its own endpoint, see PanelService.
+        var panelsTask = panels.GetPanelsAsync(ct);
         var calendarTask = calendar.GetAgendaAsync(ct);
         var alertsTask = hazards.GetAlertsAsync(ct);
-        await Task.WhenAll(zonesTask, outsideTask, settingsTask, routinesTask, camerasTask, calendarTask, alertsTask);
+        await Task.WhenAll(zonesTask, outsideTask, settingsTask, routinesTask, camerasTask, panelsTask, calendarTask, alertsTask);
 
         var settings = await settingsTask;
         var now = time.GetUtcNow();
@@ -49,6 +53,7 @@ public class DashboardService(
             SunEvents: SolarCalculator.EventsForDay(now, settings.Latitude, settings.Longitude),
             Routines: await routinesTask,
             Cameras: await camerasTask,
+            Panels: await panelsTask,
             Calendar: await calendarTask,
             Alerts: await alertsTask);
     }

@@ -12,6 +12,7 @@ using Aerie.Api.Services.Dashboard;
 using Aerie.Api.Services.DeviceMapping;
 using Aerie.Api.Services.Hazards;
 using Aerie.Api.Services.Media;
+using Aerie.Api.Services.Panels;
 using Aerie.Api.Services.Routines;
 using HADotNet.Core;
 using HADotNet.Core.Clients;
@@ -132,6 +133,9 @@ builder.Services.AddSingleton<IForecastService, ForecastService>();
 builder.Services.AddSingleton<ISiteSettingsService, SiteSettingsService>();
 builder.Services.AddScoped<IZoneService, ZoneService>();
 builder.Services.AddScoped<IRoutineService, RoutineService>();
+// The tier above routines: a tile that opens a sub-UI of controls - see
+// PanelService and docs/plans/kiosk-climate.md.
+builder.Services.AddScoped<IPanelService, PanelService>();
 // The kiosk's camera button row - see CameraDirectory and
 // docs/camera-devices-architecture.md.
 builder.Services.AddScoped<ICameraDirectory, CameraDirectory>();
