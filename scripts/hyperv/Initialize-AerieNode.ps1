@@ -94,7 +94,13 @@ param(
     [string]$SwitchName = 'ExternalSwitch',
     # Everything Aerie puts on a host's data volume lives under D:\aerie, so
     # the whole footprint is one directory to find, back up, or delete.
+    # -VMStoragePath is the default for both disks; -OsDiskPath and
+    # -DataDiskPath split them across volumes on a host where the fastest
+    # volume and the largest one are not the same. Forwarded as-is to
+    # New-AerieVM.ps1, which documents what belongs on which.
     [string]$VMStoragePath = 'D:\aerie\VMs',
+    [string]$OsDiskPath,
+    [string]$DataDiskPath,
     [string]$TemplatePath = 'D:\aerie\vm-templates',
 
     # Defaults to <TemplatePath>\<distro>.vhdx; override to share a template
@@ -103,6 +109,12 @@ param(
 
     [int]$MemoryGB = 16,
     [int]$CPUCount = 4,
+
+    # Virtual size of the fixed OS disk, and of the golden image when this
+    # run is the one that builds it — one number, so a host that already has
+    # a differently-sized template still produces the disk that was asked
+    # for. See docs/plans/node-storage.md finding 4.
+    [int]$OsDiskSizeGB = 100,
     [int]$DataDiskSizeGB = 200,
 
     [string[]]$ExtraPackages = @(),
@@ -150,6 +162,12 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot 'lib\AerieSsh.ps1')
+
+# Resolved here rather than in Preflight because the free-space check, the
+# summary, the recreate teardown and the Create stage all need the answer,
+# and New-AerieVM.ps1 applies the same two lines to whatever it is handed.
+if (-not $OsDiskPath) { $OsDiskPath = $VMStoragePath }
+if (-not $DataDiskPath) { $DataDiskPath = $VMStoragePath }
 
 $script:StageNumber = 0
 function Write-Stage {
@@ -294,25 +312,70 @@ try {
     # this conservatively counts a full new copy on top of the old one still
     # on disk rather than assuming the teardown that hasn't happened yet.
     if (-not $resuming) {
-        # Free space: the OS disk is a full copy of the template (not a
-        # differencing disk), and the data disk is fixed, so both consume
-        # their full size immediately. Running out mid-copy leaves a
-        # half-built VM.
-        $templateSizeBytes = if (Test-Path $GoldenImagePath) { (Get-Item $GoldenImagePath).Length } else { 32GB }
-        $neededBytes = $templateSizeBytes + ([int64]$DataDiskSizeGB * 1GB) + 2GB
+        # Free space. Both disks are fixed, so each consumes its full virtual
+        # size the moment it is created - the OS disk is no longer a copy of a
+        # ~2GB sparse template but a ${OsDiskSizeGB}GB file written out in
+        # full. Running out midway leaves a half-built VM.
+        #
+        # Charged per volume rather than once, because -OsDiskPath and
+        # -DataDiskPath may be different ones: on a host where they differ,
+        # summing them onto either volume would refuse builds that fit, and on
+        # a host where they don't, checking only one would let through a build
+        # that doesn't. Keyed by the volume's unique path so two different
+        # directories on the same volume are still charged together.
+        # A list rather than a map keyed on path: -OsDiskPath and
+        # -DataDiskPath are the *same* path in the single-volume default, and
+        # two demands on one path are two demands, not one.
+        $demands = @(
+            @{ Path = $OsDiskPath; Bytes = ([int64]$OsDiskSizeGB * 1GB); What = "${OsDiskSizeGB}GB fixed OS disk" }
+        )
+        if ($DataDiskSizeGB -gt 0) {
+            $demands += @{ Path = $DataDiskPath; Bytes = ([int64]$DataDiskSizeGB * 1GB); What = "${DataDiskSizeGB}GB fixed data disk" }
+        }
+        # The template is built onto -TemplatePath's volume, and only when it
+        # isn't already there. It stays dynamic, so it costs its actual bytes
+        # rather than -SizeGB; qemu-img also writes a full copy into
+        # $env:TEMP first, which this doesn't try to model.
+        if (-not (Test-Path $GoldenImagePath)) {
+            $demands += @{ Path = $TemplatePath; Bytes = 4GB; What = 'golden image build' }
+        }
 
-        # -FilePath needs the path to exist, which it won't on a first run,
-        # so fall back to the drive letter the path is rooted at.
-        $volume = Get-Volume -FilePath $VMStoragePath -ErrorAction SilentlyContinue
-        if (-not $volume) {
-            $driveLetter = [IO.Path]::GetPathRoot($VMStoragePath).TrimEnd('\', ':')
-            if ($driveLetter) { $volume = Get-Volume -DriveLetter $driveLetter -ErrorAction SilentlyContinue }
+        # Grouped by volume rather than by path, so two directories on one
+        # volume are charged against it together and a trailing backslash
+        # can't split them apart.
+        $byVolume = @{}
+        foreach ($demand in $demands) {
+            # -FilePath needs the path to exist, which it won't on a first
+            # run, so fall back to the drive letter the path is rooted at.
+            $volume = Get-Volume -FilePath $demand.Path -ErrorAction SilentlyContinue
+            if (-not $volume) {
+                $driveLetter = [IO.Path]::GetPathRoot($demand.Path).TrimEnd('\', ':')
+                if ($driveLetter) { $volume = Get-Volume -DriveLetter $driveLetter -ErrorAction SilentlyContinue }
+            }
+            if (-not $volume) {
+                # Deduped: with -OsDiskPath and -DataDiskPath defaulted to
+                # the same missing drive, this is one problem, not two.
+                $message = "Can't inspect the volume for '$($demand.Path)'. Does that drive exist on $env:COMPUTERNAME?"
+                if (-not $failures.Contains($message)) { $failures.Add($message) }
+                continue
+            }
+
+            $key = if ($volume.UniqueId) { $volume.UniqueId } else { "$($volume.DriveLetter)" }
+            if (-not $byVolume.ContainsKey($key)) {
+                $byVolume[$key] = @{ Volume = $volume; Bytes = [int64]0; What = @() }
+            }
+            $byVolume[$key].Bytes += $demand.Bytes
+            $byVolume[$key].What += $demand.What
         }
-        if (-not $volume) {
-            $failures.Add("Can't inspect the volume for -VMStoragePath '$VMStoragePath'. Does that drive exist on $env:COMPUTERNAME?")
-        }
-        elseif ($volume.SizeRemaining -lt $neededBytes) {
-            $failures.Add("Not enough free space on $($volume.DriveLetter): - need ~$([math]::Round($neededBytes/1GB,1))GB (OS disk copy + ${DataDiskSizeGB}GB fixed data disk), have $([math]::Round($volume.SizeRemaining/1GB,1))GB.")
+
+        foreach ($entry in $byVolume.Values) {
+            # 2GB of headroom for the seed ISO, the VM configuration, and the
+            # console log - small, but not nothing, and this is the last
+            # cheap place to notice.
+            $neededBytes = $entry.Bytes + 2GB
+            if ($entry.Volume.SizeRemaining -lt $neededBytes) {
+                $failures.Add("Not enough free space on $($entry.Volume.DriveLetter): - need ~$([math]::Round($neededBytes/1GB,1))GB ($($entry.What -join ' + ')), have $([math]::Round($entry.Volume.SizeRemaining/1GB,1))GB.")
+            }
         }
     }
 
@@ -326,6 +389,14 @@ try {
     Write-Host "MAC:       $MacAddress  ->  switch '$SwitchName' (External)"
     Write-Host "Expecting: $(if ($ExpectedIPAddress) { $ExpectedIPAddress } else { '(not verifying - -SkipWaitForReady)' })"
     Write-Host "Template:  $GoldenImagePath"
+    # Printed separately even when they're the same path, because "which
+    # volume is etcd's WAL on" is the question docs/plans/node-storage.md was
+    # written about, and the answer should be on screen before the build
+    # rather than inferred from a default afterwards.
+    Write-Host "OS disk:   $OsDiskPath\$VMName\os-disk.vhdx (fixed, ${OsDiskSizeGB}GB - put this on the host's FASTEST volume)"
+    if ($DataDiskSizeGB -gt 0) {
+        Write-Host "Data disk: $DataDiskPath\$VMName\data-disk.vhdx (fixed, ${DataDiskSizeGB}GB - put this on the host's LARGEST volume)"
+    }
     # Printed so a later auth failure can be checked against something rather
     # than guessed at: this same fingerprint appears in the seed ISO's
     # user-data and in cloud-init's authorized-keys banner on the VM console.
@@ -357,10 +428,18 @@ try {
             Stop-VM -Name $VMName -TurnOff -Force
         }
         Remove-VM -Name $VMName -Force
-        $staleVmDir = Join-Path $VMStoragePath $VMName
-        if (Test-Path $staleVmDir) {
-            Write-Host "Deleting $staleVmDir ..."
-            Remove-Item -Path $staleVmDir -Recurse -Force
+        # Both roots: the OS and data disks may be on different volumes, and
+        # leaving the data disk behind would fail the rebuild's New-VHD on a
+        # file that already exists. Select -Unique so the single-volume
+        # default deletes one directory once.
+        $staleVmDirs = @($OsDiskPath, $DataDiskPath) |
+            ForEach-Object { Join-Path $_ $VMName } |
+            Select-Object -Unique
+        foreach ($staleVmDir in $staleVmDirs) {
+            if (Test-Path $staleVmDir) {
+                Write-Host "Deleting $staleVmDir ..."
+                Remove-Item -Path $staleVmDir -Recurse -Force
+            }
         }
     }
 
@@ -390,9 +469,14 @@ try {
         }
         else {
             Write-Host "Not on this host - building it (one-time, ~10-20 min depending on link speed)."
+            # -SizeGB matches -OsDiskSizeGB so the template this run builds is
+            # already the size the OS disk wants, and New-AerieVM.ps1's resize
+            # is a no-op. A template that was already on the host keeps
+            # whatever size it was built at and gets resized per-VM instead.
             $goldenArgs = @{
                 Distro     = $Distro
                 OutputPath = $GoldenImagePath
+                SizeGB     = $OsDiskSizeGB
             }
             if ($QemuImgZipPath) { $goldenArgs.QemuImgZipPath = $QemuImgZipPath }
             if ($QemuImgSha256) { $goldenArgs.QemuImgSha256 = $QemuImgSha256 }
@@ -413,9 +497,11 @@ try {
             NtpServer       = $NtpServer
             Distro          = $Distro
             Username        = $Username
-            VMStoragePath   = $VMStoragePath
+            OsDiskPath      = $OsDiskPath
+            DataDiskPath    = $DataDiskPath
             MemoryGB        = $MemoryGB
             CPUCount        = $CPUCount
+            OsDiskSizeGB    = $OsDiskSizeGB
             DataDiskSizeGB  = $DataDiskSizeGB
         }
         if ($Domain) { $vmArgs.Domain = $Domain }
@@ -430,9 +516,17 @@ try {
         # picking the default up again one script down.
         $vmArgs.ConsolePassword = $ConsolePassword
 
+        # Both disks are fixed now, so both are written out in full before
+        # the VM starts - the OS disk too, which used to be a fast sparse
+        # copy. Said once, up front, because the alternative is an operator
+        # watching a seemingly-hung run.
         if ($DataDiskSizeGB -gt 0) {
-            Write-Host "Note: the ${DataDiskSizeGB}GB data disk is fixed-size, so Hyper-V zeroes it up front. Expect this to take a while on spinning storage."
+            Write-Host "Note: the ${OsDiskSizeGB}GB OS disk and the ${DataDiskSizeGB}GB data disk are both fixed-size, so Hyper-V writes them out up front. Expect this to take a while on spinning storage."
         }
+        else {
+            Write-Host "Note: the ${OsDiskSizeGB}GB OS disk is fixed-size, so Hyper-V writes it out up front. Expect this to take a while on spinning storage."
+        }
+
         & (Join-Path $PSScriptRoot 'New-AerieVM.ps1') @vmArgs
     }
 
@@ -518,7 +612,8 @@ try {
             "| MAC | $tick$MacAddress$tick |"
             "| Address | $address |"
             "| Distro | $Distro |"
-            "| Resources | ${MemoryGB}GB RAM, $CPUCount vCPU, ${DataDiskSizeGB}GB data disk |"
+            "| Resources | ${MemoryGB}GB RAM, $CPUCount vCPU, ${OsDiskSizeGB}GB OS disk, ${DataDiskSizeGB}GB data disk |"
+            "| Disks | OS on $tick$OsDiskPath$tick, data on $tick$DataDiskPath$tick, both fixed |"
             "| Elapsed | ${elapsed} min |"
             ''
         )

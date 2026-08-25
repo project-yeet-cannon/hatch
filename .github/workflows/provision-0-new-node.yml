@@ -12,8 +12,9 @@
 # only one of the two paths and let them drift.
 #
 # Billing: `runs-on` pins `self-hosted`, so runs never land on a GitHub-hosted
-# runner and never consume Actions minutes, however long the 200GB fixed-disk
-# zeroing takes.
+# runner and never consume Actions minutes, however long the fixed-disk
+# writing takes - both disks are fixed now, so that is the OS disk's 100GB
+# on top of the data disk's 200GB.
 #
 # Runner requirements on each Hyper-V host:
 #   - Windows runner service running as a local Administrator (the Hyper-V
@@ -56,6 +57,11 @@ on:
         required: true
         default: '16'
         type: string
+      os_disk_gb:
+        description: 'Fixed OS disk in GB. 100 is the plan default; 32 was the old template size and is what filled.'
+        required: true
+        default: '100'
+        type: string
       data_disk_gb:
         description: 'Fixed Longhorn data disk in GB.'
         required: true
@@ -78,9 +84,19 @@ on:
         default: ExternalSwitch
         type: string
       vm_storage_path:
-        description: 'Where the VM and its disks live'
+        description: 'Where the VM and its disks live. The default for both paths below.'
         required: true
         default: 'D:\aerie\VMs'
+        type: string
+      os_disk_path:
+        description: "OS disk + VM config, on the host's FASTEST volume. Blank = vm_storage_path."
+        required: false
+        default: ''
+        type: string
+      data_disk_path:
+        description: "Longhorn data disk, on the host's LARGEST volume. Blank = vm_storage_path."
+        required: false
+        default: ''
         type: string
       template_path:
         description: 'Where the golden VHDX lives (built here if absent)'
@@ -125,9 +141,10 @@ jobs:
     name: ${{ inputs.vm_name }} on ${{ inputs.host }}
     runs-on: [self-hosted, '${{ inputs.host }}']
 
-    # Generous on purpose. A fixed 200GB VHDX is zeroed up front, the golden
-    # image may need building on a first run, and cloud-init does a full
-    # package upgrade plus a reboot. Failing at 6h means something hung.
+    # Generous on purpose. Both VHDXs are fixed and written out up front
+    # (100GB OS + 200GB data at the defaults), the golden image may need
+    # building on a first run, and cloud-init does a full package upgrade
+    # plus a reboot. Failing at 6h means something hung.
     timeout-minutes: 360
 
     steps:
@@ -309,9 +326,12 @@ jobs:
           DISTRO: ${{ inputs.distro }}
           SWITCH_NAME: ${{ inputs.switch_name }}
           VM_STORAGE_PATH: ${{ inputs.vm_storage_path }}
+          OS_DISK_PATH: ${{ inputs.os_disk_path }}
+          DATA_DISK_PATH: ${{ inputs.data_disk_path }}
           TEMPLATE_PATH: ${{ inputs.template_path }}
           MEMORY_GB: ${{ inputs.memory_gb }}
           CPU_COUNT: ${{ inputs.cpu_count }}
+          OS_DISK_GB: ${{ inputs.os_disk_gb }}
           DATA_DISK_GB: ${{ inputs.data_disk_gb }}
           EXTRA_PACKAGES: ${{ inputs.extra_packages }}
           PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
@@ -364,9 +384,15 @@ jobs:
             TemplatePath      = $env:TEMPLATE_PATH
             MemoryGB          = [int]$env:MEMORY_GB
             CPUCount          = [int]$env:CPU_COUNT
+            OsDiskSizeGB      = [int]$env:OS_DISK_GB
             DataDiskSizeGB    = [int]$env:DATA_DISK_GB
             SshPublicKey      = $env:NODE_SSH_PUBLIC_KEY
           }
+
+          # Only when supplied: the script defaults each to VMStoragePath,
+          # and passing an empty string here would override that with ''.
+          if ($env:OS_DISK_PATH -and $env:OS_DISK_PATH.Trim()) { $params.OsDiskPath = $env:OS_DISK_PATH.Trim() }
+          if ($env:DATA_DISK_PATH -and $env:DATA_DISK_PATH.Trim()) { $params.DataDiskPath = $env:DATA_DISK_PATH.Trim() }
 
           if ($env:DOMAIN) { $params.Domain = $env:DOMAIN }
 

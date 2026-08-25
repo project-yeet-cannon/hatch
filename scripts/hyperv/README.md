@@ -106,26 +106,45 @@ whole footprint is a single directory to find, back up, or delete:
 ```text
 D:\aerie\
   vm-templates\                        -TemplatePath — golden VHDX, shared by every VM on the host
-    debian-13-genericcloud.vhdx
+    debian-13-genericcloud.vhdx        dynamic, 100GB virtual — a file to copy, not a disk to run
     debian-13-genericcloud.vhdx.provenance.json
   VMs\                                 -VMStoragePath — Hyper-V config plus one directory per VM
     aerie-node-1\
-      os-disk.vhdx                     full copy of the template, not a differencing disk
-      data-disk.vhdx                   fixed-size, unformatted; Longhorn claims it in Phase 3
+      os-disk.vhdx                     -OsDiskPath — fixed 100GB, converted from the template
+      data-disk.vhdx                   -DataDiskPath — fixed, unformatted; Longhorn claims it in Phase 3
       seed.iso                         NoCloud cloud-init seed for this VM
       console-log-shipper.ps1          only when console-log shipping is on - see below
 ```
 
-Both roots are defaults, not assumptions — pass `-VMStoragePath` /
-`-TemplatePath` (or the workflow's `vm_storage_path` / `template_path`) to put
-either somewhere else, including on different volumes. Missing directories are
-created on first run.
+**The rule: the OS disk goes on the host's fastest volume and is fixed; the
+Longhorn data disk goes on its largest and is fixed; nothing Aerie creates on
+a host is dynamic, and no Aerie VM has automatic checkpoints.** That last
+clause belongs in the same sentence as the first three, because an automatic
+checkpoint layers a dynamic differencing disk over a fixed one and makes them
+untrue again — Hyper-V's default is on, and it is per-VM, so every VM has to
+turn it off. `New-AerieVM.ps1` does, at creation.
+
+The golden template is the one deliberate exception, and only because it is
+never booted: it stays dynamic so it is ~2GB to copy between hosts rather than
+100GB, and `New-AerieVM.ps1` converts it to fixed when it cuts a VM's OS disk
+from it. Its provenance JSON records which it is.
+
+Why this is a rule rather than a preference, and what it cost to learn:
+[`docs/plans/node-storage.md`](../../docs/plans/node-storage.md).
+
+All three roots are defaults, not assumptions. `-VMStoragePath` (the
+workflow's `vm_storage_path`) sets where both disks go; `-OsDiskPath` and
+`-DataDiskPath` (`os_disk_path` / `data_disk_path`) override it one at a time,
+which is what a host whose fastest volume is not its largest needs. Missing
+directories are created on first run.
 
 ## Flow B — GitHub Actions (primary)
 
 Actions → **Provision 0: New node VM** → Run workflow. Pick the `host`
 matching the runner label, fill in `vm_name`, `mac_address`, `expected_ip`,
-and the per-host `memory_gb` / `data_disk_gb`. `preflight_only` is available
+and the per-host `memory_gb` / `os_disk_gb` / `data_disk_gb`. Set `os_disk_path`
+on a host whose fastest volume isn't the one `vm_storage_path` points at — see
+the rule under On-disk layout. `preflight_only` is available
 as a checkbox and checks the host is ready — missing switch, wrong switch
 type, a taken MAC, an occupied IP, a too-full volume — without building
 anything.
@@ -311,7 +330,7 @@ removed, or renamed.
 - **The pfSense DHCP reservation.** Verification proves it's right; it doesn't
   create it.
 - Physical-disk passthrough, if you'd rather Longhorn used a whole disk than a
-  VHDX. These scripts always create a VHDX on `-VMStoragePath`'s volume.
+  VHDX. These scripts always create a VHDX on `-DataDiskPath`'s volume.
 
 ## Scripts
 

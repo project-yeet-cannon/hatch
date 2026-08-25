@@ -83,7 +83,7 @@
 
 .PARAMETER DestinationPath
     The directory on the host's *fastest* volume that VM disks go under - the
-    counterpart of New-AerieVM.ps1's -VMStoragePath, and normally the boot
+    counterpart of New-AerieVM.ps1's -OsDiskPath, and normally the boot
     volume rather than the bulk one. The disk lands at
     <DestinationPath>\<VMName>\os-disk.vhdx.
 
@@ -92,7 +92,9 @@
 
 .PARAMETER SizeGB
     Virtual size of the new fixed disk, binary as everywhere else in this tree
-    (100 means 100 GiB). Default 100, up from the golden image's 32.
+    (100 means 100 GiB). Default 100, which is also what New-AerieVM.ps1 now
+    builds a fresh node's OS disk at - a node migrated by this script and a
+    node provisioned today land on the same number.
 
     A fixed disk consumes this much of the destination volume immediately, so
     the free-space refusal below is not advisory. On a host whose fast volume

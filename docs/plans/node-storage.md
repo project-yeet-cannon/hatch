@@ -13,12 +13,20 @@ read finding 1's figures as bucket ranges rather than measurements.
 node at a time and with no maintenance window, put kubelet's image GC at 70/55
 and journald's cap at 512M on all three nodes.
 
-What is left is two things and one of them is only a date. **Phase 3** — stop
-the next node built from reintroducing all of it — is untouched and is the real
-remaining work. **Phase 4** is 2026-09-01: the soak on the three source VHDXs
-ends and they can be deleted, and Phase 2's week-long gate can be read. Both
-were trailing halves of Phases 1 and 2 and are gathered there so those phases
-read as what they are.
+**Phase 3 is complete** (2026-08-25): the golden image is 100 GB and records
+its own subformat, `New-AerieVM.ps1` converts it to a *fixed* OS disk and
+places that disk and the Longhorn one on separately-chosen volumes, automatic
+checkpoints are off at creation, and the rule is written down once in
+[`scripts/hyperv/README.md`](../../scripts/hyperv/README.md). A node built
+today gets what Phase 1 had to retrofit onto the three that exist. Nothing has
+been dispatched through the changed path yet — the next node built is the test,
+and it is worth reading the Provision 0 summary's new `Disks` row on that run
+rather than assuming.
+
+What is left is only a date. **Phase 4** is 2026-09-01: the soak on the three
+source VHDXs ends and they can be deleted, and Phase 2's week-long gate can be
+read. Both were trailing halves of Phases 1 and 2 and are gathered there so
+those phases read as what they are.
 
 The problem this plan was written against: two symptoms, one cause — every
 node's OS disk was a *dynamic* VHDX, on the *slow* volume, sized from a
@@ -643,10 +651,18 @@ node — the same mechanism the cluster plan's 6b.1 already used.
 
 ## Phase 3 — stop provisioning it wrong
 
-Without this, the next node built reintroduces every finding above, which is
-precisely what happened to the node rebuilt on 08/23.
+**Complete 2026-08-25.** Without this, the next node built reintroduces every
+finding above, which is precisely what happened to the node rebuilt on 08/23.
 
-- [ ] **3.1 — Golden image: fixed, and bigger.**
+One thing worth knowing that the steps below didn't anticipate: all three hosts
+already have a 32 GB template on disk, and templates are reused rather than
+rebuilt. So moving 3.1's default alone would have changed nothing on any
+existing host — `os_disk_gb` would have been accepted and silently ignored.
+`New-AerieVM.ps1` therefore resizes the per-VM disk to `-OsDiskSizeGB` after
+converting it, rather than trusting whatever size the host's template happens
+to be, and the template is left shared and untouched.
+
+- [x] **3.1 — Golden image: fixed, and bigger.**
       [`Get-GoldenImage.ps1`](../../scripts/hyperv/Get-GoldenImage.ps1)'s
       `-SizeGB` default moves 32 → 100. The `subformat=dynamic` on the
       `qemu-img convert` can stay — the template is a file to be copied, and
@@ -654,7 +670,7 @@ precisely what happened to the node rebuilt on 08/23.
       is known — but the provenance JSON it writes should record which it is, so
       a later reader can tell without opening the file.
 
-- [ ] **3.2 — `New-AerieVM.ps1` creates the OS disk fixed, and separately
+- [x] **3.2 — `New-AerieVM.ps1` creates the OS disk fixed, and separately
       placed.** Two changes, and the second is the interface change: today a
       single `-VMStoragePath` decides where *everything* goes, and this plan's
       whole point is that the OS disk and the Longhorn data disk now want
@@ -663,12 +679,12 @@ precisely what happened to the node rebuilt on 08/23.
       breaks. Then make the golden-image copy a `Convert-VHD -VHDType Fixed`
       rather than a `Copy-Item`.
 
-- [ ] **3.3 — Provision 0 exposes both.** `os_disk_path`, `os_disk_gb` (default
+- [x] **3.3 — Provision 0 exposes both.** `os_disk_path`, `os_disk_gb` (default
       `100`) and `data_disk_path` alongside the existing `vm_storage_path` and
       `data_disk_gb` in
       [`provision-0-new-node.yml`](../../.github/workflows/provision-0-new-node.yml).
 
-- [ ] **3.4 — Automatic checkpoints off at VM creation.**
+- [x] **3.4 — Automatic checkpoints off at VM creation.**
       [`New-AerieVM.ps1`](../../scripts/hyperv/New-AerieVM.ps1) gains
       `Set-VM -AutomaticCheckpointsEnabled $false` beside the
       `Disable-VMIntegrationService` line it already carries for the same kind
@@ -686,7 +702,7 @@ precisely what happened to the node rebuilt on 08/23.
       hardest to notice: a node built without it looks identical in every
       dashboard and is quietly paying finding 7's cost.
 
-- [ ] **3.5 — Document the rule, once.** In
+- [x] **3.5 — Document the rule, once.** In
       [`scripts/hyperv/README.md`](../../scripts/hyperv/README.md)'s on-disk
       layout section: **the OS disk goes on the host's fastest volume and is
       fixed; the Longhorn data disk goes on its largest and is fixed; nothing

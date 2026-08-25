@@ -12,11 +12,20 @@
     those checks.
 
     Per run, this:
-      - copies the golden VHDX into a fresh per-VM OS disk (a full copy, not
-        a differencing disk — so the golden template can be moved or deleted
-        later without breaking VMs already built from it)
+      - converts the golden VHDX into a fresh per-VM OS disk: fixed, at
+        -OsDiskSizeGB, and a full copy rather than a differencing disk — so
+        the golden template can be moved or deleted later without breaking
+        VMs already built from it
       - creates a second, fixed-size VHDX for Longhorn (Phase 1) / left
         unused (Phase 0 scratch VM)
+
+    Where those two disks land is two arguments, not one: -OsDiskPath for the
+    host's fastest volume and -DataDiskPath for its largest, both defaulting
+    to -VMStoragePath so a single-volume host still passes one path. Neither
+    disk is ever dynamic, and (see the Set-VM call below) no VM this creates
+    has automatic checkpoints — an automatic checkpoint layers a dynamic
+    differencing disk over a fixed one and makes that untrue again. See
+    docs/plans/node-storage.md.
       - renders a NoCloud cloud-init seed ISO with this VM's hostname/SSH
         key/NTP server/packages baked in, plus a break-glass console password
         for -Username (see -ConsolePassword)
@@ -46,6 +55,15 @@
         -SwitchName ExternalSwitch -MacAddress 00-15-5D-01-02-04 `
         -SshPublicKeyPath ~\.ssh\id_ed25519.pub -NtpServer 10.0.0.1 `
         -MemoryGB 16 -DataDiskSizeGB 200
+
+.EXAMPLE
+    # Same node on a host whose fastest volume isn't its biggest: OS disk on
+    # the SSD, Longhorn's disk on the bulk volume.
+    .\New-AerieVM.ps1 -VMName aerie-node-1 -GoldenImagePath D:\aerie\vm-templates\debian-13-genericcloud.vhdx `
+        -SwitchName ExternalSwitch -MacAddress 00-15-5D-01-02-04 `
+        -SshPublicKeyPath ~\.ssh\id_ed25519.pub -NtpServer 10.0.0.1 `
+        -OsDiskPath C:\aerie\VMs -DataDiskPath D:\aerie\VMs `
+        -MemoryGB 16 -OsDiskSizeGB 100 -DataDiskSizeGB 200
 #>
 #Requires -Modules Hyper-V
 #Requires -RunAsAdministrator
@@ -90,7 +108,32 @@ param(
     [string]$Domain,
     [string]$Username = 'aerie',
 
+    # The default for both -OsDiskPath and -DataDiskPath, and the only one of
+    # the three most callers need to pass. Set either of the other two to put
+    # that disk on a different volume from the other.
     [string]$VMStoragePath = 'D:\aerie\VMs',
+
+    # Where the OS disk and the VM's configuration go: the host's *fastest*
+    # volume. This is the disk etcd's write-ahead log fsyncs to, and the one
+    # docs/plans/node-storage.md Phase 1 moved on all three existing nodes —
+    # off the bulk volume they had been provisioned onto by a -VMStoragePath
+    # that decided both. Nothing here guesses which volume is fastest; it is
+    # an argument, measured per host.
+    [string]$OsDiskPath,
+
+    # Where the Longhorn data disk goes: the host's *largest* volume. Often
+    # the same as -OsDiskPath on a host with one volume, and deliberately not
+    # on a host with two.
+    [string]$DataDiskPath,
+
+    # Virtual size of the OS disk. The golden image is grown to match at
+    # build time and cloud-init's growpart expands the root filesystem into
+    # it on first boot; a template that is already some other size is resized
+    # here, so this number wins over whatever a host's template happens to
+    # be. See docs/plans/node-storage.md finding 4 for why the old 32 was not
+    # enough.
+    [int]$OsDiskSizeGB = 100,
+
     [int]$MemoryGB = 16,
     [int]$CPUCount = 4,
 
@@ -132,20 +175,52 @@ if ($existingMacs -contains $macNormalized) {
     throw "MAC $MacAddress is already assigned to another VM on this host. DHCP reservations depend on MACs being unique - pick another."
 }
 
-$vmDir = Join-Path $VMStoragePath $VMName
-New-Item -ItemType Directory -Path $vmDir -Force | Out-Null
+# -VMStoragePath is the default for both, so a caller that passes only it
+# gets exactly the single-volume layout this script had before the two were
+# separable, and a caller that passes one of them moves only that disk.
+if (-not $OsDiskPath) { $OsDiskPath = $VMStoragePath }
+if (-not $DataDiskPath) { $DataDiskPath = $VMStoragePath }
 
-$osDiskPath = Join-Path $vmDir 'os-disk.vhdx'
-Write-Host "Copying golden image to $osDiskPath ..."
-Copy-Item -Path $GoldenImagePath -Destination $osDiskPath
+# One directory per VM under each root. They are the same directory whenever
+# the two roots are, which is the common case and the historical layout.
+$vmDir = Join-Path $OsDiskPath $VMName
+$dataDir = Join-Path $DataDiskPath $VMName
+New-Item -ItemType Directory -Path $vmDir -Force | Out-Null
+New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+
+# Convert, not copy. The template is dynamic (see Get-GoldenImage.ps1) and a
+# VM running off a dynamic disk pays for every first write to every block
+# twice — once to extend the file, once to write the data — which on these
+# hosts showed up as etcd WAL fsync p99s in the hundreds of milliseconds and
+# a disk-latency alert that was telling the truth. Convert-VHD reads the
+# template and writes a fixed disk in one pass, so this costs no more I/O
+# than the Copy-Item it replaces; it costs the destination volume the disk's
+# full size up front, which is the point. docs/plans/node-storage.md finding 3.
+$osDiskFile = Join-Path $vmDir 'os-disk.vhdx'
+Write-Host "Converting golden image to a ${OsDiskSizeGB}GB fixed OS disk at $osDiskFile ..."
+Convert-VHD -Path $GoldenImagePath -DestinationPath $osDiskFile -VHDType Fixed
+
+# The template's virtual size is Get-GoldenImage.ps1's -SizeGB, which is the
+# same 100 by default but need not be: a host provisioned before that default
+# moved still has a 32GB template on it, and building a node from it must not
+# silently hand back the 32GB disk this plan exists to stop. Resizing here
+# rather than resizing the template keeps the template shared and untouched.
+# growpart has not run yet — nothing has booted this disk — so the guest's
+# root filesystem is sized from whatever this leaves behind.
+$osDiskBytes = [int64]$OsDiskSizeGB * 1GB
+$currentBytes = (Get-VHD -Path $osDiskFile).Size
+if ($currentBytes -ne $osDiskBytes) {
+    Write-Host "Resizing OS disk $([math]::Round($currentBytes/1GB,1))GB -> ${OsDiskSizeGB}GB (the template on this host is not $OsDiskSizeGB GB) ..."
+    Resize-VHD -Path $osDiskFile -SizeBytes $osDiskBytes
+}
 
 if ($DataDiskSizeGB -gt 0) {
-    $dataDiskPath = Join-Path $vmDir 'data-disk.vhdx'
+    $dataDiskFile = Join-Path $dataDir 'data-disk.vhdx'
     # Fixed, not dynamic: Longhorn wants consistent I/O latency, and fixed
     # disks can't overcommit the host's storage across the three nodes.
     # Costs an upfront zeroing pass at provision time.
-    Write-Host "Creating ${DataDiskSizeGB}GB fixed data disk at $dataDiskPath ..."
-    New-VHD -Path $dataDiskPath -SizeBytes ([int64]$DataDiskSizeGB * 1GB) -Fixed | Out-Null
+    Write-Host "Creating ${DataDiskSizeGB}GB fixed data disk at $dataDiskFile ..."
+    New-VHD -Path $dataDiskFile -SizeBytes ([int64]$DataDiskSizeGB * 1GB) -Fixed | Out-Null
 }
 
 # --- Render cloud-init seed ---
@@ -203,18 +278,21 @@ Remove-Item -Path $seedSrc -Recurse -Force
 # --- Create the VM ---
 
 Write-Host "Creating VM '$VMName' ..."
-New-VM -Name $VMName -Generation 2 -MemoryStartupBytes ([int64]$MemoryGB * 1GB) -VHDPath $osDiskPath -SwitchName $SwitchName -Path $VMStoragePath | Out-Null
+# -Path is the VM's *configuration* directory, which follows the OS disk
+# rather than the data disk: it is small, it is written to on every state
+# change, and it is what Hyper-V needs to find to start the VM at all.
+New-VM -Name $VMName -Generation 2 -MemoryStartupBytes ([int64]$MemoryGB * 1GB) -VHDPath $osDiskFile -SwitchName $SwitchName -Path $OsDiskPath | Out-Null
 
 Set-VMProcessor -VMName $VMName -Count $CPUCount
 Set-VMMemory -VMName $VMName -DynamicMemoryEnabled $false
 
 if ($DataDiskSizeGB -gt 0) {
-    Add-VMHardDiskDrive -VMName $VMName -Path $dataDiskPath -ControllerType SCSI
+    Add-VMHardDiskDrive -VMName $VMName -Path $dataDiskFile -ControllerType SCSI
 }
 
 Add-VMDvdDrive -VMName $VMName -Path $isoPath
 
-$osDisk = Get-VMHardDiskDrive -VMName $VMName | Where-Object { $_.Path -eq $osDiskPath }
+$osDisk = Get-VMHardDiskDrive -VMName $VMName | Where-Object { $_.Path -eq $osDiskFile }
 Set-VMFirmware -VMName $VMName -EnableSecureBoot On -SecureBootTemplate MicrosoftUEFICertificateAuthority -FirstBootDevice $osDisk
 
 $nic = Get-VMNetworkAdapter -VMName $VMName
@@ -222,6 +300,23 @@ Set-VMNetworkAdapter -VMNetworkAdapter $nic -StaticMacAddress $macNormalized -Ma
 
 Set-VM -Name $VMName -AutomaticStartAction Start -AutomaticStopAction ShutDown
 Disable-VMIntegrationService -VMName $VMName -Name 'Time Synchronization'
+
+# Hyper-V takes an automatic checkpoint when a VM *starts* and removes it on a
+# clean shutdown, so a node that has been up for weeks — which is what a node
+# is for — is running on a dynamic .avhdx layered over its OS disk the whole
+# time. That undoes the fixed disk this script just converted: every guest
+# write copies-on-write at block granularity into a file that grows as it
+# goes. Off at creation, because a node built without this looks identical in
+# every dashboard and is quietly paying for it; the three nodes that predate
+# it were fixed by Move-NodeOsDisk.ps1, which turns the same flag off.
+# docs/plans/node-storage.md finding 7.
+#
+# Guarded because the property does not exist on Windows Server 2016's
+# Hyper-V, where automatic checkpoints were not a feature and so are not a
+# problem either.
+if ((Get-VM -Name $VMName).PSObject.Properties['AutomaticCheckpointsEnabled']) {
+    Set-VM -Name $VMName -AutomaticCheckpointsEnabled $false
+}
 
 # Set-VMComPort's -Path only accepts a named pipe ("\\.\pipe\Name") - Hyper-V
 # has no built-in way to redirect a COM port straight to a file, on Gen 1 or

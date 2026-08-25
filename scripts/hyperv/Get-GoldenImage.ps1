@@ -5,6 +5,12 @@
     Hyper-V-native VHDX, and grows it so cloud-init's growpart module can
     expand the root filesystem into the extra space on first boot.
 
+    The output is a *dynamic* VHDX at -SizeGB (default 100) virtual, and both
+    halves of that are deliberate: it is a template to be copied between
+    hosts, not a disk to be run, so it stays small on the wire, and
+    New-AerieVM.ps1 converts it to fixed when it cuts a VM's OS disk from it.
+    The provenance JSON records which it is.
+
 .DESCRIPTION
     Run this ONCE (per distro), not once per host — the output VHDX has no
     per-host state baked in. Copy the resulting file to every Hyper-V host
@@ -78,7 +84,18 @@ param(
     # re-enable once that's sorted rather than leaving this on.
     [switch]$SkipChecksumVerification,
 
-    [int]$SizeGB = 32
+    # Virtual size of the template, and therefore the default size of every
+    # OS disk cut from it — cloud-init's growpart expands the root filesystem
+    # to fill whatever it is given. 100 rather than 32 because 32 was a
+    # template default that nothing measured: it put every node's root
+    # filesystem at 80-85% used and climbing 4-5 points a day on image
+    # accumulation alone. See docs/plans/node-storage.md findings 4 and 5.
+    #
+    # Costs nothing here: the template stays a dynamic VHDX, so a bigger
+    # virtual size is a bigger number in a header, not bigger bytes on disk.
+    # It is New-AerieVM.ps1 that pays for it, at VM-create time, where the
+    # destination volume is known.
+    [int]$SizeGB = 100
 )
 
 $ErrorActionPreference = 'Stop'
@@ -208,9 +225,18 @@ try {
 
     # --- convert and grow ---
 
+    # Dynamic on purpose, and recorded as such in the provenance below. The
+    # template is a file to be copied to every host that needs it, where a
+    # ~2GB sparse file beats a 100GB one over the wire and on the shelf;
+    # conversion to fixed belongs at VM-create time, in New-AerieVM.ps1,
+    # where the destination volume is known and the disk is the one the guest
+    # will actually run on. Aerie runs no VM off a dynamic disk — see
+    # docs/plans/node-storage.md finding 3 — and this file is not one.
+    $vhdxSubformat = 'dynamic'
+
     $rawVhdx = Join-Path $work 'image-raw.vhdx'
-    Write-Host "Converting qcow2 -> vhdx ..."
-    & $qemuImg.FullName convert -O vhdx -o subformat=dynamic $sourceImage $rawVhdx
+    Write-Host "Converting qcow2 -> vhdx ($vhdxSubformat) ..."
+    & $qemuImg.FullName convert -O vhdx -o "subformat=$vhdxSubformat" $sourceImage $rawVhdx
     if ($LASTEXITCODE -ne 0) { throw "qemu-img convert failed with exit code $LASTEXITCODE" }
 
     Write-Host "Growing image to ${SizeGB}GB (cloud-init's growpart module expands the root fs into this on first boot) ..."
@@ -230,6 +256,11 @@ try {
         qemuImgSource = if ($QemuImgZipPath) { $QemuImgZipPath } else { $QemuImgUrl }
         qemuImgSha256 = $zipHash
         sizeGB        = $SizeGB
+        # Which kind of VHDX this file is, so a later reader can tell without
+        # opening it. Templates are dynamic and the VMs cut from them are
+        # fixed, so "which is this?" is a question the answer to which is
+        # otherwise a Get-VHD away on a host that may no longer have the file.
+        vhdxSubformat = $vhdxSubformat
         builtUtc      = (Get-Date).ToUniversalTime().ToString('o')
         builtOn       = $env:COMPUTERNAME
     }
