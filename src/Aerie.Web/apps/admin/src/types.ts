@@ -329,3 +329,90 @@ export interface CalendarSync {
   removed: number;
   failedAccounts: number;
 }
+
+/**
+ * Mirrors of Aerie.Api's Panel DTOs (Models/Panels/Dtos.cs). A Panel is the
+ * tier above a Routine: a kiosk tile that opens a sub-UI holding several calls
+ * to action, some of them existing Routines and some of them Controls -
+ * typed, device-bound surfaces that report state as well as write it.
+ *
+ * Only the admin half is here. The kiosk's PanelSummary and PanelStateDto live
+ * in the dashboard app, which is the only thing that reads them.
+ */
+export type PanelItemKind = 'Routine' | 'Control';
+
+export type ControlKind = 'Switch' | 'Thermostat';
+
+export type ControlRole = 'Power' | 'Setpoint' | 'Mode' | 'Ambient';
+
+export interface PanelControlBinding {
+  id: string;
+  role: ControlRole;
+  channelId: string;
+}
+
+/**
+ * One entry in a Panel's ordered list. The nullable fields mirror the server's
+ * exactly, including which `kind` makes each one non-null: `routineId` is set
+ * only on a Routine item, and everything from `controlKind` down only on a
+ * Control.
+ */
+export interface PanelItem {
+  id: string;
+  sortOrder: number;
+  kind: PanelItemKind;
+  routineId: string | null;
+  controlKind: ControlKind | null;
+  label: string | null;
+  icon: string | null;
+  color: string | null;
+  /** Thermostat only: the HVAC mode that means "on" for this device — "cool" on an air conditioner, "heat" on a radiator. */
+  onMode: string | null;
+  /** Thermostat bounds in °F. Null means the server's default (60 / 85 / 1). */
+  minF: number | null;
+  maxF: number | null;
+  stepF: number | null;
+  bindings: PanelControlBinding[];
+}
+
+export interface Panel {
+  id: string;
+  name: string;
+  description: string | null;
+  icon: string | null;
+  color: string | null;
+  sortOrder: number;
+  included: boolean;
+  items: PanelItem[];
+}
+
+export interface PanelControlBindingWriteRequest {
+  role: ControlRole;
+  channelId: string;
+}
+
+export interface PanelItemWriteRequest {
+  sortOrder: number;
+  kind: PanelItemKind;
+  routineId: string | null;
+  controlKind: ControlKind | null;
+  label: string | null;
+  icon: string | null;
+  color: string | null;
+  onMode: string | null;
+  minF: number | null;
+  maxF: number | null;
+  stepF: number | null;
+  bindings: PanelControlBindingWriteRequest[];
+}
+
+/** Items are embedded and replaced wholesale on every write, exactly as RoutineWriteRequest does with its actions — the item list *is* the panel. */
+export interface PanelWriteRequest {
+  name: string;
+  description: string | null;
+  icon: string | null;
+  color: string | null;
+  sortOrder: number;
+  included: boolean;
+  items: PanelItemWriteRequest[];
+}

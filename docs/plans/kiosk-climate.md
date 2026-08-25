@@ -1,6 +1,6 @@
 # Kiosk Climate
 
-**Status:** Phases 0–4 complete (naming, model, schema, domain rules, the read path, and the write path). Phases 5–8 not started.
+**Status:** Phases 0–5 complete (naming, model, schema, domain rules, the read path, the write path, and the admin UI). Phases 6–8 not started.
 
 New kiosk dashboard UI for house climate controls, and the two new domain
 concepts that make it possible: **Panels** and **Controls**.
@@ -348,27 +348,69 @@ none of it. Two of those tests exist because of that choice — a channel turned
 read-only *after* a panel bound it reaches the write path as `Rejected` → 400,
 and an unreachable HA is `Failed` → 502.
 
-## [] Phase 5 — Admin UI
+## [x] Phase 5 — Admin UI
 
-**Status:** not started
+**Status:** complete
 
-- [ ] Add the `Panel` types and the `getPanels`/`createPanel`/`updatePanel`/
+- [x] Add the `Panel` types and the `getPanels`/`createPanel`/`updatePanel`/
       `deletePanel` calls to `src/Aerie.Web/apps/admin/src/{types.ts,api/client.ts}`.
-- [ ] Add `PanelsPage.tsx` modelled on `RoutinesPage.tsx` — list, create form,
-      per-row edit form, `IconPicker`, color, sortOrder, included.
-- [ ] Item editor: add-routine (a select over existing routines) and
+- [x] Add [`PanelsPage.tsx`](../../src/Aerie.Web/apps/admin/src/pages/PanelsPage.tsx)
+      modelled on `RoutinesPage.tsx` — list, create form, per-row edit form,
+      `IconPicker`, color, sortOrder, included.
+- [x] Item editor: add-routine (a select over existing routines) and
       add-control (a `ControlKind` select), reorderable, removable.
-- [ ] Per control, render one channel select per role for that kind, filtered to
-      channels whose metric matches — mirror `RoutinesPage`'s
-      `eligibleChannelOptions`, keyed on role rather than kind.
-- [ ] Thermostat extras: `OnMode` select populated from the bound `HvacMode`
+- [x] Per control, render one channel select per role for that kind, filtered to
+      channels whose metric matches — and, for the written roles, to `ReadWrite`.
+- [x] Thermostat extras: `OnMode` select populated from the bound `HvacMode`
       channel's `availableOptions`, and MinF/MaxF/StepF number inputs showing the
       defaults as placeholders.
-- [ ] Client-side mirror of the required-role check so the form says what's
+- [x] Client-side mirror of the required-role check so the form says what's
       missing before the POST does.
-- [ ] Add the `/panels` route and nav link in
+- [x] Add the `/panels` route and nav link in
       [`admin/src/App.tsx`](../../src/Aerie.Web/apps/admin/src/App.tsx), between
       Routines and Calendars.
+
+**The combobox got extracted rather than mirrored.** The plan said to mirror
+`RoutinesPage`'s `eligibleChannelOptions`, and that part is a mirror — the
+filter is keyed on role rather than kind, and adds the `ReadWrite` half that
+`PanelBindingRules.IsWritten` describes. But the ~100-line searchable
+`ChannelSelect` under it is not something to mirror, so it moved to
+[`components/ChannelSelect.tsx`](../../src/Aerie.Web/apps/admin/src/components/ChannelSelect.tsx)
+with a `ChannelChoice` supertype: `RoutinesPage`'s `ChannelOption` now extends
+it with the `RoutineActionKind` the metric implies, and passes its richer rows
+straight in. `RoutinesPage` lost 90 lines and gained no behavior.
+
+**The rules are duplicated in TypeScript on purpose, and it is not only about
+validation.** `ROLE_METRIC`, `roleIsWritten` and `ROLES_FOR` are the form's
+*shape*, not its checker: which channel selects exist at all is the question a
+control editor has to answer before it renders, and it cannot ask the server
+that per keystroke. Each constant names the C# member it mirrors, the error
+wording tracks the server's so the same problem reads the same either way it is
+caught, and the server still runs the real rules on every write.
+
+**Bindings are held keyed by role, not as a list.** `toItemRequest` sends only
+the roles the *current* kind understands, so flipping a control Thermostat →
+Switch → Thermostat does not discard the setpoint channel already picked —
+and a leftover role can never reach the API as the "`A Switch control has no
+Setpoint role`" rejection it would otherwise be.
+
+**A blank number box is null, which is the default — not zero.** `MinF`/`MaxF`/
+`StepF` show `PanelDefaults` as placeholders and send null when empty, and the
+client's `min >= max` check compares *effective* values for the same reason
+Phase 2's does: a min of 90 against a blank max is a min of 90 against 85.
+
+**The form requires at least one item; the API does not.** An empty panel is a
+legal row — nothing in `PanelBindingRules` has an opinion about a panel with no
+items — but it is a tile on a wall that opens onto nothing, so the form refuses
+to create one. Deliberate asymmetry: the API stays permissive about what can
+exist, the admin UI is opinionated about what is worth making.
+
+**What the apply showed.** `make test-web` clean across all six apps. One lint
+warning appeared and was fixed rather than tolerated: exporting a plain function
+(`channelLabel`) beside a component breaks React fast refresh, and nothing
+outside the module needed it. No C# changed, so `make test-api` stays at 801.
+Browser verification is the user's — Phase 7 is where this page gets driven for
+the first time, building the Climate panel itself.
 
 ## [] Phase 6 — Kiosk UI
 

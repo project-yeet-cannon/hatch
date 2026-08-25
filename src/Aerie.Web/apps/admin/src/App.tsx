@@ -2,6 +2,7 @@ import { Navigate, NavLink, Route, Routes } from 'react-router-dom';
 import './App.css';
 import { ZonesPage } from './pages/ZonesPage';
 import { RoutinesPage } from './pages/RoutinesPage';
+import { PanelsPage } from './pages/PanelsPage';
 import { CalendarsPage } from './pages/CalendarsPage';
 import { DevicesPage } from './pages/DevicesPage';
 import { DiscoveryPage } from './pages/DiscoveryPage';
@@ -28,6 +29,7 @@ export function App() {
         <div className="admin-nav-content">
           <NavLink to="/zones" className={navLinkClass}>Zones</NavLink>
           <NavLink to="/routines" className={navLinkClass}>Routines</NavLink>
+          <NavLink to="/panels" className={navLinkClass}>Panels</NavLink>
           <NavLink to="/calendars" className={navLinkClass}>Calendars</NavLink>
           <NavLink to="/devices" className={navLinkClass}>Devices</NavLink>
           <NavLink to="/discovery" className={navLinkClass}>Discovery</NavLink>
@@ -42,6 +44,7 @@ export function App() {
           <Route path="/" element={<Navigate to="/zones" replace />} />
           <Route path="/zones" element={<ZonesPage />} />
           <Route path="/routines" element={<RoutinesPage />} />
+          <Route path="/panels" element={<PanelsPage />} />
           <Route path="/calendars" element={<CalendarsPage />} />
           <Route path="/devices" element={<DevicesPage />} />
           <Route path="/discovery" element={<DiscoveryPage />} />

@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import type { Device, DeviceChannel, DeviceChannelMetric, Routine, RoutineActionKind, RoutineWriteRequest } from '../types';
 import { createRoutine, deleteRoutine, getDevices, getRoutines, triggerRoutine, turnOffRoutine, updateRoutine } from '../api/client';
+import { ChannelSelect, type ChannelChoice } from '../components/ChannelSelect';
 import { IconPicker } from '../components/IconPicker';
 import { iconFor } from '../lib/icons';
 
@@ -15,13 +16,9 @@ const METRIC_TO_KIND: Partial<Record<DeviceChannelMetric, RoutineActionKind>> = 
   MediaPlayback: 'PlayMedia',
 };
 
-interface ChannelOption {
-  channelId: string;
-  deviceName: string;
-  metric: DeviceChannelMetric;
+/** A pickable channel plus the one thing a Routine adds to it: which action kind the metric implies. */
+interface ChannelOption extends ChannelChoice {
   kind: RoutineActionKind;
-  haEntityId: string;
-  availableOptions: string[] | null;
 }
 
 function eligibleChannelOptions(devices: Device[]): ChannelOption[] {
@@ -498,133 +495,4 @@ function ActionValueInput({ option, value, onChange }: { option: ChannelOption; 
         />
       );
   }
-}
-
-function channelLabel(option: ChannelOption): string {
-  return `${option.deviceName} — ${option.metric} (${option.haEntityId})`;
-}
-
-/** Substring matches anywhere qualify, but matches starting at a word boundary (start of string, or after a non-alphanumeric char) rank first. */
-function searchChannelOptions(options: ChannelOption[], query: string): ChannelOption[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return options;
-  return options
-    .map((option) => {
-      const label = channelLabel(option).toLowerCase();
-      const idx = label.indexOf(q);
-      if (idx === -1) return null;
-      const atWordBoundary = idx === 0 || !/[a-z0-9]/i.test(label[idx - 1]);
-      return { option, idx, atWordBoundary };
-    })
-    .filter((m): m is { option: ChannelOption; idx: number; atWordBoundary: boolean } => m !== null)
-    .sort((a, b) => (a.atWordBoundary === b.atWordBoundary ? a.idx - b.idx : a.atWordBoundary ? -1 : 1))
-    .map((m) => m.option);
-}
-
-function HighlightedLabel({ text, query }: { text: string; query: string }) {
-  const q = query.trim();
-  if (!q) return <>{text}</>;
-  const idx = text.toLowerCase().indexOf(q.toLowerCase());
-  if (idx === -1) return <>{text}</>;
-  return (
-    <>
-      {text.slice(0, idx)}
-      <mark className="search-match">{text.slice(idx, idx + q.length)}</mark>
-      {text.slice(idx + q.length)}
-    </>
-  );
-}
-
-/** Searchable combobox for picking a device channel - a plain <select> was unusable once the channel list got long. */
-function ChannelSelect({
-  value,
-  options,
-  onSelect,
-}: {
-  value: string;
-  options: ChannelOption[];
-  onSelect: (channelId: string) => void;
-}) {
-  const [query, setQuery] = useState('');
-  const [open, setOpen] = useState(false);
-  const [highlighted, setHighlighted] = useState(0);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  const selected = options.find((o) => o.channelId === value) ?? null;
-  const results = open ? searchChannelOptions(options, query) : [];
-
-  useEffect(() => {
-    if (!open) return;
-    function onOutsideClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', onOutsideClick);
-    return () => document.removeEventListener('mousedown', onOutsideClick);
-  }, [open]);
-
-  function choose(option: ChannelOption) {
-    onSelect(option.channelId);
-    setQuery('');
-    setOpen(false);
-  }
-
-  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setOpen(true);
-      setHighlighted((i) => Math.min(i + 1, results.length - 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setHighlighted((i) => Math.max(i - 1, 0));
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      const option = results[highlighted];
-      if (option) choose(option);
-    } else if (e.key === 'Escape') {
-      setOpen(false);
-      setQuery('');
-    }
-  }
-
-  return (
-    <div ref={containerRef} style={{ position: 'relative', minWidth: '16rem' }}>
-      <input
-        type="text"
-        placeholder="Type to search…"
-        value={open ? query : (selected ? channelLabel(selected) : '')}
-        onFocus={() => {
-          setOpen(true);
-          setQuery('');
-          setHighlighted(0);
-        }}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setHighlighted(0);
-        }}
-        onKeyDown={onKeyDown}
-        style={{ width: '100%' }}
-      />
-      {open && (
-        <div className="card channel-select-dropdown">
-          {results.length === 0 && <p className="text-muted channel-select-empty">No matching channels.</p>}
-          {results.map((option, index) => (
-            <div
-              key={option.channelId}
-              className="channel-select-option"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                choose(option);
-              }}
-              onMouseEnter={() => setHighlighted(index)}
-              style={{ background: index === highlighted ? 'var(--primary-bg)' : 'transparent' }}
-            >
-              <HighlightedLabel text={channelLabel(option)} query={query} />
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }

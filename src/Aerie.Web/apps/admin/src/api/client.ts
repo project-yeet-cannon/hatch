@@ -22,6 +22,8 @@ import type {
   DeviceHistory,
   DeviceWriteRequest,
   HazardAlert,
+  Panel,
+  PanelWriteRequest,
   ProvisioningInfo,
   Routine,
   RoutineWriteRequest,
@@ -121,6 +123,19 @@ export const updateRoutine = (id: string, request: RoutineWriteRequest) =>
 export const deleteRoutine = (id: string) => fetchJson<void>(`/api/routines/${id}`, { method: 'DELETE' });
 export const triggerRoutine = (id: string) => fetchJson<void>(`/api/routines/${id}/trigger`, { method: 'POST' });
 export const turnOffRoutine = (id: string) => fetchJson<void>(`/api/routines/${id}/turn-off`, { method: 'POST' });
+
+// ---- Panels ----
+//
+// The kiosk's own panel endpoints (/state, /power, /setpoint) are deliberately
+// absent: admin configures panels, the wall tablet drives them.
+
+export const getPanels = () => fetchJson<Panel[]>('/api/panels');
+export const getPanel = (id: string) => fetchJson<Panel>(`/api/panels/${id}`);
+export const createPanel = (request: PanelWriteRequest) =>
+  fetchJson<Panel>('/api/panels', { method: 'POST', ...asJson(request) });
+export const updatePanel = (id: string, request: PanelWriteRequest) =>
+  fetchJson<Panel>(`/api/panels/${id}`, { method: 'PUT', ...asJson(request) });
+export const deletePanel = (id: string) => fetchJson<void>(`/api/panels/${id}`, { method: 'DELETE' });
 
 // ---- Calendar ----
 //
