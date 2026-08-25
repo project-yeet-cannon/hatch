@@ -60,7 +60,26 @@ fi
 FIELDS_JSON=$(sed 's/^{"fields"://; s/}$//' /tmp/fields-response.json)
 FIELDS_ESCAPED=$(printf '%s' "$FIELDS_JSON" | sed 's/\\/\\\\/g; s/"/\\"/g')
 
-BODY=$(cat <<JSON
+# Written to a file rather than held in a variable for `-d "$BODY"`, and
+# that is the whole reason this file exists rather than the obvious inline
+# form. Linux caps a *single* argv entry at MAX_ARG_STRLEN - 32 pages,
+# 131072 bytes - independently of the far larger total ARG_MAX that `getconf
+# ARG_MAX` reports, and the escaped field cache blows through it: 138043
+# bytes across 764 fields on 2026-08-25. Past that line execve() returns
+# E2BIG, curl never starts, and because the `|| echo 000` below catches a
+# command substitution that produced nothing, the loop reports `HTTP 000` and
+# blames Dashboards for what is a local exec failure - the shell's own
+# `curl: Argument list too long` being the only true word in the output.
+#
+# This grew into the failure rather than arriving with it. The cache is one
+# entry per field fluent-bit has ever shipped, so it only crosses 131072
+# bytes after enough distinct fields accumulate; the script worked for
+# months and then began failing every run without anything about it
+# changing. `-d @file` keeps argv a constant few hundred bytes no matter how
+# many fields the cluster reaches, which is the property worth having here -
+# a larger buffer would just move the same cliff further out.
+BODY_FILE=/tmp/index-pattern-body.json
+cat > "$BODY_FILE" <<JSON
 {
   "attributes": {
     "title": "$INDEX_PATTERN_TITLE",
@@ -69,20 +88,23 @@ BODY=$(cat <<JSON
   }
 }
 JSON
-)
 
 attempt=1
 while [ "$attempt" -le "$MAX_ATTEMPTS" ]; do
   status=$(curl -s -o /tmp/index-pattern-response.json -w '%{http_code}' -X POST \
     "$DASHBOARDS_URL/api/saved_objects/index-pattern/$INDEX_PATTERN_ID?overwrite=true" \
-    -H 'Content-Type: application/json' -H 'osd-xsrf: true' -d "$BODY" || echo 000)
+    -H 'Content-Type: application/json' -H 'osd-xsrf: true' -d @"$BODY_FILE" || echo 000)
 
   if [ "$status" = "200" ]; then
     echo "created/updated index pattern '$INDEX_PATTERN_ID' (aerie-logs-*, time field: time)"
     exit 0
   fi
 
-  echo "[$attempt/$MAX_ATTEMPTS] Dashboards not ready yet or request failed (HTTP $status): $(cat /tmp/index-pattern-response.json 2>/dev/null || true)"
+  # "HTTP 000" means curl produced no status line at all - it could not run,
+  # could not connect, or died mid-request - which is a different thing from
+  # Dashboards answering with an error, and reads as a readiness problem if
+  # the message does not say so.
+  echo "[$attempt/$MAX_ATTEMPTS] index-pattern POST failed (HTTP $status; 000 = request never completed): $(cat /tmp/index-pattern-response.json 2>/dev/null || true)"
   attempt=$((attempt + 1))
   sleep "$RETRY_DELAY_SECONDS"
 done
