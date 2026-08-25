@@ -272,13 +272,38 @@ spec:
             # most of the argument the re-scope preamble owed for keeping
             # both.
             #
-            # repeat_interval overridden to 5m on this route alone - the
-            # parent's 4h would make this a dead-man's switch with a 4-hour
-            # blind spot, defeating the point. static-monitors-configmap.yaml's
+            # repeat_interval overridden on this route alone - the parent's
+            # 4h would make this a dead-man's switch with a 4-hour blind spot,
+            # defeating the point. static-monitors-configmap.yaml's
             # watchdog.toml sets Kuma's own interval/retries to tolerate this
             # cadence without false-positiving on ordinary jitter.
+            #
+            # group_interval is overridden *with* it, and that pairing is the
+            # whole point rather than a tidy-up. Alertmanager re-evaluates
+            # repeat_interval only on group_interval ticks, and the test in
+            # its dedup stage is `entry.Timestamp.Before(now - repeat)` where
+            # the nflog entry's timestamp is written a few milliseconds after
+            # the flush that sent it. So when repeat_interval equals
+            # group_interval, the tick at exactly one interval later fails
+            # that comparison by those milliseconds and the notification slips
+            # to the following tick: `repeat_interval: 5m` under the parent's
+            # `group_interval: 5m` delivered a push every **ten** minutes, not
+            # five. Kuma's monitor tolerates 300s + 3 x 60s = 486s, so the
+            # Watchdog went red for about two minutes out of every ten from
+            # the day this route started working until 2026-08-25 - the
+            # dead-man's switch flapping on its own cadence rather than on
+            # anything it was watching.
+            #
+            # 1m/2m rather than a smaller equal pair: the quantization applies
+            # to any repeat_interval that is an exact multiple of
+            # group_interval, so these are deliberately not one - the push
+            # lands on the 3m tick, every 3m, roughly a third of Kuma's
+            # tolerance. Keep that ratio if either number is ever retuned; the
+            # failure it prevents is invisible in the rendered config, which
+            # says 5m either way.
             - receiver: kuma-watchdog
-              repeat_interval: 5m
+              group_interval: 1m
+              repeat_interval: 2m
               matchers:
                 - alertname = "Watchdog"
         receivers:

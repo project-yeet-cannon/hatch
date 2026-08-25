@@ -82,10 +82,15 @@
 #                ./kube-prometheus-stack.yaml's receiver name a
 #                concrete push URL in the same commit instead of a human
 #                copying a generated one out of Kuma's UI after the fact.
-#                interval 300s / retry 60s / max_retries 3 gives roughly 8
-#                minutes of grace before a missed Alertmanager cycle (5m
-#                repeat_interval on that route) reads as the monitor going
-#                red, rather than every ordinary jitter doing so.
+#                interval 300s / retry 60s / max_retries 3 gives 486s - just
+#                over 8 minutes - before a missed Alertmanager cycle reads as
+#                the monitor going red, rather than every ordinary jitter
+#                doing so. That number is only meaningful against the actual
+#                delivered cadence of the route that pushes here, which is not
+#                the same as the repeat_interval written on it: see
+#                ./kube-prometheus-stack.yaml's group_interval note. At the
+#                3m cadence that route now delivers, this tolerates two
+#                consecutive missed pushes.
 apiVersion: v1
 kind: ConfigMap
 metadata:
