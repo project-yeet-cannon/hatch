@@ -103,3 +103,9 @@ public record PanelItemStateDto(
     bool? IsActive);
 
 public record PanelStateDto(Guid Id, string Name, IReadOnlyList<PanelItemStateDto> Items);
+
+/// <summary>The kiosk's on/off tap. Absolute rather than a toggle: the wall's copy of the state can be up to a poll stale, and a toggle would then do the opposite of what the finger asked for.</summary>
+public record PanelPowerRequest(bool On);
+
+/// <summary>The kiosk's setpoint write, in F. One request per settled interaction - holding "+" from 68 to 78 sends this once, not ten times (docs/plans/kiosk-climate.md).</summary>
+public record PanelSetpointRequest(decimal ValueF);

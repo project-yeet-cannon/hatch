@@ -1,6 +1,6 @@
 # Kiosk Climate
 
-**Status:** Phases 0–3 complete (naming, model, schema, domain rules, and the read path). Phases 4–8 not started.
+**Status:** Phases 0–4 complete (naming, model, schema, domain rules, the read path, and the write path). Phases 5–8 not started.
 
 New kiosk dashboard UI for house climate controls, and the two new domain
 concepts that make it possible: **Panels** and **Controls**.
@@ -292,28 +292,61 @@ adding it to the TS type also means updating the mock and test data sources,
 which is Phase 6's first two bullets. Phase 3 is service-only: `GetStateAsync`
 has no route in front of it until `PanelsController` lands in Phase 4.
 
-## [] Phase 4 — Write path and admin API
+## [x] Phase 4 — Write path and admin API
 
-**Status:** not started
+**Status:** complete
 
-- [ ] Add `PanelsController` with the CRUD five, items replaced wholesale on
-      write, modelled on
-      [`RoutinesController`](../../src/Aerie.Api/Controllers/RoutinesController.cs).
-- [ ] Create/Update load every referenced channel, run `PanelBindingRules.Validate`
+- [x] Add [`PanelsController`](../../src/Aerie.Api/Controllers/PanelsController.cs)
+      with the CRUD five, items replaced wholesale on write, modelled on
+      [`RoutinesController`](../../src/Aerie.Api/Controllers/RoutinesController.cs) —
+      plus `GET /{id}/state`, the route Phase 3 left `GetStateAsync` waiting for.
+- [x] Create/Update load every referenced channel, run `PanelBindingRules.Validate`
       per item, and answer `BadRequest` with the reason before saving —
       an invalid panel must never reach the database.
-- [ ] Add `POST /{id}/items/{itemId}/power`: resolve the item, build the
+- [x] Add `POST /{id}/items/{itemId}/power`: resolve the item, build the
       `CommandRequest` (`SetPower`, or `SetHvacMode` with `OnMode`/`"off"`),
       dispatch through `IClimateCommandService`, map `Rejected` → 400 and
       `Failed` → 502 as the routines endpoints do.
-- [ ] Add `POST /{id}/items/{itemId}/setpoint`: clamp to `MinF`/`MaxF`, round to
+- [x] Add `POST /{id}/items/{itemId}/setpoint`: clamp to `MinF`/`MaxF`, round to
       `StepF`, dispatch `SetTemperature`.
-- [ ] Reason string on every dispatch: `$"Panel '{panel.Name}' — {item label}"`.
-- [ ] Both write endpoints 404 on an item that isn't a control, and 400 on a
+- [x] Reason string on every dispatch: `$"Panel '{panel.Name}' — {item label}"`.
+- [x] Both write endpoints 404 on an item that isn't a control, and 400 on a
       control whose kind doesn't support the verb (setpoint on a `Switch`).
-- [ ] `PanelCommandTests`: power via `Power` binding; power via `OnMode` fallback
-      including the `"off"` direction; setpoint clamped low; clamped high;
-      rounded to step; setpoint refused on a `Switch`.
+- [x] [`PanelCommandTests`](../../src/Aerie.Api.Tests/Panels/PanelCommandTests.cs):
+      power via `Power` binding; power via `OnMode` fallback including the
+      `"off"` direction; setpoint clamped low; clamped high; rounded to step;
+      setpoint refused on a `Switch`.
+
+**The setpoint clamps twice, and the second one is not redundant.** Clamp into
+range, snap to the nearest step *measured from `MinF`* (so every reachable value
+is one the ⊖/⊕ buttons can also land on), then clamp again — because a range the
+step doesn't divide evenly can snap its own top upward and out. 60–73 by 5s is
+the case: 73 is 13 above the minimum, the nearest step is 75, and only the
+second clamp brings it back to 73. Pinned by its own test.
+
+**"Is this routine id real?" is the one validation `PanelBindingRules` can't
+answer.** The class is pure by design, and that question needs the database, so
+the controller asks it separately. Without it a bad routine id is a
+`DbUpdateException` — a 500 for what is plainly a bad request.
+
+**A routine item, and an item belonging to a different panel, both read as 404.**
+`LoadControlAsync` searches the panel's own `Items` and returns nulls for
+anything that isn't a control on *that* panel, which makes "the panel is the
+boundary" structural rather than a thing each endpoint remembers. The kiosk
+triggers a routine item through `/api/routines/{id}/trigger`, as planned.
+
+**`POST .../power` takes `{ on: bool }` rather than toggling.** The wall's copy
+of the state can be a poll stale; a toggle would then do the opposite of what
+the finger asked for. The absolute form makes a stale client wrong about what it
+*displays*, never about what it *sends*.
+
+**What the apply showed.** `make test-api` went 777 → 801. The tests drive the
+real `ClimateCommandService` with only Home Assistant faked, which is what makes
+them worth having: the whole claim of Phase 4 is that panel writes inherit the
+ledger, the guards and the outcome mapping, and a mocked chokepoint would test
+none of it. Two of those tests exist because of that choice — a channel turned
+read-only *after* a panel bound it reaches the write path as `Rejected` → 400,
+and an unreachable HA is `Failed` → 502.
 
 ## [] Phase 5 — Admin UI
 
