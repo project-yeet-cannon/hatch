@@ -1,6 +1,6 @@
 # Kiosk Climate
 
-**Status:** Phases 0–1 complete (naming, model, and schema). Phases 2–8 not started.
+**Status:** Phases 0–2 complete (naming, model, schema, and domain rules). Phases 3–8 not started.
 
 New kiosk dashboard UI for house climate controls, and the two new domain
 concepts that make it possible: **Panels** and **Controls**.
@@ -149,7 +149,7 @@ touched, not just that a person touched something.
 
 ---
 
-## Phase 1 — Schema
+## [x] Phase 1 — Schema
 
 **Status:** complete
 
@@ -178,29 +178,58 @@ clean, but any later code that needs the *type* inside that class must qualify
 it. `make test-api` stayed at 736 passing — Phase 1 adds tables and touches no
 behavior.
 
-## Phase 2 — Domain rules
+## [x] Phase 2 — Domain rules
 
-**Status:** not started
+**Status:** complete
 
-- [ ] Add `PanelBindingRules` under `src/Aerie.Api/Services/Panels/` — a pure
-      class, no DB or clock, sibling in spirit to `CommandExpectation`.
-- [ ] `RequiredMetric(ControlRole)` and `RolesFor(ControlKind)` returning
-      required/optional roles per the table above.
-- [ ] `Validate(EfPanelItem, IReadOnlyDictionary<Guid, EfDeviceChannel>)`
+- [x] Add `PanelBindingRules` under
+      [`src/Aerie.Api/Services/Panels/`](../../src/Aerie.Api/Services/Panels/) — a
+      pure class, no DB or clock, sibling in spirit to `CommandExpectation`.
+- [x] `RequiredMetric(ControlRole)` and `RolesFor(ControlKind)` returning
+      required/optional roles per the table above, plus `IsWritten(ControlRole)` —
+      the direction half of the table needed a name of its own, because `Ambient`
+      is the one role that accepts a `Read` channel.
+- [x] `Validate(EfPanelItem, IReadOnlyDictionary<Guid, EfDeviceChannel>)`
       returning null or the reason: missing required role, wrong metric,
       read-only channel on a writing role, unknown role for the kind,
       `Thermostat` with `Mode` bound but no `OnMode`, `MinF >= MaxF`,
       non-positive `StepF`.
-- [ ] Add `PanelDefaults` with `MinF = 60`, `MaxF = 85`, `StepF = 1`, and a
+- [x] Add `PanelDefaults` with `MinF = 60`, `MaxF = 85`, `StepF = 1`, and a
       comment on why they are constants rather than settings for now.
-- [ ] Extract `RoutineService.ComputeIsActive` into a shared
+- [x] Extract `RoutineService.ComputeIsActive` into a shared
       `RoutineToggleState.IsActive(routine, latest)`; repoint `RoutineService` at
       it and confirm `RoutineServiceTests` still passes untouched.
-- [ ] `src/Aerie.Api.Tests/Panels/PanelBindingRulesTests.cs`: one test per
-      rejection reason, plus a valid `Switch`, a valid `Thermostat` with `Power`,
-      and a valid `Thermostat` with `Mode` + `OnMode`.
+- [x] [`src/Aerie.Api.Tests/Panels/PanelBindingRulesTests.cs`](../../src/Aerie.Api.Tests/Panels/PanelBindingRulesTests.cs):
+      one test per rejection reason, plus a valid `Switch`, a valid `Thermostat`
+      with `Power`, and a valid `Thermostat` with `Mode` + `OnMode`.
 
-## Phase 3 — Read path
+**Three rejection reasons the plan didn't list, and why they're there.** A
+binding whose channel id isn't in the caller's dictionary returns "does not
+exist" rather than throwing — Phase 4 loads channels from ids in a request body,
+so the lookup missing an id is an ordinary bad request, not a bug. A role bound
+twice is rejected because the read path assumes one channel per role and would
+otherwise silently pick whichever came first. And `Validate` answers for routine
+items too (routine set, no bindings), because Phase 4 runs it over *every* item
+in a panel, not only the controls.
+
+**`MinF >= MaxF` compares effective values, not stored ones.** `MinF = 90` with
+`MaxF` null is rejected against the default 85 — null means "the default", so
+validating the raw column would let a nonsensical range through.
+
+**`OnMode` is required whenever `Mode` is bound**, including alongside `Power`,
+which is stricter than "needed to be switchable" alone would require. `OnMode` is
+what a bound mode channel *means* for that device; making the requirement depend
+on which other roles happen to be present would make the stored answer
+situational.
+
+**What the apply showed.** `make test-api` went 736 → 758, and
+`RoutineServiceTests` passed unchanged — which is the whole point of extracting
+`RoutineToggleState` rather than copying it. `RoutineService`'s channel-id
+gather also collapsed into `SelectMany(RoutineToggleState.PowerChannelIds)`, so
+the "which channels decide this toggle" question now has exactly one answer in
+the codebase instead of two that happened to agree.
+
+## [] Phase 3 — Read path
 
 **Status:** not started
 
@@ -229,7 +258,7 @@ behavior.
       reads; a routine item's isActive matching `RoutineService`'s; a control
       whose channels have no samples yet reading all-null rather than throwing.
 
-## Phase 4 — Write path and admin API
+## [] Phase 4 — Write path and admin API
 
 **Status:** not started
 
@@ -252,7 +281,7 @@ behavior.
       including the `"off"` direction; setpoint clamped low; clamped high;
       rounded to step; setpoint refused on a `Switch`.
 
-## Phase 5 — Admin UI
+## [] Phase 5 — Admin UI
 
 **Status:** not started
 
@@ -274,7 +303,7 @@ behavior.
       [`admin/src/App.tsx`](../../src/Aerie.Web/apps/admin/src/App.tsx), between
       Routines and Calendars.
 
-## Phase 6 — Kiosk UI
+## [] Phase 6 — Kiosk UI
 
 **Status:** not started
 
@@ -311,7 +340,7 @@ behavior.
       geometry is shared.
 - [ ] `make test-web` clean (lint + build). Leave browser verification to the user.
 
-## Phase 7 — The Climate panel itself
+## [] Phase 7 — The Climate panel itself
 
 **Status:** not started
 
@@ -328,7 +357,7 @@ behavior.
 - [ ] Check the command ledger — every action present, `Source = Human`, reason
       naming the panel and the control.
 
-## Phase 8 — Documentation and dissipation
+## [] Phase 8 — Documentation and dissipation
 
 **Status:** not started
 

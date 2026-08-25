@@ -28,25 +28,13 @@ public class RoutineService(IDbContextFactory<AerieContext> dbFactory) : IRoutin
         // paying it for every routine's channels.
         var powerChannelIds = routines
             .Where(r => r.IsToggle)
-            .SelectMany(r => r.Actions)
-            .Where(a => a.Kind == RoutineActionKind.SetPower)
-            .Select(a => a.ChannelId)
+            .SelectMany(RoutineToggleState.PowerChannelIds)
             .Distinct()
             .ToList();
         var latest = await ChannelLatestValues.GetLatestAsync(db, powerChannelIds, ct);
 
         return routines
-            .Select(r => new RoutineSummary(r.Id, r.Name, r.Description, r.Icon, r.Color, r.IsToggle, IsActive: ComputeIsActive(r, latest)))
+            .Select(r => new RoutineSummary(r.Id, r.Name, r.Description, r.Icon, r.Color, r.IsToggle, IsActive: RoutineToggleState.IsActive(r, latest)))
             .ToList();
-    }
-
-    private static bool? ComputeIsActive(EfRoutine routine, IReadOnlyDictionary<Guid, ChannelLatestValue> latest)
-    {
-        if (!routine.IsToggle) return null;
-
-        var powerChannelIds = routine.Actions.Where(a => a.Kind == RoutineActionKind.SetPower).Select(a => a.ChannelId).ToList();
-        if (powerChannelIds.Count == 0) return false;
-
-        return powerChannelIds.All(id => latest.TryGetValue(id, out var value) && value.State == "on");
     }
 }
