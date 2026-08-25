@@ -1,0 +1,53 @@
+# The photos plan (docs/plans/immich.md) Phase 3.4 - photos.${DOMAIN}.
+#
+# Written here rather than enabled in the chart, and the chart's own ingress
+# block is left disabled. Two reasons, and the second is the one that would
+# have bitten:
+#
+#   - Shape. Every hostname this cluster serves is a plain Ingress in a
+#     manifest (charts/aerie/templates/ingress.yaml), with no tls: block, so
+#     that 3b.10d's wildcard TLSStore default is what terminates at the
+#     websecure entrypoint. A chart-rendered Ingress would be the one route in
+#     the house whose certificate story is configured somewhere else.
+#   - The chart's ingress carries `nginx.ingress.kubernetes.io/proxy-body-size:
+#     "0"` to lift the upload body limit. There is no ingress-nginx here.
+#     Traefik applies **no request body limit at all** by default, so that
+#     annotation has no analogue and needs none - and an annotation named for
+#     a controller that is not installed is exactly the sort of thing someone
+#     later "fixes" into a Traefik middleware that then imposes a limit which
+#     did not previously exist. Written down so that reading does not happen.
+#
+# No forwardAuth middleware, deliberately - Finding 7 of the plan. Immich has
+# its own accounts, its own mobile app and its own API tokens; putting the
+# wall (docs/auth-architecture.md) in front of it would break the phone
+# clients that are the entire point of Phase 3's gate, to add a second login
+# to a service that already has one. The exposure boundary is the network:
+# this name resolves only on the LAN and the tailnet, and nothing publishes it.
+#
+# DNS needs no work: pfSense already resolves every *.${DOMAIN} name to the
+# ingress VIP (docs/file-share.md).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: photos
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: photos
+    app.kubernetes.io/part-of: aerie
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: "photos.${DOMAIN}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                # <release>-<component>, from ./helmrelease.yaml's release
+                # name - see that file's header on why the name `immich` is
+                # load-bearing rather than cosmetic.
+                name: immich-server
+                port:
+                  number: 2283

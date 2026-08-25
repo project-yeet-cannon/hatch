@@ -70,6 +70,21 @@
 #                it exists to catch is worse than one narrowly scoped to an
 #                endpoint the auth model was never meant to gate.
 #
+# New again, from the photos plan (docs/plans/immich.md) Phase 3.5:
+#
+#   photos.toml - Immich (deploy/cluster/photos/app/helmrelease.yaml), probed
+#                on /api/server/ping, which is the same endpoint the chart's
+#                own liveness, readiness and startup probes all use - so this
+#                monitor and Kubernetes agree about what "up" means instead of
+#                each having an opinion. `immich-server` is the Service name
+#                the chart derives from the release name; that file's header
+#                explains why the release is called `immich` and why renaming
+#                it would break more than this line.
+#                Deliberately the in-cluster Service rather than
+#                https://photos.${DOMAIN}: this checks Immich, and a monitor
+#                that also traverses Traefik and the wildcard certificate
+#                reports red for three different reasons with one colour.
+#
 # The push monitor kube-prometheus-stack.yaml's Watchdog route now targets -
 # see that file's own comment on the receiver side of this pairing:
 #
@@ -130,6 +145,13 @@ data:
     type = "http"
     name = "Share"
     url = "http://share.aerie.svc:5000/__dufs__/health"
+    interval = 60
+    retry_interval = 60
+    max_retries = 1
+  photos.toml: |
+    type = "http"
+    name = "Photos"
+    url = "http://immich-server.immich.svc:2283/api/server/ping"
     interval = 60
     retry_interval = 60
     max_retries = 1

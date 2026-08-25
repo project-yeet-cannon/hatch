@@ -1,0 +1,340 @@
+# The photos plan (docs/plans/immich.md) Phase 3.3 - Immich itself.
+#
+# In the `immich` namespace rather than in flux-system, matching every other
+# HelmRelease that installs a *workload* into the namespace it lives in
+# (../../infrastructure/controllers/*.yaml, ../../observability/controllers/
+# *.yaml). ../../apps/helmrelease.yaml is the exception, not the pattern: it
+# lives in flux-system because its chart is first-party and its source is the
+# same GitRepository every Kustomization reads. This one has a chart source of
+# its own - ./helmrepository.yaml - and a HelmRelease resolves a HelmRepository
+# in its own namespace, so the two travel together.
+#
+# The release name is `immich`, and it is load-bearing rather than cosmetic.
+# The chart names every Service `<release>-<component>`, and its own default
+# env wires the components together with that same expression: REDIS_HOSTNAME
+# becomes `immich-valkey`, IMMICH_MACHINE_LEARNING_URL becomes
+# `http://immich-machine-learning:3003`, and Immich's *own* built-in default
+# for machineLearning.urls is the literal `http://immich-machine-learning:3003`
+# with no release name in it at all. At release name `immich` all three agree.
+# At any other name the first two follow and the third does not, and the
+# symptom is smart search and face detection silently doing nothing while
+# every pod reports healthy. ../../observability/controllers/
+# static-monitors-configmap.yaml's `photos.toml` also names immich-server
+# literally.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: immich
+  namespace: immich
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: immich
+      # Pinned, like every other release in this tree. 0.13.1 is current as of
+      # 2026-08-25 and is the first line of the chart's OCI-only era - the
+      # HTTP repo was retired in 0.13.0, which is why ./helmrepository.yaml is
+      # the first `type: oci` source here.
+      version: 0.13.1
+      sourceRef:
+        kind: HelmRepository
+        name: immich
+  # Longer than the 4m the small controllers get, and shorter than the
+  # Kustomization's own 15m (../../photos.yaml). Three images have to land on
+  # a cold node before anything reports Ready: measured from the registry at
+  # v3.0.0, immich-server is ~798 MB compressed and immich-machine-learning
+  # ~452 MB, so the first install is well over a gigabyte of pull before a
+  # single probe succeeds.
+  timeout: 10m
+  install:
+    remediation:
+      retries: 1
+  upgrade:
+    remediation:
+      retries: 1
+    # As next door: a failed upgrade otherwise leaves behind whatever it
+    # managed to create before it stopped, and the retry collides with objects
+    # Helm does not believe it owns.
+    cleanupOnFail: true
+
+  # ---------------------------------------------------------------------
+  # A note on this chart's schema, because its failure mode is unusual
+  # ---------------------------------------------------------------------
+  # values.schema.json is real here and it is enforced - a misspelled key is
+  # a rejected release rather than the silent no-op that 3b.8's kube-vip
+  # footnote describes. That is the good half. The other half is that the
+  # schema's `common` section is a `$ref` to an *absolute https URL* at
+  # raw.githubusercontent.com, and Helm's validator resolves remote refs at
+  # render time. So rendering this release reaches the public internet for
+  # something that is not an image or a chart, and an outage there presents
+  # as a schema-load error rather than as a network one. Verified enforced,
+  # not merely present: an invented key under server.controllers.main.
+  # containers.main is rejected by name.
+  values:
+    # -------------------------------------------------------------------
+    # Shared by every component
+    # -------------------------------------------------------------------
+    # Top-level keys in this chart are applied to server, machine-learning
+    # and valkey alike; the per-component sections below override them.
+    controllers:
+      main:
+        containers:
+          main:
+            image:
+              # The Immich version, pinned here rather than left to the
+              # chart's appVersion default - which happens to be this same
+              # v3.0.0 today. Explicit because the chart's own README says
+              # the chart "does not update with every Immich release", so the
+              # two cadences are genuinely independent and a chart bump must
+              # not be able to move the application version as a side effect.
+              # valkey overrides both repository and tag in its own section
+              # and is unaffected by this line.
+              tag: v3.0.0
+
+    # -------------------------------------------------------------------
+    # Immich-specific configuration (this chart's own section)
+    # -------------------------------------------------------------------
+    immich:
+      metrics:
+        # kube-prometheus-stack is already installed and its five
+        # *SelectorNilUsesHelmValues settings are false
+        # (../../observability/controllers/kube-prometheus-stack.yaml), so a
+        # ServiceMonitor in this namespace is scraped with no further wiring.
+        # This flag also sets IMMICH_TELEMETRY_INCLUDE=all and opens ports
+        # 8081 (api) and 8082 (microservices) on the server container.
+        enabled: true
+
+      persistence:
+        library:
+          # ./library-pvc.yaml. The chart cannot create this volume and says
+          # so in its own values.yaml; it is mounted at /data, which is where
+          # Immich v2+ expects its media root.
+          existingClaim: immich-library
+
+      # immich-config.json, as YAML. Setting this makes the server read
+      # IMMICH_CONFIG_FILE, and the consequence is worth knowing before the
+      # first admin login: **Administration > Settings becomes read-only**.
+      # Every setting below and every setting left at its default is then
+      # owned by this file, which is the GitOps answer and is not the answer
+      # somebody expects when they try to change the transcode preset from
+      # the web UI. Immich deep-merges this over its defaults, so only the
+      # keys that differ appear here.
+      configuration:
+        storageTemplate:
+          # Off by default upstream, and the reason to turn it on is Phase 4
+          # rather than tidiness: `rclone copy` to Glacier Deep Archive is
+          # cheapest and safest over immutable, date-partitioned paths, and
+          # this is what makes the library that instead of a flat pile of
+          # UUIDs. Also the format the offsite copy is browsable in on the
+          # bad day, when the thing reading it may be a human with an S3
+          # console rather than an Immich instance.
+          enabled: true
+          template: "{{y}}/{{y}}-{{MM}}-{{dd}}/{{filename}}"
+        trash:
+          # Upstream's default, written out because Phase 5's dedup work
+          # depends on it: a wrongly-deleted asset during an import is
+          # recoverable for 30 days rather than gone.
+          enabled: true
+          days: 30
+        backup:
+          database:
+            # The nightly logical dump, written into the library volume's
+            # backups/ directory - which is what Phase 4 carries offsite to
+            # STANDARD_IA beside the photos it describes. All three fields are
+            # upstream defaults, written out on purpose: Phase 4's schedule is
+            # chosen to start after this has finished (../../photos/database/
+            # scheduledbackup.yaml's own comment lays out the night's
+            # timetable), and an ordering that depends on an upstream default
+            # is an ordering that can change without a commit here.
+            #
+            # This is the second line of defence, not the first: CNPG's
+            # continuous WAL archiving (../database/objectstore.yaml) is what
+            # gives point-in-time recovery. These dumps are what survives the
+            # WAL bucket being wrong, and 14 of them is a fortnight.
+            enabled: true
+            cronExpression: "0 2 * * *"
+            keepLastAmount: 14
+        server:
+          # Used for the links Immich puts in emails and shared-link QR
+          # codes. Resolvable on the LAN and the tailnet only - Finding 7 -
+          # so it is the same name ./ingress.yaml serves.
+          externalDomain: "https://photos.${DOMAIN}"
+
+    # -------------------------------------------------------------------
+    # server
+    # -------------------------------------------------------------------
+    server:
+      controllers:
+        main:
+          # Recreate, replacing the chart's hardcoded RollingUpdate, and this
+          # is the one override here that is a correctness fix rather than a
+          # preference. Immich runs its own schema migrations at container
+          # start. Under RollingUpdate the new pod starts *while the old one
+          # is still serving*, so an upgrade that carries a migration runs it
+          # underneath a running previous version - and with maxSurge the two
+          # can also both hold the job queue. One replica, one migration, one
+          # writer: the correct strategy is to stop and then start.
+          #
+          # It costs a few seconds of downtime on every upgrade, on a service
+          # whose availability requirement is "a phone retries the backup".
+          strategy: Recreate
+          containers:
+            main:
+              env:
+                # The CNPG Cluster's read-write Service (../database/
+                # cluster.yaml). -rw rather than a pod name, so this follows a
+                # failover; in-namespace, so no .svc suffix is needed.
+                DB_HOSTNAME: immich-pg-rw
+                DB_PORT: "5432"
+                # All three read from immich-pg-app, the Secret **CNPG
+                # generates** when it bootstraps the cluster. That is the
+                # distinction worth stating out loud, because it looks like an
+                # omission otherwise: scripts/secrets/parameters.json is for
+                # material an *operator* supplies, and this password is not
+                # one - nothing types it, nothing stores it in SSM, and it
+                # never reaches this repository. Rotating it is a CNPG
+                # operation, and this reference keeps working across it.
+                #
+                # dbname and username come from the same Secret rather than
+                # being written as the literal `immich` twice: ../database/
+                # cluster.yaml's bootstrap.initdb is the single place those
+                # names are decided.
+                DB_USERNAME:
+                  valueFrom:
+                    secretKeyRef:
+                      name: immich-pg-app
+                      key: username
+                DB_DATABASE_NAME:
+                  valueFrom:
+                    secretKeyRef:
+                      name: immich-pg-app
+                      key: dbname
+                DB_PASSWORD:
+                  valueFrom:
+                    secretKeyRef:
+                      name: immich-pg-app
+                      key: password
+                # Immich stores some timestamps without a zone and renders
+                # dates in local time; without this the container is UTC and
+                # every photo taken after 19:00 lands on the wrong day in the
+                # timeline. ${TZ} is already required in
+                # scripts/k3s/cluster-config.json.
+                TZ: ${TZ}
+              # Goal 2 of docs/plans/swarm/design.md. The limits are the
+              # interesting half: this one container is the API, the web UI
+              # *and* the whole job runner since Immich merged microservices
+              # into it, so thumbnail generation and ffmpeg transcodes happen
+              # here. The requests describe the steady state of a house whose
+              # photos are already imported; the limits describe an import.
+              resources:
+                requests:
+                  cpu: 200m
+                  memory: 1Gi
+                limits:
+                  cpu: "3"
+                  memory: 4Gi
+      defaultPodOptions:
+        # ---------------------------------------------------------------
+        # The node label, and why this line exists at all
+        # ---------------------------------------------------------------
+        # The plan's Finding 2 claimed dataLocality: strict-local would pull
+        # this pod onto the node holding the bulk disk "through the volume",
+        # with no node name and no node selector anywhere. **That is not what
+        # Longhorn does, and it was measured rather than assumed** - see the
+        # plan's Phase 3 section for the transcript. Under
+        # WaitForFirstConsumer the causality runs the other way: the
+        # scheduler picks a node first, Longhorn is told to put the single
+        # replica *there*, the diskSelector then matches nothing on a node
+        # with no bulk disk, and the volume reports `tags not fulfilled`
+        # while the pod sits Pending forever. The PV is stamped with a hard
+        # nodeAffinity to the wrong node on the way past, so it does not
+        # recover on its own either. Immediate binding is not a fix; it
+        # produces a PV with no nodeAffinity at all and defers the same
+        # failure to attach time.
+        #
+        # So the pod has to be steered, and the only question is by what.
+        # A node *name* is what docs/ethos.md forbids. A node *label* is not
+        # one: it is the same kind of structural fact the Longhorn disk tag
+        # already is - "this node is where the bulk disk was attached" - and
+        # scripts/k3s/Add-BulkDisk.ps1 now applies both, from the same fact,
+        # in the same stage, so they cannot disagree. Nothing here knows or
+        # cares which node carries it.
+        nodeSelector:
+          storage.aerie/bulk: "true"
+
+    # -------------------------------------------------------------------
+    # machine-learning
+    # -------------------------------------------------------------------
+    machine-learning:
+      controllers:
+        main:
+          # Recreate, for a plainer reason than the server's: the cache below
+          # is a ReadWriteOnce volume and this pod is *not* pinned to a node,
+          # so a rolling update that starts the replacement somewhere else
+          # deadlocks on multi-attach until the old pod is killed by hand.
+          strategy: Recreate
+          containers:
+            main:
+              # The largest single memory consumer this cluster has run. The
+              # models are CLIP for smart search and buffalo_l for faces, on
+              # CPU - no GPU exists here, and at this library size CPU is
+              # adequate because the work is a one-time backfill plus a
+              # trickle afterward. The limit is what an import's face
+              # detection actually needs headroom for; the request is what
+              # the process holds at idle with the models resident.
+              resources:
+                requests:
+                  cpu: 500m
+                  memory: 1Gi
+                limits:
+                  cpu: "3"
+                  memory: 6Gi
+      persistence:
+        cache:
+          # emptyDir upstream, which re-downloads the whole model set from
+          # Hugging Face on every pod restart - a few hundred MB and several
+          # minutes during which search and face detection quietly fail.
+          enabled: true
+          type: persistentVolumeClaim
+          size: 10Gi
+          # ReadWriteOnce, not the ReadWriteMany the chart's comment
+          # suggests: RWX on Longhorn means a share-manager pod and an NFS
+          # export per volume, and there is exactly one consumer. `Recreate`
+          # above is what makes RWO safe across an upgrade.
+          accessMode: ReadWriteOnce
+          # Bulk-where-loss-is-tolerable, per the storage split - every byte
+          # here is re-downloadable, which is the definition of that class.
+          # Not longhorn-bulk: the tagged disk is for the library alone.
+          storageClass: longhorn-r2
+
+    # -------------------------------------------------------------------
+    # valkey
+    # -------------------------------------------------------------------
+    valkey:
+      # Off upstream, on here. Immich requires a Redis-compatible queue and
+      # this is the chart's own, pinned by digest in its values - one fewer
+      # component to own than pointing Immich at something else.
+      enabled: true
+      controllers:
+        main:
+          containers:
+            main:
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 64Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+      persistence:
+        data:
+          # emptyDir upstream. A lost queue mid-import is a re-run of an
+          # ingest rather than a data loss, so this is not a correctness fix -
+          # but there is no reason to accept it for 1 Gi, and the failure it
+          # avoids (a restart during a 250,000-asset import) is one Phase 5
+          # will actually be exposed to.
+          enabled: true
+          type: persistentVolumeClaim
+          size: 1Gi
+          accessMode: ReadWriteOnce
+          storageClass: longhorn-r2

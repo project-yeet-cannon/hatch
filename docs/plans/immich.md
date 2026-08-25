@@ -1,8 +1,10 @@
 # Photos — Immich on Aerie
 
-**Status:** Phases 1, 1b and 2 are done — the bulk disk exists, the node OS
-disks are off the slow volumes, and `immich-pg` is running with its extensions,
-its WAL archiving and a nightly base backup. Phase 3 installs Immich itself.
+**Status:** Phases 1, 1b and 2 are done — the bulk disk exists and is proven,
+the node OS disks are off the slow volumes, and `immich-pg` is running with its
+extensions, its WAL archiving and a nightly base backup. Phase 3's tree is
+written and validated; its two remaining steps are the operator's and need this
+commit on `main` first. Phase 4 is the offsite archive.
 Five phases to MVP, each independently useful and
 independently revertible; two scaffolded follow-ons (`v+1` sharing, `v+2` kiosk)
 that are deliberately *not* built yet but are named here so the MVP does not
@@ -86,6 +88,17 @@ would need a `PHOTOS_NODE` variable that has to agree with a disk that was
 physically attached somewhere. With strict-local there is no such variable: the
 disk tag is structural, the tagged disk exists on exactly one node because that
 is where the operator attached it, and Kubernetes derives the placement.
+
+> **Correction, 2026-08-25 (Phase 3).** The paragraph above is right about the
+> design and wrong about the mechanism, and the difference cost a Pending pod
+> to discover. Longhorn does **not** pull the consumer onto the disk's node;
+> under `WaitForFirstConsumer` the causality runs the other way — the scheduler
+> picks a node knowing nothing about Longhorn disk tags, and Longhorn is then
+> told to put the single replica *there*. On a node with no `bulk` disk the
+> volume reports `tags not fulfilled` and the pod waits forever. The fix keeps
+> the ethos intact and is the same shape: **a node label, not a node name**,
+> written by `Add-BulkDisk.ps1` from the same fact that produces the disk tag.
+> The transcript and the reasoning are in [Phase 3](#-phase-3--immich) below.
 
 ### 3. Immich needs a Postgres that `aerie-pg` cannot be — but it needs no custom image
 
@@ -257,7 +270,7 @@ in a pod.
 | Layer name | `photos`, not `immich` | The capability outlives the vendor; `v+1`/`v+2` are photo-domain, not Immich-domain |
 | Database | **Own CNPG `Cluster`**, stock operand + `vchord` image volume | Finding 3 |
 | DB storage | `local-path`, anti-affinity | [Storage split](swarm/design.md#storage-split) — unchanged, and Immich's docs say the same thing louder |
-| Library storage | New disk, Longhorn **`longhorn-bulk`** class: 1 replica, `strict-local`, `diskSelector: bulk` | Finding 2 |
+| Library storage | New disk, Longhorn **`longhorn-bulk`** class: 1 replica, `strict-local`, `diskSelector: bulk`, plus a `storage.aerie/bulk` node label the consumer selects on | Finding 2, as corrected by [Phase 3.0](#30--the-measurement-that-changed-the-design) — the disk tag places the replica, the label places the pod, and neither names a node |
 | Offsite | **`rclone copy` → S3 Glacier Deep Archive**, originals only | Findings 4 and 5 |
 | DB offsite | CNPG WAL → existing bucket **and** nightly logical dump → archive bucket (Standard-IA) | Finding 4 |
 | Exposure | `photos.${DOMAIN}`, wildcard TLS, no forwardAuth | Finding 7 |
@@ -316,7 +329,8 @@ Do not cancel anything until Phase 5's gate passes.
   namespace: immich  ──────────────┴──────────────────────────────────┐
                                                                       │
    immich-server ──── valkey (1Gi PVC, longhorn-r2)                   │
-        │        └─── immich-machine-learning (model cache, 10Gi)     │
+        │  ^      └─── immich-machine-learning (model cache, 10Gi)    │
+        │  └ nodeSelector storage.aerie/bulk  (Phase 3.0)             │
         │                                                             │
         ├── PVC immich-library ── StorageClass longhorn-bulk          │
         │      1 replica · strict-local · diskSelector: bulk          │
@@ -329,7 +343,7 @@ Do not cancel anything until Phase 5's gate passes.
                extension image volume: vchord                         │
                ObjectStore → s3://${WAL_BUCKET}/  (existing bucket)   │
                                                                       │
-   CronJob photos-archive  ── podAffinity → immich-server's node ─────┘
+   CronJob photos-archive  ── nodeSelector storage.aerie/bulk ─────────┘
         rclone copy → s3://${PHOTOS_ARCHIVE_BUCKET}/
               library/ upload/ profile/   → DEEP_ARCHIVE
               backups/ (nightly pg dump)  → STANDARD_IA
@@ -347,8 +361,11 @@ node, with no node name anywhere in the repo.
 **Gate:** a test pod writes and reads a file on the PVC, and `kubectl get volume
 -n longhorn-system` shows one replica, on the tagged disk.
 
-**Status:** 1.2–1.6 are written and in the tree. 1.1 is the operator's, 1.7
-belongs to Phase 3, and 1.8 cannot run until 1.1 has.
+**Status:** done 2026-08-25. 1.1 was the operator's and has happened — the
+disk is attached, and `storageMaximum` is **1,267,109,507,072 bytes (1180.09
+GiB)**, which is the measured number every projection downstream of Phase 1 was
+waiting on. 1.7 and 1.8 landed with Phase 3, and 1.8 is the step that falsified
+Finding 2's mechanism; see that phase.
 
 ### What the hardware actually turned out to be
 
@@ -503,7 +520,7 @@ it protects 800 GB exactly as well as it protects 1.5 TB.
       gives: Immich's HelmRelease must not create it, and one owner is the rule
       that file exists to keep.
 
-- [ ] **1.7 — The PVC.** `immich-library`, `1Ti`, `ReadWriteOnce`,
+- [x] **1.7 — The PVC.** `immich-library`, `1Ti`, `ReadWriteOnce`,
       `storageClassName: longhorn-bulk`, in the `photos` layer (Phase 3). Sized
       *under* the disk deliberately: expansion is one field, and Longhorn cannot
       shrink. `1Ti` is a cap rather than an allocation — see the ceiling section
@@ -511,16 +528,21 @@ it protects 800 GB exactly as well as it protects 1.5 TB.
       leaves room for the `v+3` external library to become a second PVC on the
       same disk rather than a resize argument with a full volume.
 
-- [ ] **1.8 — Gate.** Schedule a throwaway pod with the PVC, write a file, read
-      it back, delete the pod, confirm the Longhorn volume shows exactly one
-      replica on the `bulk` disk and that a pod forced to another node with a
-      `nodeSelector` stays `Pending` rather than attaching remotely. That last
-      check is what proves `strict-local` is doing the work, and it is the one
-      that fails silently if the class was created without it.
+- [x] **1.8 — Gate.** Passed, but only on the second attempt, and the first
+      attempt is the more useful half — it is what turned Finding 2's mechanism
+      from an assumption into a measurement. Both runs are written up under
+      [Phase 3's 3.0](#30--the-measurement-that-changed-the-design).
 
-      Record the `storageMaximum` Longhorn reports for the disk while here. Every
-      size in this plan downstream of Phase 1 is a projection until that number
-      is measured.
+      Short version: a throwaway pod with **no** `nodeSelector` landed on a node
+      with no bulk disk, and the volume reported `tags not fulfilled` while the
+      pod sat `Pending` — the opposite of what "strict-local forces the consumer
+      pod there" predicts. With the node label in place the same pod scheduled on
+      the tagged node, wrote and read its file, and
+      `kubectl get replicas.longhorn.io` showed exactly one replica, on
+      `/var/lib/longhorn-bulk`.
+
+      `storageMaximum` for the disk: **1,267,109,507,072 bytes = 1180.09 GiB**,
+      which is what the ceiling section above had projected.
 
 ---
 
@@ -670,89 +692,220 @@ monitored, with an admin account and nothing in it yet.
 **Gate:** a phone on the tailnet installs the app, signs in, and backs up one
 photo, which appears in the web UI.
 
-- [ ] **3.1 — The Flux layer.** `deploy/cluster/photos.yaml`, a Kustomization
-      named `photos` over `./deploy/cluster/photos`, modeled on
-      [`apps.yaml`](../../deploy/cluster/apps.yaml): `dependsOn` on
-      `infra-config` only — **not** on `data-schema` or `apps`, which is the
-      whole point of it being its own layer. `wait: true`, `prune: true`,
-      `postBuild.substituteFrom` the `aerie-cluster-config` ConfigMap. Add it to
-      [`deploy/cluster/kustomization.yaml`](../../deploy/cluster/kustomization.yaml).
+**Status:** the tree is written, validated and server-side dry-run clean against
+the live cluster. What is left is not code: **3.7 and 3.8 are the operator's**,
+and neither can run until this commit reaches `main` and Flux reconciles it.
 
-- [ ] **3.2 — The chart source.** An **OCI** `HelmRepository` — the first in this
-      tree, because the HTTP repo at `immich-app.github.io/immich-charts` has been
-      retired and no longer receives updates:
+The phase also found a design defect in Phase 1 and fixed it at the source
+rather than working around it, which is 3.0 below and is the part worth reading
+even if the rest is skimmed.
 
-      ```yaml
-      apiVersion: source.toolkit.fluxcd.io/v1
-      kind: HelmRepository
-      metadata: { name: immich, namespace: immich }
-      spec:
-        type: oci
-        url: oci://ghcr.io/immich-app/immich-charts
-        interval: 1h
-      ```
+### 3.0 — The measurement that changed the design
 
-- [ ] **3.3 — The HelmRelease.** Chart `immich`, pinned `0.13.1`, into the
-      `immich` namespace, values covering:
-      - `immich.persistence.library.existingClaim: immich-library` (1.7). The
-        chart does **not** create this volume and says so.
-      - DB env: `DB_HOSTNAME: immich-pg-rw`, `DB_USERNAME`/`DB_DATABASE_NAME` per
-        the CNPG cluster's app user, `DB_PASSWORD` from the CNPG-generated
-        `immich-pg-app` secret via `secretKeyRef`. **CNPG generates this
-        credential; it never touches SSM or the repo** — it is not an operator
-        secret, it is a cluster-internal one, and that distinction is worth a
-        comment in the file.
-      - `valkey.enabled: true`, with `persistence.data` switched from `emptyDir`
-        to a 1 Gi `persistentVolumeClaim` on `longhorn-r2`.
-      - `machine-learning` enabled, `persistence.cache` switched from `emptyDir`
-        to a 10 Gi PVC on `longhorn-r2` — without it the model set is
-        re-downloaded on every pod restart.
-      - `immich.metrics.enabled: true` — kube-prometheus-stack is already
-        installed, so this is free ServiceMonitors.
-      - `immich.configuration`: `storageTemplate` enabled with a
-        `{{y}}/{{y}}-{{MM}}-{{dd}}/{{filename}}` layout, `trash` enabled at 30
-        days, and **`backup.database` enabled** — that nightly dump is what
-        Phase 4 carries offsite.
-      - **Resource requests and limits on every container.** Not optional here:
-        [design.md](swarm/design.md) makes them the mechanism by which the
-        scheduler can place anything at all, and the ML container is the largest
-        single memory consumer this cluster will have run.
+Finding 2 asserted that `dataLocality: strict-local` plus `diskSelector: bulk`
+would pull Immich's server pod onto the node holding the bulk disk "through the
+volume", so that no node name and no node selector needed to exist anywhere.
+That assertion was tested before the HelmRelease was written, because it is the
+one claim in the plan that nothing else in the tree would have caught.
 
-- [ ] **3.4 — Ingress.** `photos.${DOMAIN}`, `ingressClassName: traefik`, **no
-      `tls:` block** (the wildcard `TLSStore` default terminates at the
-      entrypoint) and **no auth middleware** (Finding 7). The chart's own ingress
-      block carries nginx annotations for body size; **do not enable it** — write
-      the Ingress in this layer instead. Traefik applies no request body limit by
-      default, so the nginx `proxy-body-size` annotation has no analogue and needs
-      none, which is exactly the sort of thing that gets "fixed" wrongly later.
+**It is false.** A throwaway pod with no scheduling constraints, mounting a
+fresh `longhorn-bulk` PVC:
 
-      DNS needs nothing: pfSense already resolves every `*.${DOMAIN}` name to the
-      ingress VIP ([file-share.md](../file-share.md)).
+```
+1 Pending/aerie-node-1      # ... and still Pending at 8 checks
+volume pvc-28e2...  nodeID: aerie-node-1   diskSelector: [bulk]
+                    state: detached        message: tags not fulfilled
+pv     pvc-28e2...  nodeAffinity: kubernetes.io/hostname In [aerie-node-1]
+```
 
-- [ ] **3.5 — Uptime monitor.** One entry in
-      [`static-monitors-configmap.yaml`](../../deploy/cluster/observability/controllers/static-monitors-configmap.yaml):
+The causality runs the opposite way to the one Finding 2 described. Under
+`WaitForFirstConsumer` the **scheduler chooses first** — and it chooses with no
+knowledge of Longhorn disk tags, because Longhorn's CSI driver advertises only
+`kubernetes.io/hostname` topology and sets `storageCapacity: false`, so there is
+nothing for the scheduler to filter on. Longhorn is then *told* which node to
+put the single replica on, `diskSelector` matches no disk there, and the volume
+is stuck. Worse, the PV is stamped with a hard `nodeAffinity` to the wrong node
+on the way past, so nothing self-heals; the PVC has to be deleted along with the
+`Retain`-policy PV it bound to.
 
-      ```toml
-      type = "http"
-      name = "Photos"
-      url = "http://immich-server.immich.svc:2283/api/server/ping"
-      ```
+`volumeBindingMode: Immediate` is not the fix either — tested, on a throwaway
+class. It produces a PV with **no** `nodeAffinity` at all and a Longhorn replica
+with no node assigned, which defers exactly the same failure to attach time and
+loses `WaitForFirstConsumer`'s only advantage on the way.
 
-      matching the `api.toml`/`share.toml` shape and interval already there.
+**The fix is a node label, and a label is not the thing `ethos.md` forbids.**
+What that document rules out is *this installation's node is called `k3s-2`*
+appearing in the repo. `storage.aerie/bulk: "true"` is the same class of
+structural fact the Longhorn disk tag already is — "the bulk disk was attached
+here" — and it is written by the same script, in the same stage, from the same
+argument, so the two cannot drift apart. The repo still names no node, and a
+second installation that attaches its disk somewhere else needs no edit.
 
-- [ ] **3.6 — The Alpine DNS caveat.** Immich's docs flag a DNS resolution bug in
-      Alpine-based images on clusters whose nodes carry `search` domains in
-      `/etc/resolv.conf`. Check the nodes; if search domains are present and the
-      pods show intermittent resolution failures, the fix is a `dnsConfig` with
-      `ndots: 1` on the affected Deployments. Written down here because the
-      symptom (occasional 502s, ML timeouts) does not look like DNS.
+So [`Add-BulkDisk.ps1`](../../scripts/k3s/Add-BulkDisk.ps1) now does two things
+in its Longhorn stage instead of one, and verifies both by reading them back:
+the `node.longhorn.io` disk patch it always did, and
+`kubectl label node <node> storage.aerie/bulk=true --overwrite`. The label was
+also applied by hand to the node that already carries the disk, so a re-dispatch
+of `provision-7-bulk-disk.yml` is a no-op rather than a first run.
 
-- [ ] **3.7 — Create the admin account and the family's accounts.** First run
-      only. Turn **off** public registration afterward.
+Re-run of 1.8's gate afterwards, which is what closes both this and Phase 1:
+
+```
+1 Running/aerie-node-2
+aerie-bulk-gate-ok
+pvc-2a8b...-r-050d465b   aerie-node-2   /var/lib/longhorn-bulk   running
+```
+
+One replica, on the tagged disk, on the node the pod was steered to.
+
+- [x] **3.1 — The Flux layer.** A second Kustomization in
+      [`photos.yaml`](../../deploy/cluster/photos.yaml), named `photos` over
+      `./deploy/cluster/photos/app`, beside the `photos-database` that Phase 2
+      shipped early. `dependsOn: photos-database` and nothing else — which
+      transitively is `infra-config` and nothing else, so the whole photo domain
+      hangs off one edge into the platform and none into the family's own site
+      tier. `wait: true`, `prune: true`, `postBuild.substituteFrom` the
+      `aerie-cluster-config` ConfigMap, `timeout: 15m` — longer than the
+      HelmRelease's own 10m, for the reason [`apps.yaml`](../../deploy/cluster/apps.yaml)
+      gives about its own: Flux's wait covers applying the HelmRelease *and*
+      waiting for helm-controller to finish with it.
+
+      The root [`kustomization.yaml`](../../deploy/cluster/kustomization.yaml)
+      already pointed at `photos.yaml`; only its comment changed.
+
+- [x] **3.2 — The chart source.**
+      [`helmrepository.yaml`](../../deploy/cluster/photos/app/helmrepository.yaml),
+      `type: oci` against `oci://ghcr.io/immich-app/immich-charts` — the first
+      OCI Helm source in this tree, and not by preference: the HTTP repo was
+      removed in chart 0.13.0. Two differences from its classic siblings are
+      written into the file, because they are invisible otherwise: the `url` is
+      the registry *path* and source-controller appends the chart name from the
+      HelmRelease, and `interval` polls no index because there is none.
+
+- [x] **3.3 — The HelmRelease.**
+      [`helmrelease.yaml`](../../deploy/cluster/photos/app/helmrelease.yaml),
+      chart `immich` pinned `0.13.1` (verified current), release name `immich`,
+      in the `immich` namespace alongside its HelmRepository rather than in
+      flux-system — matching every other HelmRelease that installs a *workload*
+      into the namespace it lives in. Everything the plan asked for is there;
+      six things are worth knowing that the plan did not anticipate:
+
+      - **The release name is load-bearing.** The chart names Services
+        `<release>-<component>` and wires the components together with that same
+        expression, but Immich's *own* built-in default for `machineLearning.urls`
+        is the literal `http://immich-machine-learning:3003` with no release name
+        in it. At release name `immich` all of them agree. At any other name the
+        chart follows and Immich's default does not, and the symptom is smart
+        search and face detection silently doing nothing while every pod reports
+        healthy.
+      - **`strategy: Recreate` on the server, replacing the chart's hardcoded
+        `RollingUpdate`.** This is a correctness fix, not a preference: Immich
+        runs its schema migrations at container start, so a rolling upgrade runs
+        the new version's migrations underneath the still-serving old one, and
+        with `maxSurge` both can hold the job queue. One replica, one migration,
+        one writer.
+      - **`strategy: Recreate` on machine-learning too**, for a plainer reason —
+        its model cache is a ReadWriteOnce volume and that pod is *not* pinned to
+        a node, so a rolling update that starts the replacement elsewhere
+        deadlocks on multi-attach until something kills the old pod by hand.
+      - **The ML cache is `ReadWriteOnce`, not the `ReadWriteMany` the chart's
+        comment suggests.** RWX on Longhorn means a share-manager pod and an NFS
+        export per volume; there is exactly one consumer, and `Recreate` above is
+        what makes RWO safe across an upgrade.
+      - **`immich.configuration` makes Administration > Settings read-only.**
+        That is the GitOps answer and it is the right one, but it is not what
+        somebody expects when they try to change the transcode preset from the
+        web UI, so it is written at the top of that block. `backup.database`'s
+        three fields are upstream defaults spelled out on purpose: Phase 4's
+        schedule is chosen to start after this dump finishes, and an ordering
+        that depends on an upstream default can change without a commit here.
+      - **The chart's `values.schema.json` `$ref`s an absolute https URL** at
+        `raw.githubusercontent.com` for its `common` section, and Helm resolves
+        remote refs at render time — verified enforced, not merely present, by
+        feeding it an invented key and watching it get rejected by name. So
+        rendering this release reaches the public internet for something that is
+        neither an image nor a chart, and an outage there presents as a
+        schema-load error rather than a network one.
+
+      Resource requests and limits are on all three containers. The server's are
+      the interesting ones: since Immich merged microservices into it, that one
+      container is the API, the web UI *and* the job runner, so ffmpeg lives
+      there. Requests describe a house whose photos are already imported; limits
+      describe an import.
+
+- [x] **3.4 — Ingress.**
+      [`ingress.yaml`](../../deploy/cluster/photos/app/ingress.yaml),
+      `photos.${DOMAIN}`, `ingressClassName: traefik`, no `tls:` block, no auth
+      middleware. The chart's own ingress stays disabled. Its
+      `nginx.ingress.kubernetes.io/proxy-body-size: "0"` annotation is the trap
+      the plan predicted and the file now names explicitly: there is no
+      ingress-nginx here, Traefik applies no request body limit by default, and
+      the wrong "fix" is a Traefik middleware that *introduces* a limit which did
+      not previously exist.
+
+- [x] **3.5 — Uptime monitor.** `photos.toml` in
+      [`static-monitors-configmap.yaml`](../../deploy/cluster/observability/controllers/static-monitors-configmap.yaml),
+      the same shape as its five neighbours, probing
+      `http://immich-server.immich.svc:2283/api/server/ping` — the same endpoint
+      the chart's liveness, readiness and startup probes all use, so Kuma and
+      Kubernetes agree about what "up" means. Deliberately the in-cluster Service
+      rather than the public name: a monitor that also traverses Traefik and the
+      wildcard certificate reports red for three different reasons with one
+      colour.
+
+      **Also, and this is the loose end Phase 2 left here on purpose:**
+      [`scrape/cloudnative-pg.yaml`](../../deploy/cluster/observability/config/scrape/cloudnative-pg.yaml)
+      selected `cnpg.io/cluster: aerie-pg` in namespace `aerie`, so `immich-pg`
+      had no metrics at all. Widened to `cnpg.io/cluster` **Exists** across
+      `aerie` and `immich`, rather than copied into a second file — the failure
+      mode of a per-cluster PodMonitor is a database nobody notices is
+      unmonitored. Still an explicit namespace list, because a bare `Exists`
+      everywhere would also scrape whatever a future tenant installs. The two
+      Postgres alerts are scoped `namespace="aerie"` and are unaffected.
+
+      Immich's own metrics need no object: `immich.metrics.enabled: true` makes
+      the chart emit a ServiceMonitor, and kube-prometheus-stack's five
+      `*SelectorNilUsesHelmValues: false` settings mean a ServiceMonitor in any
+      namespace is scraped with no further wiring.
+
+- [x] **3.6 — The Alpine DNS caveat.** Checked, and it does not apply: all three
+      nodes report `search .` in `/etc/resolv.conf` — systemd-resolved's spelling
+      of *no search domains* — so there is nothing for musl's resolver to expand
+      badly and no `dnsConfig` is needed. Recorded rather than dropped, because
+      the symptom (occasional 502s, ML timeouts) does not look like DNS, and the
+      answer to "did anyone check?" should be yes-and-here-is-when.
+
+- [ ] **3.7 — Create the admin account and the family's accounts.** The
+      operator's, on first run, after this commit reaches `main`. Turn **off**
+      public registration afterward.
+
+      Note before doing it: Immich's config is a ConfigMap now (3.3), so the
+      admin UI's Settings page is read-only. Account creation is not affected —
+      users are database rows, not configuration — but a setting that needs
+      changing is a commit against `helmrelease.yaml`, not a click.
 
 - [ ] **3.8 — Gate.** Phone app on the tailnet signs in and completes a backup of
       one photo; the web UI at `photos.${DOMAIN}` shows it; Kuma is green;
-      Grafana shows the Immich ServiceMonitor's metrics.
+      Grafana shows the Immich ServiceMonitor's metrics — and, new here,
+      `immich-pg` appears in the CNPG dashboard alongside `aerie-pg`.
+
+      What was verified without deploying, so that the gate is checking the
+      things a dry run cannot: every directory under `deploy/` builds; the two
+      new `${...}` tokens are declared in
+      [`cluster-config.json`](../../scripts/k3s/cluster-config.json); the four
+      objects of the app layer pass `kubectl apply --dry-run=server` against the
+      live cluster; the chart renders from the HelmRelease's own values with the
+      intended `nodeSelector`, strategies, resources, mounts (`/data` for the
+      library, which is where Immich v2+ expects its media root) and secret
+      references; and the storage-template string survives `kustomize build`
+      unquoted-into-nonsense.
+
+      Sizing note for whoever watches the first reconcile: measured from the
+      registry at `v3.0.0`, `immich-server` is **~798 MB** compressed and
+      `immich-machine-learning` **~452 MB**. An earlier draft of this plan had
+      those the other way round. Both land on a cold node before any probe
+      succeeds, which is what the 10m Helm timeout and the 15m Kustomization
+      timeout are sized against.
 
 ---
 
@@ -794,14 +947,20 @@ cancellations.**
 - [ ] **4.4 — The CronJob.** `photos-archive`, nightly, one container running
       `rclone`:
       - Mounts `immich-library` **read-only** (`readOnly: true` on the mount).
-      - **`podAffinity`** — `requiredDuringSchedulingIgnoredDuringExecution`,
-        `topologyKey: kubernetes.io/hostname`, matching the `immich-server`
-        pod's labels. This is load-bearing and non-obvious: the PVC is
-        `ReadWriteOnce` and `strict-local`, so the volume is attachable on
-        exactly one node, and a CronJob scheduled anywhere else sits failing to
-        attach forever. Co-locating by pod affinity rather than by node name
-        keeps the operator's node name out of the repo (Finding 2), and RWO
-        permits multiple pods on the *same* node.
+      - **`nodeSelector: {storage.aerie/bulk: "true"}`** — the same one Phase
+        3.0 put on the `immich-server` pod, and for the same reason. This is
+        load-bearing and non-obvious: the PVC is `ReadWriteOnce` and
+        `strict-local`, so the volume is attachable on exactly one node, and a
+        CronJob scheduled anywhere else sits failing to attach forever. RWO
+        permits multiple pods on the *same* node, so this and the server can
+        both hold it.
+
+        The plan originally called for `podAffinity` against the
+        `immich-server` pod's labels here. The node label is strictly better
+        now that it exists: it selects on the fact that actually matters (this
+        node has the bulk disk) rather than on a proxy for it, it does not
+        break if the server pod is temporarily absent when the CronJob fires,
+        and it keeps the operator's node name out of the repo just as well.
       - `rclone copy` — never `sync` — of `library/`, `upload/`, `profile/`,
         `backups/`. **Excludes `thumbs/` and `encoded-video/` explicitly**, with
         the reason in a comment, because "back up everything" is the default
@@ -1060,8 +1219,9 @@ The check on Finding 1. None of this should be edited by any phase above:
 `deploy/cluster/apps/**`, `deploy/cluster/data/**` (Immich's database is a new
 tree, not an edit to that one), `Program.cs`, `ci.yml`, the `Makefile`.
 
-Five files outside the new `photos` tree are expected to change, each by
-addition only:
+Six files outside the new `photos` tree are expected to change. Five by
+addition only; the sixth is the exception this list exists to surface rather
+than hide, and it is called out in its own row:
 
 | File | Change |
 |---|---|
@@ -1070,6 +1230,7 @@ addition only:
 | [`kustomization.yaml`](../../deploy/cluster/kustomization.yaml) | One `photos.yaml` entry (3.1) |
 | [`parameters.json`](../../scripts/secrets/parameters.json) | Three new parameters, plus a second target on three existing ones (2.5, 4.3) |
 | [`static-monitors-configmap.yaml`](../../deploy/cluster/observability/controllers/static-monitors-configmap.yaml) | One `photos.toml` monitor (3.5) |
+| [`scrape/cloudnative-pg.yaml`](../../deploy/cluster/observability/config/scrape/cloudnative-pg.yaml) | **Not an addition — an edit.** Its selector was `cnpg.io/cluster: aerie-pg` in namespace `aerie`, which is a shape that cannot see a second CNPG cluster; widened to `Exists` across `aerie` and `immich` (3.5). Not a seam gap: the file was written when one Postgres existed, and the alternative — a second near-identical PodMonitor — is how a database ends up unmonitored because nobody copied the file. Phase 2 predicted this edit and deferred it here. |
 
 Plus the new files: `scripts/k3s/Add-BulkDisk.ps1`,
 `scripts/k3s/lib/AerieNodeDisk.ps1`,

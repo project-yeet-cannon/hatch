@@ -46,13 +46,17 @@
                       extend path, then the fstab entry keyed by UUID and the
                       mount at /var/lib/longhorn-bulk.
       5. Longhorn   - patches the node's node.longhorn.io CR to add the disk
-                      with tags: ["bulk"]. **The tag is the entire safety
+                      with tags: ["bulk"], and labels the Kubernetes Node
+                      storage.aerie/bulk=true. **The tag is the entire safety
                       mechanism.** Without it Longhorn treats a large empty
                       disk as general capacity and will place Prometheus and
-                      OpenSearch replicas on it.
+                      OpenSearch replicas on it. The label is what steers the
+                      consumer pod here - see that stage for why the tag alone
+                      cannot.
       6. Verify     - re-reads the mount, the fstab entry, the systemd mount
-                      unit, and waits for Longhorn to report the disk Ready
-                      and Schedulable with the tag it was given.
+                      unit, the node label, and waits for Longhorn to report
+                      the disk Ready and Schedulable with the tag it was
+                      given.
 
     Idempotent: a re-run against a prepared node finds the volume group,
     reconciles the fstab entry, leaves the Longhorn CR alone if it already
@@ -61,9 +65,10 @@
 
     **No node name from this script ever reaches the repo.** Which node holds
     the disk is an argument here and a fact about where an operator physically
-    attached hardware; the cluster derives placement from the disk tag and the
-    longhorn-bulk StorageClass's strict-local data locality. That is the point
-    of the tag, and docs/ethos.md is why.
+    attached hardware. What the repo names is the disk tag and the node label
+    this script writes, both of them derived from that one fact; the cluster
+    derives placement from those. That is the point of both, and docs/ethos.md
+    is why.
 
 .PARAMETER BulkDiskSizeGB
     The size the bulk disk was created at, and what makes it identifiable
@@ -162,12 +167,18 @@ Set-StrictMode -Version Latest
 #                      surviving a wiped fstab and a reordered controller.
 #   $DiskTag         - the same literal as diskSelector: "bulk" in
 #                      deploy/cluster/infrastructure/config/longhorn-storageclasses.yaml.
-#                      These two agreeing is the entire scheduling contract.
+#                      These two agreeing is half the scheduling contract.
+#   $NodeLabel       - the other half, and the same literal as the
+#                      nodeSelector on Immich's server pod in
+#                      deploy/cluster/photos/app/helmrelease.yaml. See the
+#                      Longhorn stage for why a disk tag alone is not enough.
 $MountPoint = '/var/lib/longhorn-bulk'
 $VolumeGroup = 'vg_bulk'
 $LogicalVolume = 'lv_bulk'
 $FilesystemLabel = 'longhorn-bulk'
 $DiskTag = 'bulk'
+$NodeLabelKey = 'storage.aerie/bulk'
+$NodeLabelValue = 'true'
 
 # The key of the disk entry inside the node CR's spec.disks map. Longhorn
 # generates a random one for the disk the chart registers (default-disk-<hex>);
@@ -290,6 +301,7 @@ try {
     Write-Host "Bulk disk: ~${BulkDiskSizeGB}GB ($(Format-Size $expectedBytes)), +/-${SizeTolerancePercent}%"
     Write-Host "Mount:     $MountPoint, ext4 on $lvPath, label '$FilesystemLabel', by UUID in /etc/fstab"
     Write-Host "Longhorn:  disk '$LonghornDiskName' on node '$hostname', tags [$DiskTag]"
+    Write-Host "Label:     node/$hostname $NodeLabelKey=$NodeLabelValue"
     if ($keyFingerprint) { Write-Host "SSH key:   $keyFingerprint" }
     if ($ExtendVolumeGroup) { Write-Warning "-ExtendVolumeGroup: a new empty disk of about $(Format-Size $expectedBytes) will be absorbed into $VolumeGroup and the filesystem grown onto it." }
     if ($Force) { Write-Warning '-Force: a candidate disk that already holds a partition table or a filesystem will be wiped.' }
@@ -326,6 +338,12 @@ try {
         'command -v k3s || echo missing'
         'echo ''--- lhnode'''
         "sudo k3s kubectl -n longhorn-system get nodes.longhorn.io $hostname -o json 2>/dev/null || echo missing"
+        'echo ''--- k8slabels'''
+        # --show-labels rather than -o jsonpath: the label key contains both a
+        # dot and a slash, and every jsonpath spelling that survives them needs
+        # nested quotes that Invoke-NodeSsh's no-double-quote rule forbids.
+        # awk takes the last column, which is the comma-separated label list.
+        "sudo k3s kubectl get node $hostname --show-labels --no-headers 2>/dev/null | awk '{print `$NF}' || echo missing"
         'echo ''--- end'''
     ) -join '; '
 
@@ -354,6 +372,7 @@ try {
     $packageLines = @((Get-ProbeSection -Output $probe.StdOut -Name 'packages') -split "`n" | Where-Object { $_.Trim() })
     $k3sPath = (Get-ProbeSection -Output $probe.StdOut -Name 'k3s').Trim()
     $lhNodeJson = (Get-ProbeSection -Output $probe.StdOut -Name 'lhnode').Trim()
+    $k8sLabels = @((Get-ProbeSection -Output $probe.StdOut -Name 'k8slabels').Trim() -split ',' | Where-Object { $_.Trim() })
 
     $installed = @($packageLines | Where-Object { $_ -match '\sinstall ok installed\s*$' } | ForEach-Object { ($_ -split '\s+')[0] })
     $missingPackages = @($RequiredPackages | Where-Object { $installed -notcontains $_ })
@@ -377,6 +396,7 @@ try {
     $lhSpec = Get-Field $lhNode 'spec'
     $lhDisks = if ($lhSpec) { Get-Field $lhSpec 'disks' } else { $null }
     $existingDiskEntry = if ($lhDisks) { Get-Field $lhDisks $LonghornDiskName } else { $null }
+    $nodeLabelPresent = $k8sLabels -contains "$NodeLabelKey=$NodeLabelValue"
 
     $lvm = Get-NodeLvmState -Ssh $ssh
 
@@ -406,6 +426,7 @@ try {
         Write-Host ''
         Write-Host "LVM:       $(if ($lvm.Vgs.Count) { ($lvm.Vgs | ForEach-Object { "$($_.VgName) ($($_.PvCount) PV, $(Format-Size ([int64][double]$_.Size)))" }) -join ', ' } else { 'no volume groups' })"
         Write-Host "Longhorn disk '$LonghornDiskName': $(if ($existingDiskEntry) { 'already registered' } else { 'not registered' })"
+        Write-Host "Node label $($NodeLabelKey): $(if ($nodeLabelPresent) { 'already set' } else { 'not set' })"
         Write-Host ''
         Write-Host '-PreflightOnly: stopping here. Nothing on the node was changed.' -ForegroundColor Yellow
         return
@@ -739,6 +760,45 @@ try {
         Write-Host '  patched.'
     }
 
+    # The Kubernetes node label, which is the second half of the scheduling
+    # contract and the half that took a measurement to discover was needed.
+    #
+    # The disk tag above governs where Longhorn puts a *replica*. It does not
+    # and cannot govern where Kubernetes puts a *pod*, and the longhorn-bulk
+    # class's dataLocality: strict-local does not close that gap either -
+    # measured on this cluster 2026-08-25, not assumed. Under
+    # WaitForFirstConsumer the scheduler chooses a node with no knowledge of
+    # Longhorn disk tags (the CSI driver publishes only kubernetes.io/hostname
+    # topology and no storage capacity), Longhorn is then told to place the
+    # single replica on whatever node was chosen, the diskSelector matches
+    # nothing there, and the volume reports 'tags not fulfilled' while the pod
+    # stays Pending. The PV is stamped with a hard nodeAffinity to the wrong
+    # node on the way past, so it does not self-heal.
+    #
+    # So the consumer has to be steered by a label, and a label is not the
+    # thing docs/ethos.md forbids: the forbidden thing is a *node name* in the
+    # repo. This is the same structural fact the disk tag already is - written
+    # here, from the same argument, in the same stage, so the two cannot
+    # disagree - and deploy/cluster/photos/app/helmrelease.yaml selects on it
+    # without knowing which node carries it.
+    #
+    # --overwrite makes this idempotent even if the key exists with another
+    # value. No double quotes, per Invoke-NodeSsh's rule.
+    if ($nodeLabelPresent) {
+        Write-Host "node/$hostname already carries $NodeLabelKey=$NodeLabelValue - not labelled."
+    }
+    else {
+        Write-Host "Labelling node/$hostname $NodeLabelKey=$NodeLabelValue ..."
+        $label = Invoke-NodeSsh @ssh -ConnectTimeoutSec 60 -Command (
+            "sudo k3s kubectl label node $hostname $NodeLabelKey=$NodeLabelValue --overwrite"
+        )
+        if ($label.ExitCode -ne 0) {
+            throw "Labelling node/$hostname on $IPAddress failed (exit $($label.ExitCode)):`n$($label.StdOut)$($label.StdErr)"
+        }
+        $actions.Add("labelled node/$hostname $NodeLabelKey=$NodeLabelValue")
+        Write-Host '  labelled.'
+    }
+
     # ---------------------------------------------------------------- #
     Write-Stage 'Verify'
     # ---------------------------------------------------------------- #
@@ -755,6 +815,8 @@ try {
         "df -B1 --output=size,avail $MountPoint | tail -n 1"
         'echo ''--- fstab'''
         "grep -c $uuid /etc/fstab"
+        'echo ''--- k8slabels'''
+        "sudo k3s kubectl get node $hostname --show-labels --no-headers | awk '{print `$NF}'"
         'echo ''--- end'''
     ) -join '; '
 
@@ -780,6 +842,14 @@ try {
     $expectedSources = @($lvPath, "/dev/mapper/$VolumeGroup-$LogicalVolume")
     if ($expectedSources -notcontains $findmntFields[0]) {
         throw "$MountPoint on $IPAddress is mounted from $($findmntFields[0]), not from $lvPath. Something else claimed the mount point."
+    }
+
+    # Read back rather than trusting the label command's exit code, for the
+    # same reason the mount is: this is the state the scheduler will actually
+    # find when Immich's server pod asks for a node.
+    $verifiedLabels = @((Get-ProbeSection -Output $verify.StdOut -Name 'k8slabels').Trim() -split ',' | Where-Object { $_.Trim() })
+    if ($verifiedLabels -notcontains "$NodeLabelKey=$NodeLabelValue") {
+        throw "node/$hostname does not carry $NodeLabelKey=$NodeLabelValue after this run. Without it nothing selects this node, and the consumer of a longhorn-bulk volume lands wherever the scheduler likes and then stays Pending on a replica that cannot be placed. Labels seen: $($verifiedLabels -join ', ')"
     }
 
     $unitState = (Get-ProbeSection -Output $verify.StdOut -Name 'unit').Trim()
@@ -860,6 +930,7 @@ try {
     Write-Host $findmntLine
     Write-Host "Capacity:  $(Format-Size $capacityBytes) usable$(if (-not $ExtendVolumeGroup) { " on a $(Format-Size $expectedBytes) disk (the difference is LVM and ext4 metadata)" })."
     Write-Host "Longhorn:  '$LonghornDiskName' Ready and Schedulable, $(Format-Size $storageAvailable) available of $(Format-Size $storageMaximum), tags [$DiskTag]."
+    Write-Host "Label:     node/$hostname carries $NodeLabelKey=$NodeLabelValue."
 
     # ---------------------------------------------------------------- #
     Write-Stage 'Done'
@@ -876,8 +947,9 @@ try {
     }
     Write-Host ''
     Write-Host 'Next: the longhorn-bulk StorageClass in deploy/cluster/infrastructure/config/'
-    Write-Host 'longhorn-storageclasses.yaml selects this disk by its tag and pins the volume to'
-    Write-Host 'whichever node holds it, so nothing downstream needs to know that it is this one.'
+    Write-Host 'longhorn-storageclasses.yaml selects this disk by its tag, and the node label above'
+    Write-Host 'is what puts the consuming pod on the same node. Neither names it, so nothing'
+    Write-Host 'downstream needs to know that the node is this one.'
 
     if ($env:GITHUB_STEP_SUMMARY) {
         $tick = [char]0x60
@@ -893,6 +965,7 @@ try {
             "| Filesystem | ext4, label $tick$FilesystemLabel$tick, $tick$uuid$tick |"
             "| Mount | $tick$MountPoint$tick, $(Format-Size $capacityBytes) usable |"
             "| Longhorn disk | $tick$LonghornDiskName$tick, tags $tick[$DiskTag]$tick, $(Format-Size $storageAvailable) available |"
+            "| Node label | $tick$NodeLabelKey=$NodeLabelValue$tick |"
             "| Extended | $($ExtendVolumeGroup.IsPresent) |"
             "| Wiped | $needsWipe |"
             "| Elapsed | ${elapsed} min |"

@@ -175,15 +175,28 @@ volumeBindingMode: WaitForFirstConsumer
 parameters:
   # One. See the block comment above.
   numberOfReplicas: "1"
-  # The mechanism that keeps a node name out of this repo entirely.
+  # Keeps the replica and its consumer on the same node, so the library is read
+  # off a local disk rather than over iSCSI.
   #
-  # strict-local ties the volume to the node holding its replica and forces the
-  # consumer pod onto that node *through the volume*, rather than through a
-  # nodeSelector or a PHOTOS_NODE variable written by hand. The disk tag below
-  # is structural; the tagged disk exists on exactly one node because that is
-  # where an operator attached hardware; and Kubernetes derives the placement
-  # from those two facts. docs/ethos.md is why that distinction is worth a
-  # storage class parameter.
+  # ⚠ What it does **not** do - measured 2026-08-25, and this file said the
+  # opposite until then - is steer the consumer *pod*. There is no "the volume
+  # pulls the pod onto its node": under volumeBindingMode WaitForFirstConsumer
+  # the scheduler chooses first, knowing nothing about Longhorn disk tags
+  # (Longhorn's CSI driver publishes only kubernetes.io/hostname topology and
+  # sets storageCapacity: false), and Longhorn is then told to place the single
+  # replica on whatever node was chosen. On a node with no bulk disk the
+  # diskSelector below matches nothing, the volume reports `tags not fulfilled`
+  # and the pod stays Pending - with a hard nodeAffinity to the wrong node
+  # already stamped on the PV, so it does not recover on its own. Immediate
+  # binding is not a fix either; it produces a PV with no nodeAffinity at all
+  # and defers the same failure to attach time.
+  #
+  # What actually places the pod is the `storage.aerie/bulk` node label that
+  # scripts/k3s/Add-BulkDisk.ps1 writes beside the disk tag, selected on by
+  # deploy/cluster/photos/app/helmrelease.yaml. Still no node name in this
+  # repo - a label is the same structural fact the tag is - but it is a second
+  # object, and anything that mounts a longhorn-bulk volume needs it. See
+  # docs/plans/immich.md Phase 3.0.
   dataLocality: "strict-local"
   # The other half of the same contract, and the entire safety mechanism for
   # the disk itself. Longhorn schedules replicas onto any disk with capacity,

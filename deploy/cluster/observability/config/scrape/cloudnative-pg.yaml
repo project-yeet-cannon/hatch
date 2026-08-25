@@ -17,11 +17,23 @@
 # is for the same reason - this object supersedes it rather than complementing
 # it.
 #
-# `cnpg.io/cluster: aerie-pg` is the label CNPG's instance manager stamps on
-# every pod it creates for that Cluster (../../../data/cluster/cluster.yaml),
-# not a label this repository invents - selecting on it is what makes this
-# object track instance count automatically as Phase 7 raises
-# POSTGRES_INSTANCES from 2 to 3, with no edit here.
+# `cnpg.io/cluster` is the label CNPG's instance manager stamps on every pod
+# it creates for a Cluster, with the cluster's own name as the value - not a
+# label this repository invents. Selecting on its *existence* rather than on
+# one value is what makes this object track instance count automatically as
+# Phase 7 raises POSTGRES_INSTANCES from 2 to 3, and what makes it cover a
+# second Cluster in a second namespace with no edit here.
+#
+# It was `matchLabels: {cnpg.io/cluster: aerie-pg}` over namespace `aerie`
+# alone until the photos plan (docs/plans/immich.md) Phase 3 added immich-pg
+# in `immich` (deploy/cluster/photos/database/cluster.yaml), whose own
+# `monitoring.enablePodMonitor: false` points here exactly as aerie-pg's
+# does. Widening the selector rather than copying this file is the choice
+# that keeps *the next* CNPG cluster monitored by default: the failure mode
+# of a per-cluster PodMonitor is a database nobody notices is unmonitored,
+# and 6b.8's replication-lag and instance-count alerts read this job by name.
+# The two namespaces are still named explicitly - a bare Exists across every
+# namespace would also scrape anything a future tenant installs.
 #
 # The ~480 lines of queries these pods answer with - replication lag, the WAL
 # archiver, per-database size, xid age - are already installed by the chart's
@@ -37,8 +49,10 @@ spec:
   namespaceSelector:
     matchNames:
       - aerie
+      - immich
   selector:
-    matchLabels:
-      cnpg.io/cluster: aerie-pg
+    matchExpressions:
+      - key: cnpg.io/cluster
+        operator: Exists
   podMetricsEndpoints:
     - port: metrics
