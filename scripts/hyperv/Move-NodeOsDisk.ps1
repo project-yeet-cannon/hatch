@@ -110,11 +110,11 @@
     migrated disk, and boots it. The migrated disk is left on the destination
     volume for inspection; deleting it is an operator's call.
 
-    This is the whole reason step 1.9 exists as a separate step: the undo is
+    This is the whole reason step 4.1 exists as a separate step: the undo is
     available for exactly as long as the source file is.
 
 .PARAMETER RemoveSourceDisk
-    Plan step 1.9. Deletes the source VHDX recorded in the sidecar, after
+    Plan step 4.1. Deletes the source VHDX recorded in the sidecar, after
     asserting the VM is running from the migrated disk, that the node is Ready
     and every etcd member is healthy, and that the soak has elapsed. -Force
     waives the soak and nothing else.
@@ -146,7 +146,7 @@
         -SshPrivateKeyPath ~\.ssh\id_ed25519 -Rollback
 
 .EXAMPLE
-    # A week later, step 1.9
+    # A week later, step 4.1
     .\Move-NodeOsDisk.ps1 -VMName aerie-node-N -IPAddress 10.0.0.21 `
         -SshPrivateKeyPath ~\.ssh\id_ed25519 -RemoveSourceDisk
 #>
@@ -216,13 +216,13 @@ Set-StrictMode -Version Latest
 #                        needs the fixed conversion without the move. The
 #                        sidecar records both names, so nothing is ambiguous.
 #   $SidecarFileName   - the record of where this disk came from. It is the
-#                        rollback path and step 1.9's only source of truth
+#                        rollback path and step 4.1's only source of truth
 #                        about which file is safe to delete.
 #   $FreeMarginGB      - the plan's refusal: never leave a Windows boot volume
 #                        with less than this after a fixed disk lands on it.
 #                        Not a parameter, because the way to fit on a tight
 #                        volume is a smaller -SizeGB, not a thinner margin.
-#   $SoakDays          - step 1.9's soak before a source disk may be deleted.
+#   $SoakDays          - step 4.1's soak before a source disk may be deleted.
 $OsDiskFileName = 'os-disk.vhdx'
 $FixedDiskFileName = 'os-disk-fixed.vhdx'
 $SidecarFileName = 'os-disk-migration.json'
@@ -830,7 +830,7 @@ try {
 
             # Convert-VHD reads one file and writes another, so an in-place
             # conversion needs a second name. Both are recorded in the
-            # sidecar; after step 1.9 deletes the source, the surviving disk
+            # sidecar; after step 4.1 deletes the source, the surviving disk
             # is the -fixed one and that record is what explains the name.
             if ($inPlace -and -not $alreadyMigrated) {
                 $newDiskPath = Join-Path $destinationDir $FixedDiskFileName
@@ -1246,7 +1246,7 @@ try {
     }
 
     # ================================================================== #
-    #  -RemoveSourceDisk: plan step 1.9, and the only mode that deletes.
+    #  -RemoveSourceDisk: plan step 4.1, and the only mode that deletes.
     # ================================================================== #
     if ($mode -eq 'RemoveSource') {
         Write-Stage 'Soak'

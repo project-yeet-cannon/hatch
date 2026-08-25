@@ -80,7 +80,7 @@ on:
         required: true
         type: string
       mode:
-        description: 'move: the migration. rollback: repoint the VM back at the recorded source disk. remove-source: delete that source disk, after the soak (plan step 1.9)'
+        description: 'move: the migration. rollback: repoint the VM back at the recorded source disk. remove-source: delete that source disk, after the soak (plan step 4.1)'
         required: true
         default: 'move'
         type: choice

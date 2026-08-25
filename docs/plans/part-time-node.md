@@ -1,7 +1,9 @@
 # Part-time node — a fourth host that leaves when its owner wants it back
 
-**Status:** Not started. Five phases; the first three are cluster work that
-stands on its own merits, the last two are the machine-specific part.
+**Status:** Phase 1 done — the tooling can build an agent now, and that stands
+on its own whether or not a fourth host ever appears. Phases 2-5 not started.
+Five phases; the first three are cluster work that stands on its own merits,
+the last two are the machine-specific part.
 
 A fourth Windows host joins the cluster as a k3s **agent**, carrying a Linux VM
 sized to take real load off the three permanent nodes. Its owner uses the
@@ -179,36 +181,86 @@ persisted mode and decides. Phase 4.
 
 ---
 
-## Phase 1 — Teach the tooling about agents
+## [x] Phase 1 — Teach the tooling about agents
 
 **Exit:** a `role: agent` dispatch of Provision 1 produces a node that shows
 `<none>` under ROLES in `kubectl get nodes` and schedules pods.
 
-- [ ] 1.1 Add an `-Agent` parameter set to
+The code is written and the assertions are in it — Verify fails the run if
+ROLES is anything but `<none>`. The exit criterion itself cannot be *observed*
+until there is a fourth host to dispatch against, which is Phase 3; nothing
+here changes any existing dispatch's behavior, so it lands before then rather
+than waiting on hardware.
+
+- [x] 1.1 Add an `-Agent` parameter set to
       [`Install-K3sNode.ps1`](../../scripts/k3s/Install-K3sNode.ps1), taking the
       same `-JoinServer` target and token, running `k3s agent --server
       https://<ip>:6443 --token <token>`. Preflight drops the etcd (2379-2380)
       port checks, which an agent never speaks, and keeps 6443 and 10250.
-- [ ] 1.2 The node-configuration stage (`vm.max_map_count`,
+      **Three things this step turned out to also need**, each of which would
+      otherwise have produced an install that reports success:
+      - The unit is `k3s-agent.service`, not `k3s.service` — the install script
+        names it after the command it is given — and the uninstall script beside
+        it is `k3s-agent-uninstall.sh`. Every `systemctl` and `-Reinstall` path
+        keys off the role now.
+      - Both units are probed on every run. A node is one role or the other
+        (they share `/var/lib/rancher/k3s` and the same kubelet), so finding the
+        other one active stops the run with the uninstall command to run if the
+        role change is deliberate.
+      - Port **22** on the join server joins the preflight for agents, because
+        of 1.3 below.
+- [x] 1.2 The node-configuration stage (`vm.max_map_count`,
       `etcd-expose-metrics`) splits: the sysctl applies to agents, the etcd
-      metrics setting does not. `/etc/rancher/k3s/config.yaml` is a server file;
-      an agent reads `/etc/rancher/k3s/agent.yaml`. Getting this wrong installs
-      cleanly and is never read — the same trap
-      [`longhorn.yaml`](../../deploy/cluster/infrastructure/controllers/longhorn.yaml)'s
-      note 4 documents.
-- [ ] 1.3 The verify stage asserts `Ready` without asserting a control-plane
-      role, and skips the `:2381` etcd metrics probe.
-- [ ] 1.4 Add a `role` choice input (`server` / `agent`) to
+      metrics setting does not. **The mechanism is worse than this plan
+      assumed, and in a useful direction.** There is no
+      `/etc/rancher/k3s/agent.yaml` — `k3s agent` reads the same
+      `/etc/rancher/k3s/config.yaml` a server does. What differs is the
+      filtering: k3s checks the keys it finds there against the **server**
+      command's flags only ([`pkg/configfilearg`](https://github.com/k3s-io/k3s/blob/master/pkg/configfilearg/defaultparser.go)'s
+      `ValidFlags` has no `agent` entry, and `stripInvalidFlags` returns the
+      list untouched for any command that has none), so `etcd-expose-metrics`
+      reaches the agent CLI verbatim and the unit exits at start on `flag
+      provided but not defined`. So the failure is loud rather than silent —
+      but it is a failed install rather than the configuration mistake it
+      actually is, which is worth as much documentation either way. An agent
+      gets **no** config.yaml, and one left behind by an earlier server install
+      on the same node is removed rather than inherited; a config.yaml this
+      script didn't write stops the run instead.
+      Also confirmed rather than assumed: the kubelet image-GC drop-in *does*
+      apply to agents unchanged — k3s runs kubelet from the same
+      `/var/lib/rancher/k3s/agent` tree on both roles — and so does journald's
+      cap. Three of the four settings, not two.
+- [x] 1.3 The verify stage asserts `Ready` without asserting a control-plane
+      role, and skips the `:2381` etcd metrics probe. It asserts the *opposite*
+      too: for an agent, ROLES must read `<none>`, which is this phase's exit
+      criterion and the one thing that tells a worker from a server at a
+      glance. The part the plan missed: an agent has no kubeconfig and no
+      apiserver, so `k3s kubectl` on it talks to a default `localhost:8080` and
+      fails. Every cluster-level question in Verify — Ready, `/configz`, the
+      labels, the node list — is asked of `-JoinServer` over SSH with the same
+      key instead, which is what put port 22 in 1.1's preflight.
+- [x] 1.4 Add a `role` choice input (`server` / `agent`) to
       [`provision-1-install-k3s.yml`](../../.github/workflows/provision-1-install-k3s.yml),
       defaulting to `server` so no existing dispatch changes behavior.
-- [ ] 1.5 Node labels, applied at install from a new `-NodeLabel` parameter, so
+      Landed as a third option on the `role` input that already existed
+      (`cluster-init` / `join` / **`agent`**) rather than a second input named
+      `role` beside it. Same effect on existing dispatches — `cluster-init` is
+      still first, and neither of the two existing values changed meaning.
+- [x] 1.5 Node labels, applied at install from a new `-NodeLabel` parameter, so
       placement never keys off a node **name**. Two to start:
       `aerie.family/availability=part-time` and `aerie.family/storage=none`. The
       GPU label that finding's decision table defers
       (`aerie.family/gpu=<model>`) uses the same mechanism when it arrives, and
       that is the whole of "design for it now".
+      `--node-label` alone is not enough: kubelet writes those labels when it
+      first creates the Node object and never revisits them, so re-dispatching
+      to change one would report success having changed nothing. They are
+      passed to the install *and* reconciled against the live Node object
+      afterwards. Labels named are added or overwritten; nothing is removed,
+      since kubelet, k3s and Longhorn all write onto the same object.
+      Exposed on the workflow as a comma-separated `node_labels` input.
 
-## Phase 2 — Make a node leaving a non-event
+## [] Phase 2 — Make a node leaving a non-event
 
 Independently valuable, and a prerequisite: this lands **before** D joins.
 
@@ -235,7 +287,7 @@ and DNS survive it with no gap.
       every future personal-mode entry, run against a node whose owner is not
       waiting to play a game.
 
-## Phase 3 — Build the node
+## [] Phase 3 — Build the node
 
 **Exit:** four nodes Ready; D holds no Longhorn replicas; the house is unchanged.
 
@@ -255,10 +307,11 @@ and DNS survive it with no gap.
       [`stagger-update-reboots.yml`](../../.github/workflows/stagger-update-reboots.yml)'s
       matrix and to every provisioning workflow's `host` choice list.
 - [ ] 3.4 Dispatch **Provision 0** for `aerie-node-3`: 16 GB static memory,
-      fixed OS disk on the volume 3.1 chose, **`-DataDiskSizeGB 0`**. If that
-      parameter cannot express "no data disk" today, it is a small addition to
-      [`New-AerieVM.ps1`](../../scripts/hyperv/New-AerieVM.ps1) and belongs in
-      Phase 1.
+      fixed OS disk on the volume 3.1 chose, **`-DataDiskSizeGB 0`**. Checked
+      while doing Phase 1: `0` already means "no data disk" all the way through
+      [`New-AerieVM.ps1`](../../scripts/hyperv/New-AerieVM.ps1),
+      `Initialize-AerieNode.ps1` and `provision-0-new-node.yml` — the Phase 0
+      scratch VM has always used it. Nothing to add.
 - [ ] 3.5 Set `-AutomaticStartAction Nothing` on the VM (finding 6). Everything
       else about the VM stays as the script builds it.
 - [ ] 3.6 Dispatch **Provision 1** with `role: agent`, joining any permanent
@@ -269,7 +322,7 @@ and DNS survive it with no gap.
       three healthy replicas across A, B and C only.
 - [ ] 3.8 Leave it empty for a few days and watch. Nothing is moved yet.
 
-## Phase 4 — Personal mode
+## [] Phase 4 — Personal mode
 
 **Exit:** an unelevated desktop user clicks a shortcut; within a minute the node
 is drained, the VM is off and the runner is stopped. Another click returns all
@@ -323,7 +376,7 @@ the boot task read.
       should go `NotReady`, its pods should reschedule, and the boot task should
       bring it back correctly on the next power-on.
 
-## Phase 5 — An absence that doesn't page anyone
+## [] Phase 5 — An absence that doesn't page anyone
 
 **Exit:** a full personal-mode evening produces no alert and no red tile, and a
 node that is down *without* personal mode set still produces both.

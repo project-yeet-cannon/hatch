@@ -1,6 +1,12 @@
-# Step 1 of the provisioning pipeline: install k3s server on one node
-# (the cluster plan Phase 2), either forming the cluster's embedded etcd or
-# joining an existing one. Dispatch-only, one node per run.
+# Step 1 of the provisioning pipeline: install k3s on one node (the cluster
+# plan Phase 2) - as a server that forms the cluster's embedded etcd or joins
+# an existing one, or as an agent (worker) that joins without becoming an etcd
+# member at all. Dispatch-only, one node per run.
+#
+# `role: agent` is the part-time-node plan's Phase 1: "add a worker" is a
+# normal operation for any installation, and until that role existed here it
+# was not expressible. An agent is a normal, schedulable node - it is not
+# tainted and nothing has to opt into it - it simply runs no control plane.
 #
 # This workflow is deliberately thin: it checks out the repo and hands every
 # decision to scripts/k3s/Install-K3sNode.ps1, which also supports being run
@@ -11,7 +17,9 @@
 # on only one of the two paths and let them drift.
 #
 # The runner doesn't need to be the node being installed - it only needs
-# outbound SSH to -ip_address (and, when joining, to node 1's :6443). Reusing
+# outbound SSH to -ip_address (and, when joining, to the target server's
+# :6443, plus its :22 for an agent, which has no kubeconfig of its own for
+# the script to verify through). Reusing
 # the same hyperv-host-* runners as provision-0-new-node.yml means no new
 # runner prerequisite: they already carry the OpenSSH client that script
 # needs.
@@ -31,6 +39,12 @@
 # node's etcd member down for its duration, and three members survive one.
 # See docs/plans/swarm/phase-6-observability.md (6b.1) and
 # docs/plans/node-storage.md (2.1, 2.2) for why each setting is what it is.
+#
+# An agent reconciles three of those four: etcd-expose-metrics is a
+# server-only key, and `k3s agent` exits at start on it rather than ignoring
+# it - see the script. Re-dispatching is also the way `node_labels` change
+# after a node has joined, since --node-label alone applies at registration
+# and never again.
 #
 # Previous step: provision-0-new-node.yml, once the node answers SSH.
 # Next step: provision-2-seed-secrets.yml, then provision-3-bootstrap-flux.yml.
@@ -56,15 +70,21 @@ on:
         required: true
         type: string
       role:
-        description: 'cluster-init forms the etcd cluster (node 1 only); join adds a server to an existing one'
+        description: 'cluster-init forms the etcd cluster (node 1 only); join adds a server to an existing one; agent adds a worker that never joins etcd'
         required: true
         type: choice
         options:
           - cluster-init
           - join
+          - agent
       join_server:
-        description: 'Required when role=join: node 1''s LAN address'
+        description: 'Required when role=join or role=agent: an existing server''s LAN address'
         required: false
+        type: string
+      node_labels:
+        description: 'Optional comma-separated key=value node labels, e.g. aerie.family/availability=part-time,aerie.family/storage=none. Placement should key off these, never off a node name'
+        required: false
+        default: ''
         type: string
       reinstall:
         description: 'DESTRUCTIVE: if k3s is already active on this node, uninstall it first and reinstall clean with today''s inputs (see the script''s -Reinstall notes on etcd membership before using this on a server that already joined)'
@@ -120,6 +140,7 @@ jobs:
           IP_ADDRESS: ${{ inputs.ip_address }}
           ROLE: ${{ inputs.role }}
           JOIN_SERVER: ${{ inputs.join_server }}
+          NODE_LABELS: ${{ inputs.node_labels }}
           REINSTALL: ${{ inputs.reinstall }}
           PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
           # No K3S_VERSION here on purpose: the pin is structural, so it is
@@ -144,8 +165,8 @@ jobs:
             }
           }
 
-          if ($env:ROLE -eq 'join' -and -not $env:JOIN_SERVER) {
-            throw "role=join needs join_server (node 1's LAN address)."
+          if ($env:ROLE -ne 'cluster-init' -and -not $env:JOIN_SERVER) {
+            throw "role=$($env:ROLE) needs join_server (the LAN address of a server that is already up)."
           }
 
           $params = @{
@@ -161,6 +182,19 @@ jobs:
           }
           else {
             $params.JoinServer = $env:JOIN_SERVER
+            if ($env:ROLE -eq 'agent') { $params.Agent = $true }
+          }
+
+          # Split here rather than asking the operator for YAML: a
+          # comma-separated line is what fits in a workflow_dispatch text box.
+          # The script validates each entry against Kubernetes' own label
+          # grammar, so a typo fails before anything is installed.
+          if ($env:NODE_LABELS) {
+            $params.NodeLabel = @(
+              $env:NODE_LABELS -split ',' |
+                ForEach-Object { $_.Trim() } |
+                Where-Object { $_ }
+            )
           }
 
           if ([bool]::Parse($env:REINSTALL)) { $params.Reinstall = $true }

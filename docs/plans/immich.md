@@ -522,7 +522,7 @@ it protects 800 GB exactly as well as it protects 1.5 TB.
 ---
 
 
-## [] Phase 1b - await instance node SSD-ification
+## [] Phase 1b - await ./node-storage.md
 
 We need to move the node OS disks off of spinning metal, which is where the bulk one is.
 

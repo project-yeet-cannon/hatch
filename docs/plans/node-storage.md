@@ -9,21 +9,24 @@ or under 8 ms. The gate as originally written ("under 10 ms") turned out not to
 be expressible in the metric it was written against — see 1.6's postscript, and
 read finding 1's figures as bucket ranges rather than measurements.
 
-All that is left of Phase 1 is 1.9's soak: three source VHDXs are still on disk
-as the rollback path until 2026-09-01. **Phase 2 is written and not yet
-dispatched** — both settings are reconciled by
-[`Install-K3sNode.ps1`](../../scripts/k3s/Install-K3sNode.ps1)'s node
-configuration stage, so rolling it out is *Provision 1* once per node, one at a
-time, with no maintenance window; see 2.1 and 2.2 for what was built and where
-each departs from the sketch. Phase 3 is untouched, and finding 7a argues for
-bringing Phase 2 forward.
+**Phase 2 is complete too** (2026-08-25): three green *Provision 1* runs, one
+node at a time and with no maintenance window, put kubelet's image GC at 70/55
+and journald's cap at 512M on all three nodes.
+
+What is left is two things and one of them is only a date. **Phase 3** — stop
+the next node built from reintroducing all of it — is untouched and is the real
+remaining work. **Phase 4** is 2026-09-01: the soak on the three source VHDXs
+ends and they can be deleted, and Phase 2's week-long gate can be read. Both
+were trailing halves of Phases 1 and 2 and are gathered there so those phases
+read as what they are.
 
 The problem this plan was written against: two symptoms, one cause — every
 node's OS disk was a *dynamic* VHDX, on the *slow* volume, sized from a
-template rather than from the workload. Three phases. Phase 1 stopped the
-alerts and was the only one with a maintenance window; Phase 2 stops the root
-filesystem from filling again; Phase 3 stops the next node built from
-reintroducing both.
+template rather than from the workload. Three phases of work, and a fourth that
+is only dates. Phase 1 stopped the alerts and was the only one with a
+maintenance window; Phase 2 stopped the root filesystem from filling again;
+Phase 3 stops the next node built from reintroducing both; Phase 4 is the two
+waiting periods the first two left behind.
 
 Everything below was measured against the live cluster on **2026-08-24**. The
 per-host numbers are observations of one installation, not facts about Aerie —
@@ -300,6 +303,9 @@ also drained and powered off in the middle of its own storm.
 
 ## Phase 1 — the OS disk moves to the fast volume, fixed, at 100 GB
 
+**Complete** (2026-08-25), gate passed as restated in 1.6. The source VHDXs it
+left behind are deleted in 4.1, on a date rather than as a step here.
+
 One node at a time, the same operation on each — move to the fastest volume
 with room on that host, and convert to fixed — but to a *different volume per
 host*, and on one of the three that is not the boot volume (findings 2 and 6).
@@ -354,7 +360,7 @@ is for.
 
       **Hard refusals**, in the spirit of the storage scripts already in the
       tree: never run against a VM whose node is the only healthy etcd member;
-      never delete the source VHDX (1.9 does that, after a soak); and never
+      never delete the source VHDX (4.1 does that, after a soak); and never
       target a destination volume with less than `-SizeGB` + 40 GB free, so a
       fixed disk cannot be the reason a Windows boot volume fills.
 
@@ -383,7 +389,7 @@ is for.
       touches. That last one is unconditional and is not a tidy-up — see
       finding 7 for what leaving it on would have cost.
 
-      It also carries 1.9 and its undo as modes rather than as runbook lines,
+      It also carries 4.1 and its undo as modes rather than as runbook lines,
       because both act on a file nothing else on the host now references:
       `-RemoveSourceDisk` and `-Rollback` both read an `os-disk-migration.json`
       written beside the new disk *before* the first boot off it, which names
@@ -535,31 +541,16 @@ is for.
       given up deliberately, because it would have risked a second maintenance
       window on an etcd member to learn something the plan does not act on.
 
-- [ ] **1.9 — Soak, then delete the sources.** Leave the original
-      `os-disk.vhdx` files in place for a week as the rollback path — repointing
-      `Set-VMHardDiskDrive` back is a one-line undo for as long as they exist.
-      Delete them after, and only then; this is the step that is easy to skip
-      and expensive to skip in the other direction.
-
-      Both halves are `Move-NodeOsDisk.ps1` modes rather than runbook lines:
-      `-Rollback` for the undo, `-RemoveSourceDisk` for the deletion, and the
-      latter refuses inside the soak, refuses while the node is not Ready, and
-      refuses while any etcd member is unhealthy. Both read the
-      `os-disk-migration.json` written beside the new disk *before* its first
-      boot, which is the only thing on the host that still names the source.
-
-      On the node converted in place, the surviving disk is called
-      `os-disk-fixed.vhdx` rather than `os-disk.vhdx` — `Convert-VHD` cannot
-      write the file it reads, so the two had to have different names in one
-      directory. The sidecar records both. Renaming it back would mean another
-      window for no benefit.
-
 ## Phase 2 — bound what grows, so the bigger disk stays big
 
-Independent of Phase 1 and safe to land first. Neither step needs a window.
+**Complete** (2026-08-25). Independent of Phase 1 and safe to land first;
+neither step needed a window. Both are reconciled by
+[`Install-K3sNode.ps1`](../../scripts/k3s/Install-K3sNode.ps1)'s node
+configuration stage, which is to say by dispatching *Provision 1* once per
+node — the same mechanism the cluster plan's 6b.1 already used.
 
-- [ ] **2.1 — kubelet image GC, moved down.** *Built; not yet dispatched to the
-      three nodes.* Written by
+- [x] **2.1 — kubelet image GC, moved down.** *Dispatched to all three nodes on
+      2026-08-25; kubelet on each reports 70/55.* Written by
       [`Install-K3sNode.ps1`](../../scripts/k3s/Install-K3sNode.ps1)'s existing
       config-reconcile path, reusing its "restart k3s only if the value changed"
       behaviour.
@@ -609,7 +600,7 @@ Independent of Phase 1 and safe to land first. Neither step needs a window.
       is present and ignored — the failure mode of any merged-config mechanism —
       would otherwise look exactly like success.
 
-- [ ] **2.2 — Cap journald.** *Built; not yet dispatched to the three nodes.*
+- [x] **2.2 — Cap journald.** *Dispatched to all three nodes on 2026-08-25.*
       `SystemMaxUse=512M` in a `/etc/systemd/journald.conf.d/` drop-in, placed by
       [`cloud-init/user-data.tmpl.yaml`](../../scripts/hyperv/cloud-init/user-data.tmpl.yaml)
       for new nodes and applied in place on the existing three. 1.3–1.9 GB
@@ -642,16 +633,13 @@ Independent of Phase 1 and safe to land first. Neither step needs a window.
       here is well inside both, which is the point — this step is against the
       unboundedness, not against today's figure.
 
-- [ ] **2.3 — Gate.** A week after 2.1, root filesystem used is flat rather than
-      climbing, and no `ImageGCFailed` or `EvictionThresholdMet` events on any
-      node. Flat is the whole point: the slope in finding 4, not the absolute
-      number, is what this phase is against.
-
-      The week starts when the last node has been dispatched, not when 2.1 and
-      2.2 were written — and "flat" is now measured from a different baseline
-      than finding 4's: the three nodes came out of Phase 1 at 16–27% of 99 GB
-      rather than 83–85% of 32 GB, so a climbing line has much further to run
-      before it is an incident and much longer to hide in.
+      **Result.** Three green Provision 1 runs, one node at a time, quorum
+      never below 2 of 3 and every node back `Ready` — the reconcile path did
+      what it was built for, and neither setting needed a window. The node
+      measured before the change went 883.7 MB to 468 MB the moment the vacuum
+      ran; the other two came out at 437.2 MB and 494.3 MB. Root filesystems
+      sit at 22-24 GB of 99 GB (23-26%), which is 4.2's starting line rather
+      than its result.
 
 ## Phase 3 — stop provisioning it wrong
 
@@ -706,6 +694,55 @@ precisely what happened to the node rebuilt on 08/23.
       checkpoints.** One sentence, in the place someone reads before building
       a node. The last clause is 3.4's, and belongs in the same sentence
       because an automatic checkpoint makes the first three untrue again.
+
+## Phase 4 — 2026-09-01: the soak ends, and the gate is read
+
+Neither of these is work. Both were the trailing halves of earlier phases —
+the source-disk deletion was 1.9, the image-GC gate was 2.3 — and both are
+*dates*: nothing anyone does brings either of them forward, and leaving them
+in place made two finished phases read as unfinished ones. They share a date
+because the last migration and the last Provision 1 dispatch happened within a
+day of each other, so one visit to the plan closes both.
+
+- [ ] **4.1 — Delete the source VHDXs.** *Was 1.9.* The original
+      `os-disk.vhdx` files stay in place for a week as the rollback path —
+      repointing `Set-VMHardDiskDrive` back is a one-line undo for as long as
+      they exist. Delete them after, and only then; this is the step that is
+      easy to skip and expensive to skip in the other direction.
+
+      Both halves are `Move-NodeOsDisk.ps1` modes rather than runbook lines:
+      `-Rollback` for the undo, `-RemoveSourceDisk` for the deletion, and the
+      latter refuses inside the soak, refuses while the node is not Ready, and
+      refuses while any etcd member is unhealthy. Both read the
+      `os-disk-migration.json` written beside the new disk *before* its first
+      boot, which is the only thing on the host that still names the source.
+      The refusal is the reason this can be a date rather than a discipline: a
+      run dispatched early is refused, not obeyed.
+
+      On the node converted in place, the surviving disk is called
+      `os-disk-fixed.vhdx` rather than `os-disk.vhdx` — `Convert-VHD` cannot
+      write the file it reads, so the two had to have different names in one
+      directory. The sidecar records both. Renaming it back would mean another
+      window for no benefit.
+
+- [ ] **4.2 — Gate: the slope, not the number.** *Was 2.3.* A week after the
+      last node took Phase 2's settings, root filesystem used is flat rather
+      than climbing, and no `ImageGCFailed` or `EvictionThresholdMet` events on
+      any node. Flat is the whole point: the slope in finding 4, not the
+      absolute number, is what Phase 2 is against.
+
+      **Read it carefully, because the easy reading is wrong.** Finding 4's
+      slope was 4–5 points a day on a 32 GB disk. The same bytes per day on a
+      99 GB disk is under 1.5 points, and the nodes start this week at 23–26%.
+      So a flat-looking line proves much less than it did in finding 4: what
+      would actually demonstrate the ceiling works is image GC firing at 70%
+      and holding, and nothing has been near 70% since Phase 1. If the line is
+      flat at ~24% on the day, the honest reading is that Phase 1 bought so
+      much room the ceiling has not been tested yet — a pass on the letter of
+      the gate, and a deferral of its question.
+
+      What would fail it is unambiguous either way: a climbing line, or a GC
+      event that errors rather than reclaiming.
 
 ## What this plan does not cover
 

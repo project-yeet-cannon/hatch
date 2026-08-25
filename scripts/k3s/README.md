@@ -30,23 +30,27 @@ that checks out this repo and calls the same script with the same parameters,
 so the two can't drift.
 
 The runner dispatching a workflow doesn't need to be the node being worked on
-— it only needs outbound SSH to that node (and, when joining, to node 1's
-`:6443`). These reuse the same `hyperv-host-*` runners
-[`scripts/hyperv/`](../hyperv/) already requires, so there's no new
-prerequisite: whichever of the three you pick, it already has the OpenSSH
-client Phase 1 needed for its own post-boot verification.
+— it only needs outbound SSH to that node (and, when joining, to the target
+server's `:6443`, plus its `:22` for an agent). These reuse the same
+`hyperv-host-*` runners [`scripts/hyperv/`](../hyperv/) already requires, so
+there's no new prerequisite: whichever of the three you pick, it already has
+the OpenSSH client Phase 1 needed for its own post-boot verification.
 
 ## Provision 1 — install k3s
 
-[The cluster plan](../../docs/plans/swarm/phase-2-k3s-flux-secrets.md) Phase 2's first item: installs k3s server on one node that
-Phase 1 already built, either forming the cluster's embedded etcd or joining
-an existing one.
+[The cluster plan](../../docs/plans/swarm/phase-2-k3s-flux-secrets.md) Phase 2's first item: installs k3s on one node that
+Phase 1 already built — as a **server** that forms the cluster's embedded etcd
+or joins an existing one, or as an **agent** (worker) that joins without ever
+becoming an etcd member.
 
 ### Order of operations
 
 1. Node 1 first, `role: cluster-init`. This forms the single-node embedded
    etcd cluster.
 2. Node 2 next, `role: join`, `join_server` = node 1's LAN address.
+3. Any number of workers after that, `role: agent`, `join_server` = the LAN
+   address of any server that is up. Order among them doesn't matter, and an
+   agent joining or leaving is a scheduling event rather than a raft one.
 
 Running node 2 before node 1 exists fails preflight: the workflow checks
 `join_server:6443` answers before it ever touches the node being installed.
@@ -56,11 +60,71 @@ Running node 2 before node 1 exists fails preflight: the workflow checks
 > non-production — the third server doesn't rejoin until Phase 7, when the
 > current prod box is rebuilt as a node.
 
+### Servers and agents
+
+Quorum is a property of the etcd members, not of the machine count: three
+servers give this cluster a quorum of two, which survives losing one. A fourth
+*server* changes that arithmetic — four members still need three, so it buys
+no extra tolerance and adds a machine that can fail. A fourth *agent* changes
+nothing about it. Everything past the third node should be an agent unless
+there is a reason for it to vote.
+
+An agent is a **normal, schedulable node** — not tainted, nothing has to opt
+into it. It just runs no control plane: no apiserver, no etcd, `<none>` under
+`ROLES`. See [the part-time-node plan](../../docs/plans/part-time-node.md) for
+the case that first needed one.
+
+Four things differ from a server install, and every one of them is a way to
+get an install that looks clean and is wrong:
+
+| | Server | Agent |
+|---|---|---|
+| systemd unit | `k3s.service`, `k3s-uninstall.sh` | `k3s-agent.service`, `k3s-agent-uninstall.sh` |
+| `/etc/rancher/k3s/config.yaml` | written | **removed**, never written — see below |
+| Cluster checks in Verify | asked of the node itself | asked of `join_server` over SSH |
+| etcd `:2381` probe | asserted | skipped — there is no etcd |
+
+The config.yaml row is the sharp one. `k3s agent` *does* read that file, but
+k3s only filters the keys it finds there against the **server** command's
+flags — [`pkg/configfilearg`](https://github.com/k3s-io/k3s/blob/master/pkg/configfilearg/defaultparser.go)'s
+`ValidFlags` has no `agent` entry, and `stripInvalidFlags` returns the list
+untouched for any command that has none. So `etcd-expose-metrics` is handed to
+the agent CLI verbatim, and the unit dies at start on `flag provided but not
+defined`. An agent therefore gets **no** config.yaml, and one left behind by
+an earlier server install on the same node is removed rather than inherited.
+
+A node is one role or the other. Both units claim `/var/lib/rancher/k3s` and
+the same kubelet, so a dispatch that would install the second over the first
+is refused with the uninstall command to run if the role change is deliberate.
+
+### Node labels
+
+`node_labels` takes a comma-separated list of `key=value`, e.g.
+`aerie.family/availability=part-time,aerie.family/storage=none`. **Placement
+rules should key off these rather than off a node name** — a name says which
+machine it is, a label says what it can do, and only the second survives the
+machine being replaced. A GPU node later needs no redesign, just
+`aerie.family/gpu=<model>` and a `nodeSelector` that was already asking for a
+capability.
+
+Labels are passed to the install as `--node-label` *and* reconciled against
+the live Node object afterwards, because `--node-label` alone lands only at
+registration: kubelet writes those labels when it first creates the Node and
+never revisits them, so re-dispatching to change one would otherwise report
+success having changed nothing. Labels named here are added or overwritten;
+nothing is removed, since kubelet, k3s and Longhorn all write their own onto
+the same object.
+
+Use a prefix of your own. Most `kubernetes.io/` and `k8s.io/` keys are refused
+to a self-registering kubelet by the NodeRestriction admission plugin, which
+fails the node's *registration* — an install that ends at "timed out waiting
+for Ready" with the reason only in the node's journal.
+
 ### One-time setup
 
 | Name | Kind | What |
 |---|---|---|
-| `K3S_CLUSTER_TOKEN` | repository secret | Generate once with `openssl rand -hex 32` *before* installing node 1. Identical across every server in the cluster — store it like the SSH keys, never in git. Rotating it means reinstalling every node. |
+| `K3S_CLUSTER_TOKEN` | repository secret | Generate once with `openssl rand -hex 32` *before* installing node 1. Identical across every node in the cluster, agents included — store it like the SSH keys, never in git. Rotating it means reinstalling every node. |
 | `NODE_SSH_PRIVATE_KEY` | repository secret | Already set for [`provision-0-new-node.yml`](../../.github/workflows/provision-0-new-node.yml) — the same keypair Phase 1 baked into the node's `authorized_keys`. |
 
 Nothing else to set: the k3s version is **not** a variable. It's pinned in
@@ -74,34 +138,48 @@ workflow from its branch.
 ### What a run actually does
 
 1. **Preflight.** Resolves the SSH key, confirms the OpenSSH client is on the
-   runner, confirms the node answers port 22, and — for `role: join` — that
-   `join_server` answers 6443. Cheap failures before an install that
-   downloads a binary and starts etcd.
-1a. **Join preflight.** For `role: join`, also checks that `join_server`
-   answers 6443 (apiserver), 2379-2380 (etcd client/peer), and 10250
-   (kubelet) from the runner. Only proves those ports answer from the
-   runner, not from the joining node itself — but a miss here is almost
-   always a typo'd `join_server` or a firewalled node 1, worth catching
-   before the remote install starts. UDP 8472 (flannel VXLAN) isn't checked;
-   see "Still manual" below.
-2. **Inspect.** Checks whether k3s is already active on the node. If so, the
+   runner, confirms the node answers port 22, and — for `role: join` and
+   `role: agent` — that `join_server` answers. Cheap failures before an
+   install that downloads a binary and starts etcd.
+1a. **Join preflight.** Checks that `join_server` answers 6443 (apiserver)
+   and 10250 (kubelet) from the runner, plus 2379-2380 (etcd client/peer)
+   for `role: join` — an agent never speaks etcd, so requiring those ports
+   of it would fail an install for a reason that couldn't affect it — plus
+   22 for `role: agent`, which Verify uses to ask the server about the
+   agent. Only proves those ports answer from the runner, not from the
+   joining node itself — but a miss here is almost always a typo'd
+   `join_server` or a firewalled node 1, worth catching before the remote
+   install starts. UDP 8472 (flannel VXLAN) isn't checked; see "Still
+   manual" below.
+2. **Inspect.** Checks whether this node's unit is already active. If so, the
    install is skipped (safe to rerun this workflow) unless `reinstall` is
-   checked, which runs the node's own `k3s-uninstall.sh` first.
-2a. **Node configuration.** Reconciles the four settings below, before k3s
-   ever starts on a fresh node. Idempotent — a re-run against a node that
-   already has all four reports nothing changed, and k3s is restarted only
+   checked, which runs the node's own uninstall script first. Both units are
+   probed either way: finding the *other* role running stops the run rather
+   than installing over it.
+2a. **Node configuration.** Reconciles the four settings below (three on an
+   agent — config.yaml is server-only), before k3s ever starts on a fresh
+   node. Idempotent — a re-run against a node that already has them reports
+   nothing changed, and k3s is restarted only
    when one of the two files k3s reads *at start* actually changed.
 3. **Install.** Downloads the pinned install script to `/tmp/k3s-install.sh`
    on the node and runs it via `sudo env INSTALL_K3S_VERSION=... sh
    /tmp/k3s-install.sh server [--cluster-init | --server https://<node1>:6443]
    --disable servicelb --token ...` — `sudo env`, not a bare `sudo VAR=val`
    prefix, because most sudoers policies reset the environment before exec
-   and would otherwise silently drop the version pin.
-4. **Verify.** Polls until `k3s.service` is active and the node's own name
-   shows `Ready` in `k3s kubectl get nodes`, checks `vm.max_map_count`, etcd's
-   `:2381` and the image-GC thresholds the *running kubelet* resolved (asked of
-   kubelet's own `/configz` through the apiserver, not of the file it was
-   handed — a drop-in that is present and ignored is the failure this catches),
+   and would otherwise silently drop the version pin. `role: agent` runs
+   `agent --server https://<server>:6443 --token ...` instead, with no
+   `--disable servicelb`: that is a server flag, and an agent handed one
+   fails the same way an inherited config.yaml does. Any `node_labels` are
+   appended as `--node-label`.
+4. **Verify.** Polls until the unit is active and the node's own name shows
+   `Ready` in `k3s kubectl get nodes` — asked of the node itself for a
+   server, of `join_server` for an agent, which has no kubeconfig of its own.
+   Checks `vm.max_map_count`, etcd's `:2381` (servers only) and the image-GC
+   thresholds the *running kubelet* resolved (asked of kubelet's own
+   `/configz` through the apiserver, not of the file it was handed — a
+   drop-in that is present and ignored is the failure this catches). For an
+   agent it also asserts `ROLES` reads `<none>`, which is the one thing that
+   tells a worker from a server at a glance. Reconciles `node_labels`,
    reports journald's size against its cap, then prints the full node list to
    the job summary.
 
@@ -109,12 +187,13 @@ workflow from its branch.
 
 Each is structural rather than an operator's preference, so none of them is a
 workflow input — the value lives in
-[`Install-K3sNode.ps1`](Install-K3sNode.ps1) beside the reasoning for it.
+[`Install-K3sNode.ps1`](Install-K3sNode.ps1) beside the reasoning for it. An
+agent reconciles three of the four; the second row is server-only.
 
 | Setting | File on the node | Why | Restart |
 |---|---|---|---|
 | `vm.max_map_count=262144` | `/etc/sysctl.d/60-aerie-opensearch.conf` | OpenSearch refuses to start below it ([the cluster plan](../../docs/plans/swarm/phase-6-observability.md) 6b.1) | applied live, none needed |
-| `etcd-expose-metrics: true` | `/etc/rancher/k3s/config.yaml` | without it the quorum alert has nothing to evaluate (6b.1) | k3s, if it changed |
+| `etcd-expose-metrics: true` | `/etc/rancher/k3s/config.yaml` | without it the quorum alert has nothing to evaluate (6b.1). **Servers only** — see "Servers and agents" above | k3s, if it changed |
 | image GC at `70`/`55` | `/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/50-aerie-image-gc.conf` | kubelet's own 85/80 makes the first image GC of a node's life happen under pressure ([node storage](../../docs/plans/node-storage.md) 2.1) | k3s, if it changed |
 | `SystemMaxUse=512M` | `/etc/systemd/journald.conf.d/60-aerie-journal-cap.conf` | journald's default ceiling scales with the disk (10% capped at 4G), so a bigger OS disk raises it rather than bounding it ([node storage](../../docs/plans/node-storage.md) 2.2) | journald only, restarted and vacuumed in place |
 

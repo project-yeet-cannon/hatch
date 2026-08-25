@@ -1,8 +1,9 @@
 <#
 .SYNOPSIS
-    Installs and starts k3s server on one already-provisioned Aerie node,
-    either initializing the cluster's embedded etcd or joining an existing
-    one, over SSH from the Hyper-V host - no hand-typed SSH session.
+    Installs and starts k3s on one already-provisioned Aerie node - as a
+    server that initializes the cluster's embedded etcd or joins an existing
+    one, or as an agent (worker) that joins without ever becoming an etcd
+    member - over SSH from the Hyper-V host, no hand-typed SSH session.
 
 .DESCRIPTION
     This is the entry point for the cluster plan Phase 2's first step. It is the
@@ -13,35 +14,64 @@
 
     Unlike Initialize-AerieNode.ps1 there is no VM to build - this only ever
     talks to a node that already answers SSH. It runs the official k3s
-    install script (get.k3s.io) remotely, pinned to -K3sVersion, as either:
+    install script (get.k3s.io) remotely, pinned to -K3sVersion, as one of:
 
-      -ClusterInit   server --cluster-init --disable servicelb --token <token>
-      -JoinServer ip server --server https://<ip>:6443 --disable servicelb
-                          --token <token>
+      -ClusterInit          server --cluster-init --disable servicelb
+                                   --token <token>
+      -JoinServer ip        server --server https://<ip>:6443
+                                   --disable servicelb --token <token>
+      -JoinServer ip -Agent agent  --server https://<ip>:6443 --token <token>
 
     Exactly one of -ClusterInit / -JoinServer is required. Use -ClusterInit
     for the first server (forms the single-node etcd cluster); use
-    -JoinServer <node1-ip> for every server after that.
+    -JoinServer <node1-ip> for every server after that; add -Agent to join as
+    a worker instead.
+
+    An agent is a normal, schedulable node that runs no control plane - no
+    apiserver, no etcd member, '<none>' under ROLES - which is the right shape
+    for capacity that is expected to come and go (the part-time-node plan
+    Phase 1). It changes four things here, and each of them is a way to get an
+    install that looks clean and is wrong:
+
+      - the unit is k3s-agent.service, and the install script writes
+        k3s-agent-uninstall.sh rather than k3s-uninstall.sh beside it.
+      - /etc/rancher/k3s/config.yaml is read by 'k3s agent' too, but k3s
+        filters the keys it finds there only against the *server* command's
+        flags (pkg/configfilearg's ValidFlags has no agent entry, and its
+        stripInvalidFlags returns the list untouched when a command has none).
+        etcd-expose-metrics therefore reaches the agent CLI verbatim and the
+        unit dies at start on 'flag provided but not defined'. An agent gets
+        no config.yaml at all - and one left behind by an earlier server
+        install is removed here rather than inherited.
+      - an agent has no kubeconfig and no apiserver, so every cluster-level
+        question in Verify is asked of -JoinServer over SSH instead. That is
+        why port 22 there is a preflight check for agents.
+      - there is no etcd, so the :2381 metrics probe is skipped.
 
     This is also how the cluster plan's Phase 6b.1 and the node-storage
     plan's Phase 2 land: re-dispatching against a node that is already active
     reconciles all four node-level settings - vm.max_map_count,
     etcd-expose-metrics, kubelet's image-GC thresholds and journald's size cap
     - without a full reinstall, restarting k3s only if a file k3s reads at
-    start actually changed. Dispatch one node at a time and wait for every
-    node to show Ready before reconfiguring the next: each restart takes an
-    etcd member down for its duration.
+    start actually changed (an agent reconciles three of the four, and its
+    restart costs the cluster nothing but the node). Dispatch one node at a
+    time and wait for every node to show Ready before reconfiguring the next:
+    each server restart takes an etcd member down for its duration.
 
     Stages:
       1. Preflight - SSH key resolves, the OpenSSH client is present, the
                      node answers port 22, and (for -JoinServer) the target
-                     server's apiserver (6443), etcd (2379-2380), and kubelet
-                     (10250) ports answer too. Cheap failures before an
-                     install that downloads a binary and starts etcd.
+                     server's apiserver (6443) and kubelet (10250) ports
+                     answer too - plus etcd (2379-2380) when joining as a
+                     server, which an agent never speaks, and port 22 when
+                     joining as an agent, which Verify needs. Cheap failures
+                     before an install that downloads a binary and starts
+                     etcd.
       2. Inspect   - checks whether k3s is already active on the node. If so,
                      the install is skipped (idempotent re-run) unless
                      -Reinstall forces a clean uninstall/reinstall.
-      3. Node configuration - writes four node-level settings: the
+      3. Node configuration - writes four node-level settings (three on an
+                     agent, which has no config.yaml): the
                      vm.max_map_count sysctl drop-in (applied live too) and
                      /etc/rancher/k3s/config.yaml's etcd-expose-metrics from
                      the cluster plan Phase 6b.1, plus kubelet's image-GC
@@ -51,21 +81,25 @@
                      start actually changed - a fresh install below picks
                      both up on its own first start; journald is restarted
                      and vacuumed in place instead, since k3s does not read
-                     it. Also symlinks /root/.kube/config to k3s's
-                     own kubeconfig, so kubectl and flux both work for root
-                     with no KUBECONFIG to remember while debugging from the
-                     node's own console - operator ergonomics, not a
+                     it. On servers only, also symlinks /root/.kube/config to
+                     k3s's own kubeconfig, so kubectl and flux both work for
+                     root with no KUBECONFIG to remember while debugging from
+                     the node's own console - operator ergonomics, not a
                      cluster plan step, and safe as a dangling link on a
-                     node that hasn't been installed yet.
+                     node that hasn't been installed yet. An agent never gets
+                     that file, so the link would dangle forever.
       4. Install   - downloads and runs the pinned install script on the node
                      via sudo (the Phase 1 cloud-init user has
                      NOPASSWD:ALL sudo).
-      5. Verify    - polls until the k3s.service is active and this node's
-                     own name shows Ready in `k3s kubectl get nodes`, checks
-                     vm.max_map_count, etcd's :2381 metrics endpoint and the
-                     image-GC thresholds the running kubelet actually
-                     resolved (not the file it was handed), reports journald's
-                     size against its cap, then prints the full node list.
+      5. Verify    - polls until the unit is active and this node's own name
+                     shows Ready in `k3s kubectl get nodes` (asked of the node
+                     itself for a server, of -JoinServer for an agent), checks
+                     vm.max_map_count, etcd's :2381 metrics endpoint (servers
+                     only) and the image-GC thresholds the running kubelet
+                     actually resolved (not the file it was handed), asserts
+                     ROLES is '<none>' on an agent, reconciles -NodeLabel
+                     against the live Node object, reports journald's size
+                     against its cap, then prints the full node list.
 
 .PARAMETER K3sVersion
     Optional override. The pin normally comes from scripts/versions.json
@@ -76,10 +110,34 @@
     Renovate ask under Goal 6.5).
 
 .PARAMETER Token
-    The shared cluster token, identical across every server in the cluster.
-    Generate once with `openssl rand -hex 32` before installing node 1, and
-    pass the same value again for every later node. Store it like the SSH
-    keys - never in git.
+    The shared cluster token, identical across every node in the cluster,
+    agents included. Generate once with `openssl rand -hex 32` before
+    installing node 1, and pass the same value again for every later node.
+    Store it like the SSH keys - never in git.
+
+.PARAMETER Agent
+    Join as a worker (`k3s agent`) rather than as a fourth server. Requires
+    -JoinServer. See the .DESCRIPTION above for the four things it changes,
+    and the part-time-node plan for why a cluster wants the option at all.
+
+.PARAMETER NodeLabel
+    Zero or more `key=value` labels to put on this node, passed to the install
+    as --node-label and reconciled against the live Node object on every
+    re-run. Placement rules should key off these rather than off a node
+    *name*: a name says which machine it is, a label says what it can do, and
+    only the second survives the machine being replaced.
+
+    Labels named here are added or overwritten; nothing is removed, since this
+    script does not own the whole label set (kubelet, k3s and Longhorn all put
+    their own there). --node-label alone would not be enough: kubelet applies
+    it at registration and never again, so a re-dispatch against a node that
+    already joined would report success having changed nothing.
+
+    Use a prefix of your own (aerie.family/...). Most kubernetes.io/ and
+    k8s.io/ keys are refused to a self-registering kubelet by the
+    NodeRestriction admission plugin, which fails the node's *registration* -
+    an install that ends at 'timed out waiting for Ready' with the reason
+    only in the node's journal.
 
 .EXAMPLE
     # Node 1 - forms the cluster, at the committed pin
@@ -90,6 +148,14 @@
     # Node 2 - joins node 1
     .\Install-K3sNode.ps1 -VMName aerie-node-2 -IPAddress 10.0.0.22 `
         -Token $token -JoinServer 10.0.0.21 `
+        -SshPrivateKeyPath ~\.ssh\id_ed25519
+
+.EXAMPLE
+    # A worker, not a fourth control-plane member - the part-time-node plan's
+    # host D, labelled by what it is rather than by what it is called
+    .\Install-K3sNode.ps1 -VMName aerie-node-3 -IPAddress 10.0.0.24 `
+        -Token $token -JoinServer 10.0.0.21 -Agent `
+        -NodeLabel 'aerie.family/availability=part-time', 'aerie.family/storage=none' `
         -SshPrivateKeyPath ~\.ssh\id_ed25519
 
 .EXAMPLE
@@ -121,8 +187,27 @@ param(
     [switch]$ClusterInit,
 
     [Parameter(Mandatory, ParameterSetName = 'Join')]
+    [Parameter(Mandatory, ParameterSetName = 'Agent')]
     [ValidatePattern('^(\d{1,3}\.){3}\d{1,3}$')]
     [string]$JoinServer,
+
+    # Only valid alongside -JoinServer: an agent has nothing to initialize.
+    # PowerShell resolves this on its own - -JoinServer alone satisfies the
+    # 'Join' set, -JoinServer with -Agent satisfies only 'Agent'.
+    [Parameter(Mandatory, ParameterSetName = 'Agent')]
+    [switch]$Agent,
+
+    # key=value, validated to Kubernetes' own label grammar (optional
+    # DNS-subdomain prefix, then a <=63 character name and value). Rejecting a
+    # malformed one here rather than at the apiserver keeps a typo from
+    # becoming an install that succeeds and a placement rule that never
+    # matches - and keeps the value shell-safe on its way through
+    # sudo -> install script -> systemd unit.
+    # (?-i) because ValidatePattern matches case-insensitively by default,
+    # which would let an upper-case prefix through - and Kubernetes requires
+    # that half to be a lower-case DNS subdomain.
+    [ValidatePattern('(?-i)^([a-z0-9]([-a-z0-9.]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?=([A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?)?$')]
+    [string[]]$NodeLabel = @(),
 
     [string]$Username = 'aerie',
 
@@ -140,7 +225,10 @@ param(
     # inputs. Etcd members don't remove themselves on uninstall - if this is
     # a server that isn't the last one standing, remove it from the cluster's
     # member list first (`k3s kubectl` from a surviving node) or it leaves a
-    # dead voter behind.
+    # dead voter behind. An agent has no member list to leave, so -Reinstall
+    # there costs only the pods it was running. It is not how a node changes
+    # role: Inspect refuses a dispatch that finds the other unit active, and
+    # names the uninstall script to run first.
     [switch]$Reinstall
 )
 
@@ -159,6 +247,20 @@ if (-not $K3sVersion) {
 else {
     $script:K3sVersionSource = '-K3sVersion override'
 }
+
+# One switch, read in a dozen places below - named once so no stage has to
+# re-derive it from the parameter set. k3s's install script names the unit
+# after the command it was given ('k3s' for a server, 'k3s-<command>'
+# otherwise) and writes the matching uninstall script beside it, so the
+# service name is a role fact rather than a constant.
+$isAgent = [bool]$Agent
+$serviceName = if ($isAgent) { 'k3s-agent' } else { 'k3s' }
+$otherServiceName = if ($isAgent) { 'k3s' } else { 'k3s-agent' }
+$uninstallScript = "/usr/local/bin/$serviceName-uninstall.sh"
+$roleDescription =
+if ($ClusterInit) { 'cluster-init (first server, forms etcd)' }
+elseif ($isAgent) { "agent (worker) joining $JoinServer - no etcd, no apiserver" }
+else { "server joining $JoinServer" }
 
 $script:StageNumber = 0
 function Write-Stage {
@@ -351,15 +453,32 @@ try {
         # connect can't meaningfully test a connectionless port, and
         # Debian/Ubuntu cloud images ship with no firewall active by default,
         # which is why this has stayed a non-issue in practice.
-        $joinPorts = [ordered]@{
-            6443  = 'k3s apiserver'
-            2379  = 'etcd client'
-            2380  = 'etcd peer'
-            10250 = 'kubelet'
+        #
+        # A list of pairs rather than a hashtable keyed on the port: [ordered]
+        # returns an OrderedDictionary, whose indexer binds an Int32 argument
+        # to its *positional* overload, so $ports[6443] reads as "the 6444th
+        # entry" and quietly returns nothing.
+        $joinPorts = New-Object Collections.Generic.List[hashtable]
+        $joinPorts.Add(@{ Port = 6443; Name = 'k3s apiserver' })
+        if (-not $isAgent) {
+            # An agent talks to the apiserver and is talked to on its own
+            # kubelet port; it never joins the etcd cluster, so requiring
+            # 2379-2380 of the server it joins would fail an install for a
+            # reason that could not affect it.
+            $joinPorts.Add(@{ Port = 2379; Name = 'etcd client' })
+            $joinPorts.Add(@{ Port = 2380; Name = 'etcd peer' })
         }
-        foreach ($port in $joinPorts.Keys) {
-            if (-not (Test-TcpPort -IPAddress $JoinServer -Port $port)) {
-                $failures.Add("-JoinServer $JoinServer isn't answering on $port ($($joinPorts[$port])) from this machine. Confirm node 1 finished -ClusterInit, the address is right, and nothing is firewalling node-to-node traffic.")
+        $joinPorts.Add(@{ Port = 10250; Name = 'kubelet' })
+        if ($isAgent) {
+            # Not node-to-node traffic - this script's own. An agent has no
+            # kubeconfig, so Verify asks the join server every cluster-level
+            # question over SSH with the same key. Unchecked, a missing route
+            # there fails the run after the install rather than before it.
+            $joinPorts.Add(@{ Port = 22; Name = 'SSH, which Verify uses to ask this server about the agent' })
+        }
+        foreach ($portProbe in $joinPorts) {
+            if (-not (Test-TcpPort -IPAddress $JoinServer -Port $portProbe.Port)) {
+                $failures.Add("-JoinServer $JoinServer isn't answering on $($portProbe.Port) ($($portProbe.Name)) from this machine. Confirm node 1 finished -ClusterInit, the address is right, and nothing is firewalling node-to-node traffic.")
             }
         }
     }
@@ -370,7 +489,11 @@ try {
     }
 
     Write-Host "Node:      $VMName ($IPAddress)"
-    Write-Host "Role:      $(if ($ClusterInit) { 'cluster-init (first server, forms etcd)' } else { "join existing cluster at $JoinServer" })"
+    Write-Host "Role:      $roleDescription"
+    Write-Host "Unit:      $serviceName.service"
+    if ($NodeLabel.Count -gt 0) {
+        Write-Host "Labels:    $($NodeLabel -join ', ')"
+    }
     Write-Host "k3s:       $K3sVersion (pinned, from $script:K3sVersionSource)"
     if ($keyFingerprint) {
         Write-Host "SSH key:   $keyFingerprint"
@@ -393,6 +516,8 @@ try {
     $probeScript = (@(
             'echo ''--- service'''
             'systemctl is-active k3s 2>/dev/null || echo inactive'
+            'echo ''--- service-agent'''
+            'systemctl is-active k3s-agent 2>/dev/null || echo inactive'
             'echo ''--- version'''
             '(command -v k3s >/dev/null 2>&1 && k3s --version 2>/dev/null | head -n1) || echo ''k3s not installed'''
             'echo ''--- sysctl'''
@@ -418,8 +543,16 @@ try {
         throw "SSH to $IPAddress as '$Username' failed$(if ($permanentReason) { ": $permanentReason" }):`n$($probe.StdErr)"
     }
 
-    $serviceState = (Get-ProbeSection -Output $probe.StdOut -Name 'service').Trim()
-    if (-not $serviceState) { $serviceState = 'unknown' }
+    # Both units are probed on every run, whichever one this dispatch asks
+    # for: a node is a server or an agent, never both, and finding the other
+    # one active is the difference between 'already done' and 'about to
+    # install a second k3s over the top of the first'.
+    $serverState = (Get-ProbeSection -Output $probe.StdOut -Name 'service').Trim()
+    if (-not $serverState) { $serverState = 'unknown' }
+    $agentState = (Get-ProbeSection -Output $probe.StdOut -Name 'service-agent').Trim()
+    if (-not $agentState) { $agentState = 'unknown' }
+    $serviceState = if ($isAgent) { $agentState } else { $serverState }
+    $otherServiceState = if ($isAgent) { $serverState } else { $agentState }
     $installedVersion = (Get-ProbeSection -Output $probe.StdOut -Name 'version').Trim()
     if (-not $installedVersion) { $installedVersion = 'unknown' }
     $liveMaxMapCount = (Get-ProbeSection -Output $probe.StdOut -Name 'sysctl').Trim()
@@ -430,8 +563,23 @@ try {
     $currentJournalUsage = (Get-ProbeSection -Output $probe.StdOut -Name 'journal-usage').Trim()
     $currentKubeconfigLinkTarget = (Get-ProbeSection -Output $probe.StdOut -Name 'kubeconfig-link').Trim()
 
-    Write-Host "k3s.service: $serviceState"
+    Write-Host "$serviceName.service: $serviceState"
     Write-Host "k3s binary:  $installedVersion"
+
+    # Not recoverable by installing anyway: `k3s server` and `k3s agent` share
+    # /var/lib/rancher/k3s and would run two kubelets against one node.
+    if ($otherServiceState -eq 'active') {
+        throw @"
+'$VMName' is already running $otherServiceName.service, but this dispatch asks for $serviceName.service.
+
+A node is one or the other - both units claim /var/lib/rancher/k3s and the same kubelet, so installing the second over the first leaves two of them fighting for one node. Changing a node's role is a rebuild, not a reconfiguration.
+
+To change it deliberately, uninstall the current role first, then re-dispatch:
+  ssh $Username@$IPAddress sudo /usr/local/bin/$otherServiceName-uninstall.sh
+
+If $otherServiceName is a server that is still an etcd member, remove it from the member list from a surviving node before uninstalling it, or it leaves a dead voter behind.
+"@
+    }
 
     $alreadyActive = $serviceState -eq 'active'
     # Captured before -Reinstall can flip $alreadyActive below - it gates the
@@ -440,10 +588,10 @@ try {
     # never touched the install pipeline at all.
     $wasAlreadyActive = $alreadyActive
     if ($alreadyActive -and $Reinstall) {
-        Write-Warning "-Reinstall: k3s is active on '$VMName' - running its uninstall script before reinstalling with today's inputs. If this is a server node and other servers are still up, it will not have removed itself from the etcd member list first."
-        $uninstall = Invoke-NodeSsh @ssh -Command "test -x /usr/local/bin/k3s-uninstall.sh && sudo /usr/local/bin/k3s-uninstall.sh || echo 'no k3s-uninstall.sh found'" -ConnectTimeoutSec 60
+        Write-Warning "-Reinstall: $serviceName is active on '$VMName' - running its uninstall script before reinstalling with today's inputs.$(if (-not $isAgent) { ' If this is a server node and other servers are still up, it will not have removed itself from the etcd member list first.' })"
+        $uninstall = Invoke-NodeSsh @ssh -Command "test -x $uninstallScript && sudo $uninstallScript || echo 'no $uninstallScript found'" -ConnectTimeoutSec 60
         if ($uninstall.ExitCode -ne 0) {
-            throw "k3s-uninstall.sh failed on $IPAddress (exit $($uninstall.ExitCode)):`n$($uninstall.StdOut)$($uninstall.StdErr)"
+            throw "$uninstallScript failed on $IPAddress (exit $($uninstall.ExitCode)):`n$($uninstall.StdOut)$($uninstall.StdErr)"
         }
         Write-Host '  uninstalled.'
         $alreadyActive = $false
@@ -458,6 +606,11 @@ try {
     # ever starts on a fresh node - see those docs for why none of them can be
     # a chart-side or in-cluster fix. Idempotent: a re-run against a node that
     # already has all four reports nothing changed.
+    #
+    # Three of the four apply to an agent unchanged - the sysctl, the kubelet
+    # drop-in (k3s runs kubelet from the same /var/lib/rancher/k3s/agent tree
+    # on both roles) and the journald cap. The fourth, config.yaml, is
+    # server-only and actively harmful on an agent; see its branch below.
 
     $configActions = New-Object Collections.Generic.List[string]
 
@@ -488,20 +641,65 @@ try {
         Write-Host "vm.max_map_count: applied live (was $liveMaxMapCount)."
     }
 
-    $k3sConfigChanged = $currentK3sConfig -ne $desiredK3sConfig
-    if (-not $k3sConfigChanged) {
-        Write-Host "$k3sConfigPath already matches - not rewriting."
+    # Declared before the branch so the restart decision below can read it on
+    # either path.
+    $k3sConfigChanged = $false
+    if ($isAgent) {
+        # `k3s agent` reads this file too - configfilearg's After list names
+        # both commands - but it only filters the keys it finds against the
+        # *server* command's flags: ValidFlags has no 'agent' entry, and
+        # stripInvalidFlags returns the list untouched for any command that
+        # has none. So every key here is handed to the agent CLI verbatim, and
+        # etcd-expose-metrics is not one of its flags. The unit then exits at
+        # start on 'flag provided but not defined', which systemd reports as a
+        # failed install rather than as the configuration mistake it is.
+        #
+        # An agent therefore gets no config.yaml at all. Nothing this script
+        # manages needs to be in one on an agent, so there is no agent-shaped
+        # version of it to write.
+        if ($null -eq $currentK3sConfig) {
+            Write-Host "$k3sConfigPath absent - correct for an agent (it is server-only here)."
+        }
+        elseif ($currentK3sConfig -eq $desiredK3sConfig) {
+            # This node's own managed copy, left by an earlier server install
+            # on the way to becoming an agent. Ours to remove.
+            $removeK3sConfig = Invoke-NodeSsh @ssh -ConnectTimeoutSec 15 -Command (
+                'sudo rm -f {0}' -f $k3sConfigPath
+            )
+            if ($removeK3sConfig.ExitCode -ne 0) {
+                throw "Removing $k3sConfigPath on $IPAddress failed (exit $($removeK3sConfig.ExitCode)):`n$($removeK3sConfig.StdOut)$($removeK3sConfig.StdErr)"
+            }
+            $k3sConfigChanged = $true
+            $configActions.Add("removed $k3sConfigPath (server-only - k3s agent would exit at start on its etcd-expose-metrics key)")
+            Write-Host "$k3sConfigPath removed - server-only, and k3s agent would exit at start on it."
+        }
+        else {
+            throw @"
+$k3sConfigPath exists on '$VMName' with content this script did not write, and this dispatch installs an agent.
+
+k3s hands every key in that file to 'k3s agent' without filtering it against the agent's own flags, so any server-only key in there stops the unit at start with 'flag provided but not defined' - an install that reports success and a node that never joins.
+
+Read the file, move what belongs elsewhere, and delete it before re-dispatching:
+  ssh $Username@$IPAddress cat $k3sConfigPath
+"@
+        }
     }
     else {
-        $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($desiredK3sConfig))
-        $writeK3sConfig = Invoke-NodeSsh @ssh -ConnectTimeoutSec 30 -Command (
-            'sudo mkdir -p /etc/rancher/k3s && echo {0} | base64 -d | sudo tee {1} >/dev/null' -f $encoded, $k3sConfigPath
-        )
-        if ($writeK3sConfig.ExitCode -ne 0) {
-            throw "Writing $k3sConfigPath on $IPAddress failed (exit $($writeK3sConfig.ExitCode)):`n$($writeK3sConfig.StdOut)$($writeK3sConfig.StdErr)"
+        $k3sConfigChanged = $currentK3sConfig -ne $desiredK3sConfig
+        if (-not $k3sConfigChanged) {
+            Write-Host "$k3sConfigPath already matches - not rewriting."
         }
-        $configActions.Add("wrote $k3sConfigPath")
-        Write-Host "$k3sConfigPath written."
+        else {
+            $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($desiredK3sConfig))
+            $writeK3sConfig = Invoke-NodeSsh @ssh -ConnectTimeoutSec 30 -Command (
+                'sudo mkdir -p /etc/rancher/k3s && echo {0} | base64 -d | sudo tee {1} >/dev/null' -f $encoded, $k3sConfigPath
+            )
+            if ($writeK3sConfig.ExitCode -ne 0) {
+                throw "Writing $k3sConfigPath on $IPAddress failed (exit $($writeK3sConfig.ExitCode)):`n$($writeK3sConfig.StdOut)$($writeK3sConfig.StdErr)"
+            }
+            $configActions.Add("wrote $k3sConfigPath")
+            Write-Host "$k3sConfigPath written."
+        }
     }
 
     $kubeletDropInChanged = $currentKubeletDropIn -ne $desiredKubeletDropIn
@@ -550,7 +748,15 @@ try {
     # Not one of the plans' settings - tracked in its own list so the
     # messaging below stays about what those steps actually assert.
     $kubeconfigActions = New-Object Collections.Generic.List[string]
-    if ($currentKubeconfigLinkTarget -eq $k3sYamlPath) {
+    if ($isAgent) {
+        # k3s never writes $k3sYamlPath on an agent - there is no apiserver on
+        # this node to hand out credentials for - so the link would dangle for
+        # the node's whole life rather than resolve on first start. The
+        # ergonomic this buys a server (a bare `kubectl` from its console)
+        # isn't available on an agent at all.
+        Write-Host "Root's kubeconfig: skipped - an agent has no $k3sYamlPath to point at."
+    }
+    elseif ($currentKubeconfigLinkTarget -eq $k3sYamlPath) {
         Write-Host "$kubeconfigLinkPath already links to $k3sYamlPath - not rewriting."
     }
     else {
@@ -580,12 +786,12 @@ try {
         # membership, per its own notes above). A fresh install below picks
         # both files up on its own first start, so this only fires when
         # reconfiguring a node that joined in an earlier phase.
-        Write-Warning "Restarting k3s on '$VMName' to apply $($restartReasons -join ' and '). This takes one etcd member down for the length of the restart - wait for every node to show Ready (kubectl get nodes) before reconfiguring the next one."
-        $restart = Invoke-NodeSsh @ssh -Command 'sudo systemctl restart k3s' -ConnectTimeoutSec 30
+        Write-Warning "Restarting $serviceName on '$VMName' to apply $($restartReasons -join ' and ').$(if ($isAgent) { ' This node stops running pods for the length of the restart; it is not an etcd member, so the cluster loses only its capacity.' } else { ' This takes one etcd member down for the length of the restart - wait for every node to show Ready (kubectl get nodes) before reconfiguring the next one.' })"
+        $restart = Invoke-NodeSsh @ssh -Command "sudo systemctl restart $serviceName" -ConnectTimeoutSec 30
         if ($restart.ExitCode -ne 0) {
-            throw "systemctl restart k3s failed on $IPAddress (exit $($restart.ExitCode)):`n$($restart.StdOut)$($restart.StdErr)"
+            throw "systemctl restart $serviceName failed on $IPAddress (exit $($restart.ExitCode)):`n$($restart.StdOut)$($restart.StdErr)"
         }
-        $configActions.Add("restarted k3s to apply $($restartReasons -join ' and ')")
+        $configActions.Add("restarted $serviceName to apply $($restartReasons -join ' and ')")
     }
 
     if ($configActions.Count -eq 0) {
@@ -593,18 +799,31 @@ try {
     }
 
     if ($alreadyActive) {
-        Write-Host "k3s is already active on '$VMName' - skipping install (pass -Reinstall to force a clean reinstall). Proceeding to Verify."
+        Write-Host "$serviceName is already active on '$VMName' - skipping install (pass -Reinstall to force a clean reinstall). Proceeding to Verify."
     }
     else {
         # ---------------------------------------------------------------- #
         Write-Stage 'Install'
         # ---------------------------------------------------------------- #
 
+        # Applied at registration. Kubelet writes them onto the Node object the
+        # first time it creates one and never revisits them, which is why
+        # Verify reconciles the same list against the live object afterwards -
+        # this half only covers a node's first join.
+        $labelArgs = @()
+        foreach ($label in $NodeLabel) { $labelArgs += @('--node-label', $label) }
+
         $k3sArgs = if ($ClusterInit) {
-            @('server', '--cluster-init', '--disable', 'servicelb', '--token', $Token)
+            @('server', '--cluster-init', '--disable', 'servicelb', '--token', $Token) + $labelArgs
+        }
+        elseif ($isAgent) {
+            # No --disable servicelb: that is a server flag, and handing it to
+            # an agent fails the same way an inherited config.yaml does. The
+            # disable is a cluster-wide decision the servers already made.
+            @('agent', '--server', "https://${JoinServer}:6443", '--token', $Token) + $labelArgs
         }
         else {
-            @('server', '--server', "https://${JoinServer}:6443", '--disable', 'servicelb', '--token', $Token)
+            @('server', '--server', "https://${JoinServer}:6443", '--disable', 'servicelb', '--token', $Token) + $labelArgs
         }
 
         # Downloaded to a file rather than piped straight into sh: leaves the
@@ -620,7 +839,7 @@ try {
         # works regardless of that policy.
         $installCmd = "curl -sfL https://get.k3s.io -o /tmp/k3s-install.sh && sudo env INSTALL_K3S_VERSION='$K3sVersion' sh /tmp/k3s-install.sh $($k3sArgs -join ' ')"
 
-        Write-Host "Installing k3s $K3sVersion on '$VMName' ..."
+        Write-Host "Installing k3s $K3sVersion on '$VMName' as $(if ($isAgent) { 'an agent' } else { 'a server' }) ..."
         $install = Invoke-NodeSsh @ssh -Command $installCmd -ConnectTimeoutSec 30
         if ($install.ExitCode -ne 0) {
             throw "k3s install failed on $IPAddress (exit $($install.ExitCode)):`n$($install.StdOut)$($install.StdErr)"
@@ -634,32 +853,58 @@ try {
 
     $deadline = (Get-Date).AddMinutes($ReadyTimeoutMinutes)
 
-    Write-Host 'Waiting for k3s.service to be active ...'
+    # Where a cluster-level question gets asked. A server can answer for
+    # itself - k3s writes it a kubeconfig and it runs the apiserver. An agent
+    # has neither, so `k3s kubectl` there fails against a default
+    # localhost:8080; the same questions go to the server it joined, over SSH
+    # with the same key material. That is what the port 22 preflight above is
+    # for.
+    $clusterSsh = if ($isAgent) {
+        @{ IPAddress = $JoinServer; User = $Username; KeyPath = $privateKeyPath; KnownHostsFile = $knownHostsFile }
+    }
+    else { $ssh }
+    $clusterHost = if ($isAgent) { $JoinServer } else { $IPAddress }
+
+    Write-Host "Waiting for $serviceName.service to be active ..."
     while ($true) {
-        $status = Invoke-NodeSsh @ssh -Command 'systemctl is-active k3s 2>/dev/null || echo inactive' -ConnectTimeoutSec 15
+        $status = Invoke-NodeSsh @ssh -Command "systemctl is-active $serviceName 2>/dev/null || echo inactive" -ConnectTimeoutSec 15
         if ($status.ExitCode -eq 0 -and $status.StdOut.Trim() -eq 'active') { break }
         if ((Get-Date) -gt $deadline) {
-            throw "Timed out after $ReadyTimeoutMinutes min waiting for k3s.service to become active on $IPAddress. Inspect with: ssh $Username@$IPAddress sudo journalctl -u k3s -n 100"
+            throw "Timed out after $ReadyTimeoutMinutes min waiting for $serviceName.service to become active on $IPAddress. Inspect with: ssh $Username@$IPAddress sudo journalctl -u $serviceName -n 100"
         }
         Start-Sleep -Seconds 5
     }
-    Write-Host '  k3s.service active.'
+    Write-Host "  $serviceName.service active."
 
-    Write-Host "Waiting for node '$hostname' to report Ready ..."
+    Write-Host "Waiting for node '$hostname' to report Ready$(if ($isAgent) { " (asked of $JoinServer)" }) ..."
     while ($true) {
-        $nodeStatus = Invoke-NodeSsh @ssh -Command "sudo k3s kubectl get node $hostname --no-headers 2>/dev/null" -ConnectTimeoutSec 15
+        $nodeStatus = Invoke-NodeSsh @clusterSsh -Command "sudo k3s kubectl get node $hostname --no-headers 2>/dev/null" -ConnectTimeoutSec 15
         if ($nodeStatus.ExitCode -eq 0 -and $nodeStatus.StdOut -match '^\S+\s+Ready\b') { break }
         if ((Get-Date) -gt $deadline) {
-            throw "Timed out after $ReadyTimeoutMinutes min waiting for '$hostname' to report Ready. Inspect with: ssh $Username@$IPAddress sudo k3s kubectl get nodes -o wide"
+            throw "Timed out after $ReadyTimeoutMinutes min waiting for '$hostname' to report Ready. Inspect with: ssh $Username@$clusterHost sudo k3s kubectl get nodes -o wide, and ssh $Username@$IPAddress sudo journalctl -u $serviceName -n 100"
         }
         Start-Sleep -Seconds 5
     }
     Write-Host '  node Ready.'
 
+    if ($isAgent) {
+        # The part-time-node plan Phase 1's exit criterion, and the one thing
+        # that distinguishes this install from the server one at a glance: an
+        # agent that somehow came up as a server would satisfy every other
+        # check on this page. ROLES is the third column of `get node`.
+        $nodeColumns = @($nodeStatus.StdOut.Trim() -split '\s+')
+        $reportedRoles = if ($nodeColumns.Count -ge 3) { $nodeColumns[2] } else { '' }
+        if ($reportedRoles -ne '<none>') {
+            throw "'$hostname' is Ready but reports ROLES '$reportedRoles' rather than '<none>' - that is a control-plane node, not an agent. Confirm $serviceName.service is what is running (not k3s.service) and that this node was not previously installed as a server."
+        }
+        Write-Host '  ROLES: <none> (agent, as intended).'
+    }
+
     # Each managed setting's own exit criterion - checked here rather than
     # left to a later gate script, so a run that reports success actually
-    # satisfies them instead of finding out at 6b.5/6b.9, or a week into the
-    # node-storage plan's 2.3, several steps and possibly days later.
+    # satisfies them instead of finding out at 6b.5/6b.9, or a week later when
+    # the node-storage plan's 4.2 is read, several steps and possibly days
+    # later.
     Write-Host 'Verifying node settings ...'
     # sudo, not a bare 'sysctl': /usr/sbin (where Debian keeps the binary)
     # isn't on the non-root $Username's non-interactive SSH PATH, so a bare
@@ -672,21 +917,29 @@ try {
     }
     Write-Host '  vm.max_map_count: 262144.'
 
-    # etcd binds :2381 as part of the same k3s server process whose apiserver
-    # side just reported this node Ready - a short-lived race, not a
-    # misconfiguration, so this gets its own small retry window rather than
-    # failing on the first miss the instant k3s.service/Ready is achieved.
-    $etcdDeadline = (Get-Date).AddSeconds(60)
-    $etcdMetricsCheck = $null
-    while ($true) {
-        $etcdMetricsCheck = Invoke-NodeSsh @ssh -Command 'curl -s --max-time 5 http://127.0.0.1:2381/metrics | head -1' -ConnectTimeoutSec 15
-        if ($etcdMetricsCheck.ExitCode -eq 0 -and $etcdMetricsCheck.StdOut.Trim()) { break }
-        if ((Get-Date) -gt $etcdDeadline) {
-            throw "etcd's metrics endpoint (127.0.0.1:2381) is not answering on $IPAddress after 60s. Confirm $k3sConfigPath has etcd-expose-metrics: true and that k3s restarted cleanly: ssh $Username@$IPAddress sudo journalctl -u k3s -n 100"
-        }
-        Start-Sleep -Seconds 5
+    if ($isAgent) {
+        # Nothing to answer: an agent runs no etcd, which is most of the point
+        # of it. The quorum alert 6b.8 evaluates is a property of the three
+        # servers, and stays one however many agents join.
+        Write-Host '  etcd metrics endpoint (:2381): skipped - an agent runs no etcd.'
     }
-    Write-Host '  etcd metrics endpoint (:2381): answering.'
+    else {
+        # etcd binds :2381 as part of the same k3s server process whose apiserver
+        # side just reported this node Ready - a short-lived race, not a
+        # misconfiguration, so this gets its own small retry window rather than
+        # failing on the first miss the instant k3s.service/Ready is achieved.
+        $etcdDeadline = (Get-Date).AddSeconds(60)
+        $etcdMetricsCheck = $null
+        while ($true) {
+            $etcdMetricsCheck = Invoke-NodeSsh @ssh -Command 'curl -s --max-time 5 http://127.0.0.1:2381/metrics | head -1' -ConnectTimeoutSec 15
+            if ($etcdMetricsCheck.ExitCode -eq 0 -and $etcdMetricsCheck.StdOut.Trim()) { break }
+            if ((Get-Date) -gt $etcdDeadline) {
+                throw "etcd's metrics endpoint (127.0.0.1:2381) is not answering on $IPAddress after 60s. Confirm $k3sConfigPath has etcd-expose-metrics: true and that k3s restarted cleanly: ssh $Username@$IPAddress sudo journalctl -u k3s -n 100"
+            }
+            Start-Sleep -Seconds 5
+        }
+        Write-Host '  etcd metrics endpoint (:2381): answering.'
+    }
 
     # The node-storage plan 2.1's exit criterion, asked of the kubelet that is
     # actually running rather than of the file it was supposed to read - the
@@ -699,7 +952,7 @@ try {
     $imageGcLow = $null
 
     while ($true) {
-        $configz = Invoke-NodeSsh @ssh -ConnectTimeoutSec 20 -Command (
+        $configz = Invoke-NodeSsh @clusterSsh -ConnectTimeoutSec 20 -Command (
             "sudo k3s kubectl get --raw /api/v1/nodes/$hostname/proxy/configz"
         )
         if ($configz.ExitCode -eq 0 -and $configz.StdOut -match '"imageGCHighThresholdPercent"\s*:\s*(\d+)') {
@@ -708,12 +961,12 @@ try {
             break
         }
         if ((Get-Date) -gt $gcDeadline) {
-            throw "kubelet's live configuration on $IPAddress could not be read after 60s (/api/v1/nodes/$hostname/proxy/configz). Confirm $kubeletDropInPath is valid YAML and that kubelet started: ssh $Username@$IPAddress sudo journalctl -u k3s -n 100"
+            throw "kubelet's live configuration on $IPAddress could not be read after 60s (/api/v1/nodes/$hostname/proxy/configz, asked of $clusterHost). Confirm $kubeletDropInPath is valid YAML and that kubelet started: ssh $Username@$IPAddress sudo journalctl -u $serviceName -n 100"
         }
         Start-Sleep -Seconds 5
     }
     if ($imageGcHigh -ne $imageGcHighTarget -or $imageGcLow -ne $imageGcLowTarget) {
-        throw "kubelet on $IPAddress reports image GC thresholds $imageGcHigh/$imageGcLow, not $imageGcHighTarget/$imageGcLowTarget. $kubeletDropInPath was written but not taken - check it parses (kubelet ignores a drop-in it cannot read) and that k3s restarted after it landed: ssh $Username@$IPAddress sudo journalctl -u k3s -n 100"
+        throw "kubelet on $IPAddress reports image GC thresholds $imageGcHigh/$imageGcLow, not $imageGcHighTarget/$imageGcLowTarget. $kubeletDropInPath was written but not taken - check it parses (kubelet ignores a drop-in it cannot read) and that $serviceName restarted after it landed: ssh $Username@$IPAddress sudo journalctl -u $serviceName -n 100"
     }
     Write-Host "  kubelet image GC: high $imageGcHigh / low $imageGcLow."
 
@@ -734,7 +987,50 @@ try {
         }
     }
 
-    $nodeList = Invoke-NodeSsh @ssh -Command 'sudo k3s kubectl get nodes -o wide' -ConnectTimeoutSec 15
+    # --node-label above only lands at registration - kubelet sets those
+    # labels when it first creates the Node object and never revisits them.
+    # Reconciled here against the live object instead, which is the only thing
+    # a nodeSelector or affinity rule ever reads, and the only way a re-run
+    # against a node that already joined can change anything at all.
+    $labelActions = New-Object Collections.Generic.List[string]
+    if ($NodeLabel.Count -gt 0) {
+        $labelJson = Invoke-NodeSsh @clusterSsh -ConnectTimeoutSec 20 -Command (
+            "sudo k3s kubectl get node $hostname -o jsonpath='{.metadata.labels}'"
+        )
+        if ($labelJson.ExitCode -ne 0 -or -not $labelJson.StdOut.Trim()) {
+            throw "Could not read '$hostname' labels from $clusterHost (exit $($labelJson.ExitCode)):`n$($labelJson.StdOut)$($labelJson.StdErr)"
+        }
+        $currentLabels = @{}
+        foreach ($property in ($labelJson.StdOut.Trim() | ConvertFrom-Json).PSObject.Properties) {
+            $currentLabels[$property.Name] = [string]$property.Value
+        }
+
+        foreach ($label in $NodeLabel) {
+            # Split on the first = only: the validation on -NodeLabel already
+            # forbids a second one, so this is about being explicit rather
+            # than defensive.
+            $key, $value = $label.Split('=', 2)
+            if ($currentLabels.ContainsKey($key) -and $currentLabels[$key] -eq $value) {
+                Write-Host "  label ${key}=${value}: already set."
+                continue
+            }
+            $previous = if ($currentLabels.ContainsKey($key)) { " (was $($currentLabels[$key]))" } else { '' }
+            # --overwrite so a changed value is a change rather than an error.
+            # Nothing is ever removed here: kubelet, k3s and Longhorn all put
+            # labels on this object too, and this script owns only the ones it
+            # was handed.
+            $applyLabel = Invoke-NodeSsh @clusterSsh -ConnectTimeoutSec 20 -Command (
+                "sudo k3s kubectl label node $hostname $label --overwrite"
+            )
+            if ($applyLabel.ExitCode -ne 0) {
+                throw "Applying label '$label' to '$hostname' from $clusterHost failed (exit $($applyLabel.ExitCode)):`n$($applyLabel.StdOut)$($applyLabel.StdErr)"
+            }
+            $labelActions.Add("${key}=${value}${previous}")
+            Write-Host "  label ${key}=${value}: applied${previous}."
+        }
+    }
+
+    $nodeList = Invoke-NodeSsh @clusterSsh -Command 'sudo k3s kubectl get nodes -o wide' -ConnectTimeoutSec 15
     Write-Host ''
     Write-Host $nodeList.StdOut.TrimEnd()
 
@@ -743,8 +1039,11 @@ try {
     # ---------------------------------------------------------------- #
 
     $elapsed = [math]::Round(((Get-Date).ToUniversalTime() - $startedUtc).TotalMinutes, 1)
-    Write-Host "'$VMName' is running k3s $K3sVersion in ${elapsed} min." -ForegroundColor Green
-    if (-not $ClusterInit) {
+    Write-Host "'$VMName' is running k3s $K3sVersion as $(if ($isAgent) { 'an agent' } else { 'a server' }) in ${elapsed} min." -ForegroundColor Green
+    if (-not $ClusterInit -and -not $isAgent) {
+        # Agents are exempt on the arithmetic, not by exception: joining one
+        # adds no etcd member, so the quorum this warns about is whatever the
+        # servers already made it.
         Write-Warning 'Two-node embedded etcd has worse availability than one node (tolerates zero losses, not one) - the cluster plan flags this build window as non-production until the third server rejoins in Phase 7.'
     }
     if ($configActions.Count -eq 0) {
@@ -754,14 +1053,34 @@ try {
         Write-Host 'Node settings changed:'
         foreach ($action in $configActions) { Write-Host "  - $action" }
     }
-    if ($kubeconfigActions.Count -eq 0) {
+    if ($isAgent) {
+        Write-Host "Root's kubeconfig: not applicable on an agent."
+    }
+    elseif ($kubeconfigActions.Count -eq 0) {
         Write-Host "Root's kubeconfig: already linked ($kubeconfigLinkPath -> $k3sYamlPath)."
     }
     else {
         Write-Host "Root's kubeconfig: $($kubeconfigActions -join '; ')."
     }
 
-    if (-not $wasAlreadyActive) {
+    if ($NodeLabel.Count -gt 0) {
+        if ($labelActions.Count -eq 0) {
+            Write-Host "Node labels: already as asked ($($NodeLabel -join ', '))."
+        }
+        else {
+            Write-Host 'Node labels applied:'
+            foreach ($action in $labelActions) { Write-Host "  - $action" }
+        }
+    }
+
+    if ($isAgent -and -not $wasAlreadyActive) {
+        Write-Host ''
+        Write-Host 'Part-time-node plan Phase 1 - confirm and tick off in docs/plans/part-time-node.md:'
+        Write-Host '  - the node shows <none> under ROLES                     (verified above)'
+        Write-Host '  - it schedules pods (it is not tainted - that is the point of Phase 2)'
+        Write-Host '  - Longhorn: set allowScheduling false on this node before it takes replicas (Phase 3.7)'
+    }
+    elseif (-not $wasAlreadyActive) {
         Write-Host ''
         Write-Host 'Phase 2 checklist - confirm and tick off in docs/plans/swarm/phase-2-k3s-flux-secrets.md:'
         Write-Host "  - this node installed and Ready                 (verified above)"
@@ -784,15 +1103,19 @@ try {
             ''
             '| | |'
             '|---|---|'
-            "| Role | $(if ($ClusterInit) { 'cluster-init (forms etcd)' } else { "join $tick$JoinServer$tick" }) |"
+            "| Role | $(if ($ClusterInit) { 'cluster-init (forms etcd)' } elseif ($isAgent) { "agent, joined $tick$JoinServer$tick" } else { "server, joined $tick$JoinServer$tick" }) |"
+            "| Unit | $tick$serviceName.service$tick |"
             "| Address | $tick$IPAddress$tick |"
             "| k3s version | $tick$K3sVersion$tick ($script:K3sVersionSource) |"
+            "| Node labels | $(if ($NodeLabel.Count -eq 0) { 'none' } else { (($NodeLabel | ForEach-Object { "$tick$_$tick" }) -join ', ') }) |"
             "| Reinstalled | $Reinstall |"
             "| Elapsed | ${elapsed} min |"
             ''
             "**Node settings:** $(if ($configActions.Count -eq 0) { 'already matched - nothing changed' } else { ($configActions -join '; ') })"
             ''
-            "**Root's kubeconfig:** $(if ($kubeconfigActions.Count -eq 0) { "already linked ($kubeconfigLinkPath -> $k3sYamlPath)" } else { ($kubeconfigActions -join '; ') })"
+            "**Node labels:** $(if ($NodeLabel.Count -eq 0) { 'none asked for' } elseif ($labelActions.Count -eq 0) { 'already as asked' } else { ($labelActions -join '; ') })"
+            ''
+            "**Root's kubeconfig:** $(if ($isAgent) { 'not applicable on an agent' } elseif ($kubeconfigActions.Count -eq 0) { "already linked ($kubeconfigLinkPath -> $k3sYamlPath)" } else { ($kubeconfigActions -join '; ') })"
             ''
             '<details><summary>kubectl get nodes -o wide</summary>'
             ''
