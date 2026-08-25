@@ -1,0 +1,53 @@
+# The photos plan (docs/plans/immich.md) Phase 2.3 - the four extensions
+# Immich needs, declared rather than bootstrapped.
+#
+# Why here and not in bootstrap.initdb.postInitSQL: postInitSQL runs exactly
+# once, on an empty data directory. An extension Immich starts requiring in a
+# later release would then be a bootstrap-only edit that a running cluster
+# silently ignores, and the symptom would surface as a failed Immich migration
+# rather than as a missing manifest line. The Database CR is reconciled like
+# any other object, so adding a fifth extension here is a one-line commit that
+# takes effect on the next reconcile.
+#
+# The database itself already exists - ./cluster.yaml's bootstrap.initdb
+# creates `immich` owned by `immich`. This object adopts it (ensure: present
+# is satisfied by an existing database) and takes over managing what is in it.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: immich-pg-immich
+  namespace: immich
+spec:
+  cluster:
+    name: immich-pg
+  name: immich
+  owner: immich
+  ensure: present
+  # The default, written out - `delete` would let a mistaken commit, or
+  # `prune: true` on the photos-database Kustomization, drop the entire photo
+  # library's metadata along with the object that declares it. spec.cluster is
+  # immutable, so a wrong cluster name here means deleting and recreating this
+  # object rather than editing it.
+  databaseReclaimPolicy: retain
+  extensions:
+    # pgvector's `vector` type is what everything else here operates on, and
+    # what Immich stores CLIP embeddings and face descriptors in.
+    - name: vector
+      ensure: present
+    # VectorChord - the index access method Immich searches those embeddings
+    # with, and the reason ./cluster.yaml preloads vchord.so and mounts an
+    # extension image. Listed after `vector` because it builds on that type.
+    - name: vchord
+      ensure: present
+    # Order matters for the last two and is not incidental: earthdistance is
+    # implemented in terms of cube's type, and CREATE EXTENSION earthdistance
+    # fails outright if cube is not already there. CNPG applies this list in
+    # order, so the dependency is expressed by position.
+    - name: cube
+      ensure: present
+    - name: earthdistance
+      ensure: present
+  # No `schema:` on any of them. Immich expects these in the default creation
+  # schema (public) and its migrations resolve the types unqualified; pinning
+  # them elsewhere would be a search_path problem that presents as a migration
+  # failure on an Immich upgrade.

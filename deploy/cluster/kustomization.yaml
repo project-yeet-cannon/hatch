@@ -34,3 +34,8 @@ resources:
   # config, depending on infra-config the same way data.yaml does - and
   # deliberately not on apps.yaml in either direction, per that step's note.
   - observability.yaml
+  # The photos plan (docs/plans/immich.md) Phase 2: photos-database, the
+  # Immich CNPG cluster. Depends on infra-config and on nothing else, and
+  # nothing depends on it - see that file's header for why a photo library
+  # must not be able to hold the app tier NotReady.
+  - photos.yaml

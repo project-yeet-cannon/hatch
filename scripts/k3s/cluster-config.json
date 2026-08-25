@@ -143,6 +143,18 @@
       "description": "2 during the two-node build window; Phase 7 raises it to 3 alongside LONGHORN_REPLICA_COUNT by changing this variable and re-running Provision 4 - no commit."
     },
     {
+      "key": "IMMICH_POSTGRES_INSTANCES",
+      "env": "IMMICH_POSTGRES_INSTANCES",
+      "githubSource": "IMMICH_POSTGRES_INSTANCES",
+      "githubKind": "variable",
+      "required": false,
+      "pattern": "^[1-3]$",
+      "hint": "Never more than the number of nodes that exist - required anti-affinity leaves the excess pod permanently Pending. Raising this above 1 also means adding a synchronous replication block to the Cluster, which is deliberately absent at one instance; the manifest says so where it matters.",
+      "example": "1",
+      "consumedBy": "docs/plans/immich.md 2.2, deploy/cluster/photos/database/cluster.yaml instances",
+      "description": "Instances in the Immich photo library's own Postgres cluster - not aerie-pg, which POSTGRES_INSTANCES sizes. Optional, and the manifest carries a ':=1' default, because Immich is not on the HA list: its recovery story is the offsite archive, and a standby would double the local-path footprint to protect data that already has WAL archiving and a nightly dump. Set it only if that judgement changes."
+    },
+    {
       "key": "WAL_BUCKET",
       "env": "WAL_BUCKET",
       "githubSource": "WAL_BUCKET",

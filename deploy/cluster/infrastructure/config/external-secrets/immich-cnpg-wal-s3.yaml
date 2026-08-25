@@ -1,0 +1,59 @@
+# GENERATED FILE - do not edit.
+#
+# Secret 'cnpg-wal-s3' in namespace 'immich', synced from the 3 parameter(s) below.
+#
+# Source:    scripts/secrets/parameters.json
+# Generator: scripts/secrets/New-ExternalSecrets.ps1
+# Step:      docs/plans/swarm/phase-3-platform-services.md 3b.6
+#
+# Regenerate:  pwsh ./scripts/secrets/New-ExternalSecrets.ps1
+# Verify:      pwsh ./scripts/secrets/New-ExternalSecrets.ps1 -Check   (ci.yml runs this)
+#
+# An edit here survives until the next run of either, and then loses. The
+# paths, the target namespace, the Secret name and the key inside it are all
+# fields of parameters.json - change one there.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: cnpg-wal-s3
+  namespace: immich
+spec:
+  # How long a rotated parameter takes to reach the cluster, worst case.
+  # Each tick is one SSM read per data entry, so this is also the cost: the
+  # whole tree is a handful of calls an hour.
+  refreshInterval: 1h
+  secretStoreRef:
+    # ClusterSecretStore, not SecretStore - one store serves every namespace,
+    # and its name carries no provider so swapping Parameter Store for OpenBao
+    # stays the one-file change ../cluster-secret-store.yaml describes. That
+    # store names the namespace of its own credential explicitly, so nothing
+    # here needs a copy of the bootstrap Secret alongside it.
+    kind: ClusterSecretStore
+    name: aerie-secrets
+  target:
+    name: cnpg-wal-s3
+    # Owner: ESO creates the Secret and owns it, so deleting this manifest
+    # deletes the Secret with it - which is what makes the git tree the whole
+    # truth. Merge would leave orphans behind after a prune.
+    creationPolicy: Owner
+    # Retain is the default and is set anyway, because the failure it governs
+    # is silent and severe: if the parameter disappears upstream, keep the last
+    # good value and report SecretSyncError, rather than deleting a live
+    # credential out from under a running workload.
+    deletionPolicy: Retain
+  data:
+    # CloudNativePG WAL archiving and base backups to S3. Its own IAM user, same isolation discipline as aerie-restic.
+    # Consumed by: docs/plans/immich.md 2.4 ObjectStore immich-pg-wal, s3Credentials.accessKeyId
+    - secretKey: access-key-id
+      remoteRef:
+        key: /aerie/postgres/wal-s3-access-key-id
+    # Secret half of the CNPG WAL archiving credential.
+    # Consumed by: docs/plans/immich.md 2.4 ObjectStore immich-pg-wal, s3Credentials.secretAccessKey
+    - secretKey: secret-access-key
+      remoteRef:
+        key: /aerie/postgres/wal-s3-secret-access-key
+    # Region of the WAL bucket. barman-cloud's s3Credentials.region is a SecretKeySelector, not a string, so this has to arrive as a Secret key rather than as a postBuild substitution even though it isn't secret. env is deliberately not AWS_REGION - the AWS CLI would pick that name up directly, which is the same reason the Route53 pair is renamed.
+    # Consumed by: docs/plans/immich.md 2.4 ObjectStore immich-pg-wal, s3Credentials.region
+    - secretKey: region
+      remoteRef:
+        key: /aerie/postgres/wal-s3-region

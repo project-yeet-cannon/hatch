@@ -1,0 +1,63 @@
+# The photos plan (docs/plans/immich.md) - the `photos` layer, and the first
+# Flux Kustomization in this tree that is not part of the cluster plan's
+# numbered phases.
+#
+# Named for the capability, not the vendor. The namespace is `immich` because
+# that is what is actually running in it; everything Aerie owns around it -
+# this layer, the scripts, the archive job - is named `photos`, because
+# `v+1` sharing and `v+2` the kiosk frame are photo-domain features that
+# should not have to be renamed if Immich is ever replaced. See the same
+# asymmetry argued at infrastructure/config/namespaces.yaml.
+#
+# ---------------------------------------------------------------------------
+# Why this is its own layer and not a folder inside apps
+#
+# The whole point of the split is `wait: true` on ./apps.yaml. Immich is a
+# four-container upstream product with its own schema, its own migrations and
+# a machine-learning model server; when it is broken, it must not be able to
+# hold the family's own site tier NotReady. So this depends on infra-config
+# and on nothing else - not data-schema, not site-config, not apps - and
+# nothing depends on it.
+#
+# ---------------------------------------------------------------------------
+# Phase 2 ships one Kustomization; Phase 3 adds the second
+#
+# photos-database is the data half: the CNPG Cluster, its WAL destination,
+# the extensions and the nightly base backup. Phase 3's Immich HelmRelease
+# lands in a sibling `photos` Kustomization over ./deploy/cluster/photos/app
+# with `dependsOn: photos-database`, for exactly the reason ./data.yaml
+# splits data-cluster from data-schema: a HelmRelease applied in the same
+# pass as the database it connects to starts against a primary that is not
+# up. Phase 2 stops short of writing that half, but the path split
+# (photos/database/, and later photos/app/) is what leaves room for it
+# without moving files later.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: photos-database
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  # 10m, matching data-cluster: this brings up a Postgres primary from a cold
+  # local-path PVC, and on the first reconcile it also pulls a ~450 MB operand
+  # image and the extension image beside it.
+  timeout: 10m
+  dependsOn:
+    - name: infra-config
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./deploy/cluster/photos/database
+  prune: true
+  # What makes the dependsOn boundary Phase 3 will hang off this one real
+  # rather than decorative - without it this is Ready as soon as the Cluster
+  # object is *applied*, not once CNPG reports it healthy.
+  wait: true
+  postBuild:
+    substituteFrom:
+      # ${WAL_BUCKET} and ${IMMICH_POSTGRES_INSTANCES} resolve nowhere else.
+      # `optional` stays false: a missing ConfigMap should fail reconciliation
+      # loudly rather than substitute empty strings into a database spec.
+      - kind: ConfigMap
+        name: aerie-cluster-config

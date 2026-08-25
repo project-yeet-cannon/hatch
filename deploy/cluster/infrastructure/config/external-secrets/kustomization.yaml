@@ -30,6 +30,7 @@ resources:
   - flux-system-aerie-site-git.yaml
   - flux-system-ghcr-pull.yaml
   - flux-system-grafana-annotations.yaml
+  - immich-cnpg-wal-s3.yaml
   - longhorn-system-longhorn-backup-target.yaml
   - observability-ghcr-pull.yaml
   - observability-github-datasource.yaml

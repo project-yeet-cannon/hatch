@@ -1,0 +1,58 @@
+# The photos plan (docs/plans/immich.md) Phase 2.4 - immich-pg's WAL and
+# base-backup destination. A copy of ../../data/cluster/objectstore.yaml, and
+# deliberately a copy rather than a shared base: the two clusters are in
+# different namespaces and an ObjectStore is resolved by bare name inside the
+# referring Cluster's namespace, so there is no object here to share. Read
+# that file for the reasoning behind every field; only the differences are
+# annotated below.
+#
+# Same bucket, same IAM user as aerie-pg. barman-cloud namespaces everything
+# it writes under the *server name* - which is the Cluster's name, immich-pg -
+# so two clusters in one bucket land in disjoint prefixes and cannot collide.
+# A second bucket would be a second thing to create, scope, pay for and
+# lifecycle, and it would buy no isolation that matters: one credential
+# already reaches both, so the blast radius is identical either way.
+#
+# Listed before ./cluster.yaml in ./kustomization.yaml for the same reason the
+# data tier lists them in that order.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: immich-pg-wal
+  namespace: immich
+spec:
+  configuration:
+    destinationPath: s3://${WAL_BUCKET}/
+    s3Credentials:
+      # The same three keys, in the same Secret name, synced into *this*
+      # namespace by the second target block Phase 2.5 added to each of the
+      # three /aerie/postgres/wal-s3-* parameters in
+      # scripts/secrets/parameters.json. An ExternalSecret is namespaced, so
+      # reaching a Secret across namespaces is not a thing that exists - the
+      # value is re-synced here rather than referenced.
+      accessKeyId:
+        name: cnpg-wal-s3
+        key: access-key-id
+      secretAccessKey:
+        name: cnpg-wal-s3
+        key: secret-access-key
+      region:
+        name: cnpg-wal-s3
+        key: region
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+  retentionPolicy: "30d"
+  # 512Mi for the same reason the data tier's copy carries it: 128Mi
+  # OOMKilled barman-cloud-backup mid-base-backup there (exit 137), and this
+  # database will not be smaller than that one for long once Immich starts
+  # writing embeddings.
+  instanceSidecarConfiguration:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
