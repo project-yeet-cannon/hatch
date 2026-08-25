@@ -1,6 +1,6 @@
 # Kiosk Climate
 
-**Status:** Phases 0–5 complete (naming, model, schema, domain rules, the read path, the write path, and the admin UI). Phases 6–8 not started.
+**Status:** Phases 0–6 complete (naming, model, schema, domain rules, the read path, the write path, the admin UI, and the kiosk UI). Phases 7–8 not started.
 
 New kiosk dashboard UI for house climate controls, and the two new domain
 concepts that make it possible: **Panels** and **Controls**.
@@ -412,42 +412,102 @@ outside the module needed it. No C# changed, so `make test-api` stays at 801.
 Browser verification is the user's — Phase 7 is where this page gets driven for
 the first time, building the Climate panel itself.
 
-## [] Phase 6 — Kiosk UI
+## [x] Phase 6 — Kiosk UI
 
-**Status:** not started
+**Status:** complete
 
-- [ ] Add `PanelSummary` and the panel state types to
+- [x] Add `PanelSummary` and the panel state types to
       [`dashboard/src/types.ts`](../../src/Aerie.Web/apps/dashboard/src/types.ts),
       plus a `PanelSource` interface (state read, power write, setpoint write) —
       the same seam `GatherSource` uses.
-- [ ] Add `api/panelsClient.ts` (`ApiPanelSource`), and `mock/mockPanelSource.ts`
-      + `mock/testPanelSource.ts`; wire all three into `getPanelSource()` in
-      `dataSource.ts` so `?source=` still switches the whole screen.
-- [ ] Add `panels` to the mock and test dashboard data sources.
-- [ ] Add `PanelsSection.tsx` — the tile row, reusing `.hf-routine-btn` and
-      `.hf-routine-circle` selectors rather than restating the geometry.
-- [ ] Render it in `App.tsx` between `CamerasSection` and `GatherTile`, guarded on
+- [x] Add [`api/panelsClient.ts`](../../src/Aerie.Web/apps/dashboard/src/api/panelsClient.ts)
+      (`ApiPanelSource`), and `mock/mockPanelSource.ts` + `mock/testPanelSource.ts`;
+      wire all three into `getPanelSource()` in `dataSource.ts` so `?source=` still
+      switches the whole screen.
+- [x] Add `panels` to the mock and test dashboard data sources.
+- [x] Add [`PanelsSection.tsx`](../../src/Aerie.Web/apps/dashboard/src/components/PanelsSection.tsx) —
+      the tile row, reusing `.hf-routine-btn` and `.hf-routine-circle` selectors
+      rather than restating the geometry.
+- [x] Render it in `App.tsx` between `CamerasSection` and `GatherTile`, guarded on
       `data.panels.length > 0`.
-- [ ] Add `hooks/usePanelState.ts`: fetch on open, poll every 5s, and hold an
-      optimistic overlay per item with a 30s TTL — `RoutinesSection`'s
-      reconcile-when-the-server-agrees plus `GatherOverlay`'s expiry, for the same
-      reasons each has.
-- [ ] Add `PanelOverlay.tsx` on `GatherOverlay`'s shape: full-screen, mounted
-      inside `.hf-page`, a 56px close target, its own ~60s idle close, and the
-      dashboard lifecycle held while it is open.
-- [ ] Add `SwitchControl.tsx` — label plus a large on/off control, pending and
+- [x] Add [`hooks/usePanelState.ts`](../../src/Aerie.Web/apps/dashboard/src/hooks/usePanelState.ts):
+      fetch on open, poll every 5s, and hold an optimistic overlay per item with a
+      30s TTL — `RoutinesSection`'s reconcile-when-the-server-agrees plus
+      `GatherOverlay`'s expiry, for the same reasons each has.
+- [x] Add [`PanelOverlay.tsx`](../../src/Aerie.Web/apps/dashboard/src/components/PanelOverlay.tsx)
+      on `GatherOverlay`'s shape: full-screen, mounted inside `.hf-page`, a 56px
+      close target, its own 60s idle close, and the dashboard lifecycle held while
+      it is open.
+- [x] Add `SwitchControl.tsx` — label plus a large on/off control, pending and
       error states per control the way `RoutinesSection` does per tile.
-- [ ] Add `ThermostatControl.tsx` — an On/Off pill, `⊖ 72° ⊕` with the setpoint as
+- [x] Add `ThermostatControl.tsx` — an On/Off pill, `⊖ 72° ⊕` with the setpoint as
       the largest thing on the card, ambient beneath it, and the bounds enforced
       client-side too so a disabled `⊕` at max is visible rather than silently
       refused.
-- [ ] Hold-to-repeat on `⊖`/`⊕` (~400ms delay, then ~150ms repeat) driving local
-      state only; dispatch a single `setpoint` write after ~700ms of quiet.
-- [ ] Render a routine item with `RoutinesSection`'s existing trigger/turn-off
-      behavior — extracted into a shared component rather than a second copy.
-- [ ] Add the `.hf-panel-*` styles to `theme.css`, reusing tile selectors where the
+- [x] Hold-to-repeat on `⊖`/`⊕` (400ms delay, then 150ms repeat) driving local
+      state only; dispatch a single `setpoint` write after 700ms of quiet.
+- [x] Render a routine item with `RoutinesSection`'s existing trigger/turn-off
+      behavior — extracted into `hooks/useRoutineTaps.ts` and
+      `components/RoutineTile.tsx` rather than a second copy.
+- [x] Add the `.hf-panel-*` styles to `theme.css`, reusing tile selectors where the
       geometry is shared.
-- [ ] `make test-web` clean (lint + build). Leave browser verification to the user.
+- [x] `make test-web` clean (lint + build) across all six apps. Browser
+      verification is the user's, in Phase 7.
+
+**The one server change this phase needed: `PanelItemStateDto` gained a
+`RoutineId`.** The plan's own API table has routine items reusing
+`POST /api/routines/{id}/trigger`, and the state DTO carried no routine id to
+call it with — `Id` on a panel item is the *item*, which that endpoint has never
+heard of. One nullable field, null on a control, and `make test-api` stayed at
+801 because it is purely additive.
+
+**The routine extraction split in two, not one.** The plan said "a shared
+component"; a component alone would have forced the panel to adopt the
+dashboard's tile *geometry* to get its *behavior*. So `useRoutineTaps` owns what
+a tap does — the in-flight guard, the optimistic toggle, the failure — and
+`RoutineTile` owns how it looks, and the overlay happens to want both. The
+one-at-a-time guard is the reason the hook holds a list rather than a single
+routine: a run of taps down a row is a person being impatient, not four
+decisions, and that had to survive the split.
+
+**The settle timer lives in `usePanelState`, not in `ThermostatControl`.** The
+plan put hold-to-repeat and the 700ms coalesce in the same bullet, which reads
+as one mechanism; they are two. The component owns the repeat, and calls
+`setSetpoint` on every step. The hook applies the value to its optimistic
+overlay *immediately* and debounces only the dispatch — so the number on the
+wall never waits on a timer, the 5s poll cannot yank a mid-hold value backwards,
+and a panel with two thermostats settles them independently. Closing the overlay
+mid-settle flushes the write rather than dropping it, which is what a person who
+taps `⊕` and walks away means.
+
+**Both ends of the range are enforced twice, and the client half snaps the same
+way the server does.** `⊖`/`⊕` step from the *minimum* by `stepF`, exactly as
+`PanelsController.Snap` does, so every value the buttons can reach is one the
+server will accept unchanged — a client that stepped from the current value
+would drift off the grid the moment a device reported something between steps.
+
+**A thermostat's On/Off pill renders unconditionally, and that is a seam this
+phase inherited rather than introduced.** `IsOn` is null both for a control with
+no on/off bound and for one whose channel has never reported, deliberately
+(Phase 3), so the kiosk cannot tell a setpoint-only thermostat from a silent
+one. A tap on the former gets the server's reason in the card's error line.
+Distinguishing them is a DTO field away if a setpoint-only thermostat ever turns
+up in the house; none has.
+
+**`isOn: null` draws as neither button selected.** Not as Off — the mock source
+carries a fan that has never reported precisely because that is the case a
+two-button switch is easiest to get wrong, and a confident "Off" for a device
+nobody has heard from is the expensive lie: it is the one that makes someone
+stop looking for the problem.
+
+**What the apply showed.** `make test-web` clean, `make test-api` unchanged at
+801. `RoutinesSection` came out 39 lines from 118 and lost no behavior — the
+whole of what it used to hold is now in the two files the overlay also uses.
+The hold-to-repeat ended up on pointer capture with `lostpointercapture` as its
+backstop rather than a `pointerleave` handler: capture suppresses boundary
+events until release, so `pointerleave` would have been a second, differently
+timed way to say "stop" — and the one whose timing could have killed the repeat
+outright on a device nobody here can test against.
 
 ## [] Phase 7 — The Climate panel itself
 
@@ -455,12 +515,12 @@ the first time, building the Climate panel itself.
 
 - [ ] Confirm the AC's channels exist and are mapped: `PowerState` or `HvacMode`,
       `SetpointTemperature`, and a `Temperature` channel for ambient.
-- [ ] Confirm both fans have `ReadWrite` `PowerState` channels.
-- [ ] In admin, create the "Climate" panel — icon, color, sort order after the
+- [x] Confirm both fans have `ReadWrite` `PowerState` channels.
+- [x] In admin, create the "Climate" panel — icon, color, sort order after the
       routines.
-- [ ] Add the AC thermostat control: bindings, `OnMode = "cool"`, bounds 60–85,
+- [x] Add the AC thermostat control: bindings, `OnMode = "cool"`, bounds 60–85,
       step 1.
-- [ ] Add Fan 1 and Fan 2 as `Switch` controls.
+- [x] Add Fan 1 and Fan 2 as `Switch` controls.
 - [ ] Verify on the wall tablet: on/off both directions, ± single step, hold from
       one end of the range to the other landing exactly **one** command.
 - [ ] Check the command ledger — every action present, `Source = Human`, reason

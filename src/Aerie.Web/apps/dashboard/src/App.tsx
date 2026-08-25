@@ -9,12 +9,14 @@ import { ZoneCard } from './components/ZoneCard';
 import { OutsideCard } from './components/OutsideCard';
 import { RoutinesSection } from './components/RoutinesSection';
 import { CamerasSection } from './components/CamerasSection';
+import { PanelsSection } from './components/PanelsSection';
 import { CalendarSection } from './components/CalendarSection';
 import { AlertBanner } from './components/AlertBanner';
 import { DashboardSkeleton } from './components/DashboardSkeleton';
 import { GatherTile } from './components/GatherTile';
 import { GatherOverlay } from './components/GatherOverlay';
 import { CameraFeedModal } from './components/CameraFeedModal';
+import { PanelOverlay } from './components/PanelOverlay';
 import { clientLogger } from './lib/clientLogger';
 import { useKioskLifecycle } from './hooks/useKioskLifecycle';
 import { useGatherLists } from './hooks/useGatherLists';
@@ -28,6 +30,8 @@ export function App() {
   const [now, setNow] = useState(() => new Date());
   // null when the overlay is closed; the id of the list it is showing otherwise.
   const [gatherListId, setGatherListId] = useState<string | null>(null);
+  // Likewise for Panels - null when closed, the opened panel's id otherwise.
+  const [panelId, setPanelId] = useState<string | null>(null);
   const { lists: gatherLists, refresh: refreshGather } = useGatherLists();
   // resetToken bumps ~30s after the last touch; see hooks/useKioskLifecycle.ts
   // and lib/kioskIdleTimings.ts. The hook also owns the reload-on-new-deploy
@@ -35,6 +39,10 @@ export function App() {
   // are suspended while Gather is open - a reset would take a half-typed item
   // with it, and a reload would take the whole page.
   const gatherOpen = gatherListId !== null;
+  // The panel the overlay is showing, from the snapshot that put its tile on
+  // screen. A poll that drops the panel - an admin un-included it while someone
+  // was standing there - closes the overlay by the same expression.
+  const openPanel = panelId === null ? undefined : data?.panels.find((panel) => panel.id === panelId);
   // The camera a motion event is asking the wall to show, if any - see
   // hooks/useMotionEvents.ts and docs/camera-devices-architecture.md.
   const { cameraDeviceId: motionCameraId, dismiss: dismissMotion } = useMotionEvents();
@@ -49,8 +57,13 @@ export function App() {
   // or a deploy reload would drop a live feed while someone is standing there
   // watching who is at the door - but a feed someone opened by hand deliberately
   // does not, so walking away from it closes it, and with it the relay's
-  // connection and the camera's.
-  const { resetToken } = useKioskLifecycle(gatherOpen || (manualCameraId === null && motionCameraId !== null));
+  // connection and the camera's. A panel holds for Gather's reason rather than
+  // the camera's: a reset or a deploy reload landing between the last "+" and
+  // the settled write would drop that write, and the overlay runs its own
+  // longer idle timer for as long as someone is standing there.
+  const { resetToken } = useKioskLifecycle(
+    gatherOpen || openPanel !== undefined || (manualCameraId === null && motionCameraId !== null),
+  );
 
   // The idle rung for a hand-opened feed: the same reset that collapses the
   // cards closes it. Any touch anywhere restarts that timer, this overlay
@@ -181,6 +194,10 @@ export function App() {
                 but tapping one opens a live feed rather than changing something
                 in the house, and that is worth a row break. */}
             {data.cameras.length > 0 && <CamerasSection cameras={data.cameras} onOpen={setManualCameraId} />}
+            {/* Below the cameras and above Gather: a panel is the tier between
+                a routine's one tap and a sub-UI of its own, and it sits in that
+                order on the screen too. */}
+            {data.panels.length > 0 && <PanelsSection panels={data.panels} onOpen={setPanelId} />}
           </>
         ) : error ? (
           <div className="hf-note" role="alert" style={{ margin: 0 }}>
@@ -198,6 +215,10 @@ export function App() {
           custom properties on that element, and an overlay mounted anywhere
           else would resolve none of them. */}
       {gatherOpen && <GatherOverlay listId={gatherListId} lists={gatherLists} onClose={closeGather} />}
+      {/* Inside .hf-page for the same reason, and keyed on the panel id so
+          switching panels remounts the state hook rather than showing one
+          panel's controls under another's name until the first fetch lands. */}
+      {openPanel !== undefined && <PanelOverlay key={openPanel.id} panel={openPanel} onClose={() => setPanelId(null)} />}
       {/* Above Gather rather than instead of it: the motion path opens this on
           its own, with nobody's hand on the tablet, so it has to be able to
           interrupt. Keyed on the device id so switching cameras tears the video

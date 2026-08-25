@@ -92,6 +92,7 @@ public class PanelService(IDbContextFactory<AerieContext> dbFactory) : IPanelSer
                 MinF: null,
                 MaxF: null,
                 StepF: null,
+                RoutineId: item.RoutineId,
                 IsToggle: routine?.IsToggle,
                 IsActive: routine is null ? null : RoutineToggleState.IsActive(routine, latest));
         }
@@ -123,6 +124,7 @@ public class PanelService(IDbContextFactory<AerieContext> dbFactory) : IPanelSer
             MinF: isThermostat ? item.MinF ?? PanelDefaults.MinF : null,
             MaxF: isThermostat ? item.MaxF ?? PanelDefaults.MaxF : null,
             StepF: isThermostat ? item.StepF ?? PanelDefaults.StepF : null,
+            RoutineId: null,
             IsToggle: null,
             IsActive: null);
     }

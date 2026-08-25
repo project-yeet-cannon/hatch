@@ -170,6 +170,89 @@ export interface HazardAlert {
   endsAt: string | null;
 }
 
+/**
+ * A Panel as the kiosk's tile row renders it: id, name, icon, color, and
+ * nothing else. Deliberately not the items - the dashboard snapshot is a 60s
+ * poll carrying every panel whether or not anyone opened one, and live control
+ * state is both too stale at that interval and too expensive to gather
+ * unconditionally. The overlay fetches its own (see PanelState).
+ *
+ * Mirrors Aerie.Api's PanelSummary (src/Aerie.Api/Models/Panels/Dtos.cs).
+ */
+export interface PanelSummary {
+  id: string;
+  name: string;
+  icon: string | null;
+  color: string | null;
+}
+
+/** Which of the two things a panel item is. Mirrors Ef.PanelItemKind. */
+export type PanelItemKind = 'Routine' | 'Control';
+
+/** The control surfaces the kiosk knows how to draw. Mirrors Ef.ControlKind - append-only, and Light/Camera are a later append rather than a redesign. */
+export type ControlKind = 'Switch' | 'Thermostat';
+
+/**
+ * Live state for one item in an open panel, mirroring PanelItemStateDto. One
+ * shape for both kinds, because the overlay renders one ordered list: the
+ * control fields are null on a routine item and the routine fields are null on
+ * a control.
+ *
+ * The three null-vs-false distinctions the server is careful about, and the
+ * kiosk has to preserve:
+ *  - isOn is null both when a control has no on/off at all and when it has one
+ *    that has never reported. A confident "Off" for a device nobody has heard
+ *    from is worse than saying nothing.
+ *  - isActive is false, not null, for a toggle routine with no samples - that
+ *    is what the dashboard tile beside it reads, and the two must agree.
+ *  - minF/maxF/stepF arrive resolved against the server's defaults, so the
+ *    client-side clamp and the server-side one work from the same numbers.
+ */
+export interface PanelItemState {
+  /** The *item* id - what the panel's power/setpoint endpoints address. */
+  id: string;
+  kind: PanelItemKind;
+  label: string | null;
+  icon: string | null;
+  color: string | null;
+  controlKind: ControlKind | null;
+  isOn: boolean | null;
+  setpointF: number | null;
+  ambientF: number | null;
+  /** The HVAC mode channel's raw state ("cool", "off"), when one is bound. */
+  mode: string | null;
+  minF: number | null;
+  maxF: number | null;
+  stepF: number | null;
+  /** Null on a control. On a routine item, what /api/routines/{id}/trigger takes. */
+  routineId: string | null;
+  isToggle: boolean | null;
+  isActive: boolean | null;
+}
+
+export interface PanelState {
+  id: string;
+  name: string;
+  items: PanelItemState[];
+}
+
+/**
+ * The slice of Panels an open overlay needs: read the state, and the two writes
+ * a control can make. Routine items inside a panel deliberately aren't here -
+ * they go out through the same /api/routines calls the dashboard tiles use, so
+ * there is exactly one trigger path in the app.
+ *
+ * Same seam as GatherSource, for the same reason: ?source= has to switch the
+ * whole screen, the overlay included.
+ */
+export interface PanelSource {
+  getState(panelId: string): Promise<PanelState>;
+  /** Absolute, not a toggle - a stale client is then wrong about what it displays, never about what it sends. */
+  setPower(panelId: string, itemId: string, on: boolean): Promise<void>;
+  /** Clamped and snapped to the control's step server-side; the kiosk clamps too so a disabled button is visible rather than a silent refusal. */
+  setSetpoint(panelId: string, itemId: string, valueF: number): Promise<void>;
+}
+
 export interface DashboardData {
   /** ISO 8601 timestamp of when this snapshot was produced. */
   generatedAt: string;
@@ -180,6 +263,7 @@ export interface DashboardData {
   sunEvents: SunEvents;
   routines: RoutineSummary[];
   cameras: CameraSummary[];
+  panels: PanelSummary[];
   calendar: CalendarDay[];
   alerts: HazardAlert[];
 }

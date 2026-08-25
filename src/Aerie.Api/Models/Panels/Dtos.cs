@@ -83,6 +83,7 @@ public record PanelWriteRequest(
 /// <param name="IsOn">Null when the control has no on/off at all (a setpoint-only thermostat) *and* when it has one that has never reported - an unread channel is unknown, not off. Contrast <paramref name="IsActive"/>.</param>
 /// <param name="Mode">The HvacMode channel's raw state ("cool", "off", ...) when one is bound. Reported as-is rather than compared to OnMode, so the kiosk can show what the device actually says.</param>
 /// <param name="MinF">Resolved against PanelDefaults, not the raw column - the kiosk needs a number to clamp against, and "null means 60" is a rule the server already knows. Null on a Switch, which has no bounds.</param>
+/// <param name="RoutineId">Null on a control. On a routine item it is what the kiosk POSTs to - a panel's routine reuses /api/routines/{id}/trigger unchanged, and Id here is the *item*, which that endpoint has never heard of.</param>
 /// <param name="IsToggle">Null on a control; a control's on/off lives in <paramref name="IsOn"/>.</param>
 /// <param name="IsActive">Null on a control and on a momentary routine. A toggle routine with no samples yet reads false, not null, because that is what RoutineService's dashboard tile reads and the two surfaces must agree.</param>
 public record PanelItemStateDto(
@@ -99,6 +100,7 @@ public record PanelItemStateDto(
     decimal? MinF,
     decimal? MaxF,
     decimal? StepF,
+    Guid? RoutineId,
     bool? IsToggle,
     bool? IsActive);
 

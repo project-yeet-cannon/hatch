@@ -19,6 +19,7 @@ import { deriveZoneStatus } from '../lib/zonePresentation';
 import { formatShortTime } from '../lib/format';
 import { calendarDateInZone, hourOfDayInZone, zonedWallClock } from '../lib/timezone';
 import { DEFAULT_TIME_ZONE } from '../config';
+import { MOCK_PANELS } from './mockPanelSource';
 
 const HOUR_MS = 60 * 60 * 1000;
 const HISTORY_HOURS = 9;
@@ -282,6 +283,7 @@ export class MockDashboardDataSource implements DashboardDataSource {
       sunEvents,
       routines: ROUTINES,
       cameras: CAMERAS,
+      panels: MOCK_PANELS,
       calendar: buildCalendar(now),
       alerts: buildAlerts(now),
     };

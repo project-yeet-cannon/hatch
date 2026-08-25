@@ -301,19 +301,22 @@ body {
   width: 100%;
   border-radius: 12px;
 }
-/* The camera row shares the routine tile's geometry by sharing its rules, not
-   by repeating its numbers - "the same size as the Routines buttons" is then
-   true by construction rather than by two values somebody has to keep equal.
-   Only the parts that differ get their own rules: a camera has no color, no
-   toggle state and no pending state. See components/CamerasSection.tsx. */
+/* The camera and panel rows share the routine tile's geometry by sharing its
+   rules, not by repeating its numbers - "the same size as the Routines buttons"
+   is then true by construction rather than by three values somebody has to keep
+   equal. Only the parts that differ get their own rules: a camera has no color,
+   no toggle state and no pending state, and a panel has a color but neither of
+   the other two. See components/CamerasSection.tsx and PanelsSection.tsx. */
 .hf-routines,
-.hf-cameras {
+.hf-cameras,
+.hf-panels {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 16px;
 }
 .hf-routine-btn,
-.hf-camera-tile {
+.hf-camera-tile,
+.hf-panel-tile {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -331,11 +334,13 @@ body {
   transition: transform 0.12s, background 0.15s;
 }
 .hf-routine-btn:hover:not(:disabled),
-.hf-camera-tile:hover {
+.hf-camera-tile:hover,
+.hf-panel-tile:hover {
   background: color-mix(in srgb, var(--ink) 3%, var(--card));
 }
 .hf-routine-btn:active:not(:disabled),
-.hf-camera-tile:active {
+.hf-camera-tile:active,
+.hf-panel-tile:active {
   transform: scale(0.96);
 }
 .hf-routine-btn:disabled {
@@ -345,7 +350,8 @@ body {
   border-color: color-mix(in srgb, var(--ink) 22%, var(--line));
 }
 .hf-routine-circle,
-.hf-camera-tile-circle {
+.hf-camera-tile-circle,
+.hf-panel-tile-circle {
   width: 66%;
   height: 66%;
   border-radius: 50%;
@@ -356,13 +362,15 @@ body {
   transition: box-shadow 0.2s, transform 0.2s;
 }
 .hf-routine-icon,
-.hf-camera-tile-icon {
+.hf-camera-tile-icon,
+.hf-panel-tile-icon {
   width: 56%;
   height: 56%;
   color: var(--ink);
 }
 .hf-routine-name,
-.hf-camera-tile-name {
+.hf-camera-tile-name,
+.hf-panel-tile-name {
   font-family: var(--display);
   font-weight: 700;
   font-size: 16px;
@@ -1008,4 +1016,204 @@ body {
   margin: 0;
   font: 500 17px/1.4 var(--ui);
   color: rgba(255, 255, 255, 0.75);
+}
+
+/* ---- Panels (docs/plans/kiosk-climate.md) -----------------------------
+   The tile row itself is styled above, sharing the routine tile's rules. What
+   is here is the overlay a tile opens: the full-screen sub-UI, and the two
+   control surfaces inside it.
+
+   Fixed and a child of .hf-page for the same reason GatherOverlay is - the
+   circadian palette is inline custom properties on that element, and an overlay
+   mounted anywhere else resolves none of them. The bar reuses
+   .hf-gather-icon-btn outright: same 56px close target, same corner, and this
+   overlay is painted in the same palette Gather's is, so unlike the camera
+   modal it has no reason to restate the button.
+--------------------------------------------------------------------------- */
+.hf-panel-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 18px 0;
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--ui);
+  /* Vertical only; the column never scrolls sideways. */
+  touch-action: pan-y;
+}
+.hf-panel-overlay * {
+  box-sizing: border-box;
+}
+.hf-panel-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+}
+.hf-panel-bar-title {
+  flex: 1;
+  min-width: 0;
+  font: 700 27px/1.2 var(--display);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hf-panel-scroll {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: 24px;
+  overflow-y: auto;
+  /* The dashboard underneath must not scroll when this column hits its end. */
+  overscroll-behavior: contain;
+}
+.hf-panel-card {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--card);
+}
+.hf-panel-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.hf-panel-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  flex: none;
+  font-size: 22px;
+}
+.hf-panel-card-label {
+  min-width: 0;
+  font: 700 21px/1.2 var(--display);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A routine keeps its dashboard tile rather than becoming a row, so it is the
+   same object in both places. Centred because a square tile in a full-width
+   card would otherwise sit oddly against one edge. */
+.hf-panel-card-routine {
+  align-items: center;
+}
+.hf-panel-card-routine .hf-routine-btn {
+  max-width: 190px;
+}
+
+/* Two absolute targets rather than one toggle: the write is absolute, and a
+   wall showing a stale state is then wrong about what it displays and never
+   about what it sends. Neither is selected when the state is unknown. */
+.hf-panel-power {
+  display: flex;
+  gap: 12px;
+}
+.hf-panel-power-btn {
+  flex: 1;
+  min-height: 64px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--bg);
+  color: var(--muted);
+  font: 700 20px/1 var(--ui);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.hf-panel-power-btn.on {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--ink) 12%, var(--card));
+  color: var(--ink);
+}
+.hf-panel-power-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.hf-panel-power-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* The setpoint is the largest thing on the card because the whole reason this
+   control exists is being readable from across the room. */
+.hf-panel-set {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.hf-panel-step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 84px;
+  height: 84px;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 26px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 28px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  /* A hold must not become a text selection or a long-press menu. */
+  touch-action: none;
+  user-select: none;
+}
+.hf-panel-step:active:not(:disabled) {
+  transform: scale(0.96);
+  background: color-mix(in srgb, var(--ink) 8%, var(--card));
+}
+/* Visibly out of range rather than silently refused - a disabled button at the
+   top of the range says why nothing is happening. */
+.hf-panel-step:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+.hf-panel-temp {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font: 700 68px/1 var(--display);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  /* Tabular numerals keep the width steady while the digits change; without
+     it, holding "+" through 99 -> 100 shoves both buttons sideways. */
+}
+.hf-panel-degree {
+  font-size: 0.5em;
+  vertical-align: super;
+  color: var(--muted);
+}
+/* Reserves its line even when there is no ambient reading (the component
+   renders a space), so a card with one and a card without are the same height
+   and the row of ⊖/⊕ buttons doesn't step up and down the column. */
+.hf-panel-ambient {
+  margin: 0;
+  min-height: 1.4em;
+  text-align: center;
+  font: 600 17px/1.4 var(--ui);
+  color: var(--muted);
+}
+.hf-panel-error {
+  margin: 0;
+  font: 600 15px/1.4 var(--ui);
+  color: var(--warm-ink);
+}
+.hf-panel-empty {
+  margin: 0;
+  font: 500 17px/1.4 var(--ui);
+  color: var(--muted);
 }

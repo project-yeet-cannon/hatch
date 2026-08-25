@@ -13,6 +13,7 @@ import type {
   TempPoint,
   ZoneClimate,
 } from '../types';
+import { TEST_PANELS } from './testPanelSource';
 
 const HOUR_MS = 60 * 60 * 1000;
 const HISTORY_HOURS = 9;
@@ -180,6 +181,7 @@ export class TestDataSource implements DashboardDataSource {
       sunEvents: xSunEvents(now),
       routines: [1, 2].map((i) => xRoutine(i)),
       cameras: [1, 2].map((i) => xCamera(i)),
+      panels: TEST_PANELS,
       calendar: xCalendar(now),
       alerts: xAlerts(now),
     };
