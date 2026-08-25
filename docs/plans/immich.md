@@ -692,9 +692,11 @@ monitored, with an admin account and nothing in it yet.
 **Gate:** a phone on the tailnet installs the app, signs in, and backs up one
 photo, which appears in the web UI.
 
-**Status:** the tree is written, validated and server-side dry-run clean against
-the live cluster. What is left is not code: **3.7 and 3.8 are the operator's**,
-and neither can run until this commit reaches `main` and Flux reconciles it.
+**Status:** deployed 2026-08-25 and green. `photos` went Ready 3m16s after the
+reconcile was triggered; Helm install succeeded at 2m16s. Everything 3.8 can
+check without a phone in hand has been checked and passes — the list is under
+3.8. What is left is genuinely the operator's: **3.7's accounts, and the phone
+half of 3.8's gate.**
 
 The phase also found a design defect in Phase 1 and fixed it at the source
 rather than working around it, which is 3.0 below and is the part worth reading
@@ -884,10 +886,33 @@ One replica, on the tagged disk, on the node the pod was steered to.
       users are database rows, not configuration — but a setting that needs
       changing is a commit against `helmrelease.yaml`, not a click.
 
-- [ ] **3.8 — Gate.** Phone app on the tailnet signs in and completes a backup of
-      one photo; the web UI at `photos.${DOMAIN}` shows it; Kuma is green;
-      Grafana shows the Immich ServiceMonitor's metrics — and, new here,
-      `immich-pg` appears in the CNPG dashboard alongside `aerie-pg`.
+- [ ] **3.8 — Gate.** Everything but the phone passed on the first apply,
+      2026-08-25:
+
+      - `photos-database` and `photos` both **Ready** on
+        `main@sha1:2ef08ea`; `Helm install succeeded for release immich/immich.v1
+        with chart immich@0.13.1`.
+      - **The node label did its job.** `immich-server` scheduled on the node
+        holding the bulk disk without anything naming it; `immich-library` bound
+        `1Ti` on `longhorn-bulk` and the Longhorn volume reports `attached`,
+        `healthy`, `strict-local`. `valkey` landed on the same node by
+        coincidence, `machine-learning` on another — which is correct, since only
+        the server has the constraint.
+      - `curl https://photos.${DOMAIN}/api/server/ping` through the ingress VIP
+        returns **200 `{"res":"pong"}`** on the wildcard cert, with no `tls:`
+        block anywhere in the layer.
+      - **Prometheus: four CNPG instances scraped, not three.** The widened
+        PodMonitor picked up `immich-pg-1` in `immich` while keeping all three
+        `aerie-pg` pods — the check that matters, since the risk of widening a
+        selector is losing what it already had. Both Immich ServiceMonitor
+        endpoints (8081 api, 8082 microservices) are `up`.
+      - AutoKuma: `Creating new http: photos`.
+      - The measured image sizes were right: the ML pull reported
+        451,974,162 bytes against the ~452 MB predicted.
+
+      **Still outstanding, and it is the actual gate:** a phone on the tailnet
+      installs the app, signs in, and backs up one photo, which appears in the
+      web UI.
 
       What was verified without deploying, so that the gate is checking the
       things a dry run cannot: every directory under `deploy/` builds; the two
