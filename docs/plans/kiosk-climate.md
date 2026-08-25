@@ -1,38 +1,350 @@
 # Kiosk Climate
 
-New Kiosk Dashboard UI for house climate controls.
+**Status:** Phase 0 complete (naming and model settled). Phases 1–8 not started.
 
-The Routines implementation has been great, I have loved it. I want to add a next-tier interaction. I don't know what to call it, so I will just call it a `Submenu` for now. This is explicitly a placeholder and I want you to suggest new names. `Submenu`s appear between `Routine`s and `Gather`s in the dashboard UI and appear as similar UI squares. They have the same UI customization as `Routine`s - name, icon, color.
+New kiosk dashboard UI for house climate controls, and the two new domain
+concepts that make it possible: **Panels** and **Controls**.
 
-When tapping on a `Submenu`, a modal pops up which has multiple calls to action. Some of these are `Routine`s. Some are a new type of element, which I will placeholder name a `Control` (again this is an explicit placeholder, place recommend a more precise domain name).
+## The ask
 
-A `Control` is a more device-specific element which performs richer controls than a simple tap. Architecturally, it may make sense to implement a `Control` as a composition of `Routine`s, or maybe there is just some conceptual overlap - I do not know and I am open to whatever is best. Ask me any clarifying questions about vision or future direction that will help hash it out.
+Routines work well, and the next tier up is missing. Between the routine tiles
+and Gather, the wall should show a **Panel** — same tile geometry, same
+name/icon/color customization — that opens a sub-UI holding several calls to
+action. Some of those are existing Routines. Some are **Controls**: richer,
+device-specific surfaces that do more than one tap can express.
 
-Example user experience for this epic:
+The user experience this is built for:
 
-- As a kiosk tablet user, I scroll down the page past Routines. I see a box named "Climate."
-- When I tap the "Climate" box, a sub-UI (probably a modal, but I don't want to be prescriptive) pops up with more actions that I can take, some of which are rich inputs:
-    - Air Conditioner control: minimal cluster of buttons to control an AC: cool/off modes, +/- degree, set temperature interaction (either digit input or a scroll wheel)
-    - Fan 1 on/off
-    - Fan 2 on/off
-    - Living room radiator thermostate control: almost the same as AC controls, but heat/off are modes instead of cool/off. A single "on/off" user language could be nice.
-- There is another box, environment
-    - For several smart lights, a simplified smart light control widget:
-        - Name
-        - Color picker
-        - Brightness
-        - On/Off
-- For cameras with controls, a `Submenu` could include a `Control` which is a live stream of a web camera with whatever controls are available (e.g. left/right/up/down, zoom, light on/off, color on/ff)
+- Scroll past the routines, see a "Climate" tile, tap it.
+- A full-screen overlay appears with:
+  - **Air conditioner** — on/off, ± 1°F, and the current setpoint big enough to
+    read across a room.
+  - **Fan 1** — on/off.
+  - **Fan 2** — on/off.
 
-Scope:
-- Determine good domain terms for `Submenu` and `Control`
-- Implement API, admin UI, and kiosk dashboard UI code for those elements
-- As MVP, we implement the `Climate` `Submenu`:
-    - AC `Control` with the controls:
-        - on/off
-        - +/- 1 degree F
-        - set temperature
-    - Fan 1 on/off
-    - Fan 2 on/ff
+Later, on the same machinery: an "Environment" panel with simplified smart-light
+controls (name, color picker, brightness, on/off), a living-room radiator that is
+the same thermostat control with heat instead of cool, and a camera panel whose
+control is a live feed with pan/tilt/zoom and a light toggle.
 
-All other `Submenu` or `Control`
+**MVP scope is the Climate panel and nothing else.** Light and camera controls are
+a seam in this design, not work in it.
+
+## Decisions
+
+| Question | Decision | Why |
+|---|---|---|
+| Name for `Submenu` | **Panel** | "The Climate panel" reads the way the household already talks. Unused as a domain noun in the repo — the only hits are prose and the unrelated modeler app. |
+| Name for `Control` | **Control**, qualified as `EfPanelControl` in code | The user-facing word stays plain. Bare `Control` collides with [`ClimateControl`](../../src/Aerie.Api/Services/ClimateControl/), `EfControlOverride` and `EfControlDecision`, so the entity, namespace and DTOs all carry the `Panel` qualifier. |
+| Is a Control composed of Routines? | **No — typed and device-bound** | A Routine is a fixed-value, fire-and-forget bundle with no read path. A Control has to *report* the current setpoint and mode and write a *parametric* value. Composing one from Routines would need one routine per degree and still could not read anything back. Controls bind channels directly and share Routines' write path (`IClimateCommandService`), not their storage. |
+| Set-temperature interaction | **± with hold-to-repeat**, coalesced into one write | Two big touch targets and a large number is the right density for a portrait wall tablet. Taps settle for ~700ms before dispatching, so holding "+" from 68 to 78 lands one ledgered `SetTemperature`, not ten. |
+| What happens to existing climate routine tiles | **Nothing — the panel is additive** | The fans in the Climate panel are new `Switch` controls bound straight to their `PowerState` channels. Two routes to the same fan is fine on a wall; a migration that moves tiles around is not worth the disruption. |
+| Where panel state comes from | **A dedicated endpoint, polled while open** | `GET /api/dashboard` is a 60s poll and carries every panel whether or not anyone opened one. Live control state is too stale at 60s and too expensive to gather unconditionally, so the snapshot carries only the tile, and the overlay fetches its own state. |
+| On/off for a thermostat | **A `Power` binding when the device has one, otherwise `OnMode`** | The AC and the radiator differ only in which HVAC mode counts as "on" (`cool` vs `heat`). Storing that mode per control is what lets both present the single "On/Off" the ask calls for. |
+
+## What the repo already gives us
+
+Read before designing; recorded so the phases below don't re-derive it.
+
+- **Every write to Home Assistant goes through one chokepoint.**
+  [`ClimateCommandService.DispatchAsync`](../../src/Aerie.Api/Services/ClimateControl/ClimateCommandService.cs)
+  ledgers intent, validates against the channel, checks overrides, dispatches,
+  records the outcome. Panels inherit all of that for free by issuing
+  `CommandRequest`s — and must not call `IHomeAssistantCommandService` directly.
+- **`CommandExpectation.Validate`** already pins which `DeviceChannelMetric` each
+  `CommandKind` requires and that the channel is `ReadWrite`. Panel binding
+  validation is the same question one level up, and should be a sibling pure
+  class, not a re-implementation.
+- **`CommandSource.Human` exists.** A person at the wall is `Human`, not
+  `Routine`; no enum change needed. (Both are exempt from override suppression,
+  which is correct — a hand on the tablet *is* the override.)
+- **`ChannelLatestValues.GetLatestAsync`** is the batched "latest value per
+  channel" read, deliberately per-channel-index rather than set-based. Panel
+  state assembly uses it, scoped to the opened panel's channels only.
+- **`RoutineService.ComputeIsActive`** is the toggle-active rule. A routine item
+  inside a panel needs the identical answer, so that logic gets extracted rather
+  than copied.
+- **The kiosk overlay idiom** is [`GatherOverlay`](../../src/Aerie.Web/apps/dashboard/src/components/GatherOverlay.tsx)
+  and [`CameraFeedModal`](../../src/Aerie.Web/apps/dashboard/src/components/CameraFeedModal.tsx):
+  full-screen, mounted **inside `.hf-page`** (the circadian palette is inline
+  custom properties on that element, and an overlay outside it resolves none of
+  them), with its own longer idle timeout and the dashboard lifecycle held while
+  it is open.
+- **Optimistic state has a house pattern.** `RoutinesSection` holds an optimistic
+  map cleared once the server snapshot agrees; `GatherOverlay` adds a TTL so a
+  change made elsewhere eventually wins. Panel controls need both halves.
+- **Tile geometry is shared, not duplicated.** `CamerasSection` reuses
+  `.hf-routine-btn`'s selectors rather than restating the numbers. Panel tiles do
+  the same.
+- **`?source=mock|test`** switches the whole screen through `dataSource.ts`.
+  Panels need mock and test implementations or that guarantee breaks.
+
+## The model
+
+```
+EfPanel                         Table "Panels"
+  Id, Name, Description?, Icon?, Color?, SortOrder, Included
+  Items: List<EfPanelItem>
+
+EfPanelItem                     Table "PanelItems"
+  Id, PanelId, SortOrder
+  Kind: PanelItemKind           Routine | Control
+  RoutineId?                    set iff Kind == Routine
+  ControlKind?                  set iff Kind == Control: Switch | Thermostat
+  Label?, Icon?, Color?         control display; a routine item uses the routine's own
+  OnMode?                       thermostat: the HVAC mode that means "on" ("cool", "heat")
+  MinF?, MaxF?, StepF?          thermostat bounds; null falls back to 60 / 85 / 1
+  Bindings: List<EfPanelControlBinding>
+
+EfPanelControlBinding           Table "PanelControlBindings"
+  Id, ItemId, Role: ControlRole, ChannelId
+```
+
+**One item table with a discriminator, rather than two parallel tables.** What the
+kiosk renders is *one ordered list of things in a modal*, and `SortOrder` is the
+property that has to be coherent across both kinds — two tables would leave the
+admin form reconciling two collections' orderings against each other for no gain.
+The nullable columns are the honest cost, and each one is documented on the entity.
+
+**Roles per control kind:**
+
+| Kind | Role | Required | Channel metric | Direction |
+|---|---|---|---|---|
+| `Switch` | `Power` | yes | `PowerState` | ReadWrite |
+| `Thermostat` | `Setpoint` | yes | `SetpointTemperature` | ReadWrite |
+| `Thermostat` | `Power` | no | `PowerState` | ReadWrite |
+| `Thermostat` | `Mode` | no | `HvacMode` | ReadWrite |
+| `Thermostat` | `Ambient` | no | `Temperature` | Read or ReadWrite |
+
+A `Thermostat` needs `Power` **or** (`Mode` **and** `OnMode`) to be switchable;
+without either it is setpoint-only, which is legal.
+
+All three enums (`PanelItemKind`, `ControlKind`, `ControlRole`) follow the repo's
+append-only rule — the column stores the underlying int, so new values go on the
+end. That rule is exactly what makes `Light` and `Camera` a later migration
+rather than a later redesign.
+
+## The API
+
+| Endpoint | Who | What |
+|---|---|---|
+| `GET /api/panels` · `GET /api/panels/{id}` | admin | Panels with their items and bindings. |
+| `POST` · `PUT /api/panels/{id}` · `DELETE /api/panels/{id}` | admin | CRUD. Items are embedded and replaced wholesale, exactly as `RoutineWriteRequest` does — the item list *is* the panel. |
+| `GET /api/dashboard` | kiosk | Gains `panels: PanelSummary[]` — id, name, icon, color. The tile, nothing more. |
+| `GET /api/panels/{id}/state` | kiosk | Live per-item state. Polled ~5s while the overlay is open. |
+| `POST /api/panels/{id}/items/{itemId}/power` | kiosk | `{ on: bool }`. Switch → `SetPower`. Thermostat → `SetPower` when `Power` is bound, else `SetHvacMode` to `OnMode` / `"off"`. |
+| `POST /api/panels/{id}/items/{itemId}/setpoint` | kiosk | `{ valueF: decimal }`, clamped server-side to `MinF`/`MaxF`. |
+
+Routine items reuse `POST /api/routines/{id}/trigger` and `/turn-off` unchanged.
+
+**Writes are item-scoped, not channel-scoped, on purpose.** The panel is the
+boundary: the kiosk can act on what an admin deliberately put on a panel, and
+cannot address an arbitrary channel by id. That is a smaller surface than
+`DevicesController`'s channel-write endpoints, which is what a wall tablet in a
+hallway should have.
+
+Every dispatch carries `CommandSource.Human` and a reason naming both halves —
+`"Panel 'Climate' — Air conditioner"` — so the ledger says which surface a person
+touched, not just that a person touched something.
+
+---
+
+## Phase 1 — Schema
+
+**Status:** not started
+
+- [ ] Add `EfPanel`, `EfPanelItem`, `EfPanelControlBinding` and the
+      `PanelItemKind` / `ControlKind` / `ControlRole` enums to a new
+      `src/Aerie.Api/Ef/Panels.cs`, with the append-only comment each existing
+      enum carries.
+- [ ] Document every nullable column on `EfPanelItem` with what makes it null —
+      the discriminator is only honest if the reader can tell which columns
+      belong to which kind.
+- [ ] Register `Panels`, `PanelItems`, `PanelControlBindings` DbSets on
+      [`AerieContext`](../../src/Aerie.Api/Ef/AerieContext.cs).
+- [ ] Configure relationships in `OnModelCreating`: item → panel cascade,
+      binding → item cascade, binding → channel cascade (a deleted channel takes
+      the binding that pointed at it), item → routine **cascade** (a deleted
+      routine must not leave an item referencing nothing).
+- [ ] `make ef-migration migration=AddPanels`.
+- [ ] `make db` then `make ef-database-update`; confirm the three tables exist
+      via `make db-shell`.
+
+## Phase 2 — Domain rules
+
+**Status:** not started
+
+- [ ] Add `PanelBindingRules` under `src/Aerie.Api/Services/Panels/` — a pure
+      class, no DB or clock, sibling in spirit to `CommandExpectation`.
+- [ ] `RequiredMetric(ControlRole)` and `RolesFor(ControlKind)` returning
+      required/optional roles per the table above.
+- [ ] `Validate(EfPanelItem, IReadOnlyDictionary<Guid, EfDeviceChannel>)`
+      returning null or the reason: missing required role, wrong metric,
+      read-only channel on a writing role, unknown role for the kind,
+      `Thermostat` with `Mode` bound but no `OnMode`, `MinF >= MaxF`,
+      non-positive `StepF`.
+- [ ] Add `PanelDefaults` with `MinF = 60`, `MaxF = 85`, `StepF = 1`, and a
+      comment on why they are constants rather than settings for now.
+- [ ] Extract `RoutineService.ComputeIsActive` into a shared
+      `RoutineToggleState.IsActive(routine, latest)`; repoint `RoutineService` at
+      it and confirm `RoutineServiceTests` still passes untouched.
+- [ ] `src/Aerie.Api.Tests/Panels/PanelBindingRulesTests.cs`: one test per
+      rejection reason, plus a valid `Switch`, a valid `Thermostat` with `Power`,
+      and a valid `Thermostat` with `Mode` + `OnMode`.
+
+## Phase 3 — Read path
+
+**Status:** not started
+
+- [ ] Add `src/Aerie.Api/Models/Panels/Dtos.cs`: `PanelSummary`,
+      `PanelDto`/`PanelItemDto`/`PanelControlBindingDto`, the matching
+      `*WriteRequest` records, and `PanelStateDto` / `PanelItemStateDto`.
+- [ ] `PanelItemStateDto` carries, per item: id, kind, label, icon, color, and
+      for a control — controlKind, `isOn: bool?`, `setpointF: decimal?`,
+      `ambientF: decimal?`, `mode: string?`, minF, maxF, stepF; for a routine —
+      isToggle, isActive.
+- [ ] Add `IPanelService` / `PanelService` under `Services/Panels/`:
+      `GetPanelsAsync` (Included + SortOrder, mirroring `RoutineService`) and
+      `GetStateAsync(panelId)`.
+- [ ] `GetStateAsync` collects only the opened panel's bound channel ids plus its
+      routine items' `SetPower` channels, and makes exactly one
+      `ChannelLatestValues.GetLatestAsync` call for the union.
+- [ ] Derive `isOn`: `Power` binding's state `== "on"` when bound; otherwise the
+      `Mode` channel's state `!= "off"`. Null when neither is bound.
+- [ ] Register `IPanelService` in [`Program.cs`](../../src/Aerie.Api/Program.cs)
+      next to `IRoutineService`.
+- [ ] Add `Panels` to `DashboardData` and compose it into
+      [`DashboardService`](../../src/Aerie.Api/Services/Dashboard/DashboardService.cs)'s
+      concurrent fan-out.
+- [ ] `PanelServiceTests`: Included/SortOrder filtering; on/off derived from
+      `Power`; on/off derived from `Mode` with no `Power`; setpoint and ambient
+      reads; a routine item's isActive matching `RoutineService`'s; a control
+      whose channels have no samples yet reading all-null rather than throwing.
+
+## Phase 4 — Write path and admin API
+
+**Status:** not started
+
+- [ ] Add `PanelsController` with the CRUD five, items replaced wholesale on
+      write, modelled on
+      [`RoutinesController`](../../src/Aerie.Api/Controllers/RoutinesController.cs).
+- [ ] Create/Update load every referenced channel, run `PanelBindingRules.Validate`
+      per item, and answer `BadRequest` with the reason before saving —
+      an invalid panel must never reach the database.
+- [ ] Add `POST /{id}/items/{itemId}/power`: resolve the item, build the
+      `CommandRequest` (`SetPower`, or `SetHvacMode` with `OnMode`/`"off"`),
+      dispatch through `IClimateCommandService`, map `Rejected` → 400 and
+      `Failed` → 502 as the routines endpoints do.
+- [ ] Add `POST /{id}/items/{itemId}/setpoint`: clamp to `MinF`/`MaxF`, round to
+      `StepF`, dispatch `SetTemperature`.
+- [ ] Reason string on every dispatch: `$"Panel '{panel.Name}' — {item label}"`.
+- [ ] Both write endpoints 404 on an item that isn't a control, and 400 on a
+      control whose kind doesn't support the verb (setpoint on a `Switch`).
+- [ ] `PanelCommandTests`: power via `Power` binding; power via `OnMode` fallback
+      including the `"off"` direction; setpoint clamped low; clamped high;
+      rounded to step; setpoint refused on a `Switch`.
+
+## Phase 5 — Admin UI
+
+**Status:** not started
+
+- [ ] Add the `Panel` types and the `getPanels`/`createPanel`/`updatePanel`/
+      `deletePanel` calls to `src/Aerie.Web/apps/admin/src/{types.ts,api/client.ts}`.
+- [ ] Add `PanelsPage.tsx` modelled on `RoutinesPage.tsx` — list, create form,
+      per-row edit form, `IconPicker`, color, sortOrder, included.
+- [ ] Item editor: add-routine (a select over existing routines) and
+      add-control (a `ControlKind` select), reorderable, removable.
+- [ ] Per control, render one channel select per role for that kind, filtered to
+      channels whose metric matches — mirror `RoutinesPage`'s
+      `eligibleChannelOptions`, keyed on role rather than kind.
+- [ ] Thermostat extras: `OnMode` select populated from the bound `HvacMode`
+      channel's `availableOptions`, and MinF/MaxF/StepF number inputs showing the
+      defaults as placeholders.
+- [ ] Client-side mirror of the required-role check so the form says what's
+      missing before the POST does.
+- [ ] Add the `/panels` route and nav link in
+      [`admin/src/App.tsx`](../../src/Aerie.Web/apps/admin/src/App.tsx), between
+      Routines and Calendars.
+
+## Phase 6 — Kiosk UI
+
+**Status:** not started
+
+- [ ] Add `PanelSummary` and the panel state types to
+      [`dashboard/src/types.ts`](../../src/Aerie.Web/apps/dashboard/src/types.ts),
+      plus a `PanelSource` interface (state read, power write, setpoint write) —
+      the same seam `GatherSource` uses.
+- [ ] Add `api/panelsClient.ts` (`ApiPanelSource`), and `mock/mockPanelSource.ts`
+      + `mock/testPanelSource.ts`; wire all three into `getPanelSource()` in
+      `dataSource.ts` so `?source=` still switches the whole screen.
+- [ ] Add `panels` to the mock and test dashboard data sources.
+- [ ] Add `PanelsSection.tsx` — the tile row, reusing `.hf-routine-btn` and
+      `.hf-routine-circle` selectors rather than restating the geometry.
+- [ ] Render it in `App.tsx` between `CamerasSection` and `GatherTile`, guarded on
+      `data.panels.length > 0`.
+- [ ] Add `hooks/usePanelState.ts`: fetch on open, poll every 5s, and hold an
+      optimistic overlay per item with a 30s TTL — `RoutinesSection`'s
+      reconcile-when-the-server-agrees plus `GatherOverlay`'s expiry, for the same
+      reasons each has.
+- [ ] Add `PanelOverlay.tsx` on `GatherOverlay`'s shape: full-screen, mounted
+      inside `.hf-page`, a 56px close target, its own ~60s idle close, and the
+      dashboard lifecycle held while it is open.
+- [ ] Add `SwitchControl.tsx` — label plus a large on/off control, pending and
+      error states per control the way `RoutinesSection` does per tile.
+- [ ] Add `ThermostatControl.tsx` — an On/Off pill, `⊖ 72° ⊕` with the setpoint as
+      the largest thing on the card, ambient beneath it, and the bounds enforced
+      client-side too so a disabled `⊕` at max is visible rather than silently
+      refused.
+- [ ] Hold-to-repeat on `⊖`/`⊕` (~400ms delay, then ~150ms repeat) driving local
+      state only; dispatch a single `setpoint` write after ~700ms of quiet.
+- [ ] Render a routine item with `RoutinesSection`'s existing trigger/turn-off
+      behavior — extracted into a shared component rather than a second copy.
+- [ ] Add the `.hf-panel-*` styles to `theme.css`, reusing tile selectors where the
+      geometry is shared.
+- [ ] `make test-web` clean (lint + build). Leave browser verification to the user.
+
+## Phase 7 — The Climate panel itself
+
+**Status:** not started
+
+- [ ] Confirm the AC's channels exist and are mapped: `PowerState` or `HvacMode`,
+      `SetpointTemperature`, and a `Temperature` channel for ambient.
+- [ ] Confirm both fans have `ReadWrite` `PowerState` channels.
+- [ ] In admin, create the "Climate" panel — icon, color, sort order after the
+      routines.
+- [ ] Add the AC thermostat control: bindings, `OnMode = "cool"`, bounds 60–85,
+      step 1.
+- [ ] Add Fan 1 and Fan 2 as `Switch` controls.
+- [ ] Verify on the wall tablet: on/off both directions, ± single step, hold from
+      one end of the range to the other landing exactly **one** command.
+- [ ] Check the command ledger — every action present, `Source = Human`, reason
+      naming the panel and the control.
+
+## Phase 8 — Documentation and dissipation
+
+**Status:** not started
+
+- [ ] Add a Panels section to [`docs/kiosk-architecture.md`](../kiosk-architecture.md):
+      where the tile sits and why, the overlay's idle rules, the optimistic model.
+- [ ] Add the Panels rows to [`docs/dashboard-api-manifest.md`](../dashboard-api-manifest.md),
+      including the new `panels` field on `DashboardData`.
+- [ ] Note in [`docs/device-architecture.md`](../device-architecture.md) that a
+      panel control binds channels by role, and that new control kinds are an
+      enum append plus a kiosk component.
+- [ ] Add this plan's row to [`docs/plans/README.md`](README.md)'s Current plans
+      table when Phase 1 starts, and remove it at dissipation.
+- [ ] Delete this file once the above land — a finished plan is not an archive
+      (README, lifecycle step 3).
+
+## Deliberately not in this plan
+
+- **Light and camera controls.** Both are an append to `ControlKind`, a role set
+  in `PanelBindingRules`, and a kiosk component. Nothing here should need to move
+  for them — that is the test of whether this model was right.
+- **Nested panels.** A panel holds routines and controls, not other panels.
+- **Panel-level scheduling or automation.** Panels are a surface a person touches;
+  the control loop ([`docs/climate-brain-architecture.md`](../climate-brain-architecture.md))
+  is the other half and stays separate.
+- **Per-control override policy.** A hand on the tablet is `Human`, which already
+  bypasses suppression. Actuator policy clamps belong in `ClimateCommandService`
+  when they arrive, and panels inherit them without asking.
