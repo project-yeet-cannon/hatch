@@ -211,6 +211,87 @@ spec:
           # by nothing in the manifest would make this file harder to audit
           # against the plan than the one line of duplication costs.
           enabled: true
+    # -----------------------------------------------------------------------
+    # The part-time-node plan's Phase 2.1 - Traefik stops being a single point
+    # of failure.
+    #
+    # Everything below this line is about survivability rather than routing,
+    # and it is worth doing on a three-node cluster whether or not a fourth
+    # ever appears: with one replica, whichever node holds it takes all
+    # ingress down with it on its Patch Tuesday reboot, for as long as
+    # rescheduling takes. That is true today. The fourth node the plan adds
+    # only makes meeting it a weekly event rather than a monthly one.
+    deployment:
+      # Two, and the anti-affinity below is what makes it two. `replicas` is a
+      # sibling of the `podAnnotations` k3s's own valuesContent sets, and
+      # setting it here does not disturb them: as this file's header records,
+      # the two values files are merged by Helm key-by-key, so a `deployment`
+      # map in file 1 merges into file 0's rather than replacing it. (Lists
+      # would replace - which is why the `tolerations` k3s sets are not
+      # touched here either.)
+      #
+      # Not three. Two replicas across three nodes survive any one node
+      # leaving, which is the whole ask; a third buys nothing until there is a
+      # fourth node to put it on and costs a pod's memory on a cluster whose
+      # limits already overcommit.
+      #
+      # One thing this count is checked against by the chart itself, and it is
+      # worth knowing why it does not bite: templates/deployment.yaml *fails*
+      # the render if replicas > 1 and any `additionalArguments` entry
+      # contains ".acme." - Traefik's own ACME resolver stores certificates in
+      # a file that cannot be shared between replicas. This installation does
+      # not use it. Certificates come from cert-manager into a Secret, served
+      # through 3b.10's TLSStore, which every replica reads equally. Verified
+      # against k3s's packaged traefik.yaml at the pinned version: its
+      # valuesContent sets no additionalArguments at all.
+      replicas: 2
+    # Required, not preferred. Two replicas that the scheduler is merely
+    # encouraged to separate are, on the day it does not, one replica with
+    # extra steps - and the day it does not is exactly the day a node is
+    # already unavailable, which is the day this exists for.
+    #
+    # The cost, stated because it is real: the chart's updateStrategy is
+    # maxSurge 1 / maxUnavailable 0, so a rolling update briefly wants a third
+    # pod, and hard anti-affinity means it needs a third node with no Traefik
+    # pod on it. With three nodes that is satisfied. With one of the three
+    # already cordoned, the rollout stalls rather than proceeding - it does not
+    # drop traffic, and it resolves itself when the node returns. A stalled
+    # upgrade during a drain is the correct trade against two replicas sharing
+    # a node during normal operation.
+    #
+    # `affinity` is run through Helm's `tpl` by _podtemplate.tpl, so the
+    # selector below can name the chart's own helpers rather than hardcoding
+    # labels this file would have to keep in step. `traefik.instance-name` is
+    # the helper `traefik.labelselector` itself uses - upstream's own commented
+    # example in values.yaml expands `{{ .Release.Name }}-{{ include
+    # "traefik.namespace" . }}` inline instead, which is the same string here
+    # but silently wrong if `instanceLabelOverride` is ever set. Both helpers
+    # read from templates/_helpers.tpl at the pinned traefik-40.1.4+up40.1.0,
+    # and both are what the Deployment's own immutable `selector.matchLabels`
+    # is built from, so this selector cannot drift from the pods it means.
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: '{{ template "traefik.name" . }}'
+                app.kubernetes.io/instance: '{{ template "traefik.instance-name" . }}'
+            topologyKey: kubernetes.io/hostname
+    # maxUnavailable: 1, for the reason
+    # ../../../../charts/aerie/templates/poddisruptionbudgets.yaml already
+    # writes out at length for `api` and `files`: a PDB that turns a planned
+    # reboot into a stuck `kubectl drain` is worse than no PDB at all, because
+    # it fails during the Patch Tuesday window it was meant to survive.
+    # minAvailable: 2 against two replicas would be exactly that - zero
+    # allowed disruptions, forever, and a drain that never completes.
+    #
+    # The chart renders this only when the key is truthy (templates/
+    # poddisruptionbudget.yaml wraps both bounds in `if`), and it renders
+    # policy/v1 on any cluster that has it, which this one does.
+    podDisruptionBudget:
+      enabled: true
+      maxUnavailable: 1
+    # -----------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # What is deliberately absent.
 #

@@ -1,9 +1,11 @@
 # Part-time node — a fourth host that leaves when its owner wants it back
 
 **Status:** Phase 1 done — the tooling can build an agent now, and that stands
-on its own whether or not a fourth host ever appears. Phases 2-5 not started.
-Five phases; the first three are cluster work that stands on its own merits,
-the last two are the machine-specific part.
+on its own whether or not a fourth host ever appears. Phase 2's two manifest
+changes (2.1, 2.2) are written and merged; its two cluster operations (2.3's
+re-read, 2.4's rehearsal) are not done. Phases 3-5 not started. Five phases;
+the first three are cluster work that stands on its own merits, the last two
+are the machine-specific part.
 
 A fourth Windows host joins the cluster as a k3s **agent**, carrying a Linux VM
 sized to take real load off the three permanent nodes. Its owner uses the
@@ -266,25 +268,160 @@ Independently valuable, and a prerequisite: this lands **before** D joins.
 **Exit:** `kubectl drain` of any node completes without `--force`, and ingress
 and DNS survive it with no gap.
 
-- [ ] 2.1 **Traefik to 2 replicas** with `requiredDuringScheduling` pod
+The two manifest changes are written; the two things that can only be learned
+from the running cluster are not done. Neither 2.1 nor 2.2 has been *observed*
+yet — they reach the cluster by being committed, like everything else under
+`deploy/`, so the first proof either works is Flux reconciling them, and the
+first proof they were the right changes is 2.4.
+
+- [x] 2.1 **Traefik to 2 replicas** with `requiredDuringScheduling` pod
       anti-affinity on `kubernetes.io/hostname`, via
       [`traefik-helmchartconfig.yaml`](../../deploy/cluster/infrastructure/config/traefik-helmchartconfig.yaml).
       Required, not preferred: two replicas that land on one node are one
       replica with extra steps. Add a PDB with `maxUnavailable: 1`, matching the
       reasoning already written into
       [`poddisruptionbudgets.yaml`](../../charts/aerie/templates/poddisruptionbudgets.yaml).
-- [ ] 2.2 **CoreDNS to 2 replicas**, same anti-affinity. k3s owns this manifest,
+      Landed as written — `deployment.replicas`, `affinity` and
+      `podDisruptionBudget` in the same `valuesContent`, all three verified by
+      rendering the chart k3s actually serves (pulled from
+      `/var/lib/rancher/k3s/server/static/charts`) against k3s's own baseline
+      values plus this file, and diffing the result against the same render
+      without it. The diff is exactly three things: `replicas: 1` → `2`, the
+      `affinity` block on the pod spec, and a new PodDisruptionBudget. Nothing
+      else in the render moved — in particular the `deployment` map k3s's own
+      values set is merged into rather than replaced, which is the key-by-key
+      Helm merge this file's header describes.
+
+      **One check that turned out not to bite, and would have been a failed
+      install if it did.** The chart's `templates/deployment.yaml` *fails the
+      render* — `fail`, not a warning — if `replicas > 1` and any
+      `additionalArguments` entry contains `.acme.`, because Traefik's own ACME
+      resolver keeps certificates in a file no second replica can share. k3s's
+      packaged `traefik.yaml` sets no `additionalArguments` at all, and this
+      installation's certificates come from cert-manager into a Secret served
+      through 3b.10's TLSStore, which every replica reads equally. Checked
+      rather than assumed, because the failure mode is a HelmChart that stops
+      installing with no object left behind to explain why.
+
+      The cost, recorded in the manifest as well: the chart's update strategy
+      is `maxSurge: 1` / `maxUnavailable: 0`, so a rolling update wants a third
+      pod, and hard anti-affinity means it wants a third node with no Traefik
+      pod on it. Three nodes satisfy that. With one of the three already
+      cordoned, a Traefik upgrade *stalls* rather than dropping traffic, and
+      resolves when the node returns. That is the right trade against two
+      replicas quietly sharing a node on an ordinary Tuesday.
+- [x] 2.2 **CoreDNS to 2 replicas**, same anti-affinity. k3s owns this manifest,
       so the override is a `HelmChartConfig` beside Traefik's rather than an
       edit — an edit is reverted on the next k3s restart.
+
+      **Both halves of that sentence are wrong, and finding out why produced a
+      better mechanism than the one it replaced.** Landed as
+      [`coredns-availability.yaml`](../../deploy/cluster/infrastructure/config/coredns-availability.yaml),
+      which carries the full reasoning; the short version:
+
+      - **A `HelmChartConfig` would do nothing.** k3s ships Traefik as a
+        `HelmChart` CR, which is what gives `HelmChartConfig` something to
+        layer onto. CoreDNS is not a chart at all — `kubectl get helmchart -A`
+        returns only `traefik` and `traefik-crd`, while CoreDNS appears under
+        `kubectl get addon -A` as a plain manifest at
+        `/var/lib/rancher/k3s/server/manifests/coredns.yaml`. A
+        `HelmChartConfig` named `coredns` would apply cleanly, be found by
+        nothing, and change nothing — the worst of the available failures, and
+        the same shape of trap as 1.2's `etcd-expose-metrics` except silent.
+      - **An edit is *not* reverted, because k3s deliberately does not own
+        `replicas`.** The packaged manifest declares no `spec.replicas`, so the
+        Deployment comes up at Kubernetes' default of 1 and the count is left
+        to the operator. That is readable in the object rather than inferred:
+        k3s's deploy controller records everything it reconciles in a gzipped
+        `objectset.rio.cattle.io/applied` annotation, and decoding it on the
+        live Deployment gives `spec` keys `revisionHistoryLimit`, `selector`,
+        `strategy`, `template` — no `replicas`. A field in neither the
+        last-applied set nor the desired manifest is in no merge patch.
+      - So the file is a **partial server-side apply**: a Deployment object
+        carrying its identity and `spec.replicas` and nothing else. SSA
+        validates the merged result, not the apply configuration, so the
+        missing `selector` and `template` are supplied by the object already in
+        the cluster and stay owned by k3s. Flux owns one field.
+      - Verified against the live cluster with `kubectl apply --server-side
+        --dry-run=server` under Flux's own field manager before committing. It
+        reports one conflict on `.spec.replicas` with `deploy@aerie-node-1` —
+        which claimed the field when it *created* the object, because the typed
+        client fills in the API default before sending, and has never asserted
+        it since. `fluxcd/pkg/ssa` passes `client.ForceOwnership`
+        unconditionally on every apply (it is not gated on `spec.force`, which
+        is the unrelated recreate-on-immutable-change mechanism), so
+        kustomize-controller takes the field. The same dry-run with
+        `--force-conflicts` returns `replicas: 2` with `kustomize-controller`
+        as its sole manager and `deploy@aerie-node-1` still owning the rest.
+      - **`kustomize.toolkit.fluxcd.io/prune: disabled` is load-bearing.**
+        infra-config is `prune: true`; without the annotation, deleting or
+        renaming that file would delete the cluster's only DNS Deployment, and
+        k3s would not put it back until some node restarted, because its deploy
+        controller re-applies an addon on manifest-checksum change and the
+        manifest would not have changed. The object is not ours to delete; one
+        field of it is ours to set.
+      - **The anti-affinity was already there, and is better than what this
+        step would have added.** k3s's own manifest gives the pod template a
+        `topologySpreadConstraints` entry with `maxSkew: 1`,
+        `topologyKey: kubernetes.io/hostname`, `whenUnsatisfiable:
+        DoNotSchedule` — the same strength as Traefik's
+        `requiredDuringScheduling`, and it keeps spreading instead of going
+        unschedulable if the replica count ever exceeds the node count. It sits
+        inside `spec.template`, which this file does not touch.
+      - One addition beyond the step as written: a PDB for CoreDNS with
+        `maxUnavailable: 1`, since k3s ships none and two replicas without one
+        still lose both to two drains in the same window — which is precisely
+        what a personal-mode entry on top of a running
+        [`stagger-update-reboots.yml`](../../.github/workflows/stagger-update-reboots.yml)
+        window would be.
 - [ ] 2.3 **Resolve the zero-allowed-disruptions PDBs** from finding 4. Repair
       the observability stack first (`autokuma` `Init:Error`, `grafana` stuck
       initializing, `opensearch` 0/1 — these predate this plan), then re-read.
       If `aerie/api` still computes 0 with 3/3 ready, that is a bug to find, not
       a number to work around.
+
+      **Re-read on 2026-08-25, and finding 4's caveat is mostly answered.** The
+      observability stack repaired itself: every pod in `observability` is
+      Running and Ready, `autokuma` and `grafana` included, and
+      `opensearch-cluster-master-pdb` now reports 1 allowed disruption. So does
+      `aerie/api`, at 3/3 ready with `currentHealthy: 3` and
+      `desiredHealthy: 2` — it was the mid-repair reading, not a bug. Nothing
+      to work around.
+
+      Five PDBs still report zero, and all five are that way **by design**,
+      which is a different answer from "unresolved":
+
+      - `longhorn-system/instance-manager-*`, one per node, `minAvailable: 1`
+        over a selector matching that node's single instance-manager pod.
+        Longhorn's `node-drain-policy` is at its default
+        `block-if-contains-last-replica`, and these PDBs are the mechanism it
+        blocks *with*: its node controller removes the PDB once the node is
+        cordoned and it has satisfied itself that no volume's last healthy
+        replica is at stake. A standing zero on an uncordoned node is the
+        resting state, not a blocker — but "Longhorn takes the PDB away when
+        asked" is a claim 2.4 should watch happen rather than trust.
+      - `aerie/aerie-pg-primary` and `immich/immich-pg-primary`,
+        `minAvailable: 1` over the single primary. Per CloudNativePG's own
+        upgrade documentation at the running 1.30.0, "if a node is to be
+        drained and contains a cluster's primary instance, a switchover happens
+        ahead of the drain" — the operator watches for the cordon and moves
+        the primary, after which the PDB selects a pod on a different node and
+        the drain proceeds. Again: something 2.4 should observe, with the timing
+        written down, because it is the step most likely to dominate a
+        personal-mode entry's 90-second budget.
+
+      What is left of this item is therefore the *watching*, which is 2.4.
 - [ ] 2.4 **A drain rehearsal.** Cordon and drain one permanent node, time it,
       confirm the house stays up, uncordon. This is the dress rehearsal for
       every future personal-mode entry, run against a node whose owner is not
       waiting to play a game.
+
+      Do this **after** Flux has reconciled 2.1 and 2.2 and both show two
+      Ready pods on two different nodes — a drain rehearsed against a single
+      Traefik replica measures the old cluster. Three things to time and write
+      down, because 4.1's 90-second deadline is a guess: how long Longhorn
+      takes to drop the instance-manager PDB, how long CNPG's switchover takes,
+      and how long the whole drain takes end to end.
 
 ## [] Phase 3 — Build the node
 

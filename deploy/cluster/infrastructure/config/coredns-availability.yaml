@@ -1,0 +1,161 @@
+# The part-time-node plan's Phase 2.2 - CoreDNS stops being a single point of
+# failure. Independently valuable, and for the same reason as Traefik's two
+# replicas next door: with one CoreDNS pod, whichever node holds it takes all
+# in-cluster name resolution down with it on its Patch Tuesday reboot. That is
+# true on three nodes today, before any part-time fourth node exists.
+#
+# ---------------------------------------------------------------------------
+# The plan said this would be a HelmChartConfig beside Traefik's. It cannot be,
+# and the reason is worth recording because it is the kind of thing that reads
+# as true and is not.
+#
+# k3s ships Traefik as a HelmChart CR, which is what gives HelmChartConfig
+# something to layer onto. It does not ship CoreDNS that way. Read from the
+# live cluster rather than inferred:
+#
+#   $ kubectl get helmchart -A
+#   kube-system   traefik
+#   kube-system   traefik-crd
+#
+#   $ kubectl get addon -A
+#   kube-system   coredns   /var/lib/rancher/k3s/server/manifests/coredns.yaml
+#
+# CoreDNS is an `Addon` - a plain multi-document manifest (ServiceAccount,
+# RBAC, ConfigMap, Deployment, Service) that k3s's deploy controller applies
+# directly. There is no chart underneath it and no values to override. A
+# `HelmChartConfig` named `coredns` would be applied cleanly, found by nothing,
+# and change nothing, which is the worst of the available failures.
+#
+# ---------------------------------------------------------------------------
+# What replaces it: k3s leaves `replicas` unowned, deliberately, and this file
+# takes just that one field.
+#
+# k3s's packaged coredns.yaml declares no `spec.replicas` at all - checked
+# against the file on the node at the pinned k3s (scripts/versions.json,
+# v1.35.7+k3s1). The Deployment therefore comes up at Kubernetes' own default
+# of 1, and the count is not part of what k3s reconciles.
+#
+# That is not a guess about intent, it is readable in the object. k3s's deploy
+# controller (wrangler's objectset apply) records everything it owns in a
+# gzipped `objectset.rio.cattle.io/applied` annotation and reconciles by
+# three-way merge against it. Decoding that annotation on the live Deployment:
+#
+#   spec keys: revisionHistoryLimit, selector, strategy, template
+#
+# No `replicas`. A field absent from both the last-applied set and the desired
+# manifest is absent from the merge patch, so a changed replica count is not
+# reverted on a k3s restart, nor on a k3s upgrade that rewrites the manifest
+# for some other reason. The plan's worry - "an edit is reverted on the next
+# k3s restart" - is true of the Corefile and the image and is not true of this.
+#
+# So this file is a **partial server-side apply**: a Deployment object carrying
+# nothing but its identity and `spec.replicas`. Server-side apply merges an
+# apply configuration into the live object and validates the result, not the
+# input, so the absence of the required `selector` and `template` fields is not
+# an error - they are supplied by the object already in the cluster, and stay
+# owned by k3s. Flux ends up owning exactly one field.
+#
+# Verified against this cluster before being committed, with a server-side
+# dry-run under Flux's own field manager:
+#
+#   $ kubectl apply --server-side --field-manager=kustomize-controller \
+#       --dry-run=server -f coredns-availability.yaml
+#   error: Apply failed with 1 conflict: conflict with "deploy@aerie-node-1"
+#          using apps/v1: .spec.replicas
+#
+# The conflict is expected and is not a problem: `deploy@...` claimed
+# `spec.replicas` when it *created* the object, because the typed client it
+# posts with fills in the API default before sending. It has never asserted the
+# field since. fluxcd/pkg/ssa passes `client.ForceOwnership` unconditionally on
+# every apply and dry-run apply - it is not gated on `spec.force`, which is a
+# different mechanism about recreating objects with immutable-field changes -
+# so kustomize-controller takes the field and k3s does not take it back. The
+# same dry-run with `--force-conflicts` returns `spec.replicas: 2` with
+# `kustomize-controller` as the sole manager of it, and `deploy@aerie-node-1`
+# still owning everything else.
+#
+# One ordering assumption, stated because SSA would behave differently if it
+# were ever false: this patch requires the Deployment to already exist. On a
+# create, an apply configuration with no selector or template is rejected by
+# the API server. It cannot happen in practice - k3s applies its own addons
+# during server start, and Flux is bootstrapped afterwards onto a cluster that
+# by definition already resolves names - and if it ever did race, the result is
+# a NotReady infra-config that succeeds on its next 10m interval, which is the
+# report rather than a fault.
+#
+# ---------------------------------------------------------------------------
+# What this file deliberately does not set: anti-affinity. The plan asked for
+# "same anti-affinity" as Traefik's; k3s's own manifest already carries a
+# stronger form of it, and adding a second, weaker constraint on top would be
+# noise. From the packaged coredns.yaml:
+#
+#   topologySpreadConstraints:
+#     - maxSkew: 1
+#       topologyKey: kubernetes.io/hostname
+#       whenUnsatisfiable: DoNotSchedule
+#       labelSelector: {matchLabels: {k8s-app: kube-dns}}
+#
+# `DoNotSchedule` is a hard constraint, the same strength as Traefik's
+# `requiredDuringSchedulingIgnoredDuringExecution`, and maxSkew 1 on hostname
+# means two replicas cannot land on one node while a second node is available.
+# It also degrades better than hard anti-affinity does, since it keeps spreading
+# rather than going unschedulable if the count ever exceeds the node count. It
+# is inside `spec.template`, which k3s owns and this file does not touch.
+# ---------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coredns
+  namespace: kube-system
+  annotations:
+    # Load-bearing, and the single most important line in this file.
+    #
+    # infra-config is `prune: true`. Without this annotation the coredns
+    # Deployment joins Flux's inventory as though Flux created it, and deleting
+    # this file - or moving it, or renaming it - would delete the cluster's
+    # only DNS Deployment. k3s would not put it back: its deploy controller
+    # re-applies an addon when the manifest's checksum changes, and the
+    # manifest would not have changed, so the object would simply stay gone
+    # until the next k3s restart on some node.
+    #
+    # The object is not ours to delete. One field of it is ours to set. This
+    # annotation is the difference.
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  # Two, not three: two replicas across three nodes survive any one node
+  # leaving, which is the whole ask, and CoreDNS on this cluster is nowhere
+  # near needing a third for load. Raising it later is a one-line change here
+  # with no other consequence - the topology spread constraint k3s ships keeps
+  # placing them correctly on its own.
+  replicas: 2
+---
+# k3s ships no PodDisruptionBudget for CoreDNS, and two replicas without one
+# still lose both if two nodes are drained in the same window - which is
+# exactly what .github/workflows/stagger-update-reboots.yml exists to sequence
+# and exactly what a personal-mode entry does on top of an already-running
+# maintenance window. Owned entirely by this file, unlike the Deployment above,
+# so it prunes normally and needs no annotation.
+#
+# maxUnavailable: 1, not minAvailable, for the reason
+# ../../../../charts/aerie/templates/poddisruptionbudgets.yaml writes out at
+# length: a PDB that turns a planned reboot into a stuck `kubectl drain` fails
+# during the window it was meant to survive. At two healthy replicas this
+# allows one disruption; with one replica already down it allows none, which is
+# the correct answer to "may I also take the last DNS pod" and the one case
+# where blocking a drain is the point.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: coredns
+  namespace: kube-system
+  labels:
+    k8s-app: kube-dns
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      # The Deployment's own immutable selector, read from the packaged
+      # manifest: `k8s-app: kube-dns` and nothing else. Not the `kubernetes.io/
+      # name: CoreDNS` label, which k3s puts on the Deployment and the Service
+      # but not on the pod template.
+      k8s-app: kube-dns

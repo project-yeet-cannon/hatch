@@ -37,6 +37,14 @@ resources:
   - cluster-secret-store.yaml
   - external-secrets
   - traefik-helmchartconfig.yaml
+  # The part-time-node plan's Phase 2.2, and the one file in this directory
+  # that is not an instance of a type installed by ../controllers: it is a
+  # two-field patch onto k3s's own CoreDNS Deployment plus a PDB for it. It
+  # sits here because it is the sibling of Traefik's two replicas above and
+  # belongs beside them, and because "everything here is applied together"
+  # already describes it - it has no dependency on layer 1 at all, the same
+  # technicality traefik-helmchartconfig.yaml records about itself.
+  - coredns-availability.yaml
   # 3b.10, in three files rather than one: the issuers are a pair that must stay
   # identical, the Certificate is the object with the human stop in it, and the
   # TLSStore is what serves the result. Splitting them keeps the flip from
