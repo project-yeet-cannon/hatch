@@ -37,14 +37,30 @@ resources:
   - cluster-secret-store.yaml
   - external-secrets
   - traefik-helmchartconfig.yaml
-  # The part-time-node plan's Phase 2.2, and the one file in this directory
-  # that is not an instance of a type installed by ../controllers: it is a
-  # two-field patch onto k3s's own CoreDNS Deployment plus a PDB for it. It
-  # sits here because it is the sibling of Traefik's two replicas above and
-  # belongs beside them, and because "everything here is applied together"
-  # already describes it - it has no dependency on layer 1 at all, the same
-  # technicality traefik-helmchartconfig.yaml records about itself.
-  - coredns-availability.yaml
+  # The part-time-node plan's Phase 2.2 - CoreDNS's replica count and PDB - is
+  # DISABLED here, not deleted. Its file keeps its reasoning intact; see the
+  # header of ./coredns-availability.yaml for what happened.
+  #
+  # Short version: as a partial server-side apply carrying only spec.replicas,
+  # it passes a hand-run `kubectl apply --server-side --dry-run=server` and
+  # fails kustomize-controller's own drift-detection dry-run, which validated a
+  # merge result with no spec.selector in it:
+  #
+  #   Deployment/kube-system/coredns dry-run failed (Invalid): [spec.selector:
+  #   Required value, ... spec.selector: Invalid value: null: field is immutable]
+  #
+  # That is a NotReady infra-config, and infra-config is the root of the
+  # dependency chain - data-cluster, then data-schema, then apps all wait on
+  # it. So one un-appliable manifest in this layer stops every application
+  # deploy in the cluster, which is what it did: infra-config sat at the
+  # previous revision while the app tier's image tag advanced three times with
+  # nothing to apply it.
+  #
+  # Nothing of it ever reached the cluster - no PDB was created and CoreDNS
+  # stayed at one replica - so removing this line prunes nothing and changes no
+  # running object. It restores the chain and hands Phase 2.2 back to its plan
+  # unstarted.
+  # - coredns-availability.yaml
   # 3b.10, in three files rather than one: the issuers are a pair that must stay
   # identical, the Certificate is the object with the human stop in it, and the
   # TLSStore is what serves the result. Splitting them keeps the flip from

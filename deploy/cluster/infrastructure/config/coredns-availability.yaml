@@ -1,3 +1,41 @@
+# ===========================================================================
+# NOT APPLIED. This file is commented out of ./kustomization.yaml.
+#
+# Everything below is preserved as written, because the reasoning in it is
+# sound and the mechanism is what turned out to be wrong. What happened, so
+# that a second attempt starts from the failure rather than from the design:
+#
+# The verification quoted further down - `kubectl apply --server-side
+# --field-manager=kustomize-controller --dry-run=server` - passes. Flux's own
+# dry-run does not. kustomize-controller reported:
+#
+#   Deployment/kube-system/coredns dry-run failed (Invalid):
+#   Deployment.apps "coredns" is invalid: [spec.selector: Required value,
+#   spec.template.metadata.labels: Invalid value: {"k8s-app":"kube-dns"}:
+#   `selector` does not match template `labels`,
+#   spec.selector: Invalid value: null: field is immutable]
+#
+# Read that error closely, because it is the clue for whoever picks this up:
+# the object being validated has k3s's `spec.template` in it and no
+# `spec.selector`. So this is not the partial config being validated on its
+# own - something merged, and the selector was dropped on the way. The
+# hand-run check does not reproduce it, which means the difference is in how
+# kustomize-controller applies rather than in this manifest's shape, and that
+# is the thing to establish before writing this file a second time.
+#
+# What it cost, which is the part that makes this worth a banner rather than a
+# footnote: infra-config is the root of the Kustomization dependency chain -
+# data-cluster depends on it, data-schema on that, apps on that. A single
+# manifest here that cannot be applied stops every application deploy in the
+# cluster. It did: infra-config held at the previous revision while the app
+# tier's image tag advanced three times with nothing to apply it, and the
+# symptom was a shipped feature that never appeared on a page. A change to
+# this layer is worth confirming against a live `flux get kustomizations`
+# rather than against a dry-run alone.
+#
+# Nothing here ever reached the cluster - no PDB was created, CoreDNS stayed
+# at one replica - so re-enabling this line is the whole of a second attempt.
+# ===========================================================================
 # The part-time-node plan's Phase 2.2 - CoreDNS stops being a single point of
 # failure. Independently valuable, and for the same reason as Traefik's two
 # replicas next door: with one CoreDNS pod, whichever node holds it takes all
