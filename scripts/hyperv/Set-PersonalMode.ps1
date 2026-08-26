@@ -95,7 +95,10 @@
 param(
     [Parameter(Mandatory, ParameterSetName = 'Enter')][switch]$Enter,
     [Parameter(Mandatory, ParameterSetName = 'Exit')][switch]$Exit,
-    [Parameter(Mandatory, ParameterSetName = 'Status')][switch]$Status,
+    # Not Mandatory, unlike its siblings, and that is the whole reason this is
+    # the default parameter set: a bare `Set-PersonalMode.ps1` with no
+    # arguments should print the state, not prompt for a switch.
+    [Parameter(ParameterSetName = 'Status')][switch]$Status,
     [Parameter(Mandatory, ParameterSetName = 'Reconcile')][switch]$Reconcile,
     [Parameter(Mandatory, ParameterSetName = 'AutoExit')][switch]$AutoExit,
     [Parameter(Mandatory, ParameterSetName = 'Pin')][switch]$Pin,
@@ -195,8 +198,22 @@ function Invoke-WithDeadline {
         Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
         return [pscustomobject]@{ TimedOut = $true; Output = ''; ExitCode = $null }
     }
-    $output = @(Receive-Job -Job $job -ErrorAction SilentlyContinue)
+
+    # A job that could not start at all also satisfies Wait-Job - it reaches a
+    # terminal state, just not Completed - and it comes back with no output.
+    # Reported with its reason rather than as an empty success, because
+    # "PowerShell could not spawn a child process" and "the drain returned
+    # nothing" are the same silence otherwise, and the first one is a broken
+    # host rather than a busy cluster.
+    $output = @(Receive-Job -Job $job -ErrorAction SilentlyContinue -ErrorVariable jobErrors)
+    $state = $job.State
+    $reason = if ($job.ChildJobs.Count -gt 0 -and $job.ChildJobs[0].JobStateInfo.Reason) { $job.ChildJobs[0].JobStateInfo.Reason.Message } else { '' }
     Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+
+    if ($state -ne 'Completed') {
+        $detail = (@($reason, ($jobErrors | ForEach-Object { $_.ToString() })) | Where-Object { $_ }) -join '; '
+        return [pscustomobject]@{ TimedOut = $false; ExitCode = $null; Output = "the background job ended $state - $detail" }
+    }
     # A job's output is whatever the block emitted; the convention below is
     # that every block's last statement is the pscustomobject from
     # Invoke-NodeSsh, so the last emitted object is the answer.
@@ -236,6 +253,11 @@ function Get-NodeStatusWord {
     return $fields[1]
 }
 
+# Every call site wraps this in @(...) and that is not decoration. PowerShell
+# unrolls an empty array on the way out of a function, so on a host with no
+# runner service registered this returns $null - and under Set-StrictMode both
+# `$null.Count` and piping $null into a Where-Object that reads `$_.Status` are
+# terminating errors. On the one code path that has to work everywhere.
 function Get-RunnerServices {
     @(Get-Service -Name 'actions.runner.*' -ErrorAction SilentlyContinue)
 }
@@ -251,7 +273,17 @@ function Read-State {
             # task is that it always reaches a decision.
             return [pscustomobject]@{
                 mode   = if ($raw.PSObject.Properties['mode'] -and $raw.mode) { $raw.mode } else { 'cluster' }
-                since  = if ($raw.PSObject.Properties['since']) { $raw.since } else { $null }
+                # ConvertFrom-Json turns an ISO-8601 string back into a
+                # [datetime], and stringifying that uses the host's local
+                # format - so a value written as 2026-08-26T01:00:00.0000000Z
+                # and read back through a -Pin would be rewritten as
+                # "08/26/2026 01:00:00", losing the offset and the round trip
+                # with it. Normalised back to round-trip form here, once,
+                # rather than at each of the places that pass it on.
+                since  = if ($raw.PSObject.Properties['since'] -and $raw.since) {
+                    if ($raw.since -is [datetime]) { $raw.since.ToUniversalTime().ToString('o') } else { [string]$raw.since }
+                }
+                else { $null }
                 pinned = [bool]($raw.PSObject.Properties['pinned'] -and $raw.pinned)
                 by     = if ($raw.PSObject.Properties['by']) { $raw.by } else { $null }
             }
@@ -268,11 +300,15 @@ function Read-State {
 }
 
 function Write-State {
-    param([Parameter(Mandatory)][string]$Mode, [bool]$Pinned = $false, [string]$By)
+    # -Since exists so that pinning does not restamp the clock. The dashboard
+    # and -Status both read this as "how long has the machine been theirs",
+    # and a pin an hour into an evening would otherwise reset that to zero -
+    # a small lie about the one number this file exists to hold.
+    param([Parameter(Mandatory)][string]$Mode, [bool]$Pinned = $false, [string]$By, [string]$Since)
     if (-not (Test-Path $StateDir)) { New-Item -ItemType Directory -Path $StateDir -Force | Out-Null }
     $state = [ordered]@{
         mode   = $Mode
-        since  = (Get-Date).ToUniversalTime().ToString('o')
+        since  = if ($Since) { $Since } else { (Get-Date).ToUniversalTime().ToString('o') }
         pinned = $Pinned
         by     = if ($By) { $By } else { "$env:USERDOMAIN\$env:USERNAME" }
         host   = $env:COMPUTERNAME
@@ -402,7 +438,7 @@ function Invoke-Enter {
 
     # --- 4. stop the runner service ------------------------------------- #
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    $services = Get-RunnerServices
+    $services = @(Get-RunnerServices)
     if ($services.Count -eq 0) {
         Add-Step 'stop runner service' 'skipped' $sw.Elapsed.TotalSeconds 'no actions.runner.* service on this host'
     }
@@ -485,7 +521,7 @@ function Invoke-Enter {
     Add-Step 'write state' 'done' $sw.Elapsed.TotalSeconds "personal$(if ($pinned) { ', pinned' })"
 
     $vmOff = ((Get-VM -Name $cfg.VMName -ErrorAction SilentlyContinue).State -eq 'Off')
-    $runnersStopped = @(Get-RunnerServices | Where-Object { $_.Status -ne 'Stopped' }).Count -eq 0
+    $runnersStopped = @(@(Get-RunnerServices) | Where-Object { $_.Status -ne 'Stopped' }).Count -eq 0
     return ($vmOff -and $runnersStopped)
 }
 
@@ -496,7 +532,7 @@ function Invoke-Exit {
 
     # --- 1. the runner service ------------------------------------------ #
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    $services = Get-RunnerServices
+    $services = @(Get-RunnerServices)
     if ($services.Count -eq 0) { Add-Step 'start runner service' 'skipped' $sw.Elapsed.TotalSeconds 'no actions.runner.* service on this host' }
     else {
         $started = 0
@@ -572,7 +608,7 @@ function Invoke-Exit {
 function Get-StatusReport {
     $state = Read-State
     $vm = Get-VM -Name $cfg.VMName -ErrorAction SilentlyContinue
-    $services = Get-RunnerServices
+    $services = @(Get-RunnerServices)
     $workers = @(Get-Process -Name 'Runner.Worker' -ErrorAction SilentlyContinue).Count
 
     $nodeStatus = 'not asked'
@@ -629,7 +665,7 @@ switch ($PSCmdlet.ParameterSetName) {
             # Windows started the runner service on the way up - it is
             # Automatic, and nothing told it otherwise. Personal mode means
             # the machine is the person's, including its CPU.
-            $running = @(Get-RunnerServices | Where-Object { $_.Status -ne 'Stopped' })
+            $running = @(@(Get-RunnerServices) | Where-Object { $_.Status -ne 'Stopped' })
             foreach ($svc in $running) {
                 try { Stop-Service -Name $svc.Name -Force -ErrorAction Stop; Write-Line "  stopped $($svc.Name), which Windows had started at boot." }
                 catch { Write-Line "  could not stop $($svc.Name): $($_.Exception.Message)" 'Red' }
@@ -665,13 +701,13 @@ switch ($PSCmdlet.ParameterSetName) {
 
     'Pin' {
         $state = Read-State
-        Write-State -Mode $state.mode -Pinned $true -By $state.by
+        Write-State -Mode $state.mode -Pinned $true -By $state.by -Since $state.since
         Write-Line 'Pinned. The daily auto-exit will leave this machine alone until -Unpin.' 'Green'
     }
 
     'Unpin' {
         $state = Read-State
-        Write-State -Mode $state.mode -Pinned $false -By $state.by
+        Write-State -Mode $state.mode -Pinned $false -By $state.by -Since $state.since
         Write-Line 'Unpinned. The daily auto-exit will take the node back at its next run.' 'Green'
     }
 
