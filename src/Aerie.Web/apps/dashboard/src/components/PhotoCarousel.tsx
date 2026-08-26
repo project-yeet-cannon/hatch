@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CarouselPhoto, PhotoSource } from '../types';
-import { nextIndex, photoCaption } from '../lib/photoCarousel';
-
-/**
- * How long one photo holds the frame. Long enough to actually look at, short
- * enough that a glance on the way past the kitchen is likely to land on a
- * different one than the last glance did.
- */
-const DWELL_MS = 20_000;
+import { DWELL_MS, nextIndex, photoCaption } from '../lib/photoCarousel';
 
 /** The cross-fade. Slow on purpose: a hard cut in the corner of your eye reads as something being wrong. */
 const FADE_MS = 1400;

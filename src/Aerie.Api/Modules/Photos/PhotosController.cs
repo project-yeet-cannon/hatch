@@ -29,7 +29,7 @@ public class PhotosController(
     ISiteSettingsService siteSettings,
     TimeProvider time) : ControllerBase
 {
-    /// <summary>How many photos the carousel gets when it doesn't say. Twenty minutes of wall at one photo a twenty seconds, which is longer than anyone stands there.</summary>
+    /// <summary>How many photos a caller that doesn't say gets. The kiosk always says - it sizes its own deck from its dwell time - so this is for a hand-typed URL and for anything else that grows a use for the manifest.</summary>
     public const int DefaultCarouselSize = 60;
 
     /// <summary>A ceiling on one manifest, so a hand-typed count cannot ask the API to serialize a whole library.</summary>

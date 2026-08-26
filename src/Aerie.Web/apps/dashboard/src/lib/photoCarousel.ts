@@ -1,6 +1,18 @@
 import type { CarouselPhoto } from '../types';
 
 /**
+ * How long one photo holds the frame. Long enough to actually look at, short
+ * enough that a glance on the way past the kitchen is likely to land on a
+ * different one than the last glance did.
+ *
+ * Here rather than in the component because the hook needs it too: how many
+ * photos a deck must hold is a function of this and how often a new deck is
+ * drawn, and two files guessing at each other's timing is how a carousel ends
+ * up looping the same twenty photos for the last third of every window.
+ */
+export const DWELL_MS = 20_000;
+
+/**
  * The carousel's decisions that aren't rendering: what a photo is captioned
  * with, and which photo comes next.
  *
@@ -55,4 +67,14 @@ export function photoDate(takenAt: string | null, timeZone: string): string | nu
 export function nextIndex(current: number, length: number): number {
   if (length <= 0) return 0;
   return (current + 1) % length;
+}
+
+/**
+ * How many photos a deck needs to fill a refresh window without repeating: one
+ * per dwell, rounded up, and no more - coming round again at the end of a
+ * window is harmless, and a much larger deck would be paying for manifest
+ * entries nobody reaches.
+ */
+export function deckSizeFor(refreshIntervalMs: number, dwellMs: number = DWELL_MS): number {
+  return Math.max(1, Math.ceil(refreshIntervalMs / dwellMs));
 }

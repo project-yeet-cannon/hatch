@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getPhotoSource } from '../dataSource';
 import { clientLogger } from '../lib/clientLogger';
+import { deckSizeFor } from '../lib/photoCarousel';
 import type { CarouselPhoto, PhotoSource } from '../types';
 
 /**
@@ -12,8 +13,13 @@ import type { CarouselPhoto, PhotoSource } from '../types';
  */
 const REFRESH_INTERVAL_MS = 30 * 60_000;
 
-/** Enough photos that a deck outlasts its refresh interval at any sane dwell time, and small enough to be one modest JSON response. */
-const DECK_SIZE = 60;
+/**
+ * Enough photos to fill the window above at the carousel's dwell time, derived
+ * rather than guessed - a deck and a refresh interval chosen independently is
+ * how a wall ends up looping the same photos for the last third of every
+ * window, or fetching a hundred manifest entries it never reaches.
+ */
+const DECK_SIZE = deckSizeFor(REFRESH_INTERVAL_MS);
 
 /**
  * The photos behind the wall carousel, plus where to fetch one's bytes.

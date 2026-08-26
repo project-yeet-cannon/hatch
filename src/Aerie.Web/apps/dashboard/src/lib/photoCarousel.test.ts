@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nextIndex, photoCaption, photoDate } from './photoCarousel';
+import { DWELL_MS, deckSizeFor, nextIndex, photoCaption, photoDate } from './photoCarousel';
 import type { CarouselPhoto } from '../types';
 
 const TZ = 'America/New_York';
@@ -73,5 +73,27 @@ describe('nextIndex', () => {
   // wall was on photo 30 of 60.
   it('stays put on an empty deck', () => {
     expect(nextIndex(29, 0)).toBe(0);
+  });
+});
+
+describe('deckSizeFor', () => {
+  it('covers the window at the dwell time', () => {
+    expect(deckSizeFor(30 * 60_000, 20_000)).toBe(90);
+  });
+
+  // A window that isn't a whole number of dwells rounds up, because the
+  // alternative is the last photo of every window being the first one again.
+  it('rounds up a partial dwell', () => {
+    expect(deckSizeFor(25_000, 20_000)).toBe(2);
+  });
+
+  // Nothing sane produces this, but a deck of zero would render an empty
+  // carousel forever rather than one photo.
+  it('never asks for an empty deck', () => {
+    expect(deckSizeFor(0, 20_000)).toBe(1);
+  });
+
+  it('defaults to the carousel\'s own dwell', () => {
+    expect(deckSizeFor(DWELL_MS * 4)).toBe(4);
   });
 });
