@@ -83,8 +83,8 @@ public class PhotosController(
     /// The probe starts at /api/server/about because it is cheap and reports a
     /// version. But that endpoint is guarded by Immich's own <c>server.about</c>
     /// permission, and a key scoped to exactly what this module needs -
-    /// <c>album.read</c> and <c>asset.view</c> - is refused there while working
-    /// perfectly everywhere else. Reporting that as "Immich refused that API
+    /// <c>album.read</c>, <c>asset.read</c> and <c>asset.view</c> - is refused
+    /// there while working perfectly everywhere else. Reporting that as "Immich refused that API
     /// key" would send an operator to re-mint a key that was already correct,
     /// which is the worst kind of wrong answer: a red light over a working
     /// system.

@@ -115,16 +115,21 @@ public class ImmichClientTests
         Assert.Equal("a1", (await client.ListAlbumsAsync(CancellationToken.None)).Items.Single().Name);
     }
 
+    /// <summary>
+    /// Immich 3 removed the assets from the album response, so the photos come
+    /// from a search. Asking the album for them still answers 200 - with no
+    /// assets on it - which is why this asserts the route as well as the shape.
+    /// </summary>
     [Fact]
-    public async Task AlbumPhotos_DropVideos_AndCarryTheirCaptionMaterial()
+    public async Task AlbumPhotos_ComeFromSearch_DropVideos_AndCarryTheirCaptionMaterial()
     {
         var (client, handler) = NewClient(responses: Ok("""
-            {"id":"a1","albumName":"Hikes","assets":[
+            {"assets":{"total":3,"count":3,"nextPage":null,"items":[
               {"id":"p1","type":"IMAGE","fileCreatedAt":"2026-05-01T00:00:00.000Z",
                "localDateTime":"2026-04-30T18:12:00.000Z","exifInfo":{"city":"Boulder","country":"USA"}},
               {"id":"v1","type":"VIDEO","fileCreatedAt":"2026-05-01T00:00:00.000Z"},
               {"id":"p2","type":"IMAGE","fileCreatedAt":"2026-05-02T00:00:00.000Z"}
-            ]}
+            ]}}
             """));
 
         var result = await client.ListAlbumPhotosAsync("a1", CancellationToken.None);
@@ -137,7 +142,57 @@ public class ImmichClientTests
         Assert.Equal("USA", result.Items[0].Country);
         // A scanned print with no EXIF is still a photo worth showing.
         Assert.Null(result.Items[1].City);
-        Assert.Equal("https://photos.example.com/api/albums/a1", handler.Requests[0].Url);
+
+        var request = handler.Requests.Single();
+        Assert.Equal("POST", request.Method);
+        Assert.Equal("https://photos.example.com/api/search/metadata", request.Url);
+        // withExif is what carries the city and country above; without it
+        // Immich answers with assets that have no exifInfo at all.
+        Assert.Equal("""{"albumIds":["a1"],"type":"IMAGE","withExif":true,"page":1,"size":1000}""", request.Body);
+    }
+
+    /// <summary>An album larger than one search page is walked to the end, not truncated at the first.</summary>
+    [Fact]
+    public async Task AlbumPhotos_FollowThePagesUntilThereIsNoNextOne()
+    {
+        var (client, handler) = NewClient(
+            SearchPage(["p1", "p2"], nextPage: "2"),
+            SearchPage(["p3"], nextPage: null));
+
+        var result = await client.ListAlbumPhotosAsync("a1", CancellationToken.None);
+
+        Assert.Equal(["p1", "p2", "p3"], result.Items.Select(a => a.Id));
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Contains("\"page\":2", handler.Requests[1].Body);
+    }
+
+    /// <summary>
+    /// The stop that keeps a 60,000-asset "All photos" from being read into
+    /// memory a page at a time forever - asserted against a server that always
+    /// says there is another page, which is what makes the walk terminate on
+    /// Aerie's own ceiling rather than on Immich's good manners.
+    /// </summary>
+    [Fact]
+    public async Task AlbumPhotos_StopAtTheCeiling_HoweverManyPagesAreOffered()
+    {
+        string[] ids = [.. Enumerable.Range(0, ImmichClient.SearchPageSize).Select(i => $"p{i}")];
+        // A fresh response per call: an HttpResponseMessage is read once.
+        var (client, handler) = NewClient([.. Enumerable.Range(0, 4).Select(_ => SearchPage(ids, nextPage: "next"))]);
+
+        var result = await client.ListAlbumPhotosAsync("a1", CancellationToken.None);
+
+        Assert.Equal(ImmichClient.MaxPhotosPerAlbum, result.Items.Count);
+        Assert.Equal(ImmichClient.MaxPhotosPerAlbum / ImmichClient.SearchPageSize, handler.Requests.Count);
+    }
+
+    /// <summary>A page with nothing on it ends the walk whatever it claims about a next one, which is the difference between a short album and an infinite loop.</summary>
+    [Fact]
+    public async Task AlbumPhotos_StopOnAnEmptyPage_EvenWhenAnotherIsOffered()
+    {
+        var (client, handler) = NewClient(SearchPage([], nextPage: "2"));
+
+        Assert.Empty((await client.ListAlbumPhotosAsync("a1", CancellationToken.None)).Items);
+        Assert.Single(handler.Requests);
     }
 
     [Fact]
@@ -228,6 +283,24 @@ public class ImmichClientTests
     }
 
     private static HttpResponseMessage Ok(string json) => StubHttpMessageHandler.Json(HttpStatusCode.OK, json);
+
+    /// <summary>One page of POST /api/search/metadata, in Immich's own shape.</summary>
+    private static HttpResponseMessage SearchPage(IReadOnlyList<string> ids, string? nextPage)
+    {
+        var items = string.Join(",", ids.Select(id =>
+            $$"""{"id":"{{id}}","type":"IMAGE","fileCreatedAt":"2026-05-01T00:00:00.000Z"}"""));
+        var next = nextPage is null ? "null" : $"\"{nextPage}\"";
+        // Spaced before the closing braces so the JSON's own }} is not read as
+        // the end of an interpolation hole.
+        return Ok($$"""{"assets":{"total":{{ids.Count}},"count":{{ids.Count}},"nextPage":{{next}},"items":[{{items}}] } }""");
+    }
+
+    /// <summary>A scripted sequence of responses, for the paged reads. The last one repeats, which no test here relies on.</summary>
+    private static (ImmichClient Client, StubHttpMessageHandler Handler) NewClient(params HttpResponseMessage[] responses)
+    {
+        var handler = new StubHttpMessageHandler(responses);
+        return (Build(handler, "https://photos.example.com", Key), handler);
+    }
 
     private static (ImmichClient Client, StubHttpMessageHandler Handler) NewClient(
         string? baseUrl = "https://photos.example.com",

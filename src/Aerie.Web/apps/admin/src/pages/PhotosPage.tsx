@@ -279,10 +279,10 @@ function ConnectionCard({ status, onSaved }: { status: PhotosStatus | null; onSa
             </button>
           </div>
           <p className="text-muted mt-1">
-            From Immich: <strong>Account settings → API Keys → New API Key</strong>. Tick <code>album.read</code> and{' '}
-            <code>asset.view</code> — that is everything Aerie does here, and nothing on that list lets it write.
-            Optionally <code>server.about</code>, which only adds the version to the line below. Stored obfuscated and
-            never sent back to a browser; leave blank to keep the current one.
+            From Immich: <strong>Account settings → API Keys → New API Key</strong>. Tick <code>album.read</code>,{' '}
+            <code>asset.read</code> and <code>asset.view</code> — that is everything Aerie does here, and nothing on
+            that list lets it write. Optionally <code>server.about</code>, which only adds the version to the line
+            below. Stored obfuscated and never sent back to a browser; leave blank to keep the current one.
           </p>
         </div>
       </div>
@@ -326,7 +326,7 @@ function ConnectionState({ status }: { status: PhotosStatus | null }) {
 function explain(error: string | null): string {
   switch (error) {
     case 'unauthorized':
-      return 'Immich refused that API key. Check it was copied whole, that it has not been revoked over there, and that it grants album.read and asset.view.';
+      return 'Immich refused that API key. Check it was copied whole, that it has not been revoked over there, and that it grants album.read, asset.read and asset.view.';
     case 'unreachable':
       return 'Nothing answered at that host. Check the address, and that the API can reach it — it is on the house network, not the internet.';
     case 'not_found':
@@ -384,9 +384,9 @@ function SetupNote() {
       <h3>Setting this up</h3>
       <ol className="text-muted">
         <li>
-          In Immich, open Account settings → API Keys and make one. Grant it <code>album.read</code> and{' '}
-          <code>asset.view</code>; add <code>server.about</code> if you want the version reported here. Nothing else —
-          Aerie only reads. Copy the key once; Immich will not show it again.
+          In Immich, open Account settings → API Keys and make one. Grant it <code>album.read</code>,{' '}
+          <code>asset.read</code> and <code>asset.view</code>; add <code>server.about</code> if you want the version
+          reported here. Nothing else — Aerie only reads. Copy the key once; Immich will not show it again.
         </li>
         <li>Paste the host and the key above, saving each.</li>
         <li>

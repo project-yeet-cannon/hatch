@@ -297,10 +297,20 @@ than going black.
 | `GET /api/photos/assets/{assetId}/image?size=` | image bytes | One rendition, proxied — `preview` (~1440px, the carousel) or `thumbnail`. **Serves an asset only if an included album holds it.** Without that allow-list this route is a hole through to every photo in the house for anything that reaches the origin. Originals are unreachable by construction: the client knows two rendition names and refuses the rest before making a request. `private, max-age=86400, immutable`, since an asset id names one photo forever. |
 
 The API key needs three of Immich's own permissions, and only three:
-`album.read` (list albums and their assets), `asset.view` (the `preview` and
-`thumbnail` renditions — *not* `asset.download`, which is what reaches an
-original), and optionally `server.about`, which adds nothing but the version on
-the admin page. Nothing Aerie calls writes to Immich.
+`album.read` (list the albums), `asset.read` (list one album's photos — see
+below) and `asset.view` (the `preview` and `thumbnail` renditions — *not*
+`asset.download`, which is what reaches an original). A fourth, `server.about`,
+is optional and adds nothing but the version on the admin page. Nothing Aerie
+calls writes to Immich.
+
+An included album's photos come from `POST /api/search/metadata`
+(`albumIds`, `type: IMAGE`, `withExif`), not from `GET /api/albums/{id}`.
+Immich 3.0 removed `assets` from the album response — and removed it *quietly*,
+in the sense that asking the album still answers `200` with an album that simply
+has no assets on it, so a wall built on that call goes empty with nothing
+anywhere reporting an error. Search is also the older spelling of the same
+question, so the one path serves an Immich 2 as well. It pages at 1000, which is
+why the read walks `nextPage` up to the 2000-per-album ceiling.
 
 No Immich hostname, key or URL appears in any response. The kiosk asks Aerie for
 a manifest of asset ids and then for those ids' bytes, both on the origin it is

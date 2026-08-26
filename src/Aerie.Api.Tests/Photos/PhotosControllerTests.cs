@@ -45,7 +45,7 @@ public class PhotosControllerTests
     }
 
     /// <summary>
-    /// A key scoped to exactly what Photos needs - album.read and asset.view -
+    /// A key scoped to exactly what Photos needs - album.read, asset.read and asset.view -
     /// is refused at /api/server/about, which is guarded by Immich's own
     /// server.about permission. A red light over a working system would send an
     /// operator to re-mint a key that was already correct.

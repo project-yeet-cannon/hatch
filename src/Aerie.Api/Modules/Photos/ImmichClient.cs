@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Aerie.Api.Services.DeviceMapping;
@@ -53,7 +54,13 @@ public interface IImmichClient
     /// <summary>Every album the API key's owner can see, covers and counts included, without any of their assets.</summary>
     Task<ImmichListResult<ImmichAlbum>> ListAlbumsAsync(CancellationToken ct);
 
-    /// <summary>The photos in one album. Videos are dropped here rather than downstream: a still frame is not what a photo frame is for.</summary>
+    /// <summary>
+    /// The photos in one album, read through Immich's asset search rather than
+    /// off the album itself - see
+    /// <see cref="ImmichClient.ListAlbumPhotosAsync"/> for why. Videos are
+    /// dropped here rather than downstream: a still frame is not what a photo
+    /// frame is for.
+    /// </summary>
     Task<ImmichListResult<ImmichAsset>> ListAlbumPhotosAsync(string albumId, CancellationToken ct);
 
     /// <summary>One asset's rendered image at <paramref name="size"/> - see <see cref="ImmichImageSizes"/>. Never the original: see the note there.</summary>
@@ -129,6 +136,9 @@ public class ImmichClient(
     /// </summary>
     public const int MaxPhotosPerAlbum = 2000;
 
+    /// <summary>Immich's own ceiling on one search page. An album larger than this is read a page at a time, up to <see cref="MaxPhotosPerAlbum"/>.</summary>
+    public const int SearchPageSize = 1000;
+
     public async Task<ImmichResult<ImmichServer>> GetServerAsync(CancellationToken ct)
     {
         // /api/server/about rather than /api/server/ping: ping answers without
@@ -153,19 +163,53 @@ public class ImmichClient(
         return ImmichListResult<ImmichAlbum>.Ok(albums);
     }
 
+    /// <summary>
+    /// An album's photos, asked for as a search rather than read off
+    /// <c>GET /api/albums/{id}</c>.
+    ///
+    /// The album response used to embed its assets, and Immich 3.0 removed that
+    /// property - <c>AlbumResponseDto.assets</c> is gone, and the documented
+    /// replacement is this endpoint. Reading it off the album is the failure
+    /// worth naming: the call still returns 200 with an album that simply has no
+    /// assets on it, so the wall goes empty with nothing anywhere reporting an
+    /// error. Search is also the *older* spelling - it predates the removal by
+    /// years - so this one path serves both an Immich 3 and an Immich 2.
+    ///
+    /// Paged, because search caps a page at <see cref="SearchPageSize"/> where
+    /// the embedded array was however long it was.
+    /// </summary>
     public async Task<ImmichListResult<ImmichAsset>> ListAlbumPhotosAsync(string albumId, CancellationToken ct)
     {
-        var result = await GetJsonAsync<AlbumBody>($"/api/albums/{Uri.EscapeDataString(albumId)}", ct);
-        if (!result.Succeeded) return ImmichListResult<ImmichAsset>.Failed(result.Error!);
+        var photos = new List<ImmichAsset>();
 
-        var photos = (result.Value?.Assets ?? [])
-            // IMAGE only. A video's poster frame is a photo the way a book
-            // cover is a book, and a carousel that pauses on one looks broken.
-            .Where(a => string.Equals(a.Type, "IMAGE", StringComparison.OrdinalIgnoreCase))
-            .Select(ToAsset)
-            .OfType<ImmichAsset>()
-            .Take(MaxPhotosPerAlbum)
-            .ToList();
+        for (var page = 1; ; page++)
+        {
+            var wanted = Math.Min(MaxPhotosPerAlbum - photos.Count, SearchPageSize);
+            // IMAGE only, asked of Immich rather than filtered afterwards, so
+            // an album of home videos does not spend the page budget on assets
+            // this then discards.
+            var request = new SearchBody([albumId], "IMAGE", WithExif: true, page, wanted);
+
+            var result = await PostJsonAsync<SearchResultsBody>("/api/search/metadata", request, ct);
+            if (!result.Succeeded) return ImmichListResult<ImmichAsset>.Failed(result.Error!);
+
+            var items = result.Value?.Assets?.Items ?? [];
+            photos.AddRange(items
+                // Enforced here as well as asked for: a video's poster frame is
+                // a photo the way a book cover is a book, and a carousel that
+                // pauses on one looks broken.
+                .Where(a => string.Equals(a.Type, "IMAGE", StringComparison.OrdinalIgnoreCase))
+                .Select(ToAsset)
+                .OfType<ImmichAsset>()
+                .Take(wanted));
+
+            // A page that answered with nothing ends the walk whatever it says
+            // about a next page: without this, a server that always offers one
+            // is an infinite loop rather than a slightly short album.
+            if (items.Count == 0) break;
+            if (photos.Count >= MaxPhotosPerAlbum) break;
+            if (NullIfEmpty(result.Value?.Assets?.NextPage) is null) break;
+        }
 
         return ImmichListResult<ImmichAsset>.Ok(photos);
     }
@@ -225,14 +269,20 @@ public class ImmichClient(
         return new ImmichConnection(parsed.GetLeftPart(UriPartial.Path).TrimEnd('/'), apiKey);
     }
 
-    private async Task<ImmichResult<T>> GetJsonAsync<T>(string path, CancellationToken ct)
+    private Task<ImmichResult<T>> GetJsonAsync<T>(string path, CancellationToken ct) =>
+        JsonAsync<T>(HttpMethod.Get, path, request: null, ct);
+
+    private Task<ImmichResult<T>> PostJsonAsync<T>(string path, object request, CancellationToken ct) =>
+        JsonAsync<T>(HttpMethod.Post, path, request, ct);
+
+    private async Task<ImmichResult<T>> JsonAsync<T>(HttpMethod method, string path, object? request, CancellationToken ct)
     {
         var connection = await ConnectionAsync(ct);
         if (connection is null) return ImmichResult<T>.Failed(NotConfigured);
 
         try
         {
-            using var response = await SendAsync(connection, path, ct);
+            using var response = await SendAsync(connection, method, path, request, ct);
             if (!response.IsSuccessStatusCode)
             {
                 var error = ErrorFor(response.StatusCode);
@@ -252,16 +302,26 @@ public class ImmichClient(
         }
     }
 
-    private Task<HttpResponseMessage> SendAsync(ImmichConnection connection, string path, CancellationToken ct)
+    private Task<HttpResponseMessage> SendAsync(ImmichConnection connection, string path, CancellationToken ct) =>
+        SendAsync(connection, HttpMethod.Get, path, body: null, ct);
+
+    private Task<HttpResponseMessage> SendAsync(
+        ImmichConnection connection, HttpMethod method, string path, object? body, CancellationToken ct)
     {
         var client = httpClientFactory.CreateClient(HttpClientName);
         // Concatenated rather than new Uri(base, path): an absolute path
         // resolved against a base *replaces* its path, so an Immich served
         // under a prefix - https://home.example.com/photos - would have that
         // prefix silently dropped on every call.
-        var request = new HttpRequestMessage(HttpMethod.Get, connection.BaseUrl + path);
+        var request = new HttpRequestMessage(method, connection.BaseUrl + path);
         request.Headers.TryAddWithoutValidation(ApiKeyHeader, connection.ApiKey);
         request.Headers.Accept.ParseAdd("application/json");
+        if (body is not null)
+        {
+            request.Content = new StringContent(
+                JsonSerializer.Serialize(body, body.GetType()), Encoding.UTF8, "application/json");
+        }
+
         return client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
     }
 
@@ -320,6 +380,26 @@ public class ImmichClient(
         [property: JsonPropertyName("albumThumbnailAssetId")] string? AlbumThumbnailAssetId,
         [property: JsonPropertyName("updatedAt")] string? UpdatedAt,
         [property: JsonPropertyName("assets")] List<AssetBody>? Assets);
+
+    /// <summary>
+    /// One page of <c>POST /api/search/metadata</c>. withExif is what carries
+    /// the city and country the carousel captions with; without it Immich
+    /// answers with assets that have no exifInfo at all.
+    /// </summary>
+    private record SearchBody(
+        [property: JsonPropertyName("albumIds")] IReadOnlyList<string> AlbumIds,
+        [property: JsonPropertyName("type")] string Type,
+        [property: JsonPropertyName("withExif")] bool WithExif,
+        [property: JsonPropertyName("page")] int Page,
+        [property: JsonPropertyName("size")] int Size);
+
+    private record SearchResultsBody(
+        [property: JsonPropertyName("assets")] SearchAssetsBody? Assets);
+
+    /// <summary>nextPage is null on the last page, which is how the walk knows to stop.</summary>
+    private record SearchAssetsBody(
+        [property: JsonPropertyName("items")] List<AssetBody>? Items,
+        [property: JsonPropertyName("nextPage")] string? NextPage);
 
     private record AssetBody(
         [property: JsonPropertyName("id")] string? Id,

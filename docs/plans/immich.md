@@ -1189,13 +1189,16 @@ and the difference is worth keeping.
    ([`secrets-architecture.md`](../secrets-architecture.md) is about the first
    kind; this is the second). Nothing about Immich reaches the repo either way.
 
-   The permissions are `album.read`, `asset.view`, and optionally
+   The permissions are `album.read`, `asset.read`, `asset.view`, and optionally
    `server.about`. `asset.view` rather than `asset.download` is the one worth
    noticing: the first reaches Immich's generated renditions and the second
    reaches originals, and a photo frame has no business holding a key that can
-   pull a 40 MB raw file. The optional third is only a version string — the
-   status check falls through to `GET /api/albums` when it is refused, so a key
-   scoped to the two that matter reads as connected rather than as broken.
+   pull a 40 MB raw file. `asset.read` is what lets Aerie ask *which* photos an
+   album holds — Immich 3.0 took the assets off the album response, so that
+   question is now a search (see the note under **What Immich 3 moved** below).
+   The optional fourth is only a version string — the status check falls through
+   to `GET /api/albums` when it is refused, so a key scoped to the three that
+   matter reads as connected rather than as broken.
 3. **A `Photos` module in `Aerie.Api`** — a folder under `Modules/`, one line in
    the registry, one table, no infrastructure. It proxies rather than exposes,
    exactly as scaffolded: the kiosk asks Aerie for a manifest of asset ids and
@@ -1227,6 +1230,36 @@ are exactly the kind of thing that leaks — into listings, backups, browser
 history. Originals are unreachable by construction: the client knows two
 rendition names (`preview`, `thumbnail`) and refuses anything else before making
 a request, so no path through this module can pull a 40 MB raw file.
+
+### What Immich 3 moved
+
+The first version of this read an album's photos off `GET /api/albums/{id}`,
+whose response embedded its assets. Immich 3.0 removed that property, and the
+way it removed it is the part worth recording: the call still answers `200`, the
+album still carries its name, its cover and its `assetCount` — there is simply
+no `assets` array on it any more. So nothing failed. The admin page listed four
+albums with the right counts and the right covers, ticking one saved and stuck,
+and "On the kiosk" said *0 photos in the selection* with no error beside it,
+because there had been no error: Immich answered, and the answer contained no
+photos. The log line for it read `Photo library rebuilt: 0 photos from 1
+albums`, which is exactly what happened and reads like a configuration mistake.
+
+The photos now come from `POST /api/search/metadata` — `albumIds`, `type: IMAGE`
+so Immich drops the videos rather than Aerie spending page budget on them, and
+`withExif` for the city and country the carousel captions with. That is Immich's
+own documented replacement, and it is also the *older* spelling of the question:
+search predates the removal by years, so the single path serves an Immich 2 and
+an Immich 3 alike, with no version sniffing anywhere in the client. It pages at
+1000 where the embedded array had no page at all, so the read walks `nextPage`
+and stops at whichever comes first — the last page, or the 2000-per-album
+ceiling that keeps someone's 60,000-asset "All photos" from being pulled into
+every replica's memory.
+
+The cost of the move is one more permission on the API key: search is
+`asset.read`, where listing albums is `album.read` and fetching a rendition is
+`asset.view`. A key minted against the old instructions lists albums fine and
+then cannot read one, which surfaces on the admin page as "Immich refused that
+API key" over the carousel — so the setup text names all three.
 
 ### What it cost the MVP
 
