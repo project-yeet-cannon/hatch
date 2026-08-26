@@ -25,9 +25,10 @@ hold across all of them.
 - **Read paths hit Postgres, jobs talk to the outside world.** Nothing in a
   request path calls Home Assistant, Google, or a weather service on the request's
   behalf — the sampling and sync jobs fetch, the database caches, the endpoints
-  read. The two deliberate exceptions are noted where they occur
-  (`GET /api/dashboard`'s weather condition note, and the actuation endpoints,
-  which exist to reach HA).
+  read. The three deliberate exceptions are noted where they occur
+  (`GET /api/dashboard`'s weather condition note; the actuation endpoints, which
+  exist to reach HA; and `/api/photos`, which proxies Immich rather than copying
+  a photo library into Postgres — see [Photos](#photos)).
 - **Outbound calls fail soft.** A dead integration degrades one section of one
   response rather than throwing out of it.
 - **Contract parity.** `Models/Dashboard/DashboardData.cs` and
@@ -266,11 +267,46 @@ Text lengths are validated rather than truncated — item name 120, quantity 32,
 note 200, list name 60 — so over-long input is a `400` naming the field, not a
 `500` out of the column.
 
+## Photos
+
+The family photo library on the wall — Immich's albums, chosen in the admin app
+and cycled through by the kiosk carousel. Design and reasoning in
+[`plans/immich.md`](plans/immich.md); the module seam is the same one Gather
+sits behind.
+
+**This is the one area that talks to another server inside a request.** Immich
+owns the library and has its own database; copying it into Postgres to satisfy
+the read-path rule would mean maintaining a second copy of every photo's
+metadata and a job to keep it honest, to answer a question — "which asset ids
+may the wall show" — that one call per included album answers directly. So
+`PhotoLibrary` caches that answer in memory: the Immich fetch behind a 15-minute
+TTL, the album *selection* re-read from Postgres every 10 seconds so another
+replica's toggle carries across. Nothing depends on which replica serves a
+request; each builds its own copy and a failed rebuild keeps the last good one,
+so an Immich that restarts leaves the wall showing slightly old photos rather
+than going black.
+
+| Method & route | Returns | Notes |
+|---|---|---|
+| `GET /api/photos/status` | `PhotosStatusDto` | Whether a host and key are set **and whether Immich currently accepts them** — a live `GET /api/server/about` against it, since a credential that is merely present tells an operator nothing. Never echoes the key. |
+| `GET /api/photos/albums` | `PhotoAlbumDto[]` | Every album Aerie knows about, in the operator's arrangement. `hasCover` rather than a cover URL: the client builds one against the route below. |
+| `POST /api/photos/albums/refresh` | `PhotoAlbumSyncDto` | Re-lists albums from Immich. Immich owns name, description, cover and count; Aerie owns `included` and `sortOrder`, and a refresh never touches those. A failed fetch deletes **nothing** — the empty list an unreachable server returns must not be read as "there are no albums". `400` when unconfigured, `502` when Immich refused. |
+| `PUT /api/photos/albums/{id:guid}` | `PhotoAlbumDto` | The admin-owned half. A null `sortOrder` leaves the arrangement alone, which is what a checkbox means. Drops the cached library so the wall sees the change on its next poll. |
+| `GET /api/photos/albums/{id:guid}/cover` | image bytes | The album's own thumbnail, proxied. Reachable because the album is one Aerie knows about — a different question from the one below. |
+| `GET /api/photos/carousel?count=` | `PhotoCarouselDto` | A shuffled sample of the included albums' photos, shuffled **server-side per request** so two tablets in two rooms are not on the same photo. Capped at 200. Carries the library's error alongside the photos when it is stale, so the wall keeps drawing and the kiosk still logs why. |
+| `GET /api/photos/assets/{assetId}/image?size=` | image bytes | One rendition, proxied — `preview` (~1440px, the carousel) or `thumbnail`. **Serves an asset only if an included album holds it.** Without that allow-list this route is a hole through to every photo in the house for anything that reaches the origin. Originals are unreachable by construction: the client knows two rendition names and refuses the rest before making a request. `private, max-age=86400, immutable`, since an asset id names one photo forever. |
+
+No Immich hostname, key or URL appears in any response. The kiosk asks Aerie for
+a manifest of asset ids and then for those ids' bytes, both on the origin it is
+already signed in to — which is what lets the photo frame need no second auth,
+no second origin, and no CORS story, and what keeps the library's credential a
+server-side secret.
+
 ## Settings
 
 | Method & route | Returns | Notes |
 |---|---|---|
-| `GET /api/settings` · `GET /api/settings/{key}` | `SiteSettingDto[]` | Secret-valued keys (`HomeAssistantToken`, `KioskWifiPassword`, `GoogleClientSecret`) come back redacted. |
+| `GET /api/settings` · `GET /api/settings/{key}` | `SiteSettingDto[]` | Secret-valued keys (`HomeAssistantToken`, `KioskWifiPassword`, `GoogleClientSecret`, `AnthropicApiKey`, `ImmichApiKey`) come back redacted. |
 | `PUT /api/settings/{key}` · `DELETE /api/settings/{key}` | `SiteSettingDto` | Secret-valued keys are obfuscated on write (`SecretObfuscator`). |
 
 ## Auth

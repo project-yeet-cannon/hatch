@@ -6,9 +6,8 @@ extensions, its WAL archiving and a nightly base backup. Phase 3's tree is
 written and validated; its two remaining steps are the operator's and need this
 commit on `main` first. Phase 4 is the offsite archive.
 Five phases to MVP, each independently useful and
-independently revertible; two scaffolded follow-ons (`v+1` sharing, `v+2` kiosk)
-that are deliberately *not* built yet but are named here so the MVP does not
-close their doors; and one long-horizon pathway (the photography workflow) that
+independently revertible; two follow-ons named here so the MVP does not close
+their doors — `v+1` sharing, still scaffolded, and `v+2` kiosk, now built; and one long-horizon pathway (the photography workflow) that
 gets no code at all and one design constraint.
 
 The MVP is: **every family photo in one place, on our own hardware, reachable
@@ -28,7 +27,7 @@ settled and which are still open:
 | Ingest tooling | **`immich-go` plus a thin first-party wrapper** |
 | Exposure | **Tailnet + LAN only.** No public ingress in the MVP |
 | Sharing with extended family | **`v+1`** — scaffolded below, not built |
-| Kiosk photo frame | **`v+2`** — scaffolded below, not built |
+| Kiosk photo frame | **`v+2`** — built, 2026-08-25; see below |
 | DSLR / RAW workflow | **Not solutioned.** One constraint on this plan, no more |
 
 ## Findings
@@ -684,7 +683,7 @@ then `immich-pg` has no metrics in Grafana.
 
 ---
 
-## [] Phase 3 — Immich
+## [x] Phase 3 — Immich
 
 **Goal:** Immich reachable at `photos.${DOMAIN}` from the LAN and the tailnet,
 monitored, with an admin account and nothing in it yet.
@@ -1159,38 +1158,78 @@ ingress is a file in a directory rather than a chart change.
 
 ---
 
-## v+2 — Immich albums on the kiosk
+## [x] v+2 — Immich albums on the kiosk
 
-**Not built. Scaffolded.** The kiosk dashboard occasionally scrolling through
-family photos is the feature most likely to make the whole thing feel worth it,
-and it is small — but it needs one decision made now so the MVP does not make it
-harder.
+**Built, 2026-08-25.** The photo frame: a `Photos` module in `Aerie.Api`, a
+Photos page in the admin app, and a carousel on the kiosk dashboard directly
+below the room cards.
 
-The shape:
+Three of the four points scaffolded below survived contact; the first did not,
+and the difference is worth keeping.
 
-1. **A tag or album-name convention marks what the kiosk may show** — say, an
-   Immich tag `kiosk`. Album-name prefixes are the alternative; tags survive
-   renames, so prefer tags.
-2. **An Immich API key, scoped and stored in SSM**, reaching the cluster the same
-   way every other credential does — `parameters.json`, ExternalSecret, no bytes
-   in git.
-3. **A `Photos` module in `Aerie.Api`** — and *this* one genuinely is a family-apps
-   module in the sense of [`family-apps-architecture.md`](../family-apps-architecture.md):
-   a folder under `Modules/`, one line in the registry, no infrastructure. It
-   proxies Immich rather than exposing it: the kiosk asks Aerie for "the next
-   photo", Aerie asks Immich, caches the thumbnail, and returns it. That keeps
-   the Immich API key off the tablets entirely, and it means the dashboard never
-   needs a second origin, a second auth, or a CORS story.
-4. **A dashboard view** that fades between photos, respecting the existing
-   circadian theme and the standby behavior from
-   [`kiosk_brightness.md`](kiosk_brightness.md) — a photo frame that lights up a
-   dark hallway at 3am is the same bug that plan exists to fix.
+### What was built
 
-**What the MVP owes it:** nothing structural, and that is the point of writing it
-down. The proxy is possible because Immich has a real API and the kiosk talks to
-`Aerie.Api` already. The only thing that would break it is putting Immich
-somewhere the API cannot reach it — which is exactly what a public-only or
-separately-networked deployment would have done.
+1. **The selection is a checkbox in Aerie, not a tag in Immich.** The scaffold
+   preferred an Immich tag `kiosk` because tags survive renames. What that
+   actually asks is for the operator to configure the wall *in Immich* — a
+   second place to look, a convention nothing enforces, and a `Refresh` that
+   cannot tell "untagged" from "never tagged". A `photos.Albums` row per album
+   with an `Included` flag is the same shape the family calendar already uses
+   (`EfCalendar.Included`), and it settles the rename problem better than tags
+   do: the row keys on Immich's album id, so a rename is a name change on a row
+   that keeps its choice. Immich owns what an album is, Aerie owns what the wall
+   does with it, and a refresh never crosses that line.
+2. **An Immich API key, stored the way admin-entered credentials are stored** —
+   `SiteSettings` through `SecretProtector`, redacted on read, alongside
+   `ImmichBaseUrl`. Not SSM, and this is the correction to the scaffold: SSM and
+   ExternalSecrets are for credentials a *pod* needs at startup, and this is one
+   an operator pastes into a form after the pod is running, the way the Home
+   Assistant token and the Google client secret already are
+   ([`secrets-architecture.md`](../secrets-architecture.md) is about the first
+   kind; this is the second). Nothing about Immich reaches the repo either way.
+3. **A `Photos` module in `Aerie.Api`** — a folder under `Modules/`, one line in
+   the registry, one table, no infrastructure. It proxies rather than exposes,
+   exactly as scaffolded: the kiosk asks Aerie for a manifest of asset ids and
+   then for those ids' bytes, so the key stays server-side and the dashboard
+   needs no second origin, no second auth and no CORS story.
+4. **A dashboard carousel** that cross-fades, captions with album, place and
+   month, and names no color the circadian phase did not supply — so it dims
+   with the wall and the veil passes over it, which is what
+   [`kiosk_brightness.md`](kiosk_brightness.md) asks of anything that lights a
+   dark hallway at 3am.
+
+### The two decisions that were not obvious
+
+**The photos are a cache, not a table.** A row per asset would be a second copy
+of a library that already has a database, plus a job to keep the copy honest,
+plus a class of bug where the two disagree about a photo. What the wall needs is
+"which asset ids may I show", which is one Immich call per included album.
+`PhotoLibrary` holds that in memory: the Immich fetch behind a 15-minute TTL,
+the selection re-read from Postgres every 10 seconds so another replica's toggle
+carries across without an invalidation message between processes. A failed
+rebuild keeps the last good deck — a frame showing quarter-hour-old photos is
+not a bug, a frame going black because Immich restarted is.
+
+**That cache's asset-id set is also the authorization.**
+`GET /api/photos/assets/{id}/image` proxies an id only if an included album
+holds it. Without that check the endpoint is a hole straight through to every
+photo in the house for anything that reaches the kiosk's origin, and asset ids
+are exactly the kind of thing that leaks — into listings, backups, browser
+history. Originals are unreachable by construction: the client knows two
+rendition names (`preview`, `thumbnail`) and refuses anything else before making
+a request, so no path through this module can pull a 40 MB raw file.
+
+### What it cost the MVP
+
+Nothing structural, which was the point of scaffolding it. The proxy works
+because Immich has a real API and the kiosk already talks to `Aerie.Api`; the
+only MVP decision that could have broken it — putting Immich somewhere the API
+cannot reach — is one this plan deliberately did not make.
+
+The surface is in
+[`dashboard-api-manifest.md`](../dashboard-api-manifest.md#photos), including
+why `/api/photos` is the third documented exception to "read paths hit Postgres,
+jobs talk to the outside world".
 
 ---
 
