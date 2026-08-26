@@ -257,3 +257,34 @@ mark.search-match {
   overflow-wrap: anywhere;
   font-size: 12px;
 }
+
+/* Photos — album covers and the kiosk preview strip.
+   Fixed boxes with object-fit: cover, because the library is full of both
+   orientations and a row of rows that each size themselves reads as a broken
+   page rather than as a list. */
+.photo-cover {
+  width: 64px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 4px;
+  display: block;
+  background: var(--bg);
+}
+
+.photo-cover-empty {
+  border: 1px dashed var(--line);
+}
+
+.photo-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.photo-strip-item {
+  width: 104px;
+  height: 78px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--bg);
+}

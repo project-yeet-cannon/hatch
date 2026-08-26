@@ -416,3 +416,60 @@ export interface PanelWriteRequest {
   included: boolean;
   items: PanelItemWriteRequest[];
 }
+
+// ---- Photos ----
+//
+// Mirrors Modules/Photos/Dtos.cs. No Immich URL appears in any of these on
+// purpose: the page builds every image src against Aerie's own proxy, so the
+// browser never learns where the photo server is (docs/plans/immich.md v+2).
+
+export interface PhotoAlbum {
+  id: string;
+  immichAlbumId: string;
+  name: string;
+  description: string | null;
+  assetCount: number;
+  hasCover: boolean;
+  included: boolean;
+  sortOrder: number;
+  providerUpdatedAt: string | null;
+  updatedAt: string;
+}
+
+/** The admin-owned half of an album. A null sortOrder leaves the arrangement alone, which is what a checkbox means. */
+export interface PhotoAlbumSelectionRequest {
+  included: boolean;
+  sortOrder: number | null;
+}
+
+export interface PhotoAlbumSync {
+  added: number;
+  updated: number;
+  removed: number;
+}
+
+export interface PhotosStatus {
+  isConfigured: boolean;
+  baseUrl: string | null;
+  hasApiKey: boolean;
+  reachable: boolean;
+  version: string | null;
+  error: string | null;
+  albumCount: number;
+  includedAlbumCount: number;
+}
+
+export interface CarouselPhoto {
+  assetId: string;
+  albumName: string;
+  takenAt: string | null;
+  city: string | null;
+  country: string | null;
+}
+
+export interface PhotoCarousel {
+  photos: CarouselPhoto[];
+  totalPhotos: number;
+  generatedAt: string;
+  error: string | null;
+}

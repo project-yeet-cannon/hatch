@@ -4,6 +4,7 @@ import { ZonesPage } from './pages/ZonesPage';
 import { RoutinesPage } from './pages/RoutinesPage';
 import { PanelsPage } from './pages/PanelsPage';
 import { CalendarsPage } from './pages/CalendarsPage';
+import { PhotosPage } from './pages/PhotosPage';
 import { DevicesPage } from './pages/DevicesPage';
 import { DiscoveryPage } from './pages/DiscoveryPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -31,6 +32,7 @@ export function App() {
           <NavLink to="/routines" className={navLinkClass}>Routines</NavLink>
           <NavLink to="/panels" className={navLinkClass}>Panels</NavLink>
           <NavLink to="/calendars" className={navLinkClass}>Calendars</NavLink>
+          <NavLink to="/photos" className={navLinkClass}>Photos</NavLink>
           <NavLink to="/devices" className={navLinkClass}>Devices</NavLink>
           <NavLink to="/discovery" className={navLinkClass}>Discovery</NavLink>
           <NavLink to="/settings" className={navLinkClass}>Settings</NavLink>
@@ -46,6 +48,7 @@ export function App() {
           <Route path="/routines" element={<RoutinesPage />} />
           <Route path="/panels" element={<PanelsPage />} />
           <Route path="/calendars" element={<CalendarsPage />} />
+          <Route path="/photos" element={<PhotosPage />} />
           <Route path="/devices" element={<DevicesPage />} />
           <Route path="/discovery" element={<DiscoveryPage />} />
           <Route path="/settings" element={<SettingsPage />} />

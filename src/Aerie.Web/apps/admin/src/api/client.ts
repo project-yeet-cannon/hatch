@@ -24,6 +24,11 @@ import type {
   HazardAlert,
   Panel,
   PanelWriteRequest,
+  PhotoAlbum,
+  PhotoAlbumSelectionRequest,
+  PhotoAlbumSync,
+  PhotoCarousel,
+  PhotosStatus,
   ProvisioningInfo,
   Routine,
   RoutineWriteRequest,
@@ -153,6 +158,27 @@ export const syncCalendarEvents = () => fetchJson<CalendarSync>('/api/calendar/s
 /** Revokes the grant with the provider, then deletes the account and its calendars and cached events. */
 export const deleteCalendarAccount = (id: string) =>
   fetchJson<void>(`/api/calendar/accounts/${id}`, { method: 'DELETE' });
+
+// ---- Photos ----
+//
+// The Immich host and key are not here: they are ordinary site settings, so the
+// Photos page writes them with putSetting like every other credential in the
+// app (docs/secrets-architecture.md).
+
+/** Whether Immich is configured and whether it currently answers - a live check, not a reading of the settings. */
+export const getPhotosStatus = () => fetchJson<PhotosStatus>('/api/photos/status');
+export const getPhotoAlbums = () => fetchJson<PhotoAlbum[]>('/api/photos/albums');
+/** Re-lists albums from Immich, preserving the choices on the ones that survive. */
+export const refreshPhotoAlbums = () => fetchJson<PhotoAlbumSync>('/api/photos/albums/refresh', { method: 'POST' });
+export const updatePhotoAlbum = (id: string, request: PhotoAlbumSelectionRequest) =>
+  fetchJson<PhotoAlbum>(`/api/photos/albums/${id}`, { method: 'PUT', ...asJson(request) });
+/** What the kiosk carousel would draw right now - the admin page uses it as the proof that a selection reached the wall. */
+export const getPhotoCarousel = (count?: number) => fetchJson<PhotoCarousel>(`/api/photos/carousel${qs({ count })}`);
+
+/** Both image sources are URLs rather than fetches: they go straight into an <img src>, on this origin, with the session cookie the page already has. */
+export const photoAlbumCoverUrl = (albumId: string) => `/api/photos/albums/${albumId}/cover`;
+export const photoAssetUrl = (assetId: string, size?: 'preview' | 'thumbnail') =>
+  `/api/photos/assets/${encodeURIComponent(assetId)}/image${qs({ size })}`;
 
 // ---- Outdoor hazards ----
 
