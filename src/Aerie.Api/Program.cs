@@ -134,7 +134,7 @@ builder.Services.AddSingleton<ISiteSettingsService, SiteSettingsService>();
 builder.Services.AddScoped<IZoneService, ZoneService>();
 builder.Services.AddScoped<IRoutineService, RoutineService>();
 // The tier above routines: a tile that opens a sub-UI of controls - see
-// PanelService and docs/plans/kiosk-climate.md.
+// PanelService and docs/kiosk-architecture.md.
 builder.Services.AddScoped<IPanelService, PanelService>();
 // The kiosk's camera button row - see CameraDirectory and
 // docs/camera-devices-architecture.md.

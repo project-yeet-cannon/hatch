@@ -10,7 +10,7 @@ namespace Aerie.Api.Ef;
 /// is a single tap, a Panel is a surface you open.
 ///
 /// A Panel holds Routines and Controls, never other Panels
-/// (docs/plans/kiosk-climate.md).
+/// (docs/kiosk-architecture.md).
 /// </summary>
 [Table("Panels")]
 public class EfPanel

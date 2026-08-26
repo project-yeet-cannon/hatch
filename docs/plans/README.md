@@ -35,7 +35,6 @@ full of active work, which is how a plan directory stops being read.
 | [`immich.md`](immich.md) | Photos on Aerie: Immich, the bulk-disk substrate, the offsite archive, and the historical ingest |
 | [`part-time-node.md`](part-time-node.md) | A fourth host that joins as an agent and hands itself back to its owner on demand |
 | [`2026-09-01-verification.md`](2026-09-01-verification.md) | Two dated checks left behind by the node-storage work. Run on or after that date, then delete |
-| [`kiosk-climate.md`](kiosk-climate.md) | Panels and Controls on the kiosk, and the Climate panel they exist for. Phase 1 (schema) complete |
 
 ## Conventions
 

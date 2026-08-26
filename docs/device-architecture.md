@@ -58,6 +58,24 @@ Instead of "a climate entity id that isn't excluded," `Zone` is a real table, an
 - Deletes the exclusion-list logic in `ZoneService.GetZonesAsync` that subtracts outside entity ids out of the zone list.
 - Sets up the climate engine: its unit of control is a `Zone`, its inputs are the zone's `Read` channels, and its actuators are the zone's `ReadWrite` channels. New actuator types (cooling, forced air) are new `Device.Kind` / `Metric` values, not new architecture.
 
+### A panel control binds channels by role
+
+The kiosk's **Panels** ([`kiosk-architecture.md`](kiosk-architecture.md#panels-on-the-wall)) are the second consumer of this layer that actuates rather than reads, and they consume channels the same way the climate engine does — by asking what a channel is *for*, never by knowing which device it belongs to. A control names a `ControlKind`, and each kind declares the **roles** it understands; each role pins the `Metric` a channel must carry and whether that channel is written:
+
+| Kind | Role | Required | Channel metric | Direction |
+|---|---|---|---|---|
+| `Switch` | `Power` | yes | `PowerState` | ReadWrite |
+| `Thermostat` | `Setpoint` | yes | `SetpointTemperature` | ReadWrite |
+| `Thermostat` | `Power` | no | `PowerState` | ReadWrite |
+| `Thermostat` | `Mode` | no | `HvacMode` | ReadWrite |
+| `Thermostat` | `Ambient` | no | `Temperature` | Read or ReadWrite |
+
+`Ambient` is the one read-only role — a room's temperature is reported, never commanded — which is why direction belongs in the table rather than being assumed from the metric. A `Thermostat` needs `Power` **or** (`Mode` plus a stored `OnMode`, the HVAC mode that means "on" for that device — `cool` for an air conditioner, `heat` for a radiator) to be switchable at all; without either it is setpoint-only, which is legal. That per-control `OnMode` is what lets one control kind present the single On/Off a wall tablet wants for two devices that differ only in which mode counts as on.
+
+[`PanelBindingRules`](../src/Aerie.Api/Services/Panels/PanelBindingRules.cs) is the one place that table lives — pure, no DB or clock, and a sibling in spirit to `CommandExpectation`, which asks the same question one level down (the metric and direction a single `CommandKind` needs). The admin API validates every item against it before saving, the kiosk write path is held to it, and the admin form mirrors it in TypeScript because *which channel selects exist at all* is a question the editor has to answer before it can render.
+
+**A new control kind is an enum append plus a kiosk component, not new architecture** — the same shape as "new actuator types are new `Device.Kind`/`Metric` values". A light control is `ControlKind.Light`, a role set in `PanelBindingRules`, and a React component; a camera control is the same three. All three panel enums (`PanelItemKind`, `ControlKind`, `ControlRole`) are append-only because the column stores the underlying int, which is what makes those later kinds a migration rather than a redesign. If adding one ever requires moving something in this layer, the role model was wrong.
+
 ## Readings: Narrow Instead of Sparse
 
 Replace the wide `EfEnvironmentReading` table with a narrow measurement table keyed by channel:

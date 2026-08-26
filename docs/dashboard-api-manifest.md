@@ -63,7 +63,7 @@ sub-resources under it exist for reuse, debugging, and other screens.
 
 | Method & route | Returns | Notes |
 |---|---|---|
-| `GET /api/dashboard` | `DashboardData` | **Primary.** Composes zones + outside + routines + cameras + the calendar agenda + outdoor hazards. Query: `historyHours` (9), `forecastHours` (7), `bucketMinutes` (30). |
+| `GET /api/dashboard` | `DashboardData` | **Primary.** Composes zones + outside + routines + cameras + panels + the calendar agenda + outdoor hazards. Query: `historyHours` (9), `forecastHours` (7), `bucketMinutes` (30). |
 | `GET /api/zones` · `GET /api/zones/{id}` | `ZoneDto` | Zone CRUD for the admin app. |
 | `POST /api/zones` · `PUT /api/zones/{id}` · `DELETE /api/zones/{id}` | `ZoneDto` | |
 | `GET /api/zones/climate` · `GET /api/zones/{id}/climate` | `ZoneClimate` | Current snapshot, history, forecast. Same window query params as `/api/dashboard`. |
@@ -107,6 +107,41 @@ each of the actuation endpoints above is recorded action by action with a
 | `POST /api/routines` · `PUT /api/routines/{id}` · `DELETE /api/routines/{id}` | CRUD. A routine's actions are embedded in the write request and replaced wholesale — the action list *is* the routine. |
 | `POST /api/routines/{id}/trigger` | Runs the actions in `SortOrder`, stopping at the first that doesn't succeed. |
 | `POST /api/routines/{id}/turn-off` | The inverse for a toggle routine: `SetPower false` to every `SetPower` action's channel. |
+
+## Panels
+
+The tier above a routine: a kiosk tile that opens a sub-UI of routines and
+device-bound **controls**. Design and reasoning in
+[`kiosk-architecture.md`](kiosk-architecture.md#panels-on-the-wall); the
+role-to-channel binding rules are in
+[`device-architecture.md`](device-architecture.md#a-panel-control-binds-channels-by-role).
+
+| Method & route | Returns | Notes |
+|---|---|---|
+| `GET /api/panels` · `GET /api/panels/{id:guid}` | `PanelDto` | Panels with their items and each control's bindings. The admin's shape. |
+| `POST /api/panels` · `PUT /api/panels/{id:guid}` · `DELETE /api/panels/{id:guid}` | `PanelDto` / 204 | CRUD. Items are embedded and replaced wholesale, exactly as a routine's actions are — the item list *is* the panel, and `SortOrder` has to stay coherent across both item kinds, which it cannot if the halves arrive in separate requests. Create and update load every referenced channel, run `PanelBindingRules.Validate` per item, and answer `400` with the reason before saving: an invalid panel never reaches the database. "Is this routine id real?" is asked separately, because the rules class is pure and that question needs the database — without it a bad routine id would be a `500` for what is plainly a bad request. |
+| `GET /api/panels/{id:guid}/state` | `PanelStateDto` | Live per-item state, polled ~5s while the overlay is open. One `ChannelLatestValues.GetLatestAsync` call for the union of the opened panel's bound channels and its routine items' `SetPower` channels — nothing outside the panel is read. `minF`/`maxF`/`stepF` come back resolved against `PanelDefaults` rather than passed through, so the client's clamp and the server's work from the same numbers. |
+| `POST /api/panels/{id:guid}/items/{itemId:guid}/power` | `PanelItemStateDto` | `{ on: bool }` — absolute, not a toggle, because the wall's copy of the state can be a poll stale. A `Switch` dispatches `SetPower`; a `Thermostat` dispatches `SetPower` when a `Power` role is bound and otherwise `SetHvacMode` to its `OnMode` / `"off"`. |
+| `POST /api/panels/{id:guid}/items/{itemId:guid}/setpoint` | `PanelItemStateDto` | `{ valueF: decimal }`. Clamped into `MinF`/`MaxF`, snapped to the nearest `StepF` **measured from `MinF`** so every reachable value is one the ⊖/⊕ buttons can also land on, then clamped again — a range the step doesn't divide evenly can snap its own top upward and out. Dispatches `SetTemperature`. |
+
+A routine item inside a panel reuses `POST /api/routines/{id}/trigger` and
+`/turn-off` unchanged; `PanelItemStateDto.routineId` is what the kiosk calls
+them with, since the item's own `id` is something those endpoints have never
+heard of.
+
+Both write endpoints go through `IClimateCommandService` like every other
+actuation, mapping `Rejected` → `400` and `Failed` → `502` as the routine
+endpoints do, and carry `CommandSource.Human` with a reason naming the panel and
+the control. **They are item-scoped rather than channel-scoped on purpose**: the
+kiosk can act on what an admin deliberately put on a panel and cannot address an
+arbitrary channel by id, which is a strictly smaller surface than the channel
+writes above. An item on a different panel, a routine item, and a control whose
+kind doesn't support the verb are `404`, `404` and `400` out of that same
+scoping.
+
+`GET /api/dashboard` carries panels too, as `PanelSummary(Id, Name, Icon,
+Color)` — the tile and nothing more. Live control state is too stale at the
+dashboard's 60s poll and too expensive to gather for panels nobody has opened.
 
 ## Cameras and motion
 

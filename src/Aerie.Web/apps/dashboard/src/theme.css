@@ -1018,7 +1018,7 @@ body {
   color: rgba(255, 255, 255, 0.75);
 }
 
-/* ---- Panels (docs/plans/kiosk-climate.md) -----------------------------
+/* ---- Panels (docs/kiosk-architecture.md) ------------------------------
    The tile row itself is styled above, sharing the routine tile's rules. What
    is here is the overlay a tile opens: the full-screen sub-UI, and the two
    control surfaces inside it.

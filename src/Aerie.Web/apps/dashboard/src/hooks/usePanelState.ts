@@ -28,7 +28,7 @@ const OPTIMISTIC_TTL_MS = 30_000;
 /**
  * How long the ⊖/⊕ buttons have to be quiet before the setpoint is dispatched.
  * Holding "+" from 68 to 78 is one decision, and it lands as one ledgered
- * SetTemperature rather than ten (docs/plans/kiosk-climate.md). The draft value
+ * SetTemperature rather than ten (docs/kiosk-architecture.md). The draft value
  * is shown immediately regardless — this delays the write, never the number.
  */
 const SETPOINT_SETTLE_MS = 700;
