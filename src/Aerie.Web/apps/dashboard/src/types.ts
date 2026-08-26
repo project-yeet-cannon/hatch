@@ -333,3 +333,46 @@ export interface GatherSource {
   /** Resolves to how many items were removed. */
   clearChecked(listId: string): Promise<number>;
 }
+
+/**
+ * Photos — the family library on the wall, as the kiosk consumes it. Mirrors
+ * Modules/Photos/Dtos.cs field for field.
+ *
+ * Note what is absent: an Immich host, a key, a URL of any kind. The kiosk asks
+ * Aerie for a manifest of asset ids and then for those ids' bytes, both on the
+ * origin it is already signed in to, so the photo frame needs no second auth
+ * and the library's credential never leaves the API
+ * (docs/plans/immich.md v+2).
+ */
+export interface CarouselPhoto {
+  assetId: string;
+  albumName: string;
+  /** ISO 8601, or null for a photo the library knows no date for - a scan, usually. */
+  takenAt: string | null;
+  city: string | null;
+  country: string | null;
+}
+
+export interface PhotoCarousel {
+  /** A shuffled sample, not the whole selection. Server-side shuffle, per request, so two tablets aren't on the same photo. */
+  photos: CarouselPhoto[];
+  /** How many photos the selection holds in all, of which photos is a sample. */
+  totalPhotos: number;
+  generatedAt: string;
+  /** Set when the library could not be refreshed. Photos may still be populated from the last good fetch - the wall keeps drawing. */
+  error: string | null;
+}
+
+/**
+ * The slice of Photos the wall needs: a manifest, and where to get one photo's
+ * bytes. Same seam as GatherSource and PanelSource, for the same reason -
+ * ?source= has to switch the whole screen.
+ *
+ * imageUrl is on the source rather than being a shared helper because it is the
+ * half that differs: the API source points at Aerie's proxy, and the mock draws
+ * its own pictures without a server in the picture at all.
+ */
+export interface PhotoSource {
+  getCarousel(count?: number): Promise<PhotoCarousel>;
+  imageUrl(assetId: string): string;
+}

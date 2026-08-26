@@ -11,6 +11,7 @@ import { RoutinesSection } from './components/RoutinesSection';
 import { CamerasSection } from './components/CamerasSection';
 import { PanelsSection } from './components/PanelsSection';
 import { CalendarSection } from './components/CalendarSection';
+import { PhotoCarousel } from './components/PhotoCarousel';
 import { AlertBanner } from './components/AlertBanner';
 import { DashboardSkeleton } from './components/DashboardSkeleton';
 import { GatherTile } from './components/GatherTile';
@@ -20,6 +21,7 @@ import { PanelOverlay } from './components/PanelOverlay';
 import { clientLogger } from './lib/clientLogger';
 import { useKioskLifecycle } from './hooks/useKioskLifecycle';
 import { useGatherLists } from './hooks/useGatherLists';
+import { usePhotoCarousel } from './hooks/usePhotoCarousel';
 import { useMotionEvents } from './hooks/useMotionEvents';
 
 const REFRESH_INTERVAL_MS = 60_000;
@@ -33,6 +35,9 @@ export function App() {
   // Likewise for Panels - null when closed, the opened panel's id otherwise.
   const [panelId, setPanelId] = useState<string | null>(null);
   const { lists: gatherLists, refresh: refreshGather } = useGatherLists();
+  // Its own data path, like Gather's: a dashboard poll that fails should not
+  // take the photo frame down with it.
+  const { photos, source: photoSource } = usePhotoCarousel();
   // resetToken bumps ~30s after the last touch; see hooks/useKioskLifecycle.ts
   // and lib/kioskIdleTimings.ts. The hook also owns the reload-on-new-deploy
   // side of the kiosk's lifecycle, which needs nothing from this component. Both
@@ -181,6 +186,15 @@ export function App() {
                 <ZoneCard key={zone.id} zone={zone} timeZone={data.timezone} />
               ))}
             </div>
+            {/* Directly under the room cards: the top of the column is the
+                house as it is right now, and this is the first thing below it
+                that is there to be looked at rather than read. Renders nothing
+                until an album is included on the admin Photos page, which is
+                what keeps a house that never set Immich up from having a hole
+                in its dashboard. */}
+            {photos.length > 0 && (
+              <PhotoCarousel photos={photos} source={photoSource} timeZone={data.timezone} />
+            )}
             {/* Below the zones, above the routines: the agenda is read, the
                 routines are touched, so the reachable half of the screen stays
                 the tappable one. An agenda whose every day is empty renders

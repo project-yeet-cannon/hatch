@@ -1,13 +1,16 @@
-import type { DashboardDataSource, GatherSource, PanelSource } from './types';
+import type { DashboardDataSource, GatherSource, PanelSource, PhotoSource } from './types';
 import { ApiDashboardDataSource } from './api/apiDataSource';
 import { ApiGatherSource } from './api/gatherClient';
 import { ApiPanelSource } from './api/panelsClient';
+import { ApiPhotoSource } from './api/photosClient';
 import { MockDashboardDataSource } from './mock/mockDataSource';
 import { MockGatherSource } from './mock/mockGatherSource';
 import { MockPanelSource } from './mock/mockPanelSource';
+import { MockPhotoSource } from './mock/mockPhotoSource';
 import { TestDataSource } from './mock/testDataSource';
 import { TestGatherSource } from './mock/testGatherSource';
 import { TestPanelSource } from './mock/testPanelSource';
+import { TestPhotoSource } from './mock/testPhotoSource';
 
 /**
  * Single place the rest of the app asks for a data source. Defaults to the real
@@ -18,10 +21,10 @@ import { TestPanelSource } from './mock/testPanelSource';
  *   ?source=test   -> TestDataSource            — all-X text / all-9999 numbers,
  *                                                 to spot any hardcoded UI values
  *
- * Gather (getGatherSource) and Panels (getPanelSource) read the same param, so
- * one URL switches the whole screen — the tiles and the overlays included —
- * rather than leaving half the page live against the API while the other half
- * is synthetic.
+ * Gather (getGatherSource), Panels (getPanelSource) and Photos
+ * (getPhotoSource) read the same param, so one URL switches the whole screen —
+ * the tiles, the overlays and the carousel included — rather than leaving half
+ * the page live against the API while the other half is synthetic.
  */
 
 type SourceKind = 'mock' | 'test' | 'api';
@@ -70,5 +73,17 @@ export function getPanelSource(): PanelSource {
       return new TestPanelSource();
     default:
       return new ApiPanelSource();
+  }
+}
+
+/** The photo carousel's manifest and image URLs. See src/api/photosClient.ts. */
+export function getPhotoSource(): PhotoSource {
+  switch (selectedSource()) {
+    case 'mock':
+      return new MockPhotoSource();
+    case 'test':
+      return new TestPhotoSource();
+    default:
+      return new ApiPhotoSource();
   }
 }
