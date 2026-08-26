@@ -94,6 +94,41 @@ spec:
       enabled: true
 
     # -------------------------------------------------------------------
+    # Default rules that this installation replaces rather than keeps
+    # -------------------------------------------------------------------
+    # docs/plans/part-time-node.md 5.1. One host in this installation belongs
+    # to a person, and on the evenings they take it back its node is supposed
+    # to be gone. These two rules are the ones that would page about it, and
+    # neither has any way to be told that an absence was asked for - their
+    # expressions are over `kube_node_status_condition` and
+    # `kube_node_spec_taint` with no hook for an exclusion.
+    #
+    # So they are disabled here and re-stated in
+    # ../config/alerts/cluster.yaml's `part-time-node` group with one clause
+    # added: `unless on(node) kube_node_labels{...personal_mode="true"}`. The
+    # re-statement is deliberately otherwise identical, including the 15m
+    # hold, so a node that is down *without* the label still produces exactly
+    # the alert it produces today. That is the other half of 5.1's exit
+    # criterion, and the half worth being careful about: the failure mode of
+    # getting this wrong is silence about a node that really did die.
+    #
+    # Disabling a chart rule rather than editing it is the only mechanism
+    # available - the rules come from the chart's own templates, and an edit
+    # would be reverted on the next reconciliation.
+    #
+    # What this does NOT cover, named here rather than discovered on an
+    # evening: `TargetDown`. It aggregates `up` by job/namespace/service and
+    # carries no node label at all, so with four nodes one absent kubelet is
+    # 25% of that job's targets and it fires. It cannot be excluded the same
+    # way for want of anything to join on, and it is too useful a rule to
+    # disable outright, so it is left alone - a personal-mode evening still
+    # produces that one alert until it is dealt with on its own terms.
+    defaultRules:
+      disabled:
+        KubeNodeNotReady: true
+        KubeNodeUnreachable: true
+
+    # -------------------------------------------------------------------
     # The k3s control-plane scrapes - 6b.1's other half
     # -------------------------------------------------------------------
     # kube-scheduler, kube-controller-manager and kube-proxy all bind to
@@ -555,6 +590,29 @@ spec:
             memory: 64Mi
     kube-state-metrics:
       priorityClassName: aerie-observability
+
+      # docs/plans/part-time-node.md 5.1. kube-state-metrics stopped exporting
+      # node labels by default in v2 - `kube_node_labels` exists but carries
+      # only the identity labels unless a resource is named here - so this one
+      # line is what makes "is this node away on purpose" expressible as a
+      # PromQL join at all. Without it the exclusion in
+      # ../config/alerts/cluster.yaml's `part-time-node` group matches nothing
+      # and every rule in it behaves exactly like the chart's own, which is a
+      # silent no-op rather than an error.
+      #
+      # One resource, one label, on purpose. Node labels are unbounded
+      # cardinality - kubelet, k3s and Longhorn all write onto the same object
+      # - and an allowlist of `nodes=[*]` would put every one of them on a
+      # metric that joins against half the node rules in the cluster.
+      #
+      # `aerie.family/availability` joins it for 5.3's dashboard, which has to
+      # be able to say *which* node is the part-time one when nobody is using
+      # it - `personal-mode` is absent at exactly the moment that question is
+      # being asked. Both are two-valued and written by
+      # scripts/k3s/Install-K3sNode.ps1's -NodeLabel or by
+      # Set-PersonalMode.ps1, so neither adds cardinality that grows.
+      metricLabelsAllowlist:
+        - nodes=[aerie.family/personal-mode,aerie.family/availability]
 
       # docs/plans/deploy-observability.md 1.2 - the one hop of the delivery
       # chain Prometheus could not otherwise see.

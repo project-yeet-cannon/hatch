@@ -9,7 +9,9 @@ tooling is written** — the host is a choice on every provisioning workflow,
 `-AutomaticStartAction` is an input rather than a manual step, and 3.6/3.8 are
 one dispatchable gate — so what is left of that phase is the physical build.
 **Phase 4 is written in full**, and its exit criterion is the first click by a
-person who is not an administrator. Phase 5 not started. Five phases; the
+person who is not an administrator. **Phase 5's 5.1-5.3 are written** (5.2 as a
+no-op with its reason); 5.4 is the deliberate go-slow that waits on the node
+existing. Five phases; the
 first three are cluster work that stands on its own merits, the last two are
 the machine-specific part.
 
@@ -816,19 +818,93 @@ been discovered on an evening somebody wanted their machine:
 **Exit:** a full personal-mode evening produces no alert and no red tile, and a
 node that is down *without* personal mode set still produces both.
 
-- [ ] 5.1 Alert rules in
+- [x] 5.1 Alert rules in
       [`cluster.yaml`](../../deploy/cluster/observability/config/alerts/cluster.yaml)
       that fire on node readiness gain an exclusion for
       `aerie.family/personal-mode=true`. The label persists on the Node object
       while the node is `NotReady`, which is what makes this work — and 4.1
       applies it *before* the drain for the same reason.
-- [ ] 5.2 The same exclusion in Uptime Kuma via
+
+      **Not an exclusion added to a rule — a rule replaced.** The two that
+      would page are the chart's own `KubeNodeNotReady` and
+      `KubeNodeUnreachable`, and neither has any hook for an exclusion: their
+      expressions are over `kube_node_status_condition` and
+      `kube_node_spec_taint` and there is nothing to pass. So they are turned
+      off in `defaultRules.disabled` and restated in a `part-time-node` group
+      with `unless on(node) kube_node_labels{...personal_mode="true"}` and
+      *nothing else changed*, including the 15m hold — because the failure
+      mode of improving them while rewriting them is silence about a node that
+      really did die.
+
+      Three things this needed that the step did not name:
+
+      - **kube-state-metrics stopped exporting node labels by default in v2.**
+        `kube_node_labels` exists but carries only identity labels unless the
+        resource is named in `metricLabelsAllowlist`, so one line in
+        [`kube-prometheus-stack.yaml`](../../deploy/cluster/observability/controllers/kube-prometheus-stack.yaml)
+        is what makes this expressible at all. Without it the `unless` matches
+        nothing and both rules behave exactly like the chart's — a silent
+        no-op that reads like a configuration. Two labels are allowlisted, not
+        `*`: node labels are unbounded cardinality (kubelet, k3s and Longhorn
+        all write onto the same object).
+      - **A third rule, `AerieNodeInPersonalMode`, at info severity**, firing
+        on the label itself. It is what makes the other two falsifiable: if it
+        is not firing during a personal-mode evening then the label is not
+        reaching Prometheus and the exclusions are not doing anything either,
+        which is otherwise a failure you only discover through a page that
+        never came.
+      - **`TargetDown` is the residue, and is left alone deliberately.** It
+        aggregates `up` by job/namespace/service and carries no node label, so
+        with four nodes one absent kubelet is 25% of that job's targets and it
+        fires. There is nothing to join an exclusion on, and it is too useful
+        to disable outright — so a personal-mode evening still produces that
+        one alert. Named in the manifest rather than discovered on an evening;
+        dealing with it is its own decision.
+- [x] 5.2 The same exclusion in Uptime Kuma via
       [`autokuma`](../../deploy/cluster/observability/controllers/autokuma.yaml),
       so the status page reads "off by request" rather than "down".
-- [ ] 5.3 A dashboard row: which node is part-time, whether it is in personal
+
+      **Nothing to change, and that is the finding.** Read the monitor set in
+      [`static-monitors-configmap.yaml`](../../deploy/cluster/observability/controllers/static-monitors-configmap.yaml):
+      API, Database, Home Assistant, Files, Share, Photos, Watchdog. Every one
+      of them probes a *service* through a ClusterIP or an ingress. **There is
+      no node monitor in Uptime Kuma**, so there is nothing for a personal-mode
+      exclusion to attach to, and the status page cannot go red because a node
+      left — it goes red when a service stops answering, which is a genuine
+      outage signal whatever caused it.
+
+      The tempting fix is the wrong one: adding a per-node monitor so that it
+      could then be excluded would *create* the red tile this phase exists to
+      prevent, and would make the status page report on infrastructure rather
+      than on whether the house works. That distinction is the reason Kuma and
+      Prometheus both exist here. 5.1's rules are where node absence is
+      reasoned about; this step closes as a no-op with the reason written
+      down.
+- [x] 5.3 A dashboard row: which node is part-time, whether it is in personal
       mode, and how much capacity is currently on loan. The number that answers
       "can I afford to hand it back right now" should be on a screen, not in
       someone's head.
+
+      A dashboard rather than a row, because none of the five already there is
+      about this:
+      [`part-time-node.json`](../../deploy/cluster/observability/config/dashboards/part-time-node.json),
+      the second dashboard in that directory that is not a copy of somebody
+      else's.
+
+      The number the step asks for is a gauge: **every pod's memory request
+      over the memory allocatable on the nodes that are not part-time.** Under
+      100% means the cluster's declared demand fits without that machine.
+      Requests rather than usage on purpose — the scheduler places on
+      requests, so this is what decides whether the pods evicted from the
+      part-time node have anywhere to land, which is the actual content of
+      "can I afford it".
+
+      Everything on it keys off `aerie.family/availability` and
+      `aerie.family/personal-mode` rather than off a node name, the same rule
+      1.5 applies to placement — and both labels therefore had to join 5.1's
+      allowlist. `availability` is the one that answers "which node is the
+      part-time one" while nobody is using it, which is exactly when
+      `personal-mode` is absent.
 - [ ] 5.4 **Only now, move the tenants.** Observability first, per finding 4,
       one workload at a time with a personal-mode cycle between each. Surge
       replicas and batch follow once the first survives a few evenings.

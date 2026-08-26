@@ -63,6 +63,22 @@
 #     addresses Grafana variables as bare $owner/$repo/$__rate_interval,
 #     which Flux never touches: its substitution only fires when `$` is
 #     immediately followed by `{`.
+#   - part-time-node.json: not upstream's either - written for this repository
+#     (docs/plans/part-time-node.md 5.3), and the second of the two here that
+#     is nobody else's copy. One question, on a screen instead of in someone's
+#     head: can the cluster afford to hand that machine back right now. The
+#     gauge is every pod's memory *request* over the memory allocatable on the
+#     nodes that are not part-time - requests rather than usage, because the
+#     scheduler places on requests and the question is whether the evicted
+#     pods have somewhere to land. Everything on it keys off the node's own
+#     `aerie.family/availability` and `aerie.family/personal-mode` labels
+#     rather than off a node name, which is the same rule that plan's 1.5
+#     applies to placement, and it depends on
+#     ../../controllers/kube-prometheus-stack.yaml's
+#     kube-state-metrics.metricLabelsAllowlist naming both: without that,
+#     every panel here is empty and so is the alert exclusion in
+#     ../alerts/cluster.yaml. It holds no ${...} tokens and no Grafana macros
+#     at all - see the strict-substitution warning below.
 #   - flux.json: github.com/fluxcd/flux2-monitoring-example,
 #     monitoring/configs/dashboards/control-plane.json ("Flux Control Plane")
 #     - the project's own example, already cited by ../scrape/flux.yaml for
@@ -138,6 +154,14 @@ configMapGenerator:
     namespace: observability
     files:
       - delivery.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
+  - name: dashboard-part-time-node
+    namespace: observability
+    files:
+      - part-time-node.json
     options:
       disableNameSuffixHash: true
       labels:
