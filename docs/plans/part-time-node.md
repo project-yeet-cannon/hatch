@@ -1,11 +1,17 @@
 # Part-time node — a fourth host that leaves when its owner wants it back
 
-**Status:** Phase 1 done — the tooling can build an agent now, and that stands
-on its own whether or not a fourth host ever appears. Phase 2's two manifest
-changes (2.1, 2.2) are written and merged; its two cluster operations (2.3's
-re-read, 2.4's rehearsal) are not done. Phases 3-5 not started. Five phases;
-the first three are cluster work that stands on its own merits, the last two
-are the machine-specific part.
+**Status:** Phase 1 done. Phase 2.1 is merged; **2.2 was merged and then
+reverted** — it stopped every application deploy in the cluster, and the
+reasoning and the failure are preserved in
+[`coredns-availability.yaml`](../../deploy/cluster/infrastructure/config/coredns-availability.yaml)'s
+header, so that step is back to unstarted. 2.3's re-read is done; 2.4's rehearsal is not. **Phase 3's
+tooling is written** — the host is a choice on every provisioning workflow,
+`-AutomaticStartAction` is an input rather than a manual step, and 3.6/3.8 are
+one dispatchable gate — so what is left of that phase is the physical build.
+**Phase 4 is written in full**, and its exit criterion is the first click by a
+person who is not an administrator. Phase 5 not started. Five phases; the
+first three are cluster work that stands on its own merits, the last two are
+the machine-specific part.
 
 A fourth Windows host joins the cluster as a k3s **agent**, carrying a Linux VM
 sized to take real load off the three permanent nodes. Its owner uses the
@@ -310,7 +316,18 @@ first proof they were the right changes is 2.4.
       cordoned, a Traefik upgrade *stalls* rather than dropping traffic, and
       resolves when the node returns. That is the right trade against two
       replicas quietly sharing a node on an ordinary Tuesday.
-- [x] 2.2 **CoreDNS to 2 replicas**, same anti-affinity. k3s owns this manifest,
+- [ ] 2.2 **CoreDNS to 2 replicas**, same anti-affinity. **Merged, then
+      reverted — back to unstarted.** Everything below was written while it was
+      merged and is left as written, because the reasoning is sound and the
+      *mechanism* is what turned out to be wrong: as a partial server-side
+      apply it passes a hand-run `kubectl apply --server-side
+      --dry-run=server` and fails kustomize-controller's own drift-detection
+      dry-run, which validated a merge result with no `spec.selector` in it.
+      infra-config is the root of the Kustomization dependency chain, so one
+      un-appliable manifest there stopped every application deploy in the
+      cluster. The file keeps its full reasoning and the failure in its header;
+      a second attempt starts from that difference rather than from this
+      design. k3s owns this manifest,
       so the override is a `HelmChartConfig` beside Traefik's rather than an
       edit — an edit is reverted on the next k3s restart.
 
@@ -647,11 +664,53 @@ carries it, along with how to measure which volume is which.
 is drained, the VM is off and the runner is stopped. Another click returns all
 three. Neither depends on remembering a command.
 
-The control is `scripts/hyperv/Set-PersonalMode.ps1`, with `-Enter`, `-Exit` and
-`-Status`, and the state lives in one file on the host that both the script and
-the boot task read.
+The control is [`scripts/hyperv/Set-PersonalMode.ps1`](../../scripts/hyperv/Set-PersonalMode.ps1),
+with `-Enter`, `-Exit` and `-Status`, and the state lives in one file on the
+host that both the script and the boot task read.
 
-- [ ] 4.1 **Enter**, in order, each step with its own deadline and **none of
+**All of it is written.** Two more actions than the plan named, both of which
+turned out to be the boot task and the daily task rather than separate scripts:
+`-Reconcile` (4.5) and `-AutoExit` (4.6), plus `-Pin`/`-Unpin` for 4.6's flag.
+[`Register-PersonalModeControl.ps1`](../../scripts/hyperv/Register-PersonalModeControl.ps1)
+installs the lot, and is dispatchable as **Provision 9**
+([`provision-9-personal-mode.yml`](../../.github/workflows/provision-9-personal-mode.yml)).
+
+Five things that fell out of writing it, each of which would otherwise have
+been discovered on an evening somebody wanted their machine:
+
+- **"Every step has a deadline" needed a mechanism, not an intention.**
+  `kubectl --timeout` bounds the drain, but nothing bounds an `ssh` whose TCP
+  connection is established and whose remote command never returns — which is
+  exactly the shape of an unwell cluster, and exactly when a person is
+  waiting. So every bounded step runs in a background job that is stopped at
+  its deadline, which kills `ssh.exe` with it. One process start per call,
+  about a second, for the difference between a promise and a hope.
+- **The state file is written last, not first.** A run interrupted halfway
+  therefore leaves the state saying `cluster`, and the boot task puts the node
+  back. That is the safe direction to be wrong in: it costs a person one click,
+  where the other direction costs the cluster a node it believes it has.
+- **The boot task has work to do in the personal-mode branch too**, which
+  "leave everything alone" hides. The runner service is Automatic, so Windows
+  starts it on the way up; personal mode means the machine is the person's,
+  including its CPU, so `-Reconcile` stops it again.
+- **A SYSTEM task's console output is in session 0, where nobody can see it.**
+  `schtasks /run` returns the instant the task launches, so a shortcut that
+  only did that would flash a window and leave the person guessing for ninety
+  seconds. 4.4's "feedback matters more than polish" is therefore a third
+  script — [`lib/Watch-PersonalModeTask.ps1`](../../scripts/hyperv/lib/Watch-PersonalModeTask.ps1),
+  which runs unelevated in the user's session, starts the task and tails the
+  shared log. Reading a log file needs no privilege, so this crosses the
+  session boundary without weakening the one 4.3 draws.
+- **The VM is asked to stop in three escalating ways, and the guest is asked
+  first.** Hyper-V's ACPI shutdown depends on the guest running the shutdown
+  integration service, and this is a cloud image rather than a machine anybody
+  configured — so `systemctl poweroff` over SSH is both likelier to work and
+  cleaner when it does. `Stop-VM` is the fallback and `-TurnOff` is what the
+  deadline buys. The hard turn-off is affordable here for a reason specific to
+  this node: it holds no Longhorn replica (finding 3), so the worst case is a
+  filesystem journal to replay.
+
+- [x] 4.1 **Enter**, in order, each step with its own deadline and **none of
       them able to stop the sequence**:
       1. Label the node `aerie.family/personal-mode=true` — before the drain,
          while the API server is still reachable from it. Phase 5 reads this.
@@ -667,10 +726,10 @@ the boot task read.
       4. `Stop-Service actions.runner.*`.
       5. `Stop-VM` (ACPI), escalating to `-Force` after a timeout.
       6. Write the state file.
-- [ ] 4.2 **Exit** is the mirror, and is allowed to fail loudly: start the
+- [x] 4.2 **Exit** is the mirror, and is allowed to fail loudly: start the
       runner service, `Start-VM`, wait for `Ready`, `kubectl uncordon`, remove
       the label, clear the state file.
-- [ ] 4.3 **Registration**, once, by an administrator:
+- [x] 4.3 **Registration**, once, by an administrator:
       `Register-PersonalModeControl.ps1` creates two Scheduled Tasks running as
       SYSTEM at highest privilege — modelled directly on
       [`Register-VmConsoleLogShipper.ps1`](../../scripts/hyperv/lib/Register-VmConsoleLogShipper.ps1),
@@ -678,16 +737,40 @@ the boot task read.
       run rights on them. This is the whole reason for the task indirection: the
       user needs to trigger an action requiring Administrator without holding
       Administrator and without a UAC prompt every time.
-- [ ] 4.4 **The shortcuts.** Two on the desktop, calling
+
+      Four tasks, not two: the boot task (4.5) and the daily auto-exit (4.6)
+      are the same script under different triggers, and they keep the default
+      administrator-only descriptor. A user who could run the boot task by
+      hand could put the node back mid-evening, which is a strange thing to
+      hand someone whose whole problem is wanting the machine to themselves.
+
+      The run right is granted by **replacing** each task's security descriptor
+      rather than appending an ACE to it — `D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;<sid>)`,
+      through `IRegisteredTask.SetSecurityDescriptor`. Appending means parsing
+      an SDDL whose default content varies by Windows build and by how the task
+      was created, and getting that wrong on a task that runs as SYSTEM at
+      highest privilege is worth designing out. `GRGX` is generic read plus
+      generic execute; execute on a task is the right to run it, and there is
+      no write, so the user cannot change what it does or who it runs as.
+
+      The SSH key lands at `C:\ProgramData\Aerie\personal-mode\node.key`
+      with inheritance stripped and two ACEs, SYSTEM and Administrators — the
+      same shape as `lib/AerieSsh.ps1`'s `Protect-PrivateKeyFile`, for SYSTEM
+      rather than for whoever ran the install, because the tasks are what use
+      it. Windows OpenSSH refuses a key file other principals can read, and a
+      file written under `ProgramData` inherits an ACL granting Users read, so
+      this is a real refusal rather than a precaution. The desktop user never
+      reads the key; they trigger a task and SYSTEM does.
+- [x] 4.4 **The shortcuts.** Two on the desktop, calling
       `schtasks /run /tn Aerie-PersonalMode-Enter` (and `-Exit`), each opening a
       console that shows the steps and their timings and closes when done.
       Feedback matters more than polish here: the user needs to know when the
       machine is theirs, and a silent shortcut means they wait, or don't.
-- [ ] 4.5 **A boot-time task** (`AtStartup`, SYSTEM) reads the state file and
+- [x] 4.5 **A boot-time task** (`AtStartup`, SYSTEM) reads the state file and
       reconciles: personal mode off and the VM down means start it; personal
       mode on means leave everything alone. This is what makes finding 6's
       Windows Update reboot harmless in both directions.
-- [ ] 4.6 **A daily auto-exit** at an hour nobody games, exiting personal mode
+- [x] 4.6 **A daily auto-exit** at an hour nobody games, exiting personal mode
       unless a `pin` flag is set. Forgetting to give the node back should cost
       one night, not one month.
 - [ ] 4.7 **Verify the ungraceful path**, because it is the one that will

@@ -357,6 +357,31 @@ Nothing k3s-specific goes in `-RunCmd` — that's a separate step, once this
 node answers SSH: see [`../k3s/README.md`](../k3s/README.md) or dispatch
 **Provision 1: Install k3s**.
 
+## The part-time host
+
+One host in an installation may belong to a person rather than to the cluster.
+`Register-PersonalModeControl.ps1` installs the control that lets them take it
+back for an evening and give it back afterwards, and
+[`docs/plans/part-time-node.md`](../../docs/plans/part-time-node.md) carries the
+reasoning. Three things about that host differ from the other three, and all
+three are arguments rather than special cases in the code:
+
+- Its VM is built with `-AutomaticStartAction Nothing`, so Hyper-V does not
+  return the node after a host reboot. A boot-time task reads the persisted
+  intention and decides instead — which is what makes a Windows Update reboot
+  mid-evening harmless. It is still in the reboot stagger: it takes updates
+  like any other machine.
+- It gets **no Longhorn data disk** (`-DataDiskSizeGB 0`), and joins Longhorn
+  with `allowScheduling: false`. Not on principle — the arithmetic is in that
+  plan's finding 3.
+- Its node is a k3s **agent**, so it has no apiserver of its own and every
+  cluster operation the control performs is asked of a permanent server over
+  SSH.
+
+Nothing else about it is different, and that is deliberate: it is a normal
+node, and the work that makes a node leaving a non-event is work the cluster
+wanted anyway.
+
 ## Windows Update reboot staggering
 
 Once at least one node VM exists, run **Actions → Stagger Windows Update
@@ -407,6 +432,9 @@ removed, or renamed.
 | [`New-AerieVM.ps1`](New-AerieVM.ps1) | Creates one VM from the template. Bypasses preflight — use directly when you know better than a check. |
 | [`Test-NodeVm.ps1`](Test-NodeVm.ps1) | Reads one VM back and asserts it against the on-disk layout rule above — fixed OS disk, allocated, no checkpoints, static memory, the start action asked for — plus the guest's root filesystem over SSH. Read-only. Dispatch as **Verify: Node VM shape**. |
 | [`Move-NodeOsDisk.ps1`](Move-NodeOsDisk.ps1) | Moves a live node's OS disk to the host's fastest volume as a fixed, larger VHDX, one node at a time. Also `-Rollback` and `-RemoveSourceDisk`. For a node built before the layout rule above; new nodes never need it. |
+| [`Set-PersonalMode.ps1`](Set-PersonalMode.ps1) | The part-time host's control: `-Enter` hands the machine back (label, cordon, drain, quiesce the runner, stop the VM), `-Exit` takes it back, `-Status` reads everything and changes nothing, `-Reconcile` is what the boot task runs, `-AutoExit` the daily one. |
+| [`Register-PersonalModeControl.ps1`](Register-PersonalModeControl.ps1) | Installs that control once, as an administrator: four Scheduled Tasks, the desktop user's run rights on two of them, two desktop shortcuts, the config and the key. Dispatch as **Provision 9: Personal mode control**. |
+| [`lib/Watch-PersonalModeTask.ps1`](lib/Watch-PersonalModeTask.ps1) | What the shortcuts run: starts a task and tails its log from the user's own session, because a SYSTEM task's output is in session 0 where nobody can see it. |
 | [`lib/New-NoCloudIso.ps1`](lib/New-NoCloudIso.ps1) | Builds the cloud-init seed ISO via Windows' built-in IMAPI2FS — no ADK or oscdimg needed. |
 | [`lib/AerieSsh.ps1`](lib/AerieSsh.ps1) | Post-boot verification over SSH. |
 | [`lib/Register-VmConsoleLogShipper.ps1`](lib/Register-VmConsoleLogShipper.ps1) | Registers the Scheduled Task that ships one VM's serial console to OpenSearch. |
