@@ -156,6 +156,90 @@ public class SiteSettingsServiceTests
         Assert.Equal(48, snapshot.HazardMaxSeverityAgeHours);
     }
 
+    [Fact]
+    public async Task ImmichBaseUrl_LosesItsTrailingSlash()
+    {
+        var snapshot = await NewService((SiteSettingKeys.ImmichBaseUrl, "https://photos.example.com/"))
+            .GetAsync(CancellationToken.None);
+
+        Assert.Equal("https://photos.example.com", snapshot.ImmichBaseUrl);
+    }
+
+    [Fact]
+    public async Task ImmichApiKey_ComesBackReadable()
+    {
+        var snapshot = await NewService((SiteSettingKeys.ImmichApiKey, SecretProtector.Protect("immich-api-key")))
+            .GetAsync(CancellationToken.None);
+
+        // Deobfuscated here because the Photos module hands it to Immich as a
+        // header, not to a screen - the same trade the Google and Anthropic
+        // secrets above make.
+        Assert.Equal("immich-api-key", snapshot.ImmichApiKey);
+    }
+
+    [Fact]
+    public async Task ImmichSettings_AreNullWhenUnset()
+    {
+        var snapshot = await NewService().GetAsync(CancellationToken.None);
+
+        Assert.Null(snapshot.ImmichBaseUrl);
+        Assert.Null(snapshot.ImmichApiKey);
+    }
+
+    /// <summary>The cache doing its job: a second read inside the TTL does not go back to the table.</summary>
+    [Fact]
+    public async Task ASecondReadInsideTheTtlIsCached()
+    {
+        var (service, factory) = NewServiceWithStore((SiteSettingKeys.ImmichBaseUrl, "https://old.example.com"));
+
+        await service.GetAsync(CancellationToken.None);
+        await StoreAsync(factory, SiteSettingKeys.ImmichBaseUrl, "https://new.example.com");
+
+        Assert.Equal("https://old.example.com", (await service.GetAsync(CancellationToken.None)).ImmichBaseUrl);
+    }
+
+    /// <summary>
+    /// And the write-side signal that makes the TTL survivable. Without it,
+    /// saving a setting and immediately reading back something derived from it -
+    /// the admin Photos page's connection check - answers with the old value for
+    /// up to thirty seconds, which reads as the save not having worked.
+    /// </summary>
+    [Fact]
+    public async Task InvalidateSendsTheNextReadBackToTheTable()
+    {
+        var (service, factory) = NewServiceWithStore((SiteSettingKeys.ImmichBaseUrl, "https://old.example.com"));
+
+        await service.GetAsync(CancellationToken.None);
+        await StoreAsync(factory, SiteSettingKeys.ImmichBaseUrl, "https://new.example.com");
+        service.Invalidate();
+
+        Assert.Equal("https://new.example.com", (await service.GetAsync(CancellationToken.None)).ImmichBaseUrl);
+    }
+
+    /// <summary>NewService's factory, kept, for the two tests that write to the table after the service has read it.</summary>
+    private static (SiteSettingsService Service, TestDbContextFactory Factory) NewServiceWithStore(
+        params (string Key, string Value)[] settings)
+    {
+        var factory = new TestDbContextFactory(
+            new DbContextOptionsBuilder<AerieContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+
+        using (var db = factory.CreateDbContext())
+        {
+            db.SiteSettings.AddRange(settings.Select(s => new EfSiteSetting { Key = s.Key, Value = s.Value }));
+            db.SaveChanges();
+        }
+
+        return (new SiteSettingsService(factory, new FakeTimeProvider()), factory);
+    }
+
+    private static async Task StoreAsync(TestDbContextFactory factory, string key, string value)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        var setting = await db.SiteSettings.FirstAsync(s => s.Key == key);
+        setting.Value = value;
+        await db.SaveChangesAsync();
+    }
+
     private sealed class TestDbContextFactory(DbContextOptions<AerieContext> options) : IDbContextFactory<AerieContext>
     {
         public AerieContext CreateDbContext() => new(options);

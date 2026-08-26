@@ -48,4 +48,9 @@ internal sealed class StubSiteSettings(
         AnthropicApiKey: anthropicApiKey,
         ImmichBaseUrl: immichBaseUrl,
         ImmichApiKey: immichApiKey));
+
+    /// <summary>Counted rather than ignored: SettingsController is supposed to call it on every write.</summary>
+    public int Invalidations { get; private set; }
+
+    public void Invalidate() => Invalidations++;
 }

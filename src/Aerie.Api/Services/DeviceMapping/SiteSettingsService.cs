@@ -32,15 +32,28 @@ public record SiteSettingsSnapshot(
 public interface ISiteSettingsService
 {
     Task<SiteSettingsSnapshot> GetAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Drops the cached snapshot so the next read comes from the table. Called
+    /// by SettingsController on every write - see the note on
+    /// <see cref="SiteSettingsService"/> for what it does and does not fix.
+    /// </summary>
+    void Invalidate();
 }
 
 /// <summary>
 /// Replaces IOptions&lt;DashboardOptions&gt; as the read side of the dashboard's
 /// scalar settings (docs/device-architecture.md Phase 5) - SettingsController
-/// is still the write side, CRUDing EfSiteSetting directly. Cached with a short
-/// TTL rather than invalidated on write, since the controller has no signal
-/// back to this singleton; a stale read is bounded to CacheTtl instead of
-/// living forever like a bare in-memory cache would.
+/// is still the write side, CRUDing EfSiteSetting directly.
+///
+/// Cached, and invalidated two ways because neither alone is enough. The
+/// controller calls <see cref="Invalidate"/> on every write, which covers the
+/// case that is actually visible to a person: saving a setting and immediately
+/// reading back something derived from it, on the replica that took the write.
+/// The TTL stays as the backstop for the other two replicas, which have no
+/// signal and would otherwise serve the old value until something restarted -
+/// so a stale read is bounded to CacheTtl rather than living forever, which is
+/// what a bare in-memory cache would do.
 /// </summary>
 public class SiteSettingsService(IDbContextFactory<AerieContext> dbFactory, TimeProvider time) : ISiteSettingsService
 {
@@ -49,6 +62,14 @@ public class SiteSettingsService(IDbContextFactory<AerieContext> dbFactory, Time
     private readonly SemaphoreSlim gate = new(1, 1);
     private SiteSettingsSnapshot? cached;
     private DateTimeOffset expiresAt;
+
+    public void Invalidate()
+    {
+        // Expiring rather than nulling, so a concurrent reader gets the old
+        // snapshot for the moment before the reload lands instead of blocking
+        // on a rebuild it did not ask for.
+        expiresAt = DateTimeOffset.MinValue;
+    }
 
     public async Task<SiteSettingsSnapshot> GetAsync(CancellationToken ct)
     {

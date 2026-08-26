@@ -10,7 +10,10 @@ namespace Aerie.Api.Controllers;
 /// <summary>CRUD over SiteSetting - the admin-editable scalars that replace the "Dashboard" appsettings section (docs/device-architecture.md Phase 2/6).</summary>
 [ApiController]
 [Route("api/[controller]")]
-public class SettingsController(AerieContext db, IHomeAssistantConnectionManager haConnection) : ControllerBase
+public class SettingsController(
+    AerieContext db,
+    IHomeAssistantConnectionManager haConnection,
+    ISiteSettingsService siteSettings) : ControllerBase
 {
     [HttpGet]
     public async Task<IReadOnlyList<SiteSettingDto>> GetAll(CancellationToken ct)
@@ -46,6 +49,12 @@ public class SettingsController(AerieContext db, IHomeAssistantConnectionManager
         }
         await db.SaveChangesAsync(ct);
 
+        // Before anything reads back: an admin who saves a setting and is
+        // immediately shown something derived from it - the Photos page's
+        // connection check is the sharp case - should not be told the old
+        // answer for the length of the cache TTL.
+        siteSettings.Invalidate();
+
         if (key is SiteSettingKeys.HomeAssistantHost or SiteSettingKeys.HomeAssistantPort or SiteSettingKeys.HomeAssistantToken)
             await haConnection.ApplyAsync(ct);
 
@@ -59,6 +68,7 @@ public class SettingsController(AerieContext db, IHomeAssistantConnectionManager
         if (setting is null) return NotFound();
         db.SiteSettings.Remove(setting);
         await db.SaveChangesAsync(ct);
+        siteSettings.Invalidate();
         return NoContent();
     }
 
