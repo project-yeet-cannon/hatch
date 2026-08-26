@@ -48,11 +48,19 @@ spec:
   # OOMKilled barman-cloud-backup mid-base-backup there (exit 137), and this
   # database will not be smaller than that one for long once Immich starts
   # writing embeddings.
+  #
+  # The 1-core CPU limit carries over from that file too, for the reason
+  # spelled out there: 500m is a 50ms-per-100ms CFS quota and throttles a
+  # single-threaded compressor by construction. This tier is where it was
+  # noticed - immich-pg-1's sidecar averaged 0.04 cores over its busiest 5m
+  # window in 7d while reaching a 0.78 throttled-period ratio, which is what
+  # kept `CPUThrottlingHigh` pending here and `InfoInhibitor` arriving on a
+  # phone as "NONE: InfoInhibitor".
   instanceSidecarConfiguration:
     resources:
       requests:
         cpu: 50m
         memory: 128Mi
       limits:
-        cpu: 500m
+        cpu: "1"
         memory: 512Mi

@@ -341,7 +341,58 @@ spec:
               repeat_interval: 2m
               matchers:
                 - alertname = "Watchdog"
+
+            # `InfoInhibitor` is not an alert about anything. It is the
+            # chart's plumbing for suppressing severity=info alerts - it
+            # fires whenever an info alert exists in a namespace that has no
+            # warning or critical alert, and exists only to be the *source*
+            # side of the third inhibit rule below. Its own rule annotation
+            # says so: "This alert should be routed to a null receiver and
+            # configured to inhibit alerts with severity=info". Its label is
+            # `severity: none`, which is why it arrives on a phone as
+            # "NONE: InfoInhibitor" - the receiving automation's
+            # `<SEVERITY>: <alertname>` branch, described above, doing
+            # exactly what it was told.
+            #
+            # Upstream never needs this route because upstream's default
+            # receiver is `null`: the chart ships route.receiver: 'null' and
+            # a single no-op receiver, so nothing notifies and this leak is
+            # invisible. This installation's default receiver is a phone, so
+            # every chart alert not routed elsewhere pages - which is the
+            # intent for real alerts and wrong for this one.
+            #
+            # The chart's *other* backstop, a fourth inhibit rule with no
+            # source matchers at all (`target_matchers: [alertname =
+            # InfoInhibitor]`, merged in from chart defaults since this file
+            # overrides `route` and `receivers` but not `inhibit_rules`), is
+            # supposed to make the always-firing Watchdog inhibit this. It
+            # does not work on Alertmanager 0.33.1, and the reason is worth
+            # writing down so nobody deletes this route believing that rule
+            # covers them. 0.33 replaced the source-cache scan in
+            # `InhibitRule.hasEqual` with a fingerprint index keyed on the
+            # rule's `equal` labels. That rule has no `equal` labels, so the
+            # key is a constant and the whole index collapses to one slot
+            # holding whichever source alert most recently had the larger
+            # EndsAt. Watchdog and InfoInhibitor are both refreshed every
+            # evaluation with near-identical EndsAt, so the slot flip-flops
+            # between them, and on the ticks where InfoInhibitor holds it the
+            # rule's own two-sided-match guard (`excludeTwoSidedMatch &&
+            # TargetMatchers.Matches(equal.Labels)`) sees the alert inhibiting
+            # itself and returns "not inhibited". That coin flip is what made
+            # this arrive *occasionally* rather than every time.
+            #
+            # A route is not subject to any of that: it is evaluated before
+            # inhibition and does not depend on what else is firing.
+            - receiver: blackhole
+              matchers:
+                - alertname = "InfoInhibitor"
         receivers:
+          # No configs of any kind: an Alertmanager receiver with no
+          # integrations is the documented way to spell "drop this", and is
+          # what the chart's own default `null` receiver is. Named
+          # `blackhole` rather than `null` because unquoted `null` is a YAML
+          # keyword and this file's other receiver names are bare.
+          - name: blackhole
           - name: kuma-watchdog
             webhook_configs:
               # The URL Kuma generates for a push monitor is normally only

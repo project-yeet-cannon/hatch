@@ -62,13 +62,38 @@ spec:
   # 16MB segments fit fine, but barman-cloud-backup buffers and multipart-
   # uploads a full base backup, and that needs real headroom. 512Mi observed
   # comfortable on this database's current size; revisit if it grows a lot.
+  #
+  # The CPU limit is 1 core rather than the 500m it was first given, and the
+  # reason is not that the sidecar needs a core - it is that 500m is a CFS
+  # quota of 50ms per 100ms period, so a single-threaded gzip is throttled
+  # by construction for as long as it runs, no matter how briefly. Measured
+  # over 7d before the change: this cluster's sidecars averaged 0.0002-0.25
+  # cores over any 5m window (p99 0.0002 on aerie-pg-1) while hitting
+  # throttled-period ratios of 0.28 on aerie-pg-3 and 0.94 on aerie-pg-1.
+  # That gap between a rounding-error average and near-total throttling is
+  # the signature of short bursts biting a quota, not of a workload that
+  # wants more CPU, and it is what kept `CPUThrottlingHigh` (severity=info,
+  # >25% throttled periods over 5m) pending against these pods - which in
+  # turn is what kept the chart's `InfoInhibitor` firing at a phone. See
+  # ../../observability/controllers/kube-prometheus-stack.yaml's blackhole
+  # route for the other half of that; this is the half that removes the
+  # cause rather than the notification.
+  #
+  # A core gives a single compressor a full period's runtime, which covers
+  # WAL archiving - one 16MB segment at a time, the common case. A base
+  # backup with parallel workers can still bite; that is a deliberately
+  # accepted remainder rather than an oversight, because the alternative is
+  # dropping the CPU limit entirely and this cluster keeps limits on
+  # everything the scheduler places. Requests stay at 50m: the measured
+  # steady-state demand is far below even that, and requests are what the
+  # scheduler and CFS shares actually read.
   instanceSidecarConfiguration:
     resources:
       requests:
         cpu: 50m
         memory: 128Mi
       limits:
-        cpu: 500m
+        cpu: "1"
         memory: 512Mi
   # Left empty on purpose. serverName exists only for API compatibility with
   # the deprecated in-tree barmanObjectStore; the live path names the server
