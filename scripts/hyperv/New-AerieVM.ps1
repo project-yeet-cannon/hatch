@@ -159,7 +159,29 @@ param(
     # (see the Set-VMComPort block below) - omit either to skip it, e.g. for
     # the Phase 0 scratch VM.
     [string]$LogIngestUrl,
-    [string]$LogIngestToken
+    [string]$LogIngestToken,
+
+    # What Hyper-V does with this VM when the host boots. `Start` is right for
+    # a permanent node and is the default, so nothing that existed before this
+    # parameter changes behaviour.
+    #
+    # `Nothing` is for the part-time host (docs/plans/part-time-node.md,
+    # finding 6): there, whether the node should be running is a question with
+    # an answer written down - the personal-mode state file - and Hyper-V's
+    # autostart cannot read it. A Windows Update reboot mid-session would
+    # otherwise bring the node back up in the middle of the evening the whole
+    # design exists to give away, and Set-UpdateRebootSchedule.ps1 sets
+    # NoAutoRebootWithLoggedOnUsers = 0 on purpose, so that reboot happens
+    # straight through an active session. With `Nothing`, the boot-time task
+    # Register-PersonalModeControl.ps1 registers reads the state file and
+    # decides - which is the same decision in a place that can be told.
+    #
+    # `StartIfRunning` is Hyper-V's third option and is offered for
+    # completeness; it restores whatever the VM was doing at host shutdown,
+    # which is a worse answer than either of the other two here because it
+    # makes the node's state after a reboot depend on how the host went down.
+    [ValidateSet('Start', 'Nothing', 'StartIfRunning')]
+    [string]$AutomaticStartAction = 'Start'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -300,7 +322,14 @@ Set-VMFirmware -VMName $VMName -EnableSecureBoot On -SecureBootTemplate Microsof
 $nic = Get-VMNetworkAdapter -VMName $VMName
 Set-VMNetworkAdapter -VMNetworkAdapter $nic -StaticMacAddress $macNormalized -MacAddressSpoofing On
 
-Set-VM -Name $VMName -AutomaticStartAction Start -AutomaticStopAction ShutDown
+# -AutomaticStopAction is not parameterised alongside the start action: a
+# node should always be asked to shut down cleanly when the host is, whoever
+# owns the machine. Only the *return* is in question, and only on the
+# part-time host.
+Set-VM -Name $VMName -AutomaticStartAction $AutomaticStartAction -AutomaticStopAction ShutDown
+if ($AutomaticStartAction -ne 'Start') {
+    Write-Host "  AutomaticStartAction = $AutomaticStartAction - this VM will NOT come back on its own after a host reboot. Something else has to start it."
+}
 Disable-VMIntegrationService -VMName $VMName -Name 'Time Synchronization'
 
 # Hyper-V takes an automatic checkpoint when a VM *starts* and removes it on a

@@ -59,6 +59,7 @@ on:
           - hyperv-host-0
           - hyperv-host-1
           - hyperv-host-2
+          - hyperv-host-3
       vm_name:
         description: 'The node VM the bulk disk is attached to (e.g. aerie-node-N). Checked against the node''s own hostname before any disk is touched'
         required: true

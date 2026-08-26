@@ -1,0 +1,152 @@
+# Reads back the shape of one node VM on the host it lives on and asserts it
+# against scripts/hyperv/README.md's on-disk layout rule - fixed OS disk, no
+# checkpoints, static memory, the start action that was asked for - plus the
+# root filesystem the guest actually got.
+#
+# docs/plans/part-time-node.md steps 3.6 and 3.8. Both exist because every
+# node that exists today was retrofitted by Move-NodeOsDisk.ps1 rather than
+# built correctly by Provision 0, so "a node built today comes out right" is
+# a claim nobody has observed. Dispatch this straight after Provision 0 and
+# the claim is either observed or refuted.
+#
+# Worth running against a permanent node too, and against one that was built
+# before any of this: the three defects it looks for - a checkpoint layering
+# a dynamic disk over a fixed one, a 32 GB template, a root filesystem that
+# never grew - all look identical to a healthy node in every dashboard.
+#
+# Unlike the verify-* workflows that talk to the cluster, `host` here is not
+# "any runner": this reads the Hyper-V object graph, so it must run on the
+# host that carries the VM.
+#
+# Billing: `runs-on` pins `self-hosted`, so runs never consume Actions
+# minutes. Read-only - nothing is started, stopped, or reconfigured.
+name: 'Verify: Node VM shape'
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: 'The Hyper-V host that carries the VM (not any runner - this reads local Hyper-V state)'
+        required: true
+        type: choice
+        options:
+          - hyperv-host-0
+          - hyperv-host-1
+          - hyperv-host-2
+          - hyperv-host-3
+      vm_name:
+        description: 'VM to read (e.g. aerie-node-3)'
+        required: true
+        type: string
+      ip_address:
+        description: "The guest's LAN address. Blank requires skip_guest_checks."
+        required: false
+        default: ''
+        type: string
+      os_disk_gb:
+        description: 'What the OS disk was asked for. 100 is the layout rule; 32 is the old template size that filled.'
+        required: true
+        default: '100'
+        type: string
+      data_disk_gb:
+        description: '0 asserts the ABSENCE of a data disk - the part-time node case.'
+        required: true
+        default: '200'
+        type: string
+      memory_gb:
+        description: 'Static memory the VM was built with'
+        required: true
+        default: '16'
+        type: string
+      automatic_start_action:
+        description: 'Expected host-boot behaviour. Nothing = the part-time node.'
+        required: true
+        default: Start
+        type: choice
+        options: [Start, Nothing, StartIfRunning]
+      template_path:
+        description: 'Where the golden VHDX and its provenance file live'
+        required: true
+        default: 'D:\aerie\vm-templates'
+        type: string
+      skip_guest_checks:
+        description: 'Drop the SSH checks rather than fail them - for a VM that is deliberately off'
+        required: false
+        default: false
+        type: boolean
+
+# Read-only, so concurrent runs cannot corrupt anything - but two runs would
+# interleave into one summary and prove nothing twice.
+concurrency:
+  group: verify-node-vm-${{ inputs.host }}-${{ inputs.vm_name }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: ${{ inputs.vm_name }} on ${{ inputs.host }}
+    runs-on: [self-hosted, '${{ inputs.host }}']
+
+    # A handful of Hyper-V reads and one SSH round trip. 10m failing means
+    # something is hanging rather than being slow.
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out provisioning scripts
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency OpenSshClient
+
+      - name: Assert the VM matches the layout rule
+        shell: powershell
+        env:
+          VM_NAME: ${{ inputs.vm_name }}
+          IP_ADDRESS: ${{ inputs.ip_address }}
+          OS_DISK_GB: ${{ inputs.os_disk_gb }}
+          DATA_DISK_GB: ${{ inputs.data_disk_gb }}
+          MEMORY_GB: ${{ inputs.memory_gb }}
+          AUTOMATIC_START_ACTION: ${{ inputs.automatic_start_action }}
+          TEMPLATE_PATH: ${{ inputs.template_path }}
+          SKIP_GUEST_CHECKS: ${{ inputs.skip_guest_checks }}
+
+          # Same keypair every provision-*/verify-* workflow uses.
+          NODE_SSH_PRIVATE_KEY: ${{ secrets.NODE_SSH_PRIVATE_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+
+          $params = @{
+            VMName               = $env:VM_NAME
+            OsDiskSizeGB         = [int]$env:OS_DISK_GB
+            DataDiskSizeGB       = [int]$env:DATA_DISK_GB
+            MemoryGB             = [int]$env:MEMORY_GB
+            AutomaticStartAction = $env:AUTOMATIC_START_ACTION
+            TemplatePath         = $env:TEMPLATE_PATH
+          }
+
+          if ([bool]::Parse($env:SKIP_GUEST_CHECKS)) {
+            $params.SkipGuestChecks = $true
+          }
+          else {
+            if (-not ($env:IP_ADDRESS -and $env:IP_ADDRESS.Trim())) {
+              throw "ip_address is blank and skip_guest_checks is false. Give the guest's address, or skip the guest checks deliberately."
+            }
+            if (-not $env:NODE_SSH_PRIVATE_KEY) {
+              throw "NODE_SSH_PRIVATE_KEY is not set. It's the same repository secret provision-0-new-node.yml already requires."
+            }
+            $params.IPAddress = $env:IP_ADDRESS.Trim()
+            $params.SshPrivateKey = $env:NODE_SSH_PRIVATE_KEY
+          }
+
+          & .\scripts\hyperv\Test-NodeVm.ps1 @params
+
+          # `exit` inside a script invoked with & sets $LASTEXITCODE without
+          # ending the caller, so it is propagated explicitly - same as every
+          # other verify-* workflow here.
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -125,6 +125,13 @@ param(
     [string]$LogIngestUrl,
     [string]$LogIngestToken,
 
+    # Forwarded to New-AerieVM.ps1. `Nothing` is the part-time host's answer
+    # (docs/plans/part-time-node.md, finding 6): that node's presence is
+    # decided by a state file a boot-time task reads, not by Hyper-V. Every
+    # permanent node takes the default.
+    [ValidateSet('Start', 'Nothing', 'StartIfRunning')]
+    [string]$AutomaticStartAction = 'Start',
+
     # Forwarded to New-AerieVM.ps1. Break-glass console login for -Username,
     # so a VM that never reaches the network is still debuggable from
     # `vmconnect` instead of only from screenshots of console scrollback.
@@ -450,6 +457,22 @@ try {
 
         Write-Host "Found VM '$VMName' with matching MAC from a previous run of this script - skipping Golden image and Create, picking up at Verify."
         Write-Warning "This VM's cloud-init config (SSH key, packages, hostname, etc.) was baked in by the run that created it and is NOT re-applied now. If -SshPublicKey or other inputs changed since then - including a rotated NODE_SSH_PUBLIC_KEY/NODE_SSH_PRIVATE_KEY - this run verifies against what's already on the VM, not against today's inputs. Re-run with -RecreateVM to stop, remove, and rebuild it with today's inputs."
+        # -AutomaticStartAction is one of the few settings a resume *can*
+        # honestly reconcile, because unlike the cloud-init inputs above it is
+        # a property of the VM object rather than something baked into a disk.
+        # It is reconciled here so that re-dispatching Provision 0 against an
+        # existing VM is how a node's start action gets *changed* - which is
+        # what turns the part-time host's finding 6 into a dispatch rather than
+        # into a line in a runbook.
+        $existingStartAction = (Get-VM -Name $VMName).AutomaticStartAction
+        if ("$existingStartAction" -ne $AutomaticStartAction) {
+            Write-Host "AutomaticStartAction is '$existingStartAction', reconciling to '$AutomaticStartAction'."
+            Set-VM -Name $VMName -AutomaticStartAction $AutomaticStartAction
+        }
+        else {
+            Write-Host "AutomaticStartAction is already '$AutomaticStartAction'."
+        }
+
         $currentState = (Get-VM -Name $VMName).State
         if ($currentState -eq 'Running') {
             Write-Host "VM is already running."
@@ -503,6 +526,7 @@ try {
             CPUCount        = $CPUCount
             OsDiskSizeGB    = $OsDiskSizeGB
             DataDiskSizeGB  = $DataDiskSizeGB
+            AutomaticStartAction = $AutomaticStartAction
         }
         if ($Domain) { $vmArgs.Domain = $Domain }
         if ($ExtraPackages) { $vmArgs.ExtraPackages = $ExtraPackages }
@@ -587,7 +611,8 @@ try {
     Write-Host '  - MAC spoofing on the vNIC                      (set by New-AerieVM.ps1)'
     Write-Host '  - second fixed VHDX for Longhorn                ' -NoNewline
     Write-Host $(if ($DataDiskSizeGB -gt 0) { "(${DataDiskSizeGB}GB, unformatted - Longhorn claims it in Phase 3)" } else { '(SKIPPED - -DataDiskSizeGB 0)' })
-    Write-Host '  - autostart + Shut Down stop action             (set by New-AerieVM.ps1)'
+    Write-Host '  - autostart + Shut Down stop action             ' -NoNewline
+    Write-Host $(if ($AutomaticStartAction -eq 'Start') { '(set by New-AerieVM.ps1)' } else { "(start action = $AutomaticStartAction - this VM will NOT return on its own after a host reboot; something must start it)" })
     Write-Host '  - NTP from pfSense                              ' -NoNewline
     Write-Host "($NtpServer - see chrony output above)"
     Write-Host '  - stagger Windows Update reboots across hosts   ' -NoNewline

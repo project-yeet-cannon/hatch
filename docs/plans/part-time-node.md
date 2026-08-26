@@ -476,6 +476,17 @@ carries it, along with how to measure which volume is which.
       account a local Administrator. Add it to
       [`stagger-update-reboots.yml`](../../.github/workflows/stagger-update-reboots.yml)'s
       matrix and to every provisioning workflow's `host` choice list.
+
+      **The repository half of this is done** — `hyperv-host-3` is a choice on
+      all nine `provision-*` workflows and is in the stagger workflow's default
+      host list, with the reason written there: that host takes Windows Updates
+      like any other, and the unscheduled reboot it takes *is* finding 6. What
+      is left is registering the runner itself on the machine, which is not a
+      repository change. The `verify-*` workflows deliberately did **not** get
+      the new label: their `host` input only picks which runner dispatches an
+      SSH-based check, and pointing one at a machine that may be in personal
+      mode makes a verification that fails for a reason unrelated to what it
+      verifies.
 - [ ] 3.4 **Dispatch Provision 0 with `preflight_only` first.** Cheap, and it
       exercises the rewritten free-space check before anything is built. That
       check now charges each volume separately rather than summing everything
@@ -508,7 +519,17 @@ carries it, along with how to measure which volume is which.
 
 - [ ] 3.6 **Verify the disk is what the rule says**, on the host, before the
       node is doing anything worth disturbing. This is the step that observes
-      the claim nobody has observed yet:
+      the claim nobody has observed yet.
+
+      **This is now a command rather than three blocks to paste and read with
+      your eyes**: [`Test-NodeVm.ps1`](../../scripts/hyperv/Test-NodeVm.ps1),
+      dispatched as **Verify: Node VM shape**
+      ([`verify-node-vm.yml`](../../.github/workflows/verify-node-vm.yml)). It
+      asserts every expectation below and 3.8's as well, in one run, and it is
+      worth running against the three permanent nodes too — the defects it
+      looks for all look identical to a healthy node in every dashboard, which
+      is the property that makes them worth a gate rather than a glance. The
+      raw reads it replaced, for when the script is itself what is missing:
 
       ```powershell
       Get-VHD <os_disk_path>\aerie-node-3\os-disk.vhdx |
@@ -543,6 +564,26 @@ carries it, along with how to measure which volume is which.
       automatic-checkpoint setting 3.6 just confirmed, which is *not* the same
       flag and must stay off.
 
+      **Not a step after the build any more — an input to it.**
+      `-AutomaticStartAction` is a parameter on
+      [`New-AerieVM.ps1`](../../scripts/hyperv/New-AerieVM.ps1) and
+      [`Initialize-AerieNode.ps1`](../../scripts/hyperv/Initialize-AerieNode.ps1),
+      and an `automatic_start_action` choice on Provision 0, defaulting to
+      `Start` so no existing dispatch changes behaviour. Two things that fell
+      out of writing it:
+
+      - `-AutomaticStopAction` is deliberately *not* parameterised beside it. A
+        node should always be asked to shut down cleanly when its host is,
+        whoever owns the machine; only the *return* is in question, and only
+        here.
+      - The **resume** path reconciles it. Unlike every cloud-init input, which
+        is baked into a disk at creation and which a resumed VM can never pick
+        up, the start action is a property of the VM object — so re-dispatching
+        Provision 0 against an existing VM is how a node's start action gets
+        changed. That is what keeps this a dispatch rather than a line in a
+        runbook, and it means a permanent node can be converted to a part-time
+        one without rebuilding it.
+
 - [ ] 3.8 **Confirm the guest actually got the space.** Over SSH once cloud-init
       has finished and rebooted:
 
@@ -557,6 +598,13 @@ carries it, along with how to measure which volume is which.
       boot. A root filesystem near 32 GB means the resize did not happen and
       `os_disk_gb` was silently ignored, which is the exact failure the
       per-VM resize exists to prevent.
+
+      3.6's `Test-NodeVm.ps1` makes both of these assertions itself, against
+      `-OsDiskSizeGB` rather than against a number written here, so one
+      dispatch answers 3.6 and 3.8 together. It also asks the guest the data
+      disk's absence a second way: Longhorn claims a raw unformatted disk, so
+      "the host attached none" and "the guest sees none" are the same fact
+      reached from two directions, and them disagreeing is worth knowing.
 
 - [ ] 3.9 Dispatch **Provision 1** with `role: agent`, joining any permanent
       node's address.

@@ -405,6 +405,7 @@ removed, or renamed.
 | [`Initialize-AerieNode.ps1`](Initialize-AerieNode.ps1) | End-to-end entry point. Start here. |
 | [`Get-GoldenImage.ps1`](Get-GoldenImage.ps1) | Builds the distro template VHDX. |
 | [`New-AerieVM.ps1`](New-AerieVM.ps1) | Creates one VM from the template. Bypasses preflight — use directly when you know better than a check. |
+| [`Test-NodeVm.ps1`](Test-NodeVm.ps1) | Reads one VM back and asserts it against the on-disk layout rule above — fixed OS disk, allocated, no checkpoints, static memory, the start action asked for — plus the guest's root filesystem over SSH. Read-only. Dispatch as **Verify: Node VM shape**. |
 | [`Move-NodeOsDisk.ps1`](Move-NodeOsDisk.ps1) | Moves a live node's OS disk to the host's fastest volume as a fixed, larger VHDX, one node at a time. Also `-Rollback` and `-RemoveSourceDisk`. For a node built before the layout rule above; new nodes never need it. |
 | [`lib/New-NoCloudIso.ps1`](lib/New-NoCloudIso.ps1) | Builds the cloud-init seed ISO via Windows' built-in IMAPI2FS — no ADK or oscdimg needed. |
 | [`lib/AerieSsh.ps1`](lib/AerieSsh.ps1) | Post-boot verification over SSH. |
