@@ -9,6 +9,7 @@ The cluster's own provisioning scripts, in the order they run:
 | [`Initialize-NodeStorage.ps1`](Initialize-NodeStorage.ps1) | *Provision 5: Node storage* | **once per node** |
 | [`Add-BulkDisk.ps1`](Add-BulkDisk.ps1) | *Provision 7: Bulk disk* | **once, on one node** |
 | [`Test-ClusterPlatform.ps1`](Test-ClusterPlatform.ps1) | *Verify: Cluster platform* | **read-only, any time** |
+| [`Invoke-DrainRehearsal.ps1`](Invoke-DrainRehearsal.ps1) | *Node drain rehearsal* | **disturbs one node, deliberately** |
 
 Between them sit [`scripts/secrets/`](../secrets/) (Provision 2) and
 [`scripts/flux/`](../flux/) (Provision 3), which are also once per cluster.
@@ -17,6 +18,15 @@ etcd — a Secret, a ConfigMap, Flux itself — is shared by every server the
 moment one node accepts it, so running it again against a second node is a
 no-op rather than a requirement. Only work on a node's own filesystem or
 systemd is per node.
+
+`Invoke-DrainRehearsal.ps1` is the odd one in that table and is marked so on
+purpose: it is the only script here that deliberately disturbs a healthy
+cluster. It makes exactly three changes — one cordon, one drain, one uncordon —
+deletes nothing, scales nothing, and never passes `--force`, and it uncordons
+the node from two separate exit paths so an interrupted run cannot leave one
+cordoned. What it buys is the answer to a question no read-only check can ask:
+does the house stay up when a node leaves. See
+[`docs/plans/part-time-node.md`](../../docs/plans/part-time-node.md) 2.4.
 
 ## Run these from the Actions tab, not by hand
 

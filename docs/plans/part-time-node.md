@@ -4,7 +4,7 @@
 reverted** — it stopped every application deploy in the cluster, and the
 reasoning and the failure are preserved in
 [`coredns-availability.yaml`](../../deploy/cluster/infrastructure/config/coredns-availability.yaml)'s
-header, so that step is back to unstarted. 2.3's re-read is done; 2.4's rehearsal is not. **Phase 3's
+header, so that step is back to unstarted. 2.3's re-read is done; 2.4's rehearsal is written and waiting on a cluster whose CoreDNS is no longer a singleton. **Phase 3's
 tooling is written** — the host is a choice on every provisioning workflow,
 `-AutomaticStartAction` is an input rather than a manual step, and 3.6/3.8 are
 one dispatchable gate — so what is left of that phase is the physical build.
@@ -439,6 +439,39 @@ first proof they were the right changes is 2.4.
       down, because 4.1's 90-second deadline is a guess: how long Longhorn
       takes to drop the instance-manager PDB, how long CNPG's switchover takes,
       and how long the whole drain takes end to end.
+
+      **Written as [`Invoke-DrainRehearsal.ps1`](../../scripts/k3s/Invoke-DrainRehearsal.ps1),
+      dispatchable as *Node drain rehearsal*
+      ([`drain-rehearsal.yml`](../../.github/workflows/drain-rehearsal.yml)).**
+      It measures all three and prints them together at the end, so they can be
+      copied into this file rather than reconstructed from a table. What
+      writing it settled:
+
+      - **The "after 2.1 and 2.2" precondition is a gate in the script, not a
+        note in a plan.** It refuses to drain unless Traefik and CoreDNS each
+        have two Ready pods on distinct nodes. `-ProceedWithSingletons`
+        overrides it, and the report then says that is what happened — so a
+        measured gap is a number about a known single point of failure rather
+        than a surprise. With 2.2 currently reverted, that override is the only
+        way this runs today, and the gap it measures is the argument for
+        finishing 2.2.
+      - **The probes run on a k3s server, not in a pod.** A node reaches a
+        ClusterIP through the same kube-proxy rules a pod does, so CoreDNS can
+        be queried at its ClusterIP directly and Traefik at the ingress VIP —
+        no image pull, no scheduling. A rehearsal that had to schedule
+        something *during a drain* would be measuring its own scaffolding.
+      - **A DNS probe it could not run is a failure, not a skip.** The resolver
+        is whichever of `dig`, `nslookup` or `busybox nslookup` the node has;
+        with none of the three, the run reports that a DNS gap could not have
+        been detected rather than reporting that there wasn't one.
+      - **The whole rehearsal is one remote script.** The interesting events
+        happen inside tens of seconds, and a probe whose sample interval is a
+        Windows-to-Linux SSH round trip cannot see them. It samples once a
+        second and hands back a transcript to be read.
+      - **Probing continues past the drain** (`-SettleSeconds`, 30 by default).
+        Ingress and DNS are disturbed by the rescheduling that *follows* an
+        eviction, not by the eviction, and a probe that stopped at the drain's
+        last second would miss exactly that.
 
 ## [] Phase 3 — Build the node
 
