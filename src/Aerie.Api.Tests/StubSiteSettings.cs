@@ -22,7 +22,9 @@ internal sealed class StubSiteSettings(
     int hazardMaxSeverityAgeHours = 48,
     string weatherAlertProvider = HazardProviders.Nws,
     string airQualityProvider = HazardProviders.OpenMeteo,
-    string? anthropicApiKey = null) : ISiteSettingsService
+    string? anthropicApiKey = null,
+    string? immichBaseUrl = null,
+    string? immichApiKey = null) : ISiteSettingsService
 {
     public Task<SiteSettingsSnapshot> GetAsync(CancellationToken ct) => Task.FromResult(new SiteSettingsSnapshot(
         TimeZone: timeZone,
@@ -43,5 +45,7 @@ internal sealed class StubSiteSettings(
         WeatherAlertContact: weatherAlertContact,
         AirQualityAlertThresholdAqi: airQualityAlertThresholdAqi,
         HazardMaxSeverityAgeHours: hazardMaxSeverityAgeHours,
-        AnthropicApiKey: anthropicApiKey));
+        AnthropicApiKey: anthropicApiKey,
+        ImmichBaseUrl: immichBaseUrl,
+        ImmichApiKey: immichApiKey));
 }

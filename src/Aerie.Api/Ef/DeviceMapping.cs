@@ -237,6 +237,24 @@ public static class SiteSettingKeys
 
     /// <summary>How far ahead, in hours, a hazard still counts as "today or the next day". Defaults to 48. Bounds both what the providers keep and what reaches the dashboard.</summary>
     public const string HazardMaxSeverityAgeHours = "HazardMaxSeverityAgeHours";
+
+    /// <summary>
+    /// Where this house's Immich lives - scheme and host, no trailing /api,
+    /// e.g. "https://photos.example.com". Operator-supplied for the reason the
+    /// Google and Anthropic credentials below are (docs/ethos.md): every
+    /// installation's photo server is its own, and the plan
+    /// (docs/plans/immich.md v+2) has Aerie proxying it rather than the kiosk
+    /// reaching it. Blank means the Photos module is simply off.
+    /// </summary>
+    public const string ImmichBaseUrl = "ImmichBaseUrl";
+
+    /// <summary>
+    /// An Immich API key, minted in Immich's own account settings and pasted
+    /// into the admin Photos page. Stored protected (SecretProtector), and it
+    /// never leaves the API: the kiosk asks Aerie for a photo and Aerie asks
+    /// Immich, so no tablet ever holds a key to the family library.
+    /// </summary>
+    public const string ImmichApiKey = "ImmichApiKey";
 }
 
 /// <summary>A single numeric sample from a DeviceChannel. Replaces the wide EfEnvironmentReading table - every sample is "channel X had value V at time T."</summary>

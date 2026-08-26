@@ -77,5 +77,7 @@ internal sealed class FakeSiteSettingsService(string? mediaBaseUrl = null, int o
         WeatherAlertContact: null,
         AirQualityAlertThresholdAqi: 101,
         HazardMaxSeverityAgeHours: 48,
-        AnthropicApiKey: null));
+        AnthropicApiKey: null,
+        ImmichBaseUrl: null,
+        ImmichApiKey: null));
 }

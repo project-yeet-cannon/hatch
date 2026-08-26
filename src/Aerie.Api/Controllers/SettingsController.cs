@@ -65,7 +65,8 @@ public class SettingsController(AerieContext db, IHomeAssistantConnectionManager
     /// <summary>The settings stored obfuscated rather than in cleartext. Adding a key here is the whole job - it drives both the write-side obfuscation and the read-side redaction.</summary>
     private static bool IsSecret(string key) =>
         key is SiteSettingKeys.HomeAssistantToken or SiteSettingKeys.KioskWifiPassword
-            or SiteSettingKeys.GoogleClientSecret or SiteSettingKeys.AnthropicApiKey;
+            or SiteSettingKeys.GoogleClientSecret or SiteSettingKeys.AnthropicApiKey
+            or SiteSettingKeys.ImmichApiKey;
 
     /// <summary>Secrets are stored protected, not encrypted (SecretProtector), so they're still redacted before leaving the API - no reason to hand back something trivially reversible.</summary>
     private static string Redact(string key, string value) =>
