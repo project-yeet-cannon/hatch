@@ -44,17 +44,54 @@ public class PhotosControllerTests
         Assert.Equal(1, status.IncludedAlbumCount);
     }
 
+    /// <summary>
+    /// A key scoped to exactly what Photos needs - album.read and asset.view -
+    /// is refused at /api/server/about, which is guarded by Immich's own
+    /// server.about permission. A red light over a working system would send an
+    /// operator to re-mint a key that was already correct.
+    /// </summary>
     [Fact]
-    public async Task Status_ARejectedKeyIsReportedRatherThanThrown()
+    public async Task Status_AKeyThatCannotReadServerInfoButCanListAlbumsIsConnected()
     {
         var h = NewHarness();
         h.Immich.Server = ImmichResult<ImmichServer>.Failed(ImmichClient.Unauthorized);
+        h.Immich.Albums = ImmichListResult<ImmichAlbum>.Ok([]);
+
+        var status = await h.Controller.GetStatus(default);
+
+        Assert.True(status.Reachable);
+        Assert.Null(status.Error);
+        // The version is what server.about was for, and it is the only thing
+        // lost by not having it.
+        Assert.Null(status.Version);
+    }
+
+    /// <summary>The other half: a key Immich refuses outright is reported, not thrown.</summary>
+    [Fact]
+    public async Task Status_AKeyRefusedEverywhereIsReportedAsRefused()
+    {
+        var h = NewHarness();
+        h.Immich.Server = ImmichResult<ImmichServer>.Failed(ImmichClient.Unauthorized);
+        h.Immich.Albums = ImmichListResult<ImmichAlbum>.Failed(ImmichClient.Unauthorized);
 
         var status = await h.Controller.GetStatus(default);
 
         Assert.True(status.IsConfigured);
         Assert.False(status.Reachable);
         Assert.Equal(ImmichClient.Unauthorized, status.Error);
+    }
+
+    /// <summary>A dead host answers every endpoint the same way, so there is nothing to learn from asking a second one.</summary>
+    [Fact]
+    public async Task Status_ADeadHostIsNotProbedTwice()
+    {
+        var h = NewHarness();
+        h.Immich.Server = ImmichResult<ImmichServer>.Failed(ImmichClient.Unreachable);
+
+        var status = await h.Controller.GetStatus(default);
+
+        Assert.Equal(ImmichClient.Unreachable, status.Error);
+        Assert.Equal(0, h.Immich.AlbumListCalls);
     }
 
     [Fact]

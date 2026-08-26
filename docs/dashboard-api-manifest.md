@@ -288,13 +288,19 @@ than going black.
 
 | Method & route | Returns | Notes |
 |---|---|---|
-| `GET /api/photos/status` | `PhotosStatusDto` | Whether a host and key are set **and whether Immich currently accepts them** — a live `GET /api/server/about` against it, since a credential that is merely present tells an operator nothing. Never echoes the key. |
+| `GET /api/photos/status` | `PhotosStatusDto` | Whether a host and key are set **and whether Immich currently accepts them for what Photos does**, since a credential that is merely present tells an operator nothing. Probes `GET /api/server/about` (cheap, reports a version) and falls through to `GET /api/albums` on a 401 — a key scoped to exactly what this module needs is *refused* at the first and works at the second, and a red light over a working system is the worst kind of wrong answer. Never echoes the key. |
 | `GET /api/photos/albums` | `PhotoAlbumDto[]` | Every album Aerie knows about, in the operator's arrangement. `hasCover` rather than a cover URL: the client builds one against the route below. |
 | `POST /api/photos/albums/refresh` | `PhotoAlbumSyncDto` | Re-lists albums from Immich. Immich owns name, description, cover and count; Aerie owns `included` and `sortOrder`, and a refresh never touches those. A failed fetch deletes **nothing** — the empty list an unreachable server returns must not be read as "there are no albums". `400` when unconfigured, `502` when Immich refused. |
 | `PUT /api/photos/albums/{id:guid}` | `PhotoAlbumDto` | The admin-owned half. A null `sortOrder` leaves the arrangement alone, which is what a checkbox means. Drops the cached library so the wall sees the change on its next poll. |
 | `GET /api/photos/albums/{id:guid}/cover` | image bytes | The album's own thumbnail, proxied. Reachable because the album is one Aerie knows about — a different question from the one below. |
 | `GET /api/photos/carousel?count=` | `PhotoCarouselDto` | A shuffled sample of the included albums' photos, shuffled **server-side per request** so two tablets in two rooms are not on the same photo. Capped at 200. Carries the library's error alongside the photos when it is stale, so the wall keeps drawing and the kiosk still logs why. |
 | `GET /api/photos/assets/{assetId}/image?size=` | image bytes | One rendition, proxied — `preview` (~1440px, the carousel) or `thumbnail`. **Serves an asset only if an included album holds it.** Without that allow-list this route is a hole through to every photo in the house for anything that reaches the origin. Originals are unreachable by construction: the client knows two rendition names and refuses the rest before making a request. `private, max-age=86400, immutable`, since an asset id names one photo forever. |
+
+The API key needs three of Immich's own permissions, and only three:
+`album.read` (list albums and their assets), `asset.view` (the `preview` and
+`thumbnail` renditions — *not* `asset.download`, which is what reaches an
+original), and optionally `server.about`, which adds nothing but the version on
+the admin page. Nothing Aerie calls writes to Immich.
 
 No Immich hostname, key or URL appears in any response. The kiosk asks Aerie for
 a manifest of asset ids and then for those ids' bytes, both on the origin it is

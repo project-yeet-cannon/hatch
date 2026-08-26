@@ -1179,7 +1179,8 @@ and the difference is worth keeping.
    do: the row keys on Immich's album id, so a rename is a name change on a row
    that keeps its choice. Immich owns what an album is, Aerie owns what the wall
    does with it, and a refresh never crosses that line.
-2. **An Immich API key, stored the way admin-entered credentials are stored** —
+2. **An Immich API key with three permissions**, stored the way admin-entered
+   credentials are stored —
    `SiteSettings` through `SecretProtector`, redacted on read, alongside
    `ImmichBaseUrl`. Not SSM, and this is the correction to the scaffold: SSM and
    ExternalSecrets are for credentials a *pod* needs at startup, and this is one
@@ -1187,6 +1188,14 @@ and the difference is worth keeping.
    Assistant token and the Google client secret already are
    ([`secrets-architecture.md`](../secrets-architecture.md) is about the first
    kind; this is the second). Nothing about Immich reaches the repo either way.
+
+   The permissions are `album.read`, `asset.view`, and optionally
+   `server.about`. `asset.view` rather than `asset.download` is the one worth
+   noticing: the first reaches Immich's generated renditions and the second
+   reaches originals, and a photo frame has no business holding a key that can
+   pull a 40 MB raw file. The optional third is only a version string — the
+   status check falls through to `GET /api/albums` when it is refused, so a key
+   scoped to the two that matter reads as connected rather than as broken.
 3. **A `Photos` module in `Aerie.Api`** — a folder under `Modules/`, one line in
    the registry, one table, no infrastructure. It proxies rather than exposes,
    exactly as scaffolded: the kiosk asks Aerie for a manifest of asset ids and

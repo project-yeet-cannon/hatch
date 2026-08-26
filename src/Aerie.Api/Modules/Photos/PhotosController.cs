@@ -64,16 +64,46 @@ public class PhotosController(
         if (!configured)
             return new PhotosStatusDto(false, settings.ImmichBaseUrl, hasKey, false, null, null, albumCount, includedCount);
 
-        var server = await immich.GetServerAsync(ct);
+        var (reachable, version, error) = await ProbeAsync(ct);
         return new PhotosStatusDto(
             IsConfigured: true,
             BaseUrl: settings.ImmichBaseUrl,
             HasApiKey: true,
-            Reachable: server.Succeeded,
-            Version: server.Value?.Version,
-            Error: server.Error,
+            Reachable: reachable,
+            Version: version,
+            Error: error,
             AlbumCount: albumCount,
             IncludedAlbumCount: includedCount);
+    }
+
+    /// <summary>
+    /// Whether this key works <em>for what Photos does</em>, which is not the
+    /// same question as whether it works.
+    ///
+    /// The probe starts at /api/server/about because it is cheap and reports a
+    /// version. But that endpoint is guarded by Immich's own <c>server.about</c>
+    /// permission, and a key scoped to exactly what this module needs -
+    /// <c>album.read</c> and <c>asset.view</c> - is refused there while working
+    /// perfectly everywhere else. Reporting that as "Immich refused that API
+    /// key" would send an operator to re-mint a key that was already correct,
+    /// which is the worst kind of wrong answer: a red light over a working
+    /// system.
+    ///
+    /// So a 401 there falls through to the call the wall actually depends on. A
+    /// key that can list albums is a key that works, version or no version.
+    /// </summary>
+    private async Task<(bool Reachable, string? Version, string? Error)> ProbeAsync(CancellationToken ct)
+    {
+        var server = await immich.GetServerAsync(ct);
+        if (server.Succeeded) return (true, server.Value?.Version, null);
+
+        // Anything other than a refusal - a dead host, a wrong address - is the
+        // same answer for every endpoint, so there is nothing to learn from
+        // asking a second one.
+        if (server.Error != ImmichClient.Unauthorized) return (false, null, server.Error);
+
+        var probe = await immich.ListAlbumsAsync(ct);
+        return probe.Succeeded ? (true, null, null) : (false, null, probe.Error);
     }
 
     /// <summary>Every album Aerie knows about, whether or not it is on the wall. Ordered the way the admin arranged them.</summary>
