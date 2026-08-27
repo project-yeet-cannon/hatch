@@ -12,8 +12,43 @@ preinstalled, so it is installed here.
 
 | File | What |
 |---|---|
+| [`Set-RunnerExecutionPolicy.ps1`](Set-RunnerExecutionPolicy.ps1) | Runs **before** the entry point, and is the reason it can run at all. Raises the runner account's execution policy if a `shell: powershell` step would otherwise be refused. |
 | [`Install-RunnerDependencies.ps1`](Install-RunnerDependencies.ps1) | Entry point. Ensures the named dependencies, or all of them. |
 | [`lib/AerieRunnerDependencies.ps1`](lib/AerieRunnerDependencies.ps1) | The shared functions — resolve, and install. Dot-sourced by the entry point *and* by the provisioning scripts that need to find a tool without installing it. |
+
+## The step before this step
+
+`Install-RunnerDependencies.ps1` is run as a `shell: powershell` step, and
+GitHub Actions implements that by writing the step body to a temp `.ps1` and
+dot-sourcing it. Under an execution policy of `Restricted` — the Windows
+**client** default — that dot-source is refused before a single line runs:
+
+```text
+File ...\_temp\<guid>.ps1 cannot be loaded because running scripts is
+disabled on this system.
+```
+
+Which is why the `Set-ExecutionPolicy -Scope Process` at the top of every step
+in this repository does not help: it is inside the file that will not load.
+Windows Server defaults to `RemoteSigned`, so the first three hosts never met
+it; the fourth is somebody's desktop and met it on its first dispatch.
+
+The fix is a composite action, [`.github/actions/ensure-powershell`](../../.github/actions/ensure-powershell/action.yml),
+placed immediately after `actions/checkout` in every workflow that has a
+`shell: powershell` step on a self-hosted runner:
+
+```yaml
+      - name: Ensure PowerShell can run repository scripts
+        uses: ./.github/actions/ensure-powershell
+```
+
+`shell: cmd` is the whole trick — cmd is not subject to PowerShell's execution
+policy, so it can launch a PowerShell told to ignore it for one process, which
+is enough to run `Set-RunnerExecutionPolicy.ps1` and fix the policy properly.
+That script raises **CurrentUser** to **RemoteSigned**: enough, because
+CurrentUser outranks LocalMachine; and narrow, because the machine most likely
+to need it belongs to a person whose own shell should not be reconfigured
+because a build agent lives there.
 
 ## Why this exists
 
@@ -33,6 +68,16 @@ runner converges on what it needs by being used:
 Each workflow names only what its own jobs use, so a k3s install doesn't fail
 on a host that has no reason to hold AWS credentials, and a container build
 doesn't drag in an Android SDK.
+
+`HyperV` is the one dependency that is mostly a *check*, in the same spirit as
+`Docker`. Every script under [`scripts/hyperv/`](../hyperv/README.md) carries
+`#Requires -Modules Hyper-V`, which is evaluated before that script's own
+preflight — so a host without the module fails with a message that names the
+missing module and offers nothing else, after the workflow has already read
+every input. This turns that into a sentence with a command in it. It enables
+the management-tools feature, which needs no restart; it will **not** enable
+the hypervisor itself, which does, because a workflow that reboots somebody's
+desktop is a worse failure than the one it was fixing.
 
 Note `shell: powershell`. `ci.yml` and `publish.yml` set a workflow-level
 `defaults.run.shell: bash`, because a Windows runner defaults to PowerShell and

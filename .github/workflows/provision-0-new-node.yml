@@ -162,6 +162,14 @@ jobs:
           # self-hosted workspace - don't leave a credential in it.
           persist-credentials: false
 
+      # Before anything else PowerShell-shaped. `shell: powershell` is
+      # implemented as a dot-source of a temp .ps1, which an execution policy of
+      # Restricted - the Windows *client* default - refuses outright, so the
+      # `Set-ExecutionPolicy -Scope Process` inside every step below sits in the
+      # file that will not load. See the action, and scripts/runner/README.md.
+      - name: Ensure PowerShell can run repository scripts
+        uses: ./.github/actions/ensure-powershell
+
       # Post-boot verification SSHes into the new VM, so the host needs an SSH
       # client. Installed here rather than listed as a prerequisite somebody
       # has to have read - see scripts/runner/README.md.
@@ -170,7 +178,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency OpenSshClient
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency OpenSshClient, HyperV
 
       # Host-level metrics run natively on Windows (not in Docker Desktop -
       # see docs/metrics-architecture.md's "Windows Server detour" note: a

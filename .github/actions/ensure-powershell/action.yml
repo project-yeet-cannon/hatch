@@ -1,0 +1,39 @@
+# The step that has to come before every `shell: powershell` step, on every
+# self-hosted Windows runner.
+#
+# GitHub Actions implements `shell: powershell` by writing the step body to a
+# temp .ps1 and dot-sourcing it. Under an execution policy of `Restricted` -
+# the Windows *client* default - that dot-source is refused before a single
+# line of the step runs, which is why `Set-ExecutionPolicy -Scope Process` at
+# the top of every step in this repository cannot help: it is inside the file
+# that will not load.
+#
+# Windows Server defaults to `RemoteSigned`, so the first three hosts never met
+# this. The fourth is somebody's desktop (docs/plans/part-time-node.md), and it
+# met it on its first dispatch.
+#
+# `shell: cmd` is the whole trick. cmd is not subject to PowerShell's execution
+# policy, so it can launch a PowerShell that is told to ignore it for one
+# process - which is enough to run the script that fixes the policy properly.
+#
+# A composite action rather than twenty copies of the same block: the logic
+# belongs in one place, and scripts/runner/README.md's rule - "a prerequisite
+# that lives only in a README is wrong on the next machine" - is the same rule
+# that put Install-RunnerDependencies.ps1 in every workflow. This is the step
+# that has to run before that one.
+#
+# Requires the repository to be checked out, so it goes immediately after
+# actions/checkout and before anything else.
+name: 'Ensure PowerShell can run repository scripts'
+description: >
+  Raises the runner account's PowerShell execution policy to RemoteSigned if
+  the effective policy would refuse to load a script file. A no-op where it is
+  already sufficient, and a named failure where Group Policy makes it
+  impossible.
+
+runs:
+  using: composite
+  steps:
+    - name: Ensure PowerShell can run repository scripts
+      shell: cmd
+      run: powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%GITHUB_WORKSPACE%\scripts\runner\Set-RunnerExecutionPolicy.ps1"

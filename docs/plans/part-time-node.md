@@ -529,6 +529,33 @@ carries it, along with how to measure which volume is which.
       [`stagger-update-reboots.yml`](../../.github/workflows/stagger-update-reboots.yml)'s
       matrix and to every provisioning workflow's `host` choice list.
 
+      **Two prerequisites nobody knew existed, both found on this host's first
+      dispatch, and both for the same underlying reason: hosts A, B and C are
+      Windows Server and D is a desktop.** They are recorded here rather than
+      only in the runner README because the plan's framing — "it is a normal
+      node" — is true of the *cluster* and turned out not to be true of the
+      *host*, and that is worth knowing before the next installation adds one.
+
+      - **The PowerShell execution policy.** `shell: powershell` is implemented
+        by GitHub Actions as a dot-source of a temp `.ps1`, which a `Restricted`
+        policy refuses outright — and `Restricted` is the Windows *client*
+        default while Server defaults to `RemoteSigned`. So every workflow
+        failed on its first step, and the `Set-ExecutionPolicy -Scope Process`
+        at the top of each of those steps could not help: it is inside the file
+        that will not load. Fixed by a composite action
+        ([`ensure-powershell`](../../.github/actions/ensure-powershell/action.yml))
+        placed after checkout in all 21 self-hosted workflows, whose trick is
+        `shell: cmd` — cmd is not subject to the policy, so it can launch a
+        PowerShell told to ignore it for one process.
+      - **The Hyper-V PowerShell module.** The Server *role* brings it; the
+        client optional feature does not, and every script under
+        `scripts/hyperv/` carries `#Requires -Modules Hyper-V`, which is
+        evaluated before that script's own preflight. Now a
+        `-Dependency HyperV` check that enables the management-tools feature
+        (no restart) and *reports* rather than fixes a host whose hypervisor is
+        off (restart) — because a workflow that reboots somebody's desktop is a
+        worse failure than the one it was fixing.
+
       **The repository half of this is done** — `hyperv-host-3` is a choice on
       all nine `provision-*` workflows and is in the stagger workflow's default
       host list, with the reason written there: that host takes Windows Updates

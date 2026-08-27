@@ -353,6 +353,110 @@ function Install-AerieOpenSshClient {
     Write-Host "OpenSSH client: installed into $opensshDirectory."
 }
 
+function Install-AerieHyperV {
+    <#
+    .SYNOPSIS
+        Ensures the Hyper-V PowerShell module is importable, enabling the
+        management-tools optional feature if it is missing - and reporting,
+        rather than fixing, a host where the hypervisor platform itself is off.
+
+    .DESCRIPTION
+        Every script under scripts\hyperv carries `#Requires -Modules Hyper-V`,
+        which is evaluated before the script's own preflight runs. So a host
+        without the module fails with
+
+            The script 'Initialize-AerieNode.ps1' cannot be run because the
+            following modules that are specified by the "#requires" statements
+            of the script are missing: Hyper-V.
+
+        - a message that names the symptom and not one word about what to do,
+        arriving after the workflow has already checked out, installed
+        dependencies and read every input. This is what turns that into a
+        sentence with a command in it.
+
+        **Two features, and only one of them is safe to turn on unattended.**
+
+          Microsoft-Hyper-V-Management-PowerShell is the module. It is a
+          management tool - no driver, no boot configuration - and enabling it
+          needs no restart. This does that.
+
+          Microsoft-Hyper-V (the hypervisor itself) changes the boot
+          configuration and always wants a restart. **This will not enable it**,
+          and the reason is specific to which machine is most likely to need
+          it: the fourth host is somebody's desktop
+          (docs/plans/part-time-node.md), and a workflow that reboots a person's
+          machine because they dispatched a build is a worse failure than the
+          one it was fixing. It is reported with the command to run and the
+          fact that a restart follows, and the operator chooses when.
+
+        On Windows Server neither branch fires: the Hyper-V *role* brings the
+        module with it, which is why the first three hosts never met this.
+
+    .PARAMETER CheckOnly
+        Report and fail rather than touching the machine.
+
+    .NOTES
+        Version-less, like the OpenSSH client above and for the same reason:
+        this is an OS feature, so the build is the host's own. There is nothing
+        to pin.
+    #>
+    [CmdletBinding()]
+    param([switch]$CheckOnly)
+
+    # ListAvailable rather than Import-Module: this only has to establish that
+    # `#Requires -Modules Hyper-V` will be satisfied, and importing it costs
+    # seconds on every dispatch for nothing.
+    if (Get-Module -ListAvailable -Name Hyper-V) {
+        Write-Host 'Hyper-V PowerShell module: present.'
+        return
+    }
+
+    # Get-WindowsOptionalFeature is itself only on Windows client and Server
+    # with DISM's PowerShell module - which is everywhere this repository runs,
+    # but a clear message beats a NotRecognized if that ever stops being true.
+    if (-not (Get-Command Get-WindowsOptionalFeature -ErrorAction SilentlyContinue)) {
+        throw 'The Hyper-V PowerShell module is missing and this host has no Get-WindowsOptionalFeature to enable it with. Install the Hyper-V management tools by hand - scripts/hyperv/README.md, One-time host prerequisites.'
+    }
+
+    $platform = Get-WindowsOptionalFeature -Online -FeatureName 'Microsoft-Hyper-V' -ErrorAction SilentlyContinue
+    if ($platform -and "$($platform.State)" -ne 'Enabled') {
+        throw @"
+The Hyper-V hypervisor is not enabled on this host (Microsoft-Hyper-V is $($platform.State)), so there is nothing for the PowerShell module to manage.
+
+This is deliberately not fixed here: enabling it rewrites the boot configuration and requires a restart, and this workflow will not restart a machine somebody may be sitting at. Run this in an elevated PowerShell, then reboot, then re-dispatch:
+
+  Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All -All
+
+Confirm the hardware supports it first if that fails - scripts/hyperv/README.md, One-time host prerequisites.
+"@
+    }
+
+    if ($CheckOnly) {
+        throw 'The Hyper-V PowerShell module is not installed, and -CheckOnly was passed. Run scripts\runner\Install-RunnerDependencies.ps1 -Dependency HyperV from an elevated shell on this machine.'
+    }
+
+    if (-not (Test-AerieAdministrator)) {
+        throw 'The Hyper-V PowerShell module is not installed, and enabling a Windows optional feature needs an elevated session. Re-run this from an elevated PowerShell, or dispatch the workflow - the runner service runs as a local Administrator.'
+    }
+
+    Write-Host 'Hyper-V PowerShell module: missing - enabling Microsoft-Hyper-V-Management-PowerShell.'
+    $result = Enable-WindowsOptionalFeature -Online -FeatureName 'Microsoft-Hyper-V-Management-PowerShell' -All -NoRestart -ErrorAction Stop
+    if ($result -and $result.RestartNeeded) {
+        Write-Warning 'Windows reports a restart is needed. The module is usually importable immediately; if the check below fails, restart this machine and re-dispatch.'
+    }
+
+    # PowerShell caches the module path listing per session, and a module that
+    # appeared during this session is not always discoverable until that cache
+    # is rebuilt - the same trap Install-AerieOpenSshClient documents for
+    # application lookup. Refreshed rather than trusted.
+    $env:PSModulePath = [Environment]::GetEnvironmentVariable('PSModulePath', 'Machine') + [IO.Path]::PathSeparator + $env:PSModulePath
+    if (-not (Get-Module -ListAvailable -Name Hyper-V)) {
+        throw 'Enabled Microsoft-Hyper-V-Management-PowerShell but the Hyper-V module still is not importable. This machine needs a restart to finish, after which a re-dispatch should pass.'
+    }
+
+    Write-Host 'Hyper-V PowerShell module: enabled.'
+}
+
 # ---------------------------------------------------------------------------
 # CI tooling
 #

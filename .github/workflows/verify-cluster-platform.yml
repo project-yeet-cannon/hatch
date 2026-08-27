@@ -77,6 +77,14 @@ jobs:
         with:
           persist-credentials: false
 
+      # Before anything else PowerShell-shaped. `shell: powershell` is
+      # implemented as a dot-source of a temp .ps1, which an execution policy of
+      # Restricted - the Windows *client* default - refuses outright, so the
+      # `Set-ExecutionPolicy -Scope Process` inside every step below is in the
+      # file that will not load. See the action, and scripts/runner/README.md.
+      - name: Ensure PowerShell can run repository scripts
+        uses: ./.github/actions/ensure-powershell
+
       - name: Ensure runner dependencies
         shell: powershell
         run: |

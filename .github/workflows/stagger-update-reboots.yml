@@ -74,6 +74,21 @@ jobs:
       matrix: ${{ steps.compute.outputs.matrix }}
       host_count: ${{ steps.compute.outputs.host_count }}
     steps:
+      # This job needs no repository content of its own - it is string parsing
+      # and arithmetic - but the step below is a `shell: powershell` step, and
+      # on a Windows client SKU those do not run at all until the execution
+      # policy is raised. That fix is a composite action, and a composite
+      # action has to be checked out before it can be used. A checkout on a
+      # self-hosted runner is a fetch of what has already changed, so the cost
+      # is close to nothing.
+      - name: Check out scripts
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Ensure PowerShell can run repository scripts
+        uses: ./.github/actions/ensure-powershell
+
       - name: Compute schedule
         id: compute
         shell: powershell
@@ -159,6 +174,9 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - name: Ensure PowerShell can run repository scripts
+        uses: ./.github/actions/ensure-powershell
 
       - name: Set Windows Update reboot schedule
         shell: powershell

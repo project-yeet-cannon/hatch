@@ -48,6 +48,11 @@
     .\Install-RunnerDependencies.ps1 -Dependency AwsCli, OpenSshClient
 
 .EXAMPLE
+    # What the Hyper-V workflows run. HyperV is a check plus one cheap
+    # optional-feature enable - never a reboot; see Install-AerieHyperV.
+    .\Install-RunnerDependencies.ps1 -Dependency OpenSshClient, HyperV
+
+.EXAMPLE
     # What ci.yml's deploy-manifests job runs
     .\Install-RunnerDependencies.ps1 -Dependency PowerShell7, Kubectl, Helm, Jq
 
@@ -57,7 +62,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('AwsCli', 'OpenSshClient', 'GitBash', 'PowerShell7', 'Kubectl', 'Helm', 'Jq', 'GitHubCli', 'Docker', 'AndroidSdk')]
+    [ValidateSet('AwsCli', 'OpenSshClient', 'GitBash', 'HyperV', 'PowerShell7', 'Kubectl', 'Helm', 'Jq', 'GitHubCli', 'Docker', 'AndroidSdk')]
     [string[]]$Dependency = @('AwsCli', 'OpenSshClient', 'GitBash', 'PowerShell7', 'Kubectl', 'Helm', 'Jq', 'GitHubCli', 'Docker'),
 
     [switch]$CheckOnly
@@ -83,6 +88,7 @@ foreach ($name in ($Dependency | Select-Object -Unique)) {
             'AwsCli' { Install-AerieAwsCli -CheckOnly:$CheckOnly | Out-Null }
             'OpenSshClient' { Install-AerieOpenSshClient -CheckOnly:$CheckOnly }
             'GitBash' { Install-AerieGitBash -CheckOnly:$CheckOnly | Out-Null }
+            'HyperV' { Install-AerieHyperV -CheckOnly:$CheckOnly }
             'PowerShell7' { Install-AeriePowerShell7 -CheckOnly:$CheckOnly | Out-Null }
             'Kubectl' { Install-AerieKubectl -CheckOnly:$CheckOnly | Out-Null }
             'Helm' { Install-AerieHelm -CheckOnly:$CheckOnly | Out-Null }

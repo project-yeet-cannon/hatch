@@ -31,7 +31,32 @@ no repo clone, no runner, no network path back to GitHub.
 Neither flow automates these — they're per-host setup, done once, and two of
 them can knock the host off the network if scripted carelessly.
 
-1. **Hyper-V role enabled.**
+**Two of them only bite on a Windows client SKU**, which is why the first three
+hosts never met them and the fourth met both on its first dispatch: a Server
+install defaults to a `RemoteSigned` execution policy and brings the Hyper-V
+PowerShell module with the role, and a client install does neither. Both are
+now converged by the workflows themselves as far as it is safe to — see items
+1 and 6.
+
+1. **Hyper-V enabled** — and on a Windows *client* SKU, that is two features,
+   not one. The **role** on Windows Server brings its PowerShell module with
+   it; on a client it does not, and every script here carries
+   `#Requires -Modules Hyper-V`, which is evaluated before a script's own
+   preflight and fails with a message that names the symptom and nothing else.
+
+   ```powershell
+   Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V* |
+     Select-Object FeatureName, State
+   # the hypervisor and everything with it - rewrites boot config, needs a reboot
+   Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All -All
+   ```
+
+   The **module** half is installed for you by the workflow's *Ensure runner
+   dependencies* step (`-Dependency HyperV`), which enables
+   `Microsoft-Hyper-V-Management-PowerShell` — a management tool, no driver, no
+   reboot. The **hypervisor** half is deliberately not automated: it needs a
+   restart, and on the part-time host that is somebody's desktop.
+   See [`Install-AerieHyperV`](../runner/lib/AerieRunnerDependencies.ps1).
 
 2. **An external virtual switch.** `-SwitchType External` isn't a real option:
    Hyper-V infers "external" from binding a physical NIC, not from
@@ -66,6 +91,18 @@ them can knock the host off the network if scripted carelessly.
 5. **A pfSense DHCP reservation per VM**, keyed to the MAC you're about to
    pass in. Do this *before* running — cloud-init needs DHCP during first
    boot, and the reservation is what makes the node's address predictable.
+
+6. **A PowerShell execution policy that will load a script file** — again a
+   Windows client concern, and again **handled for you** by the workflow's
+   *Ensure PowerShell can run repository scripts* step. Only a by-hand step
+   when running these scripts outside Actions on a stock client install:
+
+   ```powershell
+   # from a checkout, in an elevated shell
+   powershell -ExecutionPolicy Bypass -File .\scripts\runner\Set-RunnerExecutionPolicy.ps1
+   # or, for the whole machine
+   Set-ExecutionPolicy -Scope LocalMachine -ExecutionPolicy RemoteSigned -Force
+   ```
 
 ### Additionally, for flow B
 

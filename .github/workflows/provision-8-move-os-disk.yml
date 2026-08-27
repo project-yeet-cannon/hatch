@@ -141,6 +141,14 @@ jobs:
         with:
           persist-credentials: false
 
+      # Before anything else PowerShell-shaped. `shell: powershell` is
+      # implemented as a dot-source of a temp .ps1, which an execution policy of
+      # Restricted - the Windows *client* default - refuses outright, so the
+      # `Set-ExecutionPolicy -Scope Process` inside every step below sits in the
+      # file that will not load. See the action, and scripts/runner/README.md.
+      - name: Ensure PowerShell can run repository scripts
+        uses: ./.github/actions/ensure-powershell
+
       # Hyper-V is already on this host by definition. What the runner needs
       # on top is an SSH client, for everything that happens on the node.
       - name: Ensure runner dependencies
@@ -148,7 +156,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency OpenSshClient
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency OpenSshClient, HyperV
 
       - name: Move the OS disk
         shell: powershell

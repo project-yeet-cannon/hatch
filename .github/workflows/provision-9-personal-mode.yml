@@ -94,6 +94,27 @@ jobs:
         with:
           persist-credentials: false
 
+      # Before anything else PowerShell-shaped. `shell: powershell` is
+      # implemented as a dot-source of a temp .ps1, which an execution policy of
+      # Restricted - the Windows *client* default - refuses outright, so the
+      # `Set-ExecutionPolicy -Scope Process` inside every step below is in the
+      # file that will not load. See the action, and scripts/runner/README.md.
+      - name: Ensure PowerShell can run repository scripts
+        uses: ./.github/actions/ensure-powershell
+
+      # HyperV only: this workflow registers Scheduled Tasks and writes files,
+      # and never opens an SSH session of its own. What it does need is the
+      # Hyper-V module, because Register-PersonalModeControl.ps1 reads the VM
+      # it is being registered against - and `#Requires -Modules Hyper-V` is
+      # evaluated before that script's preflight, so without this the failure
+      # is a bare "modules ... are missing" with no next step in it.
+      - name: Ensure runner dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & .\scripts\runner\Install-RunnerDependencies.ps1 -Dependency HyperV
+
       - name: Install the personal-mode control
         shell: powershell
         env:
