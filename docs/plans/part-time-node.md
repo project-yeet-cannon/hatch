@@ -38,10 +38,18 @@ partial server-side apply of *any* native kind inexpressible through
 kustomize-controller. CoreDNS now runs 2/2 on two nodes. Neither ingress nor
 DNS is a single point of failure any more.
 
-2.3's re-read is done. **2.4 is the one thing left in the phase**, and its
-gate — Traefik and CoreDNS each with two Ready pods on distinct nodes — is
-satisfiable for the first time, so the rehearsal would now measure this
-cluster rather than the old one.
+2.3's re-read is done, and **2.4 has now been run twice**. It produced the
+three numbers the plan asked for — an 80.9s drain against the busiest node
+(9.1s inside 4.1's budget), Longhorn dropping its instance-manager PDB in
+1.2s, and an 8.1s CNPG switchover — and DNS survived both runs with no gap,
+which is 2.2 doing its job.
+
+**Phase 2 is one second short of its exit criterion.** Draining the node
+holding a Traefik pod cost one failed probe in 59. `traefik` has no `preStop`
+hook, so an evicted pod stops accepting connections while kube-proxy still
+lists it as an endpoint. Two replicas stop an outage; they do not close that
+race. The fix belongs in 2.1's file and is the last thing between this phase
+and done.
 
 **Phase 4 is written in full and installed** — Provision 9 succeeded — and its
 exit criterion is still the first click by a person who is not an
@@ -634,6 +642,104 @@ cluster.
         Ingress and DNS are disturbed by the rescheduling that *follows* an
         eviction, not by the eviction, and a probe that stopped at the drain's
         last second would miss exactly that.
+
+      ## Run on 2026-08-28. Six of seven, and the three numbers exist.
+
+      Twice, against two different nodes, because the first run drained the
+      node holding the `aerie-pg` primary and the second drained the node it
+      switched over *to*.
+
+      | | drain `aerie-node-0` | drain `aerie-node-1` |
+      |---|---|---|
+      | drain, end to end | **80.9s** | **22.8s** |
+      | inside 4.1's 90s budget | yes, by 9.1s | yes, by 67.2s |
+      | worst ingress gap | 0s over 115 probes | **1s over 59 probes** |
+      | worst DNS gap | 0s over 109 | 0s over 58 |
+      | Longhorn drops its PDB | 1.2s after cordon | 22s after cordon |
+      | CNPG switchover | (check was broken) | **8.1s after cordon** |
+
+      **4.1's 90-second deadline is a guess that survives, but not
+      comfortably.** 80.9s against node-0 is 9.1 seconds of headroom on a
+      cluster that is not under load and whose part-time node holds no
+      Longhorn replicas. The variance between the two runs is the finding
+      rather than either number: the drain's cost is dominated by *what the
+      node carries*, and node-0 carries the Flux controllers, cert-manager,
+      external-secrets, the CNPG operator, metrics-server and
+      local-path-provisioner. Host D will carry the observability stack
+      after 5.4, which is the heaviest thing in the cluster. **5.4 should
+      re-run this rehearsal after each workload it moves**, and the moment a
+      drain crosses about 60s the deadline needs raising rather than the
+      workload needing blame.
+
+      **Longhorn takes its PDB away when asked** — 2.3 said to watch this
+      rather than trust it, and it is now watched twice, at 1.2s and at 22s
+      after the cordon. Both are well inside any budget; the spread is again
+      about what the node held.
+
+      **CNPG's switchover is fast, and it is not the thing that dominates.**
+      8.1s, `aerie-pg-2` promoted on `aerie-node-2`, replacing `aerie-pg-1`.
+      2.3 predicted this would be the step most likely to dominate a
+      personal-mode entry's budget. It is not — evicting several dozen
+      ordinary pods is.
+
+      ### The one failure, and it is a true one
+
+      Draining `aerie-node-1` cost **one second of ingress**, one failed probe
+      in 59. Phase 2's exit criterion says "with no gap", so **this phase is
+      not done**, and the gap is not a measurement artefact: it is the
+      ordinary endpoint-propagation race. Read from the live cluster,
+      `traefik` has `terminationGracePeriodSeconds: 60` and **no `preStop`
+      hook**, and its Service is `externalTrafficPolicy: Cluster`. So an
+      evicted Traefik pod takes SIGTERM and stops accepting connections while
+      kube-proxy on the other nodes still lists it as an endpoint, and
+      whatever arrives in that window is refused.
+
+      Two replicas did not prevent it and were never going to: the second
+      replica is what stops an *outage*, and this is a race inside the
+      eviction of the first. The fix is a `preStop` hook that sleeps a few
+      seconds so the pod keeps serving while the endpoint removal
+      propagates — `deployment.lifecycle` in
+      [`traefik-helmchartconfig.yaml`](../../deploy/cluster/infrastructure/config/traefik-helmchartconfig.yaml),
+      beside the replica count 2.1 already sets there. That is a change to
+      2.1's file rather than to this step, and it is what stands between
+      Phase 2 and its exit criterion.
+
+      ### A defect in this script, found by running it
+
+      The first run failed the CNPG check, reporting that `aerie-pg` still
+      had its primary on the drained node. It did not — the switchover had
+      happened and the cluster was healthy on a new primary. The check could
+      not have seen it.
+
+      The sampler recorded the primary as `ns/pod` and the check then looked
+      for a later sample where **that same pod** appeared on a different
+      node. A CNPG switchover never does that, and this plan already said
+      why: finding 3 records that each instance binds a `local-path` PVC
+      which pins it to the node holding its directory. The pod cannot move.
+      The *role* moves, to a different pod. So the check was asking whether
+      something structurally incapable of moving had moved, and would have
+      failed on every successful switchover and passed on none.
+
+      Now keyed by the `cnpg.io/cluster` label, which is what stays constant
+      across a switchover, with the pod reported rather than used as
+      identity.
+
+      ### A finding about the runners, not the cluster
+
+      One re-run was dispatched to `hyperv-host-0` and failed before touching
+      anything, on a missing `ensure-powershell` action. That host's runner
+      workspace is **stale and dirty**: it sat at `c293a72`, and
+      `git checkout --force -B main` refused to update it —
+      `error: Path 'docs/plans/node-storage.md' not uptodate; will not remove
+      from working tree`. The workspace stayed at the old commit, which
+      predates the action.
+
+      The part worth carrying: **`actions/checkout` reported that step as
+      successful anyway.** A workflow dispatched to that host runs whatever
+      code the stale tree holds and fails somewhere unrelated, or does not
+      fail at all. This is not the part-time node's problem, but it is
+      everyone's problem the next time a provisioning workflow is pointed at
+      `hyperv-host-0`.
 
 ## [] Phase 3 — Build the node
 
