@@ -256,8 +256,14 @@ dns_once() {
     T=$(now)
     $K get pdb -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,ALLOWED:.status.disruptionsAllowed --no-headers 2>/dev/null \
       | while read -r ns name allowed; do echo "$T pdb $ns/$name $allowed"; done >> "$WORK/timeline"
-    $K get pods -A -l cnpg.io/instanceRole=primary -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,NODE:.spec.nodeName --no-headers 2>/dev/null \
-      | while read -r ns name node; do echo "$T cnpg $ns/$name $node"; done >> "$WORK/timeline"
+    # Keyed by the CLUSTER label, not by the pod name, and that is the whole
+    # of what this line is for. A CNPG switchover does not move a pod to
+    # another node - it cannot, because each instance binds a local-path PVC
+    # that pins it (the plan's finding 3). It moves the *primary role* to a
+    # different pod. Sampling only the pod name makes the two indistinguishable
+    # from a pod that simply vanished, which is what the first rehearsal did.
+    $K get pods -A -l cnpg.io/instanceRole=primary -o 'custom-columns=NS:.metadata.namespace,CLUSTER:.metadata.labels.cnpg\.io/cluster,NAME:.metadata.name,NODE:.spec.nodeName' --no-headers 2>/dev/null \
+      | while read -r ns cluster name node; do echo "$T cnpg $ns/$cluster $name $node"; done >> "$WORK/timeline"
     echo "$T nodestatus $($K get node $NODE --no-headers 2>/dev/null | awk '{print $2}')" >> "$WORK/timeline"
     sleep 2
   done
@@ -571,8 +577,13 @@ Re-run with -ProceedWithSingletons if measuring the gap a singleton produces is 
 
     # CNPG: the operator watches for the cordon and moves the primary off the
     # node ahead of the drain. Only meaningful if a primary was there.
+    #
+    # Timeline fields, after the sampler above: 0=t 1='cnpg' 2=ns/cluster
+    # 3=primary pod 4=node. The cluster is what stays constant across a
+    # switchover and the pod is what changes, so every comparison here keys on
+    # field 2 and reports field 3.
     $cnpgLines = @($timeline | Where-Object { $_ -match '\scnpg\s' })
-    $primaryHere = @($cnpgLines | Where-Object { $null -ne $cordonAt -and [double](@($_ -split '\s+')[0]) -lt $cordonAt -and (@($_ -split '\s+'))[3] -eq $NodeName })
+    $primaryHere = @($cnpgLines | Where-Object { $null -ne $cordonAt -and [double](@($_ -split '\s+')[0]) -lt $cordonAt -and (@($_ -split '\s+'))[4] -eq $NodeName })
     if ($cnpgLines.Count -eq 0) {
         Add-Check -Step '2.4.cnpg' -Name 'CNPG switchover' -Status 'Warn' -Detail 'no CNPG primary pods were visible, so there was no switchover to time'
     }
@@ -581,17 +592,19 @@ Re-run with -ProceedWithSingletons if measuring the gap a singleton produces is 
     }
     else {
         $cluster = (@($primaryHere[0] -split '\s+'))[2]
+        $fromPod = (@($primaryHere[0] -split '\s+'))[3]
         $moved = @($cnpgLines | Where-Object {
                 [double](@($_ -split '\s+')[0]) -gt $cordonAt -and
                 (@($_ -split '\s+'))[2] -eq $cluster -and
-                (@($_ -split '\s+'))[3] -ne $NodeName
+                (@($_ -split '\s+'))[4] -ne $NodeName
             } | Sort-Object { [double](@($_ -split '\s+')[0]) } | Select-Object -First 1)
         if ($moved) {
             $movedAt = [double](@($moved -split '\s+')[0])
-            Add-Check -Step '2.4.cnpg' -Name 'CNPG switchover' -Status 'Pass' -Detail "$cluster moved off '$NodeName' $([math]::Round($movedAt - $cordonAt, 1))s after the cordon, to $((@($moved -split '\s+'))[3])"
+            $toFields = @($moved -split '\s+')
+            Add-Check -Step '2.4.cnpg' -Name 'CNPG switchover' -Status 'Pass' -Detail "$cluster promoted $($toFields[3]) on $($toFields[4]) $([math]::Round($movedAt - $cordonAt, 1))s after the cordon, replacing $fromPod on '$NodeName'"
         }
         else {
-            Add-Check -Step '2.4.cnpg' -Name 'CNPG switchover' -Status 'Fail' -Detail "$cluster still reported '$NodeName' as its primary at the end of the run. The drain either blocked on its PDB or the operator did not act on the cordon"
+            Add-Check -Step '2.4.cnpg' -Name 'CNPG switchover' -Status 'Fail' -Detail "$cluster still reported a primary on '$NodeName' ($fromPod) at the end of the run. The drain either blocked on its PDB or the operator did not act on the cordon"
         }
     }
 
