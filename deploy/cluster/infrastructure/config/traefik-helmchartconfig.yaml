@@ -245,6 +245,49 @@ spec:
       # against k3s's packaged traefik.yaml at the pinned version: its
       # valuesContent sets no additionalArguments at all.
       replicas: 2
+      # Measured, not precautionary. The part-time-node plan's 2.4 drain
+      # rehearsal drained the node holding one of these two pods and lost
+      # exactly one second of ingress - 1 failed probe in 59 - against a Phase
+      # 2 exit criterion that says "with no gap".
+      #
+      # Two replicas were never going to close that. The second replica is what
+      # stops an *outage*; this is a race inside the eviction of the first. A
+      # pod being deleted receives SIGTERM and stops accepting connections
+      # immediately, while every other node's kube-proxy still lists it as an
+      # endpoint until the EndpointSlice update reaches it. The Service is
+      # `externalTrafficPolicy: Cluster`, so any node can be the one still
+      # forwarding to a pod that has already stopped listening. Whatever
+      # arrives in that window is refused, and the plan's own exit criterion
+      # counts it.
+      #
+      # preStop does not delay the SIGTERM to the container - it runs *before*
+      # it - so the pod keeps serving normally for these seconds while the
+      # removal propagates, and only then begins shutting down.
+      #
+      # `sleep` as a native SleepAction rather than `exec: [sleep, 5]`. This
+      # image does still carry /bin/sh and /bin/sleep (checked, rather than
+      # assumed, on the running pod), so the exec form would work today - but
+      # it is a dependency on the image keeping a shell, which upstream images
+      # trend away from, and it fails as an unexplained container error if that
+      # ever changes. SleepAction is handled by the kubelet, needs nothing from
+      # the image, and is GA since Kubernetes 1.30 against the 1.35 here.
+      #
+      # Five seconds: endpoint propagation on a four-node cluster is well under
+      # two. It is a margin, not a tuned value, and it is bounded by
+      # terminationGracePeriodSeconds (60, the chart's default, untouched), so
+      # Traefik still has 55 seconds to finish in-flight requests.
+      #
+      # The cost, because 2.4 measured the budget this spends from: every drain
+      # that evicts a Traefik pod now takes about five seconds longer, and
+      # 4.1's 90-second personal-mode deadline had 9.1s of headroom on the
+      # busiest node. That deadline is already flagged in the plan as a number
+      # to revisit rather than a limit to respect - entering personal mode
+      # proceeds past it by design - so a second of ingress is the better thing
+      # to buy with it.
+      lifecycle:
+        preStop:
+          sleep:
+            seconds: 5
     # Required, not preferred. Two replicas that the scheduler is merely
     # encouraged to separate are, on the day it does not, one replica with
     # extra steps - and the day it does not is exactly the day a node is
