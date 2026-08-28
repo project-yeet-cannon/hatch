@@ -38,18 +38,20 @@ partial server-side apply of *any* native kind inexpressible through
 kustomize-controller. CoreDNS now runs 2/2 on two nodes. Neither ingress nor
 DNS is a single point of failure any more.
 
-2.3's re-read is done, and **2.4 has now been run twice**. It produced the
-three numbers the plan asked for — an 80.9s drain against the busiest node
-(9.1s inside 4.1's budget), Longhorn dropping its instance-manager PDB in
-1.2s, and an 8.1s CNPG switchover — and DNS survived both runs with no gap,
-which is 2.2 doing its job.
+**Phase 2 is done, and its exit criterion is met rather than argued.** 2.4
+ran three times and now passes 7 of 7: a drain completes without `--force`,
+and ingress and DNS survive it with no gap.
 
-**Phase 2 is one second short of its exit criterion.** Draining the node
-holding a Traefik pod cost one failed probe in 59. `traefik` has no `preStop`
-hook, so an evicted pod stops accepting connections while kube-proxy still
-lists it as an endpoint. Two replicas stop an outage; they do not close that
-race. The fix belongs in 2.1's file and is the last thing between this phase
-and done.
+It produced the three numbers the plan asked for — an **80.9s** drain against
+the busiest node (9.1s inside 4.1's budget), Longhorn dropping its
+instance-manager PDB in **0.9-22s**, and an **8.1s** CNPG switchover — and it
+found two things worth more than the numbers. Draining the node holding a
+Traefik pod cost one second of ingress, which two replicas were never going
+to prevent, because it is the endpoint-propagation race inside the eviction
+of the first; a `preStop` sleep closed it and the same drain now measures
+0s over 67 probes. And 2.4's own CNPG check was asking whether a pod pinned
+by a `local-path` PVC had moved to another node, which finding 3 already said
+it never can.
 
 **Phase 4 is written in full and installed** — Provision 9 succeeded — and its
 exit criterion is still the first click by a person who is not an
@@ -356,7 +358,7 @@ code was checked by the run; this is the criterion itself.
       since kubelet, k3s and Longhorn all write onto the same object.
       Exposed on the workflow as a comma-separated `node_labels` input.
 
-## [] Phase 2 — Make a node leaving a non-event
+## [x] Phase 2 — Make a node leaving a non-event
 
 Independently valuable, and a prerequisite: this lands **before** D joins.
 
@@ -561,7 +563,7 @@ cluster.
         what a personal-mode entry on top of a running
         [`stagger-update-reboots.yml`](../../.github/workflows/stagger-update-reboots.yml)
         window would be.
-- [ ] 2.3 **Resolve the zero-allowed-disruptions PDBs** from finding 4. Repair
+- [x] 2.3 **Resolve the zero-allowed-disruptions PDBs** from finding 4. Repair
       the observability stack first (`autokuma` `Init:Error`, `grafana` stuck
       initializing, `opensearch` 0/1 — these predate this plan), then re-read.
       If `aerie/api` still computes 0 with 3/3 ready, that is a bug to find, not
@@ -598,7 +600,16 @@ cluster.
         personal-mode entry's 90-second budget.
 
       What is left of this item is therefore the *watching*, which is 2.4.
-- [ ] 2.4 **A drain rehearsal.** Cordon and drain one permanent node, time it,
+
+      **Both watched, on 2026-08-28.** Longhorn dropped its instance-manager
+      PDB 1.2s, 22s and 0.9s after the cordon across three rehearsals — it
+      takes the PDB away when asked, and the spread is about what the node
+      held rather than about Longhorn. CNPG's switchover took **8.1s**,
+      promoting `aerie-pg-2` on `aerie-node-2`. Both are far inside any
+      budget, and this step's prediction that the switchover would dominate a
+      personal-mode entry turned out to be wrong: evicting several dozen
+      ordinary pods is what costs.
+- [x] 2.4 **A drain rehearsal.** Cordon and drain one permanent node, time it,
       confirm the house stays up, uncordon. This is the dress rehearsal for
       every future personal-mode entry, run against a node whose owner is not
       waiting to play a game.
@@ -682,7 +693,7 @@ cluster.
       personal-mode entry's budget. It is not — evicting several dozen
       ordinary pods is.
 
-      ### The one failure, and it is a true one
+      ### The one failure, and it is a true one — now fixed and re-proved
 
       Draining `aerie-node-1` cost **one second of ingress**, one failed probe
       in 59. Phase 2's exit criterion says "with no gap", so **this phase is
@@ -703,6 +714,36 @@ cluster.
       beside the replica count 2.1 already sets there. That is a change to
       2.1's file rather than to this step, and it is what stands between
       Phase 2 and its exit criterion.
+
+      **Done, and the rehearsal re-run against the same node to prove it.**
+      `deployment.lifecycle.preStop.sleep.seconds: 5` — a native
+      `SleepAction` rather than `exec: [sleep, 5]`, because the exec form is a
+      dependency on the image keeping a shell (it does today; that was
+      checked on the running pod rather than assumed) and SleepAction is
+      handled by the kubelet, needs nothing from the image, and is GA since
+      Kubernetes 1.30 against the 1.35 here.
+
+      Verified the way 2.1's replica count was: rendered the chart k3s
+      actually serves against k3s's own baseline `valuesContent` plus this
+      file, and diffed against the same render without it. **One hunk**,
+      `lifecycle: null` becoming the preStop sleep, and nothing else in the
+      render moved.
+
+      | drain `aerie-node-1` | before | after |
+      |---|---|---|
+      | worst ingress gap | 1s over 59 probes | **0s over 67 probes** |
+      | drain, end to end | 22.8s | 31.3s |
+      | result | 6 of 7 | **7 of 7** |
+
+      The drain got about 8s longer, which is the preStop being paid for on
+      every Traefik eviction. That is the trade named in the manifest: 4.1's
+      90-second deadline is a number the plan already says to revisit, and
+      entering personal mode proceeds past it by design, so a second of
+      ingress is the better thing to buy with it.
+
+      **Phase 2's exit criterion is met.** `kubectl drain` of a node
+      completes without `--force`, and ingress and DNS survive it with no
+      gap.
 
       ### A defect in this script, found by running it
 
