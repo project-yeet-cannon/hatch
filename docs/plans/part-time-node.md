@@ -708,12 +708,52 @@ carries it, along with how to measure which volume is which.
       client-host prerequisites, and one against `aerie-node-2` rather than
       `aerie-node-3`.
 
-- [ ] 3.6 **Verify the disk is what the rule says**, on the host, before the
+- [x] 3.6 **Verify the disk is what the rule says**, on the host, before the
       node is doing anything worth disturbing. This is the step that observes
-      the claim nobody has observed yet — **and it has not been dispatched.**
-      The node is up and doing nothing, which is the best moment this will
-      ever have; run it now. It is also where 3.7's miss gets caught by a
-      machine rather than by reading a workflow log after the fact.
+      the claim nobody has observed yet.
+
+      **Dispatched 2026-08-28, and the claim holds.** Eleven of thirteen
+      checks pass, and the eleven are the whole of what nobody had confirmed:
+      OS disk `VhdType Fixed`, 100 GB virtual, **fully allocated** on disk
+      rather than a sparse fraction of it, one disk attached and no second
+      one, no snapshots, `AutomaticCheckpointsEnabled False`, 16 GB with
+      dynamic memory **off** (finding 5), `AutomaticStopAction ShutDown`, and
+      the template's provenance reading `sizeGB 100, subformat dynamic` —
+      exactly the deliberate exception this step predicted. So a node built
+      today by the rewritten Provision 0 does come out right, which is the
+      claim the phase header said nobody had observed.
+
+      The two failures are 3.7, which is real and known, and one that is a
+      defect in the checker rather than in the node — see below.
+
+      **The checker's own bug, and it is a repository-wide one.** The guest
+      probe reported `df returned nothing this could read`, with the node
+      answering `tail: invalid number of lines: '1\r'`. Nothing is wrong with
+      the node: the `lsblk` half of the same probe printed `sda1` at
+      107239947776 bytes in the same run. The `\r` is a **carriage return
+      from the checkout**. [`.gitattributes`](../../.gitattributes) pins
+      `*.sh` and `*.yaml` to LF — for precisely this reason, and its header
+      says so — but it does not pin `*.ps1`, so a checkout on a Windows
+      runner under Git's default `core.autocrlf` turns every multi-line
+      here-string in the repo into one carrying `\r\n`, and each `\r` becomes
+      a character in the last token of its line *on the node*.
+
+      Fixed in [`Invoke-NodeSsh`](../../scripts/hyperv/lib/AerieSsh.ps1)
+      rather than in the one caller that found it, because that function
+      already owns this contract: it refuses a `-Command` containing a double
+      quote, for the same shape of reason and with the same kind of note. A
+      CR is **normalised** rather than refused, though, and the difference is
+      the point — a double quote is the caller's mistake, while a carriage
+      return is git's, so refusing it would blame the wrong party. Most of
+      this repo joins remote commands with `'; '` and never had `\r` to lose,
+      which is why this waited for the first multi-line here-string to be
+      sent to a node.
+
+      Pinning `*.ps1 text eol=lf` in `.gitattributes` would stop it at the
+      source and is worth considering separately; it changes what every
+      Windows checkout of every script looks like, which is a wider blast
+      radius than one function that already exists to say what can survive
+      the trip to a node.
 
       **This is now a command rather than three blocks to paste and read with
       your eyes**: [`Test-NodeVm.ps1`](../../scripts/hyperv/Test-NodeVm.ps1),
@@ -771,6 +811,21 @@ carries it, along with how to measure which volume is which.
       hard to forget, which is worth recording as a small finding of its own.
       The fix is one re-dispatch of Provision 0 against the existing VM with
       `automatic_start_action: Nothing`, per the resume-path note below.
+
+      **3.6 now catches it by machine**, which is the shape this should have
+      had from the start: `Test-NodeVm.ps1` asserts the start action against
+      an `-AutomaticStartAction` parameter and fails the run, so the miss is
+      a red check rather than a line in a workflow log nobody re-reads.
+
+      **The resume path is confirmed to be safe**, which was the one thing
+      worth knowing before pointing Provision 0 at a node already carrying
+      cluster workloads. A `preflight_only` dispatch on 2026-08-28 reports
+      `Mode: RESUMING - VM 'aerie-node-3' already exists with matching MAC
+      00:15:5d:01:03:00; Template/Create will be skipped.` and stops. So the
+      re-dispatch reconciles the VM property and does not rebuild anything.
+
+      Incidentally: the MAC is `00:15:5d:01:03:00`, not the
+      `00-15-5D-04-01-01` 3.2 wrote down before the host existed.
 
       **Not a step after the build any more — an input to it.**
       `-AutomaticStartAction` is a parameter on

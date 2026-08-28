@@ -313,6 +313,22 @@ $Command
 "@
     }
 
+    # Normalised rather than refused, unlike the double quote above, because
+    # the caller usually did not put it there. `.gitattributes` pins *.sh and
+    # *.yaml to LF; it does not pin *.ps1, so a checkout on a Windows runner
+    # with Git's default core.autocrlf turns every multi-line here-string in
+    # this repo into one carrying \r\n - and each \r is then a character in
+    # the last token of its line on the *node*. Test-NodeVm.ps1's guest probe
+    # found this the hard way: `df ... | tail -n 1` arrived as `tail -n 1\r`
+    # and the node answered `tail: invalid number of lines: '1\r'`, which
+    # reads as a broken node rather than a broken checkout.
+    #
+    # A CR is never wanted in a command bound for a POSIX shell, so there is
+    # nothing to preserve and no caller that needs to opt out. Single-line
+    # commands joined with '; ' - the idiom most of this repo already uses -
+    # are unaffected either way.
+    $Command = $Command -replace "`r`n", "`n" -replace "`r", "`n"
+
     $stdout = [IO.Path]::GetTempFileName()
     $stderr = [IO.Path]::GetTempFileName()
     try {
