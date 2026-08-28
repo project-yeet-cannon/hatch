@@ -1,44 +1,47 @@
 # Part-time node — a fourth host that leaves when its owner wants it back
 
-**Status: the node exists.** `aerie-node-3` joined on **2026-08-27** as an
-agent, and Provision 0, 1 and 9 all completed against `hyperv-host-3`. Phase 1
-is done *and now observed* — ROLES reads `<none>` on a live node, which is the
-first time that exit criterion could be met rather than asserted. Most of
-Phase 3 came with it: the OS disk was built at 100 GB, `/` is 99 G, the guest
-sees no data disk at all, kubelet reports image GC at 70/55, and the journald
-cap was reported **already matching** rather than rewritten — which is 3.9's
-drift check answered in the direction it wanted.
+**Status: the node is built, and Phase 3 is done but for the watching.**
+`aerie-node-3` joined on **2026-08-27** as an agent and was finished on
+**2026-08-28**. Provision 0, 1, 5 and 9 have all run against `hyperv-host-3`,
+and *Verify: Node VM shape* passes **13 of 13** — which retires the claim this
+phase was written around. Every node that existed before this one was
+retrofitted by `Move-NodeOsDisk.ps1`, so "a node built today by the rewritten
+Provision 0 comes out right" had never been observed by anyone. It now has:
+fixed OS disk, 100 GB, **fully allocated** rather than sparse, one disk and no
+second, no snapshots, automatic checkpoints off, 16 GB with dynamic memory off
+(finding 5), and 98.2 GB on `/`.
 
-Three things the build did not get, and one nobody knew to ask for:
+What is left of Phase 3 is **3.1** — the disk measurement that was skipped, so
+the OS disk sits on `D:` by default rather than by decision — and **3.12**, the
+week of watching an idle node's root filesystem. Neither blocks anything.
 
-- **3.1 was skipped.** `os_disk_path` was left blank, so the OS disk went to
-  `vm_storage_path`'s default `D:\aerie\VMs` — the exact volume that step
-  warns against accepting without measuring.
-- **3.7 was missed at dispatch.** `automatic_start_action` was left at its
-  `Start` default, so finding 6 is currently undone. The fix is a re-dispatch,
-  not a rebuild; 3.7's resume path exists for exactly this.
-- **3.6 has not been run.** *Verify: Node VM shape* answers the fixed disk,
-  the checkpoints and the start action in one dispatch, and nothing has
-  dispatched it.
-- **Finding 7 is new, and it blocks 3.10.** The node has no `open-iscsi`, so
-  `longhorn-manager` is in `CrashLoopBackOff` on it and there is no
-  `nodes.longhorn.io/aerie-node-3` object to set `allowScheduling: false` on.
-  Provision 5 owns those packages and structurally cannot run on a node with
-  no data disk.
+Getting there turned up two things worth more than the steps that found them:
 
-Phase 2.1 is merged and now visibly two Traefik pods on two different nodes;
-**2.2 is still reverted** — it stopped every application deploy in the
-cluster, and the reasoning and the failure are preserved in
-[`coredns-availability.yaml`](../../deploy/cluster/infrastructure/config/coredns-availability.yaml)'s
-header. CoreDNS is still one replica, and it is now the last singleton
-standing in front of a node that leaves on purpose. 2.3's re-read is done;
-2.4's rehearsal is written and has not been run. **Phase 4 is written in full
-and installed** — Provision 9 succeeded on the host — and its exit criterion is
-still the first click by a person who is not an administrator. **Phase 5's
-5.1-5.3 are done, and 5.1 is confirmed end to end**: Prometheus reports
+- **Finding 7**, which is why Provision 5 now has a diskless mode. The node had
+  no `open-iscsi`, so `longhorn-manager` crashlooped on it 13 times and never
+  registered. The packages are the *initiator* half of Longhorn and every node
+  needs them; only replica-holding nodes need the disk. The script conflated
+  the two and could not express the difference.
+- **A carriage return the checkout put there.** `.gitattributes` pins `*.sh`
+  and `*.yaml` to LF and does not pin `*.ps1`, so on a Windows runner every
+  multi-line here-string carries CRLF and each `\r` lands in the last token of
+  its line *on the node*. It surfaced as a verify failure that read like a
+  broken node and was not. Normalised in `Invoke-NodeSsh`, which already owns
+  that contract.
+
+Phase 2.1 is merged and visibly two Traefik pods on two nodes; **2.2 is still
+reverted**, and CoreDNS is still one replica. It is now the **last singleton in
+front of a node that leaves on purpose**, and it is the one piece of this plan
+that is behind the thing it was supposed to precede. 2.3's re-read is done;
+2.4's rehearsal is written, has never been run, and gates on 2.2.
+
+**Phase 4 is written in full and installed** — Provision 9 succeeded — and its
+exit criterion is still the first click by a person who is not an
+administrator (4.7). **Phase 5's 5.1-5.3 are done**, and 5.1 is confirmed end
+to end: Prometheus carries
 `kube_node_labels{node="aerie-node-3", label_aerie_family_availability="part-time"}`,
-so the exclusion has something to match rather than silently matching nothing.
-5.4 waits on 3.10.
+so the exclusion has a series to match rather than silently matching nothing.
+5.4 is now unblocked and is the deliberate go-slow.
 
 Five phases; the first three are cluster work that stands on its own merits,
 the last two are the machine-specific part.
@@ -793,7 +796,7 @@ carries it, along with how to measure which volume is which.
         ConvertFrom-Json | Select-Object sizeGB, vhdxSubformat, builtUtc
       ```
 
-- [ ] 3.7 Set `-AutomaticStartAction Nothing` on the VM (finding 6). Everything
+- [x] 3.7 Set `-AutomaticStartAction Nothing` on the VM (finding 6). Everything
       else about the VM stays as the script builds it — including the
       automatic-checkpoint setting 3.6 just confirmed, which is *not* the same
       flag and must stay off.
@@ -826,6 +829,16 @@ carries it, along with how to measure which volume is which.
 
       Incidentally: the MAC is `00:15:5d:01:03:00`, not the
       `00-15-5D-04-01-01` 3.2 wrote down before the host existed.
+
+      **Done on 2026-08-28, and the resume path cost the node nothing.** The
+      re-dispatch finished in 2.1 minutes and its checklist now reads
+      `start action = Nothing - this VM will NOT return on its own after a
+      host reboot; something must start it`, which is 4.5's boot task by
+      design. The evidence that nothing was rebuilt is in the run's own guest
+      probe: `up 1 hour, 53 minutes`. A property changed on a running VM,
+      which is what made this a dispatch rather than a rebuild.
+
+      **3.6 re-run afterwards passes 13 of 13.**
 
       **Not a step after the build any more — an input to it.**
       `-AutomaticStartAction` is a parameter on
@@ -908,7 +921,7 @@ carries it, along with how to measure which volume is which.
       if anyone had edited one of them alone. `vm.max_map_count` reads
       `262144` on the node.
 
-- [ ] 3.10 **Give the node Longhorn's host packages** — finding 7, and the
+- [x] 3.10 **Give the node Longhorn's host packages** — finding 7, and the
       step this plan did not have. `open-iscsi`, `nfs-common` and `cryptsetup`,
       plus `systemctl enable --now iscsid`. Without them `longhorn-manager`
       crashloops on the node, there is no `nodes.longhorn.io/aerie-node-3` to
@@ -977,15 +990,21 @@ carries it, along with how to measure which volume is which.
       correctly before this change and wrongly after it — that Provision 5 has
       nothing to do with a node like this one.
 
-      **Verified as far as it can be without changing the node**:
-      `-PreflightOnly -DataDiskSizeGB 0` against `aerie-node-3` reports
-      `Data disk: none`, `Packages: missing open-iscsi, nfs-common,
-      cryptsetup` and `Plan: install open-iscsi, nfs-common, cryptsetup;
-      enable iscsid`, and the same command against `aerie-node-0` with
-      `-DataDiskSizeGB 200` still prints exactly what it printed before. The
-      installing half is the dispatch itself.
+      **Dispatched 2026-08-28 and done in 51 seconds.** All six stages behaved
+      as designed: `Plan: install open-iscsi, nfs-common, cryptsetup; enable
+      iscsid`, then `[4] Disk` printing `No data disk on this node
+      (-DataDiskSizeGB 0) - nothing formatted, nothing mounted, /etc/fstab
+      untouched`, then `[5] Verify` reporting `iscsid active, iscsiadm
+      present`. `longhorn-manager` on the node went from 13 crashloops to
+      `2/2 Running`, and an `instance-manager` came up beside it — which is
+      the thing that actually matters, since that is what attaches a volume
+      whose replicas are elsewhere.
 
-- [ ] 3.11 In Longhorn, set the node's `allowScheduling: false`. Confirm by
+      The regression half was checked too: `-PreflightOnly` against
+      `aerie-node-0` at `-DataDiskSizeGB 200` prints exactly what it printed
+      before.
+
+- [x] 3.11 In Longhorn, set the node's `allowScheduling: false`. Confirm by
       reading back `nodes.longhorn.io/aerie-node-3` — and then confirm the thing
       that actually matters, that an existing `longhorn-r3` volume still reports
       three healthy replicas across A, B and C only.
@@ -1035,6 +1054,38 @@ carries it, along with how to measure which volume is which.
       whether Longhorn's node controller re-adds it is worth *reading* rather
       than assuming — it is the kind of "applies cleanly, is found by
       nothing" trap 2.2 already paid for once.
+
+      **Done on 2026-08-28, and both halves of the prediction were right.**
+      The node registered with `allowScheduling: true` and an auto-created
+      `default-disk-c6b1bee8d3220ae1` at `/var/lib/longhorn` — the OS disk —
+      carrying `storageReserved: 10546799411`, about 9.8 GiB of a disk that
+      should hold nothing. The cordon is what made that a fact to read rather
+      than a race to lose.
+
+      **One thing the write-up above got wrong, and it is worth keeping.**
+      Removing the disk in a single patch is refused by a validating webhook:
+
+      ```text
+      The request is invalid: Delete Disk on node default-disk-c6b1bee8d3220ae1
+      error: Please disable the disk /var/lib/longhorn and remove all replicas
+      and backing images first
+      ```
+
+      So it is two patches, not one — set the disk's own `allowScheduling` to
+      `false`, *then* remove the key. That is Longhorn refusing to let a disk
+      disappear out from under data it might be holding, which is the right
+      refusal; it just is not the shape this step assumed.
+
+      The removal **sticks**: `spec.disks` is `{}` rather than absent, and the
+      node controller's default-disk creation only fires when the field is
+      nil, so nothing re-adds it. Polled for 75 seconds to be sure, since a
+      controller quietly putting it back is the failure this step would
+      otherwise never notice.
+
+      End state, read back after uncordoning: node `Ready` and schedulable,
+      `allowScheduling: false`, `disks: {}`, all four Longhorn pods `Running`
+      on it, and all nine volumes still `attached / healthy` with their
+      replicas on A, B and C.
 
 - [ ] 3.12 Leave it empty for a few days and watch. Nothing is moved yet.
 
