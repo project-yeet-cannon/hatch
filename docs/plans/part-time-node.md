@@ -29,11 +29,19 @@ Getting there turned up two things worth more than the steps that found them:
   broken node and was not. Normalised in `Invoke-NodeSsh`, which already owns
   that contract.
 
-Phase 2.1 is merged and visibly two Traefik pods on two nodes; **2.2 is still
-reverted**, and CoreDNS is still one replica. It is now the **last singleton in
-front of a node that leaves on purpose**, and it is the one piece of this plan
-that is behind the thing it was supposed to precede. 2.3's re-read is done;
-2.4's rehearsal is written, has never been run, and gates on 2.2.
+**Phase 2 is done but for the rehearsal.** 2.1 is two Traefik pods on two
+nodes; **2.2 landed on its second attempt** as an HPA and a PDB reaching the
+Deployment through the scale subresource, after the first attempt's failure
+was diagnosed rather than worked around: Flux normalises native kinds through
+their typed Go structs, which materialises `spec.selector: null` and makes a
+partial server-side apply of *any* native kind inexpressible through
+kustomize-controller. CoreDNS now runs 2/2 on two nodes. Neither ingress nor
+DNS is a single point of failure any more.
+
+2.3's re-read is done. **2.4 is the one thing left in the phase**, and its
+gate — Traefik and CoreDNS each with two Ready pods on distinct nodes — is
+satisfiable for the first time, so the rehearsal would now measure this
+cluster rather than the old one.
 
 **Phase 4 is written in full and installed** — Provision 9 succeeded — and its
 exit criterion is still the first click by a person who is not an
@@ -347,12 +355,16 @@ Independently valuable, and a prerequisite: this lands **before** D joins.
 **Exit:** `kubectl drain` of any node completes without `--force`, and ingress
 and DNS survive it with no gap.
 
-2.1 is now observed — two Traefik pods, on `aerie-node-1` and `aerie-node-2`,
-which is the anti-affinity doing its job rather than two replicas that
-happened to land apart. 2.2 is reverted and CoreDNS is still one pod. That
-makes this phase the **one remaining cluster-side prerequisite**, and it is
-now behind rather than ahead of the node it was supposed to precede: D is
-already in the cluster and DNS is still a singleton.
+2.1 and 2.2 are both **done and observed**: two Traefik pods on two nodes,
+and two CoreDNS pods on two nodes, each with a PDB. Neither ingress nor DNS
+is a single point of failure any more, which was this phase's whole content
+and was worth doing whether or not a fourth host ever appeared.
+
+What is left is 2.3's residue and 2.4 — the rehearsal that measures whether
+any of it works under an actual drain. Its gate (Traefik and CoreDNS each
+with two Ready pods on distinct nodes) is now satisfiable for the first time,
+so it no longer needs `-ProceedWithSingletons` and no longer measures the old
+cluster.
 
 - [x] 2.1 **Traefik to 2 replicas** with `requiredDuringScheduling` pod
       anti-affinity on `kubernetes.io/hostname`, via
@@ -390,8 +402,84 @@ already in the cluster and DNS is still a singleton.
       cordoned, a Traefik upgrade *stalls* rather than dropping traffic, and
       resolves when the node returns. That is the right trade against two
       replicas quietly sharing a node on an ordinary Tuesday.
-- [ ] 2.2 **CoreDNS to 2 replicas**, same anti-affinity. **Merged, then
-      reverted — back to unstarted.** Everything below was written while it was
+- [x] 2.2 **CoreDNS to 2 replicas**, same anti-affinity. **Merged, reverted,
+      and done properly on the second attempt.**
+
+      **The difference the reverted file asked for, established.** Its header
+      could only say "the difference is in how kustomize-controller applies"
+      and stopped there. Two dry-runs against this cluster, both as
+      `kustomize-controller` with `--force-conflicts`:
+
+      | apply configuration | result |
+      |---|---|
+      | partial, `replicas` only | `serverside-applied (server dry run)` |
+      | same **plus `selector: null`** and an empty `template` | the three reported errors, verbatim, in order |
+
+      So something materialises `spec.selector: null` between `kustomize
+      build` and the API server. It is
+      [`fluxcd/pkg/ssa/normalize`](https://github.com/fluxcd/pkg/blob/main/ssa/normalize/normalize.go)'s
+      `UnstructuredWithScheme`, which converts an object to its typed Go
+      struct, normalises it, converts it back and **replaces** the object with
+      the result — `object.Object = normalizedObject.Object`.
+      `appsv1.DeploymentSpec.Selector` is tagged `json:"selector"` with no
+      `omitempty`, so the round trip emits it as null however the file was
+      written, and SSA honours an explicit null as *remove this field* on one
+      that is required and immutable. `kubectl apply --server-side` sends the
+      file's bytes and never materialises it.
+
+      **The conclusion is bigger than this step, and belongs to the
+      installation rather than to this plan.** A partial server-side apply of
+      *any* kind in client-go's scheme is not expressible through Flux — not a
+      Deployment, not a StatefulSet, not a Service. There is no per-object
+      escape hatch: normalisation happens in kustomize-controller before the
+      `ssa` manager is called, and that manager's dry-run and real apply both
+      go out as `client.Apply`. Anyone reaching for "Flux owns one field of
+      something k3s ships" should read this first.
+
+      **What shipped instead: the scale subresource**, which is the API
+      Kubernetes provides for changing an object's size without owning the
+      object. An HPA and a PDB, both objects Flux creates and owns outright,
+      with the Deployment reached through `scaleTargetRef` and never applied
+      to. None of the failure can recur — no partial apply, no field ownership
+      shared with k3s, and no `kustomize.toolkit.fluxcd.io/prune: disabled` on
+      the cluster's only DNS Deployment, which was the genuinely dangerous
+      line in the first version. Deleting the file now removes an autoscaler
+      and a PDB; it cannot remove DNS. It is also self-healing, which a
+      one-shot field assertion was not.
+
+      `minReplicas: 2, maxReplicas: 3`, not 2 and 2. `min == max` is the
+      direct expression of "exactly two" and would fire `KubeHpaMaxedOut`
+      forever — that rule is live here and its expression is literally
+      `current_replicas == spec_max_replicas` held for 15m. A page that
+      arrives forever teaches people to ignore pages. One above the floor
+      keeps the alert meaningful for every other HPA and leaves a real
+      autoscaler rather than a fixed count dressed as one: CoreDNS requests
+      `100m` CPU and uses about `3m`, so 70% is roughly 23x current load.
+
+      **DNS availability does not depend on metrics-server**, which is itself
+      a singleton (finding 2). An HPA never scales below `minReplicas`
+      regardless of metrics — observed rather than assumed here, since it
+      scaled 1 → 2 while still reporting `cpu: <unknown>/70%`. The failure
+      mode is "cannot scale up", never "scales down to one".
+
+      **Verified the way the first attempt was not.** Its own post-mortem
+      says a change to this layer is worth confirming against a live `flux get
+      kustomizations` rather than a dry-run alone, because the dry-run passed.
+      After the push: infra-config applied `2488c0c`, then the whole chain
+      went Ready — `data-cluster`, `data-schema`, `observability-config`,
+      `photos`, and `apps` on the new revision. CoreDNS is `2/2` on
+      `aerie-node-0` and `aerie-node-3` (k3s's own topology spread constraint
+      placing them, with no anti-affinity added), the PDB reports 1 allowed
+      disruption, the HPA reports `cpu: 4%/70%` with `ScalingActive=True` and
+      `ScalingLimited=False`, and 8 of 8 lookups from a pod resolved.
+
+      Everything below was written while the first attempt was merged and is
+      left as written, because its reasoning about *k3s* is still correct and
+      only the mechanism changed.
+
+      ---
+
+      **Original note, from the reverted attempt.** Everything below was written while it was
       merged and is left as written, because the reasoning is sound and the
       *mechanism* is what turned out to be wrong: as a partial server-side
       apply it passes a hand-run `kubectl apply --server-side

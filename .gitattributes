@@ -14,3 +14,13 @@
 *.json  text
 *.sln   text
 *.csproj    text
+
+# PowerShell, for the same reason and found the same way. Every remote command
+# in scripts/ is a string sent to a Linux node over SSH, and a here-string in a
+# CRLF checkout carries \r into the last token of each of its lines: a
+# `df ... | tail -n 1` arrived at a node as `tail -n 1\r` and was answered with
+# `tail: invalid number of lines: '1\r'`, which reads as a broken node and is
+# a broken checkout. Invoke-NodeSsh normalises it now as well - this is the
+# other end of the same fix, so that the bytes never arrive wrong rather than
+# only being corrected on the way out.
+*.ps1   text eol=lf
