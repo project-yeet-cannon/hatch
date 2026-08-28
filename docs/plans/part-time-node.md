@@ -1,19 +1,47 @@
 # Part-time node — a fourth host that leaves when its owner wants it back
 
-**Status:** Phase 1 done. Phase 2.1 is merged; **2.2 was merged and then
-reverted** — it stopped every application deploy in the cluster, and the
-reasoning and the failure are preserved in
+**Status: the node exists.** `aerie-node-3` joined on **2026-08-27** as an
+agent, and Provision 0, 1 and 9 all completed against `hyperv-host-3`. Phase 1
+is done *and now observed* — ROLES reads `<none>` on a live node, which is the
+first time that exit criterion could be met rather than asserted. Most of
+Phase 3 came with it: the OS disk was built at 100 GB, `/` is 99 G, the guest
+sees no data disk at all, kubelet reports image GC at 70/55, and the journald
+cap was reported **already matching** rather than rewritten — which is 3.9's
+drift check answered in the direction it wanted.
+
+Three things the build did not get, and one nobody knew to ask for:
+
+- **3.1 was skipped.** `os_disk_path` was left blank, so the OS disk went to
+  `vm_storage_path`'s default `D:\aerie\VMs` — the exact volume that step
+  warns against accepting without measuring.
+- **3.7 was missed at dispatch.** `automatic_start_action` was left at its
+  `Start` default, so finding 6 is currently undone. The fix is a re-dispatch,
+  not a rebuild; 3.7's resume path exists for exactly this.
+- **3.6 has not been run.** *Verify: Node VM shape* answers the fixed disk,
+  the checkpoints and the start action in one dispatch, and nothing has
+  dispatched it.
+- **Finding 7 is new, and it blocks 3.10.** The node has no `open-iscsi`, so
+  `longhorn-manager` is in `CrashLoopBackOff` on it and there is no
+  `nodes.longhorn.io/aerie-node-3` object to set `allowScheduling: false` on.
+  Provision 5 owns those packages and structurally cannot run on a node with
+  no data disk.
+
+Phase 2.1 is merged and now visibly two Traefik pods on two different nodes;
+**2.2 is still reverted** — it stopped every application deploy in the
+cluster, and the reasoning and the failure are preserved in
 [`coredns-availability.yaml`](../../deploy/cluster/infrastructure/config/coredns-availability.yaml)'s
-header, so that step is back to unstarted. 2.3's re-read is done; 2.4's rehearsal is written and waiting on a cluster whose CoreDNS is no longer a singleton. **Phase 3's
-tooling is written** — the host is a choice on every provisioning workflow,
-`-AutomaticStartAction` is an input rather than a manual step, and 3.6/3.8 are
-one dispatchable gate — so what is left of that phase is the physical build.
-**Phase 4 is written in full**, and its exit criterion is the first click by a
-person who is not an administrator. **Phase 5's 5.1-5.3 are written** (5.2 as a
-no-op with its reason); 5.4 is the deliberate go-slow that waits on the node
-existing. Five phases; the
-first three are cluster work that stands on its own merits, the last two are
-the machine-specific part.
+header. CoreDNS is still one replica, and it is now the last singleton
+standing in front of a node that leaves on purpose. 2.3's re-read is done;
+2.4's rehearsal is written and has not been run. **Phase 4 is written in full
+and installed** — Provision 9 succeeded on the host — and its exit criterion is
+still the first click by a person who is not an administrator. **Phase 5's
+5.1-5.3 are done, and 5.1 is confirmed end to end**: Prometheus reports
+`kube_node_labels{node="aerie-node-3", label_aerie_family_availability="part-time"}`,
+so the exclusion has something to match rather than silently matching nothing.
+5.4 waits on 3.10.
+
+Five phases; the first three are cluster work that stands on its own merits,
+the last two are the machine-specific part.
 
 A fourth Windows host joins the cluster as a k3s **agent**, carrying a Linux VM
 sized to take real load off the three permanent nodes. Its owner uses the
@@ -56,9 +84,11 @@ operator's runbook. Hosts A, B and C are the three that already carry nodes.
 
 ## Findings
 
-Six. The first two are about the tooling, the next two decide the shape of the
-node, and the last two decide the control. All cluster numbers were read from
-the live cluster on **2026-08-24**.
+Seven. The first two are about the tooling, the next two decide the shape of
+the node, and the two after that decide the control. All cluster numbers were
+read from the live cluster on **2026-08-24**; the seventh was found on the
+built node on **2026-08-27** and is the only one that came from the machine
+rather than from a reading.
 
 ### 1. Nothing in the tooling can build an agent
 
@@ -188,6 +218,44 @@ one having asked for it.
 This VM gets `-AutomaticStartAction Nothing`, and a boot-time task reads the
 persisted mode and decides. Phase 4.
 
+### 7. A node with no data disk still needs Longhorn's host packages
+
+Found on the built node rather than in a reading, which is the only finding
+here that can say that. `longhorn-manager` is a DaemonSet with no node
+selector, so it landed on D like everywhere else, and it exits fatally at
+startup:
+
+```text
+Error starting manager: failed to check environment, please make sure you have
+iscsiadm/open-iscsi installed on the host
+```
+
+Finding 3's decision was *no Longhorn **replicas** on D*, and the plan carried
+that decision correctly all the way to `data_disk_gb: 0`. What it did not
+carry is that `open-iscsi`, `nfs-common` and `cryptsetup` are host packages
+for the **initiator** side, not the replica side — they are how a volume
+attaches to whatever node its pod runs on. They are therefore what makes
+finding 3's *other* half true. "Prometheus can run on D with its PVC still
+replicated on A/B/C" is a claim about iSCSI being available on D, and on this
+node it currently is not: a stateful pod scheduled there today would sit in
+`ContainerCreating` with the reason in the kubelet's log rather than in
+Longhorn's.
+
+They arrive by [`Initialize-NodeStorage.ps1`](../../scripts/k3s/Initialize-NodeStorage.ps1),
+dispatched as Provision 5, and that script cannot run here.
+`-DataDiskSizeGB` is `[ValidateRange(1, 65536)]`, so `0` is not expressible,
+and the Inspect stage throws `No data disk found on ...` **before** the
+Packages stage is reached — packages are stage 3, the disk decision is made in
+stage 2. The one workflow that installs the packages is structurally unable to
+install them on the one node that has no disk to pair them with.
+
+So the fix is a change to the tooling rather than an `apt-get` run by hand on
+D — the same argument Phase 1 made about agents, for the same reason. This is
+the second time this plan has found that "a node slightly unlike the other
+three" is not expressible in the provisioning path, and like the first the fix
+is reusable: a diskless worker that can still mount storage is a normal thing
+for an installation to want.
+
 ---
 
 ## [x] Phase 1 — Teach the tooling about agents
@@ -195,11 +263,11 @@ persisted mode and decides. Phase 4.
 **Exit:** a `role: agent` dispatch of Provision 1 produces a node that shows
 `<none>` under ROLES in `kubectl get nodes` and schedules pods.
 
-The code is written and the assertions are in it — Verify fails the run if
-ROLES is anything but `<none>`. The exit criterion itself cannot be *observed*
-until there is a fourth host to dispatch against, which is Phase 3; nothing
-here changes any existing dispatch's behavior, so it lands before then rather
-than waiting on hardware.
+**Observed on 2026-08-27.** `aerie-node-3` is `Ready` with ROLES `<none>`,
+running `k3s-agent.service` with `k3s.service` inactive, with no
+`/etc/rancher/k3s/` directory at all (1.2's config.yaml decision, visible as an
+absence) and with both 1.5 labels on the Node object. Every assertion in the
+code was checked by the run; this is the criterion itself.
 
 - [x] 1.1 Add an `-Agent` parameter set to
       [`Install-K3sNode.ps1`](../../scripts/k3s/Install-K3sNode.ps1), taking the
@@ -276,11 +344,12 @@ Independently valuable, and a prerequisite: this lands **before** D joins.
 **Exit:** `kubectl drain` of any node completes without `--force`, and ingress
 and DNS survive it with no gap.
 
-The two manifest changes are written; the two things that can only be learned
-from the running cluster are not done. Neither 2.1 nor 2.2 has been *observed*
-yet — they reach the cluster by being committed, like everything else under
-`deploy/`, so the first proof either works is Flux reconciling them, and the
-first proof they were the right changes is 2.4.
+2.1 is now observed — two Traefik pods, on `aerie-node-1` and `aerie-node-2`,
+which is the anti-affinity doing its job rather than two replicas that
+happened to land apart. 2.2 is reverted and CoreDNS is still one pod. That
+makes this phase the **one remaining cluster-side prerequisite**, and it is
+now behind rather than ahead of the node it was supposed to precede: D is
+already in the cluster and DNS is still a singleton.
 
 - [x] 2.1 **Traefik to 2 replicas** with `requiredDuringScheduling` pod
       anti-affinity on `kubernetes.io/hostname`, via
@@ -494,7 +563,22 @@ and is fixed; nothing Aerie creates on a host is dynamic, and no Aerie VM has
 automatic checkpoints.** [`scripts/hyperv/README.md`](../../scripts/hyperv/README.md)
 carries it, along with how to measure which volume is which.
 
-- [ ] 3.1 **Measure D's disk before choosing anything**, with the method in
+- [ ] 3.1 **Measure D's disk before choosing anything** — **skipped, and the
+      default was taken.** The successful Provision 0 ran with `os_disk_path`
+      blank, so the OS disk inherited `vm_storage_path` and landed at
+      `D:\aerie\VMs\aerie-node-3\os-disk.vhdx`. That is precisely the volume
+      this step's first caution says not to accept: *do not measure the volume
+      the documented default says the VM will be on.* Whether it is the right
+      one is now an open question rather than a decision, and it stays open
+      until the comparison below is run. It is not urgent — a wrong answer
+      costs latency on a node holding no replicas, and
+      [`Move-NodeOsDisk.ps1`](../../scripts/hyperv/Move-NodeOsDisk.ps1)
+      (Provision 8) is how it is corrected without a rebuild — but it should
+      not be left implicit.
+
+      The step as written, still to be done:
+
+      Measure with the method in
       [`scripts/hyperv/README.md`](../../scripts/hyperv/README.md)'s "Choosing
       the OS disk's volume". "A few hundred GB free" does not say whether it is
       spinning or solid-state, and this plan should not guess: the answer sets
@@ -508,23 +592,25 @@ carries it, along with how to measure which volume is which.
       query — 6.8, 5.7 and 49 ms from the same workload shape is a statement
       about the media in a way any one of those numbers alone is not.
 
-      Note that D needs `windows_exporter` running to be measurable this way,
-      which 3.3's runner and a first Provision 0 dispatch install. Either
-      dispatch `preflight_only` first to get the exporter on the box (that
-      step runs before the provisioning step and is not skipped by the flag),
-      or read the same underlying counter directly and take the Prometheus
-      comparison later:
+      `windows_exporter` is on the box now — Provision 0's preflight step
+      installs it and ran three times — so the Prometheus comparison is
+      available without the `preflight_only` dispatch this originally called
+      for. The counter reads the same thing directly:
 
       ```powershell
       Get-Counter '\LogicalDisk(*)\Avg. Disk sec/Write' -SampleInterval 5 -MaxSamples 60
       ```
-- [ ] 3.2 Host prerequisites, per
+- [x] 3.2 Host prerequisites, per
       [`scripts/hyperv/README.md`](../../scripts/hyperv/README.md): Hyper-V role,
       an External switch bound to the physical NIC with
       `-AllowManagementOS $true`, a DHCP reservation for the new MAC
       (`00-15-5D-04-01-01` under the existing `[host]-[vm]-[nic]` scheme), and
       the node SSH public key.
-- [ ] 3.3 Register a self-hosted runner labelled `hyperv-host-3`, service
+
+      Done, and the DHCP reservation resolved to **192.168.1.243**, which is
+      where the node answers. The Hyper-V role itself turned out to be one of
+      3.3's two surprises rather than a step anybody did by hand.
+- [x] 3.3 Register a self-hosted runner labelled `hyperv-host-3`, service
       account a local Administrator. Add it to
       [`stagger-update-reboots.yml`](../../.github/workflows/stagger-update-reboots.yml)'s
       matrix and to every provisioning workflow's `host` choice list.
@@ -566,7 +652,13 @@ carries it, along with how to measure which volume is which.
       SSH-based check, and pointing one at a machine that may be in personal
       mode makes a verification that fails for a reason unrelated to what it
       verifies.
-- [ ] 3.4 **Dispatch Provision 0 with `preflight_only` first.** Cheap, and it
+
+      **The machine half is done too.** The runner is registered and has
+      carried three Provision dispatches; `ensure-powershell` and the
+      `-Dependency HyperV` check both did their work on the first of them,
+      which is what turned the two prerequisites above from failures into
+      notes.
+- [x] 3.4 **Dispatch Provision 0 with `preflight_only` first.** Cheap, and it
       exercises the rewritten free-space check before anything is built. That
       check now charges each volume separately rather than summing everything
       onto one — it has to, because `os_disk_path` and `data_disk_path` may be
@@ -577,7 +669,14 @@ carries it, along with how to measure which volume is which.
       that looks arithmetically wrong is a bug in that check, and worth
       stopping for.
 
-- [ ] 3.5 Dispatch **Provision 0** for `aerie-node-3`: 16 GB static memory,
+      **Answered, though not in the shape written.** No dispatch ever set
+      `preflight_only: true` — the check ran as stage 1 of the full run and
+      printed `Preflight OK.` against `os_disk_gb: 100` and `data_disk_gb: 0`.
+      The per-volume free-space arithmetic is therefore exercised and correct;
+      what was not bought is the *cheapness*, which only matters when it
+      refuses. Nothing left here.
+
+- [x] 3.5 Dispatch **Provision 0** for `aerie-node-3`: 16 GB static memory,
       `os_disk_path` set to the volume 3.1 chose, `os_disk_gb: 100`, and
       **`data_disk_gb: 0`**. Checked while doing Phase 1: `0` already means "no
       data disk" all the way through
@@ -596,9 +695,25 @@ carries it, along with how to measure which volume is which.
       so a build on any of them exercises the resize instead. Note which one
       happened here.
 
+      **The template-build path is what happened**, as predicted: the run
+      reports `Golden image ready: D:\aerie\vm-templates\debian-13-genericcloud.vhdx`
+      and then `Converting golden image to a 100GB fixed OS disk`, taking
+      about five minutes to write the fixed disk out. `-DataDiskSizeGB 0`
+      printed `second fixed VHDX for Longhorn (SKIPPED)`, which is the
+      no-data-disk decision visible in the build log. So the per-VM resize is
+      **still unexercised** — the untested half stayed untested, and the first
+      dispatch onto A, B or C will be the one that tests it.
+
+      Three earlier dispatches failed before this one; two of them on 3.3's
+      client-host prerequisites, and one against `aerie-node-2` rather than
+      `aerie-node-3`.
+
 - [ ] 3.6 **Verify the disk is what the rule says**, on the host, before the
       node is doing anything worth disturbing. This is the step that observes
-      the claim nobody has observed yet.
+      the claim nobody has observed yet — **and it has not been dispatched.**
+      The node is up and doing nothing, which is the best moment this will
+      ever have; run it now. It is also where 3.7's miss gets caught by a
+      machine rather than by reading a workflow log after the fact.
 
       **This is now a command rather than three blocks to paste and read with
       your eyes**: [`Test-NodeVm.ps1`](../../scripts/hyperv/Test-NodeVm.ps1),
@@ -643,6 +758,20 @@ carries it, along with how to measure which volume is which.
       automatic-checkpoint setting 3.6 just confirmed, which is *not* the same
       flag and must stay off.
 
+      **Missed on the build dispatch, and this is the one live defect on the
+      node.** The successful run logged `AUTOMATIC_START_ACTION: Start`, so
+      the VM currently comes back on every host boot, whatever the state file
+      says. That is finding 6 exactly: a Windows Update reboot mid-evening
+      returns the node to the cluster with nobody having asked. 4.5's boot
+      task would eventually stop it again, which turns a design property into
+      a race — the wrong shape for the one promise this plan makes to a
+      person.
+
+      Making the input an input rather than a manual step did not make it
+      hard to forget, which is worth recording as a small finding of its own.
+      The fix is one re-dispatch of Provision 0 against the existing VM with
+      `automatic_start_action: Nothing`, per the resume-path note below.
+
       **Not a step after the build any more — an input to it.**
       `-AutomaticStartAction` is a parameter on
       [`New-AerieVM.ps1`](../../scripts/hyperv/New-AerieVM.ps1) and
@@ -663,7 +792,7 @@ carries it, along with how to measure which volume is which.
         runbook, and it means a permanent node can be converted to a part-time
         one without rebuilding it.
 
-- [ ] 3.8 **Confirm the guest actually got the space.** Over SSH once cloud-init
+- [x] 3.8 **Confirm the guest actually got the space.** Over SSH once cloud-init
       has finished and rebooted:
 
       ```bash
@@ -685,7 +814,15 @@ carries it, along with how to measure which volume is which.
       "the host attached none" and "the guest sees none" are the same fact
       reached from two directions, and them disagreeing is worth knowing.
 
-- [ ] 3.9 Dispatch **Provision 1** with `role: agent`, joining any permanent
+      **Read directly on 2026-08-27**, ahead of the dispatch:
+      `/dev/sda1  99G  3.0G  92G  4% /`, and `lsblk` shows one 100 G `sda`
+      with `sda1` at 99.9 G plus the two EFI/BIOS partitions — no `sdb`. So
+      the size survived template → convert → boot end to end, and the guest
+      agrees with the host about there being no data disk. The two host-side
+      assertions this shares with 3.6 (fixed rather than dynamic, no
+      checkpoints) are still unread, which is why 3.6 stays open.
+
+- [x] 3.9 Dispatch **Provision 1** with `role: agent`, joining any permanent
       node's address.
 
       Two of the four node settings it reconciles have never been observed on a
@@ -706,12 +843,145 @@ carries it, along with how to measure which volume is which.
       run *is* the check. Read the log for the journald line rather than
       assuming it.
 
-- [ ] 3.10 In Longhorn, set the node's `allowScheduling: false`. Confirm by
+      **Both answered, and both in the direction that means nothing has
+      drifted.** The run logged
+      `/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/50-aerie-image-gc.conf
+      written (image GC high 70 / low 55)` and then
+      `/etc/systemd/journald.conf.d/60-aerie-journal-cap.conf already matches -
+      not rewriting` — so cloud-init's copy and the script's copy are still
+      byte-identical, which is the thing that would have been silently untrue
+      if anyone had edited one of them alone. `vm.max_map_count` reads
+      `262144` on the node.
+
+- [ ] 3.10 **Give the node Longhorn's host packages** — finding 7, and the
+      step this plan did not have. `open-iscsi`, `nfs-common` and `cryptsetup`,
+      plus `systemctl enable --now iscsid`. Without them `longhorn-manager`
+      crashloops on the node, there is no `nodes.longhorn.io/aerie-node-3` to
+      act on in 3.11, and no stateful pod can be scheduled there — which is
+      most of the point of the node.
+
+      **Written.** `-DataDiskSizeGB 0` now means "this node has no data
+      disk" in
+      [`Initialize-NodeStorage.ps1`](../../scripts/k3s/Initialize-NodeStorage.ps1),
+      the same as it already did in `New-AerieVM.ps1` and
+      `Initialize-AerieNode.ps1` — so the value did not need inventing, only
+      honouring in the one script that refused it. The run does stages 1, 2
+      and 3 and a Verify that asserts the initiator alone. Provision 5 needed
+      no structural change at all: it already passes `[int]$env:DATA_DISK_GB`
+      straight through, which is the same pleasant surprise 3.5 recorded
+      about `data_disk_gb: 0` in Provision 0.
+
+      What it took, and what each piece is for:
+
+      - `[ValidateRange(1, 65536)]` → `(0, 65536)`. The only hard stop; the
+        rest is control flow.
+      - `$hasDataDisk`, read once and branched on by name, rather than five
+        scattered comparisons against `0` that a reader has to recognise as
+        the same question.
+      - The Inspect stage's disk *selection* is skipped; the identity check,
+        the block-device probe, the package probe and the iscsid probe above
+        it all still run, because none of them is about a disk.
+      - The Disk stage is skipped whole. `$uuid` is declared outside it so
+        Verify can ask whether there is one instead of tripping StrictMode.
+      - Verify splits in two. The mount, its systemd unit, its capacity and
+        its fstab entry are guarded; `iscsid` active and `iscsiadm` on PATH
+        are unconditional and still **throw**. On this path they are the
+        entire criterion, and a run that reported success without them would
+        be worse than no run — the missing binary is the exact failure the
+        mode exists to fix.
+      - `-Force` is **refused** alongside `-DataDiskSizeGB 0` rather than
+        ignored. Silently accepting a DESTRUCTIVE flag teaches the reader it
+        did something.
+
+      **One defect this found in itself, on the first read-only run against
+      the node.** The step above added a warning for content under
+      `/var/lib/longhorn` on a diskless node — on the reasoning that a node
+      holding no replicas should accumulate nothing there — and it fired
+      immediately on `engine-binaries`. That reasoning was wrong for the same
+      reason finding 7 exists: the engine-image DaemonSet has **no node
+      selector either**, so it unpacks the engine binary to that path on every
+      Longhorn node including one that will never hold a replica. Compared
+      against node-0, which additionally has `replicas/`, `longhorn-disk.cfg`,
+      `logs/` and `unix-domain-socket/`. So the warning now names the two
+      entries that mean *data* — `replicas/` and `longhorn-disk.cfg` — and
+      stays quiet about the DaemonSet's working directory. A warning that
+      fires on the resting state of the node it was written for is worse than
+      no warning.
+
+      The alternative not taken: moving the packages into Provision 1, so
+      every node gets them at join. Closer to the root cause — they are a
+      membership prerequisite now that any node can host an engine — but it
+      splits ownership of the package list across two scripts, which is the
+      drift 3.9's journald check exists to catch. One owner, with its disk
+      half made optional, is the better trade.
+
+      Provision 5's header, its `data_disk_gb` description and
+      [`scripts/k3s/README.md`](../../scripts/k3s/README.md)'s "What a run
+      actually does" all described a disk that must exist. All three now say
+      the diskless case out loud, since a reader would otherwise conclude —
+      correctly before this change and wrongly after it — that Provision 5 has
+      nothing to do with a node like this one.
+
+      **Verified as far as it can be without changing the node**:
+      `-PreflightOnly -DataDiskSizeGB 0` against `aerie-node-3` reports
+      `Data disk: none`, `Packages: missing open-iscsi, nfs-common,
+      cryptsetup` and `Plan: install open-iscsi, nfs-common, cryptsetup;
+      enable iscsid`, and the same command against `aerie-node-0` with
+      `-DataDiskSizeGB 200` still prints exactly what it printed before. The
+      installing half is the dispatch itself.
+
+- [ ] 3.11 In Longhorn, set the node's `allowScheduling: false`. Confirm by
       reading back `nodes.longhorn.io/aerie-node-3` — and then confirm the thing
       that actually matters, that an existing `longhorn-r3` volume still reports
       three healthy replicas across A, B and C only.
 
-- [ ] 3.11 Leave it empty for a few days and watch. Nothing is moved yet.
+      **Blocked on 3.10's dispatch, and currently true by accident.** There is no
+      `nodes.longhorn.io/aerie-node-3` object at all — `longhorn-manager` never
+      got far enough to create one — so all nine Longhorn volumes still report
+      `attached / healthy` with their replicas on A, B and C, which is the
+      second half of this step passing for the wrong reason. The moment 3.10
+      lands, `longhorn-manager` comes up, the node object appears with
+      `allowScheduling` at its **default of `true`**, and finding 3's
+      arithmetic is live. So this is not a step to do after 3.10 at leisure:
+      it is the same change window.
+
+      **And there is a second thing arriving with it that this step did not
+      know about**, read from the live cluster while planning the dispatch.
+      `create-default-disk-labeled-nodes` is `false` — the chart default, and
+      [`longhorn.yaml`](../../deploy/cluster/infrastructure/controllers/longhorn.yaml)
+      does not set it — which means Longhorn creates a **default disk on every
+      newly registered node**, at `defaultDataPath: /var/lib/longhorn`. On A, B
+      and C that path is the mounted 200 GB data disk, which is the whole
+      point. On D nothing is mounted there, so the disk Longhorn creates for
+      itself would be **the 100 GB OS disk**, with `allowScheduling: true` on
+      the disk as well as on the node. Node-0's object shows exactly the shape
+      that would be created: a single `default-disk-<hash>` at
+      `/var/lib/longhorn` with `storageReserved` at 10%.
+
+      That is the failure Provision 5's own header warns about — "a cluster
+      that gets Longhorn first quietly fills every node's OS disk with replica
+      data" — arriving by a different route than the one it was written for.
+      Node-level `allowScheduling: false` is enough to stop replicas landing,
+      so it is not a data-loss risk. It is a latent one: it leaves a disk
+      object pointing at the OS disk, and whoever later decides D can hold
+      replicas after all gets them on the wrong disk with nothing warning
+      them.
+
+      **So the dispatch is bracketed by a cordon**, which closes the race
+      rather than running it. `disable-scheduling-on-cordoned-node` is `true`
+      in this cluster, so a cordoned node is not a replica candidate no matter
+      what its own `allowScheduling` says. Cordon D, dispatch 3.10, set
+      `allowScheduling: false` and deal with the auto-created disk, then
+      uncordon. Between the cordon and the uncordon the node's Longhorn
+      settings can be wrong without costing anything, which is the difference
+      between a sequence and a race.
+
+      Whether the disk entry can simply be emptied (`spec.disks: {}`) or
+      whether Longhorn's node controller re-adds it is worth *reading* rather
+      than assuming — it is the kind of "applies cleanly, is found by
+      nothing" trap 2.2 already paid for once.
+
+- [ ] 3.12 Leave it empty for a few days and watch. Nothing is moved yet.
 
       Watch the root filesystem specifically. This node starts at ~100 GB with
       the image-GC ceiling already in place from its first boot, which is the
@@ -736,6 +1006,14 @@ turned out to be the boot task and the daily task rather than separate scripts:
 [`Register-PersonalModeControl.ps1`](../../scripts/hyperv/Register-PersonalModeControl.ps1)
 installs the lot, and is dispatchable as **Provision 9**
 ([`provision-9-personal-mode.yml`](../../.github/workflows/provision-9-personal-mode.yml)).
+
+**Installed on 2026-08-27** — Provision 9 completed against `hyperv-host-3`,
+so the four tasks, the shortcuts and the SYSTEM-owned key are on the machine.
+Every step below is therefore written *and* deployed; what none of it has is a
+person clicking the shortcut, which is this phase's exit criterion and 4.7's
+subject. Note that 3.7's miss changes what an evening looks like until it is
+fixed: the state file says the right thing, and Hyper-V's autostart argues
+with it.
 
 Five things that fell out of writing it, each of which would otherwise have
 been discovered on an evening somebody wanted their machine:
@@ -887,6 +1165,17 @@ node that is down *without* personal mode set still produces both.
         to disable outright — so a personal-mode evening still produces that
         one alert. Named in the manifest rather than discovered on an evening;
         dealing with it is its own decision.
+
+      **Confirmed end to end on 2026-08-27**, which the allowlist item above
+      makes worth stating separately from "it is merged". kube-state-metrics
+      runs with
+      `--metric-labels-allowlist=nodes=[aerie.family/personal-mode,aerie.family/availability]`,
+      and Prometheus answers `kube_node_labels{node="aerie-node-3"}` with
+      `label_aerie_family_availability="part-time"` on it. So the `unless`
+      has a series to match, and the silent-no-op failure this step was most
+      exposed to is ruled out. The `personal_mode` half is unobservable until
+      someone enters personal mode; `AerieNodeInPersonalMode` is what will say
+      so when they do.
 - [x] 5.2 The same exclusion in Uptime Kuma via
       [`autokuma`](../../deploy/cluster/observability/controllers/autokuma.yaml),
       so the status page reads "off by request" rather than "down".
@@ -932,9 +1221,18 @@ node that is down *without* personal mode set still produces both.
       allowlist. `availability` is the one that answers "which node is the
       part-time one" while nobody is using it, which is exactly when
       `personal-mode` is absent.
+
+      Live as `dashboard-part-time-node` in `observability`, and it now has a
+      node to describe.
+
 - [ ] 5.4 **Only now, move the tenants.** Observability first, per finding 4,
       one workload at a time with a personal-mode cycle between each. Surge
       replicas and batch follow once the first survives a few evenings.
+
+      "Only now" has a hard prerequisite it did not have when it was written:
+      every one of finding 4's first tenants has a Longhorn PVC, so **none of
+      them can start on this node until 3.10 does**. Moving a workload there
+      today produces a pod stuck attaching, not a measurement.
 
 ---
 

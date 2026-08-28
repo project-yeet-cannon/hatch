@@ -1,7 +1,19 @@
 # Step 5 of the provisioning pipeline, and the second step of the cluster plan
-# Phase 3b: prepare one node's Longhorn data disk. Installs the host packages
-# Longhorn needs, finds the data disk by shape rather than by name, formats it
-# ext4, and mounts it at /var/lib/longhorn from /etc/fstab by UUID.
+# Phase 3b: prepare one node for Longhorn. Installs the host packages Longhorn
+# needs and, unless the node has no data disk, finds that disk by shape rather
+# than by name, formats it ext4, and mounts it at /var/lib/longhorn from
+# /etc/fstab by UUID.
+#
+# **Run it against every node, including ones with no data disk.** The two
+# halves of this step belong to opposite sides of a Longhorn volume, and only
+# one of them is about a disk. The packages are the *initiator*: they are how a
+# volume attaches to whatever node its pod runs on, so every node that may ever
+# schedule a stateful pod needs them, replicas or not. `data_disk_gb: 0` is how
+# a diskless worker asks for that half alone - see docs/plans/part-time-node.md
+# finding 7, which is what a node built without this run looks like: a
+# longhorn-manager crashlooping on a missing iscsiadm, no nodes.longhorn.io
+# object, and an error message about iSCSI rather than about the disk it is
+# really about.
 #
 # **Once per node**, unlike Provision 2, 3 and 4. This is the last step in the
 # pipeline that is: everything it does lives on a single node's own filesystem
@@ -56,7 +68,7 @@ on:
         required: true
         type: string
       data_disk_gb:
-        description: 'Size the data disk was created at in Phase 1 (-DataDiskSizeGB). Used to recognise the disk, not to pick it by name'
+        description: 'Size the data disk was created at in Phase 1 (-DataDiskSizeGB). Used to recognise the disk, not to pick it by name. 0 means the node has no data disk: host packages only, nothing formatted or mounted'
         required: false
         default: '200'
         type: string
@@ -85,7 +97,8 @@ jobs:
 
     # apt-get update plus three packages is the slow part; mkfs.ext4 on a
     # 200GB disk is seconds, since ext4 does not write the whole device.
-    # Failing at 20m means something hung.
+    # Failing at 20m means something hung. A `data_disk_gb: 0` run is the slow
+    # part alone and finishes in a couple of minutes.
     timeout-minutes: 20
 
     steps:
@@ -122,6 +135,9 @@ jobs:
           VM_NAME: ${{ inputs.vm_name }}
           IP_ADDRESS: ${{ inputs.ip_address }}
           DATA_DISK_GB: ${{ inputs.data_disk_gb }}
+          # Refused alongside `data_disk_gb: 0` rather than ignored - a
+          # DESTRUCTIVE flag that is silently accepted teaches the reader it
+          # did something.
           FORCE: ${{ inputs.force }}
           PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
 

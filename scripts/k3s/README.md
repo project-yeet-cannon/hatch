@@ -433,15 +433,47 @@ since a wrong `ip_address` here means formatting a disk on the wrong machine.
    blacklisted from `multipathd` rather than fought with — multipathd claiming
    them is the classic "volume stuck in Attaching" failure.
 4. **Disk.** `mkfs.ext4 -m 0` (whole disk, no partition table), labelled
-   `longhorn`, then an fstab entry keyed by UUID and the mount.
-5. **Verify.** Re-reads the mount, the generated systemd mount unit, the fstab
-   entry, `findmnt --verify` and `iscsid` from the node — the state Longhorn
-   will actually find at 3b.11 — and checks the capacity is the disk that was
-   asked for rather than the root filesystem.
+   `longhorn`, then an fstab entry keyed by UUID and the mount. Skipped
+   entirely with `data_disk_gb: 0`.
+5. **Verify.** `iscsid` and `iscsiadm` always; the mount, the generated systemd
+   mount unit, the fstab entry, `findmnt --verify` and the capacity when there
+   is a disk to have them — the state Longhorn will actually find at 3b.11 —
+   checking that capacity is the disk that was asked for rather than the root
+   filesystem.
 
 `preflight_only` runs 1 and 2 and stops, printing which disk it would use and
 what it would change. Re-running against a prepared node reports *nothing
 needed changing* and means it: nothing is reformatted, remounted or rewritten.
+
+### A node with no data disk (`data_disk_gb: 0`)
+
+Run this against those too, and the reason is that steps 3 and 4 belong to
+opposite sides of a Longhorn volume.
+
+The **packages** are the *initiator*. They are how a volume attaches to
+whatever node its pod happens to run on, so every node that may ever schedule
+a stateful pod needs them — whether or not it stores a byte. The **disk** is
+the *replica*, and only nodes that hold data need one.
+
+`data_disk_gb: 0` asks for the first without the second: stages 1, 2, 3 and a
+Verify that asserts `iscsid` is active and `iscsiadm` is on PATH, and nothing
+on the node is formatted, mounted or written to `/etc/fstab`. `force` is
+refused alongside it rather than ignored, since there is no disk for it to
+widen.
+
+Skipping it does not produce a node without Longhorn — it produces a node with
+a **broken** one. `longhorn-manager` is a DaemonSet with no node selector, so
+it lands there regardless and exits at startup with `failed to check
+environment, please make sure you have iscsiadm/open-iscsi installed on the
+host`. There is then no `nodes.longhorn.io` object for that node at all, which
+also means no way to set `allowScheduling: false` on it. See
+[`docs/plans/part-time-node.md`](../../docs/plans/part-time-node.md) finding 7.
+
+One thing to do straight after such a run, in the same change window: set
+`allowScheduling: false` on the node's `nodes.longhorn.io` object. It is
+created the moment `longhorn-manager` registers, and it is created with
+`allowScheduling` at its **default of `true`** — so a diskless node is briefly
+a scheduling candidate before anyone tells it not to be.
 
 ### `nofail`, and the immutable mount point
 
