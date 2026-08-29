@@ -32,6 +32,21 @@ resources:
   limits:
     memory: 768Mi
 
+api:
+  # docs/plans/version.md Phase 6. When enabled, ./templates/api-rbac.yaml
+  # grants the api pods a read on Flux's GitRepository and Kustomization
+  # status, and GET /api/aerie-revision reports what the cluster has actually
+  # reconciled alongside what this replica is running.
+  #
+  # Structural rather than an operator value, and on by default, because every
+  # Aerie cluster is a Flux cluster - but it is a switch rather than a
+  # hardcoded template because it is a cluster-scoped grant, and an operator
+  # who cannot or would rather not make one should not be blocked from
+  # deploying. Turning it off costs exactly the `cluster` block on that one
+  # endpoint.
+  fluxRevisions:
+    enabled: true
+
 image:
   # Host plus namespace, no image name, no tag - ${IMAGE_REGISTRY}. The
   # template appends /aerie-api and image.api.tag.

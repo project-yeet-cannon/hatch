@@ -44,6 +44,23 @@ spec:
         {{- include "aerie.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api
     spec:
+      # ./api-rbac.yaml's ServiceAccount, whose only privilege is reading Flux's
+      # GitRepository and Kustomization status for GET /api/aerie-revision
+      # (docs/plans/version.md Phase 6). When that is disabled the pod falls
+      # back to the namespace default, which grants nothing - and the reader
+      # reports the cluster as unavailable, the same answer it gives outside a
+      # cluster altogether.
+      #
+      # automountServiceAccountToken is stated either way rather than left to
+      # the default, because the default is true: without the `false` branch a
+      # deployment that has deliberately turned this feature off would still
+      # hand every api pod a mounted token it has no reason to carry.
+      {{- if .Values.api.fluxRevisions.enabled }}
+      serviceAccountName: {{ include "aerie.name" . }}-api
+      automountServiceAccountToken: true
+      {{- else }}
+      automountServiceAccountToken: false
+      {{- end }}
       # 5b.1's dockerconfigjson Secret - without this every pod here is
       # ImagePullBackOff, since the api image lives in a private registry.
       imagePullSecrets:

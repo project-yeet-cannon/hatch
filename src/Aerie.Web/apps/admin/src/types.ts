@@ -473,3 +473,49 @@ export interface PhotoCarousel {
   generatedAt: string;
   error: string | null;
 }
+
+// ---- Aerie revision (docs/plans/version.md) ----
+
+/**
+ * Where a build sits relative to another. Only `Behind` ever justifies acting -
+ * `Ahead` happens legitimately mid-rollout and a client that reacted to it
+ * would thrash. PascalCase to match every other enum crossing this wire:
+ * Program.cs registers JsonStringEnumConverter with no naming policy, so the
+ * C# member name is what arrives.
+ */
+export type RevisionDrift = 'Unknown' | 'Current' | 'Behind' | 'Ahead';
+
+export interface ClientRevisionVerdict {
+  revision: string;
+  sequence: number;
+  drift: RevisionDrift;
+}
+
+export interface FluxKustomizationRevision {
+  name: string;
+  appliedRevision: string | null;
+  ready: boolean | null;
+}
+
+export interface FluxSourceRevision {
+  name: string;
+  revision: string | null;
+  branch: string | null;
+  kustomizations: FluxKustomizationRevision[];
+}
+
+export interface ClusterRevisions {
+  sources: FluxSourceRevision[];
+  /** Set when Flux could not be read; the rest of the response still stands. */
+  unavailable: string | null;
+}
+
+export interface AerieRevisionInfo {
+  revision: string;
+  sequence: number;
+  builtAt: string | null;
+  /** The verdict on *this browser's* build, echoed back from the headers it sent. */
+  client: ClientRevisionVerdict | null;
+  /** Only present for an authenticated caller, and only when Flux could be read. */
+  cluster: ClusterRevisions | null;
+}

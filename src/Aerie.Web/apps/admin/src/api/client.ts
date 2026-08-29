@@ -1,5 +1,6 @@
 import { handledUnauthorized } from '../lib/signIn';
 import type {
+  AerieRevisionInfo,
   AppsConfig,
   AuthGrant,
   AuthInvite,
@@ -214,3 +215,12 @@ export const signOutDevice = () => fetchJson<void>('/api/auth/sign-out', { metho
 // ---- Platform config ----
 
 export const getAppsConfig = () => fetchJson<AppsConfig>('/api/apps/config');
+
+// ---- Aerie revision ----
+
+/**
+ * What this API replica is running, what this browser is running, and what Flux
+ * has reconciled. Deliberately no-store on the server side: the whole question
+ * is "right now", and this is the one call where a cached answer is a wrong one.
+ */
+export const getAerieRevision = () => fetchJson<AerieRevisionInfo>('/api/aerie-revision');

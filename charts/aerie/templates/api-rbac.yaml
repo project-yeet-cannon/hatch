@@ -1,0 +1,66 @@
+{{- if .Values.api.fluxRevisions.enabled }}
+# docs/plans/version.md Phase 6 - the first Kubernetes API access Aerie.Api has
+# ever had, and deliberately the narrowest thing that answers the question.
+#
+# What it buys: GET /api/aerie-revision can tell an operator what Flux has
+# actually reconciled, as opposed to what has been pushed. That gap is real -
+# read live on 2026-08-28, the source was one commit ahead of most
+# Kustomizations mid-reconcile - and today it is invisible to everything except
+# a kubeconfig.
+#
+# Scope. get/list/watch on two Flux kinds, cluster-wide, and nothing else. No
+# secrets, no pods, no writes, no core API at all. A ClusterRole rather than a
+# Role because the objects live in flux-system while the API runs in its own
+# namespace; the reader (Services/FluxRevisionReader.cs) only ever asks for
+# flux-system, so the binding is wider than the use and that is worth knowing
+# rather than worth hiding - a Role in flux-system would need a RoleBinding in
+# a namespace this chart does not own.
+#
+# Off by default. A second operator running Aerie without Flux, or without
+# permission to grant cluster-scoped reads, gets an API that reports its own
+# revision and says the cluster's is unavailable - which is the same thing the
+# reader already reports when it cannot reach the API server, so nothing
+# downstream has a second case to handle.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "aerie.name" . }}-api
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "aerie.name" . }}-flux-revisions
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+rules:
+  # Only the status subresource is actually read, but Kubernetes RBAC has no
+  # way to grant status without the object: `status` is a subresource of the
+  # same resource, and a rule naming it still requires the parent verb. Listing
+  # both explicitly says that is understood rather than overlooked.
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: ["gitrepositories", "gitrepositories/status"]
+    verbs: ["get", "list"]
+  - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+    resources: ["kustomizations", "kustomizations/status"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "aerie.name" . }}-flux-revisions
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "aerie.name" . }}-flux-revisions
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "aerie.name" . }}-api
+    namespace: {{ .Release.Namespace }}
+{{- end }}
