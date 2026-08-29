@@ -107,6 +107,11 @@ public class ZoneService(
         var from = now - window.History;
         var history = ZoneMath.Bucket(rows.Select(r => (r.Timestamp, (decimal?)r.Value)), from, now, window.Bucket);
         var currentTempF = rows.Count > 0 ? rows[^1].Value : (history.Count > 0 ? history[^1].TempF : (decimal?)null);
+        // The timestamp of the row the value came from, and only of a row: the
+        // history fallback on the line above is a bucket, whose boundary is not
+        // a moment anything was measured. Leaving it null there is what keeps a
+        // client from reading an interpolated value as a fresh one.
+        var currentAsOf = rows.Count > 0 ? rows[^1].Timestamp : (DateTimeOffset?)null;
 
         var comfort = ResolveComfort(zone, setpoint, settings);
         var projected = currentTempF is { } temp
@@ -123,7 +128,7 @@ public class ZoneService(
 
         return new ZoneClimate(
             zone.Id.ToString(), zone.Name, currentTempF is { } t ? Math.Round(t, 1) : null,
-            comfort, history, projected, low, high);
+            comfort, history, projected, low, high, currentAsOf);
     }
 
     private static Task<List<Sample>> LoadMeasurementsAsync(

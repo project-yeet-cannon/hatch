@@ -122,6 +122,10 @@ function xZone(index: number, now: Date): ZoneClimate {
     id: `${X}-${index}`,
     name: X_LONG,
     currentTempF: NUM,
+    // Real, and fresh, for the reason the timestamps above are real: this
+    // source exists to catch hardcoded *content*, and a stale zone would gray
+    // its own bar out and hide the 9999 this is here to make visible.
+    currentAsOf: now.toISOString(),
     comfortRange: xComfortRange(),
     history: xSeries(history),
     forecast: xSeries(forecast),
@@ -143,6 +147,7 @@ function xOutside(now: Date): OutsideClimate {
   const { history, forecast } = timeWindow(now);
   return {
     currentTempF: NUM,
+    currentAsOf: now.toISOString(),
     humidityPct: NUM,
     sunHoursRemaining: NUM,
     sunsetTime: now.toISOString(),

@@ -28,10 +28,18 @@ const STEP_HOURS = 0.5;
 
 const TIME_ZONE = DEFAULT_TIME_ZONE;
 
-const ZONE_CURVES: Record<string, { name: string; curve: DiurnalCurve }> = {
-  living_room: { name: 'Living Room', curve: { meanF: 70, amplitudeF: 4, peakHour: 17 } },
-  bedroom: { name: 'Bedroom', curve: { meanF: 69.5, amplitudeF: 1, peakHour: 14 } },
-  office: { name: 'Office', curve: { meanF: 67.5, amplitudeF: 1.5, peakHour: 12 } },
+/**
+ * `staleMinutes` is how long ago this zone last reported, and the three values
+ * are deliberately one per band of lib/staleness.ts - fresh, stale, and past
+ * the point where the number is worth showing at all. Same reasoning as the
+ * unconfigured camera below: a state that can only be reached by unplugging a
+ * sensor is a state nobody will look at twice, and it will look wrong the first
+ * time it happens for real.
+ */
+const ZONE_CURVES: Record<string, { name: string; curve: DiurnalCurve; staleMinutes: number }> = {
+  living_room: { name: 'Living Room', curve: { meanF: 70, amplitudeF: 4, peakHour: 17 }, staleMinutes: 1 },
+  bedroom: { name: 'Bedroom', curve: { meanF: 69.5, amplitudeF: 1, peakHour: 14 }, staleMinutes: 14 },
+  office: { name: 'Office', curve: { meanF: 67.5, amplitudeF: 1.5, peakHour: 12 }, staleMinutes: 45 },
 };
 
 const INDOOR_COMFORT_RANGE: ComfortRange = { lowF: 68, highF: 71 };
@@ -104,13 +112,14 @@ function extremesOf(points: TempPoint[]): { low: DailyExtreme; high: DailyExtrem
 }
 
 function buildZone(id: string, now: Date): ZoneClimate {
-  const { name, curve } = ZONE_CURVES[id];
+  const { name, curve, staleMinutes } = ZONE_CURVES[id];
   const { history, forecast } = buildSeries(now, curve);
   const { low, high } = extremesOf([...history, ...forecast]);
   return {
     id,
     name,
     currentTempF: round1(diurnalTempF(now, TIME_ZONE, curve)),
+    currentAsOf: new Date(now.getTime() - staleMinutes * 60_000).toISOString(),
     comfortRange: INDOOR_COMFORT_RANGE,
     history,
     forecast,
@@ -259,6 +268,10 @@ function buildOutside(now: Date, zones: ZoneClimate[], sunEvents: SunEvents): Ou
 
   return {
     currentTempF,
+    // Outside is always fresh in the mock: the three interior zones already
+    // cover the staleness ladder, and a permanently stale outside card would
+    // just be noise behind every other thing the mock is for.
+    currentAsOf: now.toISOString(),
     humidityPct: currentHumidity,
     sunHoursRemaining,
     sunsetTime: sunset.toISOString(),

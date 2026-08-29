@@ -33,6 +33,20 @@ export interface ZoneClimate {
   name: string;
   /** Null when there's no reading yet - distinct from a real 0°F. */
   currentTempF: number | null;
+  /**
+   * ISO 8601. When the reading behind `currentTempF` was actually taken.
+   *
+   * Null is a different statement from "no reading", and the distinction is the
+   * whole point of the field: the server returns null both when there is no
+   * reading and when the value fell back to a history bucket, because a bucket
+   * boundary is not a moment anything was measured. Either way the client knows
+   * only that it cannot date this number, which lib/staleness.ts reads as "no
+   * data" rather than as "fresh".
+   *
+   * Without it, `currentTempF` is the newest sample anywhere in a nine-hour
+   * window and a sensor that died at noon still reads confidently at 5pm.
+   */
+  currentAsOf: string | null;
   comfortRange: ComfortRange;
   /** Actual readings, oldest first, ending at "now". */
   history: TempPoint[];
@@ -52,6 +66,8 @@ export interface HourlyOutside {
 export interface OutsideClimate {
   /** Null when there's no reading yet - distinct from a real 0°F. */
   currentTempF: number | null;
+  /** ISO 8601. Same contract as `ZoneClimate.currentAsOf`, including what null means. */
+  currentAsOf: string | null;
   humidityPct: number | null;
   sunHoursRemaining: number;
   /** ISO 8601 timestamp. */

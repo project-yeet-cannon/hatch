@@ -9,6 +9,12 @@ namespace Aerie.Api.Models.Dashboard;
 // derived on the client. Nullable numeric fields (CurrentTempF, HumidityPct,
 // Low, High) mean "no reading yet" - distinct from a real 0 - so the client
 // can render a placeholder instead of a false zero.
+//
+// CurrentAsOf is the same idea applied to time. Without it, CurrentTempF is a
+// number with no age on it, and a sensor that stopped reporting at noon still
+// produces a confident reading at 5pm - the client cannot tell a live house
+// from a dead one, however carefully it renders. See lib/staleness.ts for what
+// the client does with it, and docs/plans/kiosk-graceful-deg.md for why.
 
 public record TempPoint(DateTimeOffset Time, decimal TempF);
 
@@ -24,7 +30,14 @@ public record ZoneClimate(
     IReadOnlyList<TempPoint> History,
     IReadOnlyList<TempPoint> Forecast,
     DailyExtreme? Low,
-    DailyExtreme? High);
+    DailyExtreme? High,
+    // When the reading behind CurrentTempF was actually taken, or null when
+    // there is no such moment. Null covers two cases that are both honest and
+    // neither of which is "just now": no reading at all, and a value that fell
+    // back to a history bucket - a bucket's timestamp is a bucket boundary, not
+    // a reading, and reporting it as one would make an interpolated value look
+    // fresher than the data under it.
+    DateTimeOffset? CurrentAsOf = null);
 
 public record Precipitation(decimal AmountIn, string Window);
 
@@ -43,7 +56,10 @@ public record OutsideClimate(
     string Note,
     IReadOnlyList<TempPoint> History,
     IReadOnlyList<TempPoint> Forecast,
-    IReadOnlyList<HourlyOutside> Hourly);
+    IReadOnlyList<HourlyOutside> Hourly,
+    // When the reading behind CurrentTempF was taken. Same contract as
+    // ZoneClimate.CurrentAsOf above, including what null means.
+    DateTimeOffset? CurrentAsOf = null);
 
 /// <summary>
 /// The four sun events (see <see cref="Aerie.Api.Services.Dashboard.SolarCalculator.EventsForDay"/>)

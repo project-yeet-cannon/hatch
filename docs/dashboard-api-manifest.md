@@ -67,7 +67,7 @@ sub-resources under it exist for reuse, debugging, and other screens.
 | `GET /api/dashboard` | `DashboardData` | **Primary.** Composes zones + outside + routines + cameras + panels + the calendar agenda + outdoor hazards. Query: `historyHours` (9), `forecastHours` (7), `bucketMinutes` (30). |
 | `GET /api/zones` · `GET /api/zones/{id}` | `ZoneDto` | Zone CRUD for the admin app. |
 | `POST /api/zones` · `PUT /api/zones/{id}` · `DELETE /api/zones/{id}` | `ZoneDto` | |
-| `GET /api/zones/climate` · `GET /api/zones/{id}/climate` | `ZoneClimate` | Current snapshot, history, forecast. Same window query params as `/api/dashboard`. |
+| `GET /api/zones/climate` · `GET /api/zones/{id}/climate` | `ZoneClimate` | Current snapshot, history, forecast. Same window query params as `/api/dashboard`. `currentAsOf` dates `currentTempF` — null both when there is no reading and when the value fell back to a history bucket, since a bucket boundary is not a moment anything was measured. Without it `currentTempF` is the newest sample anywhere in the nine-hour window, so a sensor that died at noon still reads confidently at 5pm. |
 | `GET /api/zones/{id}/readings` | `TempPoint[]` | Bucketed series. Query: `from`, `to`, `bucketMinutes`. |
 | `GET /api/zones/{id}/comfort` · `PUT …` | `ComfortRange` | The zone's comfort band. |
 | `GET /api/outside` | `OutsideClimate` | Outside temperature, humidity, sun. |

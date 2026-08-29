@@ -367,24 +367,24 @@ Needs Phase 6's field. Client-side only once it has it.
 
 Small, and everything in Phase 5 depends on it.
 
-- [ ] Add `CurrentAsOf` (`DateTimeOffset?`) to `ZoneClimate` in
+- [x] Add `CurrentAsOf` (`DateTimeOffset?`) to `ZoneClimate` in
       `Models/Dashboard`, set from `rows[^1].Timestamp` in
       [`ZoneService.BuildZoneClimate`](../../src/Aerie.Api/Services/Dashboard/ZoneService.cs)
       — the same row `currentTempF` comes from — and **null when the value fell
       back to a history bucket**, because a bucket's timestamp is a bucket
       boundary and not a reading.
-- [ ] Add the equivalent to `OutsideClimate` in
+- [x] Add the equivalent to `OutsideClimate` in
       [`WeatherService`](../../src/Aerie.Api/Services/Dashboard/WeatherService.cs).
-- [ ] Mirror both onto the TypeScript
+- [x] Mirror both onto the TypeScript
       [`types.ts`](../../src/Aerie.Web/apps/dashboard/src/types.ts) contract,
       optional-null with a comment saying what null means — it is a different
       statement from "no reading", and the distinction is the whole point.
-- [ ] Update the mock and test data sources so `?source=mock` can exercise all
+- [x] Update the mock and test data sources so `?source=mock` can exercise all
       three staleness states; a state that can only be reached by unplugging a
       sensor is a state nobody will look at twice.
-- [ ] Extend the `ZoneService` tests: a fresh row, a row at the far edge of the
+- [x] Extend the `ZoneService` tests: a fresh row, a row at the far edge of the
       window, and a zone whose only value came from a bucket.
-- [ ] Note the field in [dashboard-api-manifest.md](../dashboard-api-manifest.md).
+- [x] Note the field in [dashboard-api-manifest.md](../dashboard-api-manifest.md).
 
 ## Phase 7 — The sweep
 

@@ -67,8 +67,8 @@ public class WeatherService(
         var sunHoursRemaining = Math.Round(Math.Max(0m, (decimal)(sunsetTime - now).TotalHours), 1);
 
         var zone = await zoneTask;
-        (decimal? currentTempF, IReadOnlyList<TempPoint> history) = zone is null
-            ? (null, [])
+        (decimal? currentTempF, IReadOnlyList<TempPoint> history, DateTimeOffset? currentAsOf) = zone is null
+            ? (null, [], null)
             : await GetTempHistoryAsync(db, zone.Id, from, now, window.Bucket, ct);
 
         var humidityPct = zone is null
@@ -84,7 +84,8 @@ public class WeatherService(
             Note: note,
             History: history,
             Forecast: [],
-            Hourly: []);
+            Hourly: [],
+            CurrentAsOf: currentAsOf);
     }
 
     private async Task<StateObject?> BoundedStateAsync(string entityId, CancellationToken ct)
@@ -100,7 +101,7 @@ public class WeatherService(
         }
     }
 
-    private static async Task<(decimal? CurrentTempF, IReadOnlyList<TempPoint> History)> GetTempHistoryAsync(
+    private static async Task<(decimal? CurrentTempF, IReadOnlyList<TempPoint> History, DateTimeOffset? CurrentAsOf)> GetTempHistoryAsync(
         AerieContext db, Guid zoneId, DateTimeOffset from, DateTimeOffset to, TimeSpan bucket, CancellationToken ct)
     {
         var rows = await ZoneMeasurements.ForZone(db, zoneId, DeviceChannelMetric.Temperature, from, to)
@@ -110,8 +111,12 @@ public class WeatherService(
 
         var history = ZoneMath.Bucket(rows.Select(r => (r.Timestamp, (decimal?)r.Value)), from, to, bucket);
         var currentTempF = rows.Count > 0 ? rows[^1].Value : (history.Count > 0 ? history[^1].TempF : (decimal?)null);
+        // Only ever a row's own timestamp - see the same rule in ZoneService.
+        // The outside temperature comes down the same road and goes stale the
+        // same way, so it gets the same field rather than a different story.
+        var currentAsOf = rows.Count > 0 ? rows[^1].Timestamp : (DateTimeOffset?)null;
 
-        return (currentTempF, history);
+        return (currentTempF, history, currentAsOf);
     }
 
     /// <summary>"partlycloudy" -> "Partly Cloudy".</summary>
