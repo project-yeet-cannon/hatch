@@ -79,9 +79,10 @@ Node names and cluster readings are observations of one installation.
 
 ## Findings
 
-Eleven. The first three decide the shape of the work, the next two decide the
+Twelve. The first three decide the shape of the work, the next two decide the
 mechanism, and 6-8 are each a piece of the job that turns out to be already
-done. **9-11 came out of building it** and are the ones that changed the plan.
+done. **9-12 came out of building it** and are the ones that changed the plan;
+12 is a latent bug the work happened to trip over.
 
 ### 1. Nothing in the running system can name its own commit
 
@@ -312,6 +313,27 @@ per five minutes, in a bounded map - the key is a client-supplied header, and
 an unbounded dictionary keyed on one of those is a memory leak with an open
 door.
 
+### 12. A committed build artifact had been shadowing two apps' Vite config
+
+`admin` and `docs` built cleanly and produced no stamp at all, while the other
+four worked. Both carry a **committed `vite.config.js`** — `tsc -b` output from
+their `composite` project, checked in at some point — and Vite's config lookup
+tries `vite.config.js` *before* `vite.config.ts`.
+
+So those two apps had not been building from the TypeScript config anyone
+edits. Any change to `admin/vite.config.ts` or `docs/vite.config.ts` since
+those files were committed would have built successfully and done nothing,
+which is the worst available failure mode: no error, no warning, and a config
+file that reads correctly.
+
+It surfaced here only because this plan is the first thing in a while to edit
+those two configs *and* have a visible consequence when the edit is dropped —
+and it briefly looked like a bug in the plugin rather than in what was loading
+it. The artifacts are gone (a concurrent commit removed them independently, so
+two people found this the same afternoon), the `outDir` from 2.1 stops `tsc -b`
+regenerating them in place, and `.gitignore` now names them so they cannot
+return by hand.
+
 ---
 
 ## Phases
@@ -411,7 +433,7 @@ production is running.*
       rest on `nodenext`. `.mts` imported as `.mjs` is the one spelling both
       accept. The two legacy `composite` projects also needed an `outDir`, or
       `tsc -b` drops a `.mjs` next to the source that Vite would resolve *ahead*
-      of it — a stale emit silently winning over the file everyone edits.
+      of it — see finding 12, which is that same hazard already sprung.
 - [x] **2.2** — Installed by the plugin as an inline `head-prepend` script, not
       at each app's bootstrap: that puts it in front of the ui-logs ping
       `index.html` itself fires, so even the first request of a page load
