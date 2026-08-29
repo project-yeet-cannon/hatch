@@ -149,6 +149,23 @@ spec:
             script  /fluent-bit/scripts/service_tag.lua
             call    set_service
 
+        # A second pass over the same script for `aerie_revision` - the git
+        # commit of the Aerie build that emitted the line (docs/plans/version.md).
+        # A separate stanza rather than more work inside set_service because
+        # fluent-bit binds one `call` per filter, and because the two answer
+        # different questions: one names the workload, one names its build.
+        #
+        # Most of what it does costs nothing at the application layer - the
+        # revision is parsed straight out of the tag in
+        # kubernetes.container_image, which the kubernetes filter above already
+        # attached. The override path is what makes a relayed browser line
+        # carry the browser's revision instead of the relay's; see the script.
+        [FILTER]
+            Name    lua
+            Match   kube.*
+            script  /fluent-bit/scripts/service_tag.lua
+            call    set_aerie_revision
+
       # Unchanged from the compose stack's custom_parsers.conf (7b.9) -
       # Aerie.Api's JSON console formatter writes one JSON object per line,
       # nothing here depends on being containerd vs. docker.

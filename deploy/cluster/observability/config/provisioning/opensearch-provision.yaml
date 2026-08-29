@@ -80,7 +80,7 @@ spec:
               command:
                 - /bin/sh
                 - -c
-                - /scripts/apply-ism-policy.sh && /scripts/apply-index-template.sh && /scripts/create-index-pattern.sh
+                - /scripts/apply-ism-policy.sh && /scripts/apply-index-template.sh && /scripts/create-index-pattern.sh && /scripts/create-fleet-search.sh
               env:
                 - name: OPENSEARCH_URL
                   value: http://opensearch-cluster-master:9200

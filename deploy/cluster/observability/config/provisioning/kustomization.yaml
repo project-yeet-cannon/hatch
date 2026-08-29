@@ -4,7 +4,7 @@
 # Kuma instead of OpenSearch - it needs no configMapGenerator entry of its
 # own, since its image carries provision.py rather than mounting a script.
 #
-# The three .sh files here are real copies of the old compose stack's
+# The .sh files here are real copies of the old compose stack's
 # containers/opensearch-provision/*.sh (deleted in 7b.9, in git history)
 # rather than strings embedded in ./opensearch-provision.yaml - the same call
 # ../../controllers/fluent-bit.yaml makes for its own Lua script, and for the
@@ -12,6 +12,8 @@
 # the file everyone actually greps for. They are not identical to the
 # compose originals - ./apply-index-template.sh and ./apply-ism-policy.sh
 # each carry one edit of their own, documented in their own header comments.
+# ./create-fleet-search.sh has no compose ancestor at all; it arrived with
+# docs/plans/version.md.
 #
 # disableNameSuffixHash: true, the same reason ../dashboards/kustomization.yaml
 # gives for its own generators: ./opensearch-provision.yaml's
@@ -30,5 +32,6 @@ configMapGenerator:
       - apply-ism-policy.sh
       - apply-index-template.sh
       - create-index-pattern.sh
+      - create-fleet-search.sh
     options:
       disableNameSuffixHash: true

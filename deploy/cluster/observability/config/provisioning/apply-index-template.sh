@@ -1,13 +1,22 @@
 #!/bin/sh
-# One-shot: applies the aerie-logs index template so the `service` field
-# (see ../../controllers/fluent-bit/service_tag.lua) is mapped as `keyword`
-# on new daily indices, instead of relying on OpenSearch's dynamic text+
-# keyword guess, and then converges `number_of_replicas: 0` onto the
-# aerie-logs-* indices that already exist. Copied from the old compose
-# stack's containers/opensearch-provision/apply-index-template.sh, deleted
-# with the rest of that path in 7b.9 and reachable in git history - see
+# One-shot: applies the aerie-logs index template so the `service` and
+# `aerie_revision` fields (see ../../controllers/fluent-bit/service_tag.lua)
+# are mapped as `keyword` on new daily indices, instead of relying on
+# OpenSearch's dynamic text+keyword guess, and then converges
+# `number_of_replicas: 0` onto the aerie-logs-* indices that already exist.
+# Copied from the old compose stack's
+# containers/opensearch-provision/apply-index-template.sh, deleted with the
+# rest of that path in 7b.9 and reachable in git history - see
 # ./kustomization.yaml for why this is a real file rather than a string
 # embedded in ./opensearch-provision.yaml.
+#
+# keyword and not text for the revision fields, for the same reason as
+# `service`: a git sha is an identifier to group and filter on exactly, never
+# a string to tokenise. The default guess would make `aerie_revision` a text
+# field with a `.keyword` subfield, which works for a term query and then
+# quietly does not for an aggregation written against the bare name - and the
+# whole point of this field is one path that behaves the same everywhere.
+# aerie_sequence is a long because it is ordered and gets range queries.
 #
 # settings.number_of_replicas: 0 is the one edit this copy carries over the
 # original: ../../controllers/opensearch.yaml runs `singleNode: true`, and a
@@ -86,6 +95,9 @@ TEMPLATE_BODY=$(cat <<'JSON'
     "mappings": {
       "properties": {
         "service": { "type": "keyword" },
+        "aerie_revision": { "type": "keyword" },
+        "aerie_relay_revision": { "type": "keyword" },
+        "aerie_sequence": { "type": "long" },
         "kubernetes": {
           "properties": {
             "labels": { "type": "flat_object" },
