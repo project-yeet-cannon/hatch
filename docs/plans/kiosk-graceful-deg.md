@@ -1,9 +1,15 @@
 # Graceful degradation for the kiosk UX stack
 
-**Status:** Not started. Seven phases. Phase 0 is free and de-risks Phase 3 —
-run it first. Phases 1–2 are the native shell, 3–5 the web app, 6 the API's
-half of staleness, 7 the sweep. Phases 1/2 and 3/4/5 are independent of each
-other and can land in either order; Phase 5 needs Phase 6's field.
+**Status:** All seven phases implemented and committed. Phase 0's query is
+recorded below and decided the order. What remains is the hardware verification
+at the bottom of this file, which is the operator's half — every phase here is
+covered by automated tests (166 dashboard, 39 kiosk, 902 API) and none of them
+is a substitute for standing in front of a tablet with the API stopped.
+
+Phases 1–2 ship in an APK and reach the wall through `UpdateManager`'s poll;
+touching anything under `apps/kiosk/` makes CI build and publish one, so they
+land within six hours or immediately on a power cycle. Phases 3–7 ship in the
+bundle and land on the next drift reload.
 
 A wall tablet has no keyboard, no console, and nobody standing at it. Every
 failure it can have is a failure someone discovers hours later, by walking past
