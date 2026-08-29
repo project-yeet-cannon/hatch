@@ -14,7 +14,8 @@ namespace Aerie.Api.Models.Dashboard;
 // number with no age on it, and a sensor that stopped reporting at noon still
 // produces a confident reading at 5pm - the client cannot tell a live house
 // from a dead one, however carefully it renders. See lib/staleness.ts for what
-// the client does with it, and docs/plans/kiosk-graceful-deg.md for why.
+// the client does with it, and docs/kiosk-architecture.md ("How old is that
+// number") for why.
 
 public record TempPoint(DateTimeOffset Time, decimal TempF);
 

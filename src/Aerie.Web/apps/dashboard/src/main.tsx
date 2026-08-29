@@ -21,7 +21,7 @@ clientLogger.info('kiosk main.tsx module evaluated');
 
 // Before the first render rather than after: index.html paints a clock and a
 // message into #root so a bundle that never runs is not a white wall (see the
-// comment there and Phase 0 of docs/plans/kiosk-graceful-deg.md). Calling this
+// comment there and docs/kiosk-architecture.md). Calling this
 // rather than relying on createRoot() to clear the container is deliberate -
 // the fallback owns a 15s interval and a mount watchdog that have to be torn
 // down, and the flag is what tells the watchdog it lost the race.

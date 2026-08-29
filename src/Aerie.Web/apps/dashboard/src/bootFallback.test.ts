@@ -9,7 +9,8 @@ import packageJson from '../package.json';
  * in a file no build step touches, so nothing type-checks it and nothing
  * imports it. What it protects against is also invisible in review - eight
  * sessions over nine days logged `kiosk index.html parse started` and were
- * never heard from again (Phase 0 of docs/plans/kiosk-graceful-deg.md), and the
+ * never heard from again (docs/kiosk-architecture.md, "Why the fallback screen
+ * is not paranoia"), and the
  * only symptom was a white rectangle on a wall.
  *
  * So these assert the contract's edges rather than its behaviour: that the

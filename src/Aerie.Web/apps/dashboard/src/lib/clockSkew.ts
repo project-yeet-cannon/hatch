@@ -2,7 +2,7 @@
  * Whether the tablet's own clock can still be trusted.
  *
  * The clock is the floor everything else in
- * docs/plans/kiosk-graceful-deg.md stands on - it is what the boot fallback
+ * docs/kiosk-architecture.md stands on - it is what the boot fallback
  * screen shows, what the native error screen shows, and what the header shows -
  * so a tablet whose clock has drifted is a wall that lies confidently in
  * exactly the situations the rest of this work made safe. A device that has

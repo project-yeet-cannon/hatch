@@ -11,7 +11,8 @@ namespace Aerie.Api.Tests.Dashboard;
 /// dead one. CurrentTempF is the newest measurement anywhere in the 9-hour
 /// history window, so a sensor that stopped reporting at noon still produces a
 /// confident number at 5pm - and until this field existed, no client could have
-/// known. See docs/plans/kiosk-graceful-deg.md and lib/staleness.ts.
+/// known. See docs/kiosk-architecture.md ("How old is that number") and
+/// lib/staleness.ts.
 ///
 /// The distinction these tests exist to pin down is the one a later reader is
 /// most likely to "fix": null when the value came from a bucket rather than a

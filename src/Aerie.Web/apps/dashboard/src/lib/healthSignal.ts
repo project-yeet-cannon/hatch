@@ -4,7 +4,7 @@
  * The dashboard fails quietly today: `App` sets an error state and renders it
  * only while `data` is null, so every failure after the first successful
  * snapshot changes nothing on screen. Over the nine days sampled in
- * docs/plans/kiosk-graceful-deg.md that hid fourteen real 500s, 502s and
+ * docs/kiosk-architecture.md that hid fourteen real 500s, 502s and
  * network errors from anyone standing in front of the tablet.
  *
  * A dot that is simply on-or-off is the obvious fix and the wrong one. The API
