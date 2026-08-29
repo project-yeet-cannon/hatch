@@ -30,8 +30,10 @@ interface AppVersionResponse {
 
 /**
  * The filename of a hashed asset in this app's own assets/ directory, or null
- * for anything else — cross-app references and third-party URLs (the Google
- * Fonts stylesheet in index.html's head) aren't part of this build's identity.
+ * for anything else — cross-app references and any third-party URL aren't part
+ * of this build's identity. The font files are in assets/ but never reach this
+ * function: theme.css references them, index.html doesn't, and this only ever
+ * sees the document's own <script src>/<link href>.
  * Resolved through URL so an absolute `el.src` and a root-relative attribute
  * both reduce to the same thing; the nested-path rejection keeps this in step
  * with the server's regex, which can't cross a '/' either.

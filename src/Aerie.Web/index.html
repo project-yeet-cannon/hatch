@@ -3,10 +3,30 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Loaded off the critical path rather than as a plain stylesheet link. A
+      render-blocking subresource on a third-party host means a WAN outage - LAN
+      fine, house fine - holds first paint until that socket gives up. `media=print`
+      makes the browser fetch it at low priority without blocking, and the onload
+      promotes it to `all` once it has arrived; the noscript copy covers the case
+      where the promotion never runs.
+
+      The dashboard solves this properly, by self-hosting the face through
+      fontsource (apps/dashboard/src/theme.css). This page is a plain static file
+      with no build step to bundle one into, so it hedges instead.
+    -->
     <link
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
     />
+    <noscript>
+      <link
+        href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet"
+      />
+    </noscript>
     <title>Aerie</title>
     <style>
       :root {
@@ -32,7 +52,7 @@
         justify-content: center;
         padding: 40px 24px;
         background: var(--bg);
-        font-family: "Manrope", sans-serif;
+        font-family: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
         color: var(--ink);
       }
 

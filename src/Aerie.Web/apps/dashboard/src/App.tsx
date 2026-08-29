@@ -157,9 +157,15 @@ export function App() {
       />
       <div className="hfdev">
         <div className="hf-head">
+          {/* The date comes from `now`, never from the snapshot. A snapshot
+              that went stale before midnight and a device clock that did not
+              would otherwise leave the wall reading "Thursday 3rd" above
+              "12:20 AM" on Friday - the header would be reporting the age of
+              the data while looking like it was reporting the date. How old
+              the snapshot is belongs to the health dot, not the calendar. */}
           <div className="hf-hl">
-            <span className="hf-day">{formatMonthDay(data?.generatedAt ?? now.toISOString(), timeZone)}</span>
-            <span className="hf-date">{formatWeekday(data?.generatedAt ?? now.toISOString(), timeZone)}</span>
+            <span className="hf-day">{formatMonthDay(now.toISOString(), timeZone)}</span>
+            <span className="hf-date">{formatWeekday(now.toISOString(), timeZone)}</span>
           </div>
           <div className="hf-hr">
             <span className="hf-clock">

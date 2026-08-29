@@ -1,3 +1,18 @@
+/* Manrope, self-hosted, rather than a <link> to fonts.googleapis.com.
+   That link was a render-blocking subresource on a third-party host: with the
+   WAN down and the LAN fine - a modem reboot, an ISP outage - the browser held
+   first paint on the wall until that socket gave up, and nothing else in the
+   house needs the internet to draw its first frame.
+
+   The variable face covers 200-800 in one 25KB latin subset, so the five static
+   weights the old link asked for cost one request instead of five. fontsource
+   ships it with `font-display: swap` and per-subset `unicode-range`, which is
+   what makes the failure mode a fallback face rather than a blank frame.
+
+   Imported here rather than from an entry point so a future entry point cannot
+   forget it - dev-theme.html already is a second one. */
+@import '@fontsource-variable/manrope';
+
 html,
 body {
   margin: 0;
@@ -14,9 +29,11 @@ body {
   /* Static across all circadian phases - see src/theme/tokens.ts for the
      color tokens, which are blended and applied as inline styles instead. */
   --r: 26px;
-  --ui: 'Manrope', sans-serif;
-  --display: 'Manrope', sans-serif;
-  --num: 'Manrope', sans-serif;
+  /* 'Manrope' second so a device with it installed locally still uses it if
+     the bundled face somehow fails to decode. */
+  --ui: 'Manrope Variable', 'Manrope', sans-serif;
+  --display: 'Manrope Variable', 'Manrope', sans-serif;
+  --num: 'Manrope Variable', 'Manrope', sans-serif;
 }
 
 .hf-page {
