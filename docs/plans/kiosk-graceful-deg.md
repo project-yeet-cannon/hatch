@@ -194,21 +194,21 @@ Everything here is in
 The "Reconnecting…" `TextView` becomes a proper error view; the two blind spots
 that route around it get closed.
 
-- [ ] **Handle the content crash.** Replace the empty `ContentDelegate` with
+- [x] **Handle the content crash.** Replace the empty `ContentDelegate` with
       one implementing `onCrash(session)` and `onKill(session)`: log through
       `KioskLogger.error` with the crash kind, call `session.close()` /
       `session.open(runtime)` to rebuild the content process, re-attach it to
       the `GeckoView`, show the error view, and go through `scheduleRetry()`
       rather than reloading immediately — a crash loop must back off like
       anything else. Keep the object non-empty regardless, per bug 1758212.
-- [ ] **Probe origin health after each load.** On `onPageStop(success = true)`,
+- [x] **Probe origin health after each load.** On `onPageStop(success = true)`,
       fire one background `HttpURLConnection` HEAD at
       `<DASHBOARD_URL>api/app-version/dashboard`. A 2xx confirms the load and
       keeps today's behaviour (hide overlay, reset backoff). A 4xx/5xx or a
       throw means the document that just "loaded" is an error page: show the
       error view with the status, and `scheduleRetry()`. While the error view is
       up, re-probe on the same backoff and reload on the first 2xx.
-- [ ] **Build the error view.** A `FrameLayout` replacing `reconnectingOverlay`,
+- [x] **Build the error view.** A `FrameLayout` replacing `reconnectingOverlay`,
       painted the deep-night surface rather than pure black, holding:
       - the date and the time, from `ZoneId.systemDefault()` with an
         `America/New_York` fallback, ticking on a 15s `Handler`;
@@ -223,13 +223,13 @@ that route around it get closed.
       - a small footer line: `versionName`/`versionCode` and the last four of
         the `deviceId`, so a photo of the screen is a diagnosis.
       Every string into `strings.xml`; the file currently holds two.
-- [ ] Keep the retry ladder as it is — 2s → 30s — but log each transition
+- [x] Keep the retry ladder as it is — 2s → 30s — but log each transition
       through `KioskLogger.warn` with the delay, so a tablet stuck retrying is
       visible in OpenSearch rather than only on the wall.
-- [ ] Unit-test the category mapping and the retry-delay progression as pure
-      functions, the way
-      [`CircadianBrightnessTest`](../../apps/kiosk/app/src/test/java/family/landis/aeriekiosk/CircadianBrightnessTest.kt)
-      does — pull them out of the activity to make that possible.
+- [x] Unit-tested as pure functions in `LoadFailures.kt`, pulled out of the
+      activity to make that possible — 11 tests alongside
+      [`CircadianBrightnessTest`](../../apps/kiosk/app/src/test/java/family/landis/aeriekiosk/CircadianBrightnessTest.kt)'s
+      20.
 
 ## Phase 2 — The update check never interrupts, and recovers faster
 

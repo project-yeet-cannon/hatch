@@ -1,4 +1,18 @@
 <resources>
     <string name="app_name">Aerie Kiosk</string>
-    <string name="reconnecting_message">Reconnecting…</string>
+
+    <!--
+      The error screen's sentences. Each one names a category and, where there
+      is one, the thing to do about it - a wall tablet has no console and often
+      nobody in front of it who knows what a 502 is. See LoadFailures.kt.
+    -->
+    <string name="error_network">Can\'t reach the house network right now.</string>
+    <string name="error_security">The connection to Aerie wasn\'t trusted.</string>
+    <string name="error_content">Aerie answered with something this display couldn\'t read.</string>
+    <string name="error_server">Aerie is reachable but isn\'t answering yet.</string>
+    <string name="error_crashed">The display crashed. It\'s restarting itself.</string>
+    <string name="error_unknown">Something went wrong loading the dashboard.</string>
+
+    <string name="error_retrying">Trying again on its own.</string>
+    <string name="error_reload">Reload</string>
 </resources>
