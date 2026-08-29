@@ -1349,3 +1349,154 @@ body {
     animation-duration: 1ms;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Health dot and its modal (components/HealthDot.tsx, HealthModal.tsx).
+
+   The color is the AlertBanner's trick and for the AlertBanner's reason: the
+   red is stated once, absolutely, because a warning that shifted hue with the
+   circadian phase would be reporting the time of day rather than the fault -
+   and then its luminance is handed straight back to the phase by mixing into
+   --card. A fixed red dot would be the brightest thing in the house at 3am.
+
+   --health-level arrives inline from the component and does two jobs: it mixes
+   the pip toward the surface as the fault ages, and it fades the whole control.
+   Both, rather than either alone, because a dot that only loses saturation
+   still draws the eye from across a room.
+   --------------------------------------------------------------------------- */
+.hf-health-dot {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 25;
+  /* A 52px target around a 13px pip. The visible mark should be small enough to
+     ignore from the sofa and the tappable area big enough to hit from a step
+     away without looking - those are different sizes, so they are different
+     boxes. */
+  width: 52px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  opacity: calc(0.45 + 0.55 * (var(--health-level) / 100%));
+  transition: opacity 0.8s ease;
+}
+.hf-health-pip {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: color-mix(in srgb, #d14343 var(--health-level), var(--card));
+  box-shadow: 0 0 0 3px color-mix(in srgb, #d14343 12%, transparent);
+  transition: background 0.8s ease;
+}
+
+.hf-health-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 26;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 18px 0;
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--ui);
+  touch-action: pan-y;
+}
+.hf-health-overlay * {
+  box-sizing: border-box;
+}
+.hf-health-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+}
+.hf-health-title {
+  flex: 1;
+  min-width: 0;
+  font: 700 27px/1.2 var(--display);
+}
+.hf-health-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 22px;
+  cursor: pointer;
+}
+.hf-health-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+}
+.hf-health-empty {
+  padding: 20px 4px;
+  font: 500 15px/1.4 var(--ui);
+  color: var(--muted);
+}
+.hf-health-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: var(--card);
+  /* The rail carries the level, so warn and error are told apart without
+     reading either one - the same ladder-of-presence the alerts use. */
+  border-left: 4px solid color-mix(in srgb, #d14343 70%, var(--card));
+}
+.hf-health-row.warn {
+  border-left-color: color-mix(in srgb, #e0a13f 70%, var(--card));
+}
+.hf-health-when {
+  font: 600 13px/1.5 var(--num);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.hf-health-message {
+  font: 600 15px/1.35 var(--ui);
+  overflow-wrap: anywhere;
+}
+.hf-health-detail {
+  grid-column: 2;
+  font: 500 13px/1.4 var(--ui);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.hf-health-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 0 16px;
+}
+.hf-health-reload {
+  padding: 14px 26px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--card);
+  color: var(--ink);
+  font: 600 16px/1 var(--ui);
+  cursor: pointer;
+}
+.hf-health-build {
+  font: 500 11px/1.3 var(--ui);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}

@@ -18,11 +18,14 @@ import { GatherTile } from './components/GatherTile';
 import { GatherOverlay } from './components/GatherOverlay';
 import { CameraFeedModal } from './components/CameraFeedModal';
 import { PanelOverlay } from './components/PanelOverlay';
+import { HealthDot } from './components/HealthDot';
+import { HealthModal } from './components/HealthModal';
 import { clientLogger } from './lib/clientLogger';
 import { useKioskLifecycle } from './hooks/useKioskLifecycle';
 import { useGatherLists } from './hooks/useGatherLists';
 import { usePhotoCarousel } from './hooks/usePhotoCarousel';
 import { useMotionEvents } from './hooks/useMotionEvents';
+import { useHealthSignal } from './hooks/useHealthSignal';
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -57,6 +60,10 @@ export function App() {
   // branch moved. Motion resumes on close if it is still going.
   const [manualCameraId, setManualCameraId] = useState<string | null>(null);
   const cameraDeviceId = manualCameraId ?? motionCameraId;
+  // How loud to be about the app's own failures. Fed by every clientLogger.error
+  // in the app for free, and faded by the poll below - see lib/healthSignal.ts.
+  const { level: healthLevel, entries: healthEntries, notePollSuccess } = useHealthSignal();
+  const [healthOpen, setHealthOpen] = useState(false);
   // The hold follows what is on screen, not what is available. A motion-opened
   // feed suspends the lifecycle for the same reason Gather does - an idle reset
   // or a deploy reload would drop a live feed while someone is standing there
@@ -66,8 +73,11 @@ export function App() {
   // the camera's: a reset or a deploy reload landing between the last "+" and
   // the settled write would drop that write, and the overlay runs its own
   // longer idle timer for as long as someone is standing there.
+  // The health modal holds for Gather's reason: an idle reset or a deploy
+  // reload landing while someone reads an error list takes the evidence away
+  // mid-read, and re-reading it is not possible - a reload empties the buffer.
   const { resetToken } = useKioskLifecycle(
-    gatherOpen || openPanel !== undefined || (manualCameraId === null && motionCameraId !== null),
+    gatherOpen || healthOpen || openPanel !== undefined || (manualCameraId === null && motionCameraId !== null),
   );
 
   // The idle rung for a hand-opened feed: the same reset that collapses the
@@ -111,6 +121,7 @@ export function App() {
           firstLoad = false;
           setData(snapshot);
           setError(null);
+          notePollSuccess();
         })
         .catch((err: unknown) => {
           if (cancelled) return;
@@ -126,7 +137,9 @@ export function App() {
       cancelled = true;
       clearInterval(refresh);
     };
-  }, []);
+    // notePollSuccess is stable across renders (useCallback with no deps), so
+    // this stays a mount-once effect and the poll is not restarted per render.
+  }, [notePollSuccess]);
 
   useEffect(() => {
     const tick = setInterval(() => setNow(new Date()), 15_000);
@@ -155,6 +168,10 @@ export function App() {
         aria-hidden="true"
         style={{ opacity: theme.veilOpacity, transitionDuration: `${theme.veilDurationMs}ms` }}
       />
+      {/* Fixed to the viewport rather than placed in the header flow, so it
+          stays put when the column is scrolled down a list. Renders nothing at
+          all when the wall is healthy, which is nearly always. */}
+      <HealthDot level={healthLevel} count={healthEntries.length} onOpen={() => setHealthOpen(true)} />
       <div className="hfdev">
         <div className="hf-head">
           {/* The date comes from `now`, never from the snapshot. A snapshot
@@ -235,6 +252,9 @@ export function App() {
           custom properties on that element, and an overlay mounted anywhere
           else would resolve none of them. */}
       {gatherOpen && <GatherOverlay listId={gatherListId} lists={gatherLists} onClose={closeGather} />}
+      {healthOpen && (
+        <HealthModal entries={healthEntries} timeZone={timeZone} onClose={() => setHealthOpen(false)} />
+      )}
       {/* Inside .hf-page for the same reason, and keyed on the panel id so
           switching panels remounts the state hook rather than showing one
           panel's controls under another's name until the first fetch lands. */}

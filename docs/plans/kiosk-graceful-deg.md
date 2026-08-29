@@ -255,14 +255,14 @@ Confirming what is already true, and fixing the one case where it isn't.
 - [ ] Unit-test the interval selection — ladder and backoff together — against a
       fake clock.
 
-## Phase 3 — The page cannot go white
+## Phase 3 — The page cannot go white ✅
 
-- [ ] **Self-host Manrope.** Subset the five weights the pages actually use into
+- [x] **Self-host Manrope.** Subset the five weights the pages actually use into
       `apps/dashboard/public/fonts/`, declare them with `@font-face` and
       `font-display: swap` in `theme.css`, and delete the `fonts.googleapis.com`
       `<link>` from both `index.html` files. `swap` means a broken font file
       costs a fallback face, never a blank frame.
-- [ ] **Ship a fallback screen inside `#root`.** Static markup in
+- [x] **Ship a fallback screen inside `#root`.** Static markup in
       `apps/dashboard/index.html`, which no build step touches (already the
       documented convention for that file's inline script). It renders:
       - date and time, from `new Date()` through
@@ -274,35 +274,35 @@ Confirming what is already true, and fixing the one case where it isn't.
         `no-cache` revalidation somehow doesn't.
       `createRoot(...).render()` replaces all of it on mount, so the cost on a
       healthy load is one paint of markup nobody sees.
-- [ ] **Add a mount watchdog.** In the same inline script, a `setTimeout` at 10s
+- [x] **Add a mount watchdog.** In the same inline script, a `setTimeout` at 10s
       that — if a `window.__aerieMounted` flag set by `main.tsx` is still
       unset — swaps the message to "The dashboard didn't finish loading" and
       logs `kiosk mount watchdog fired` through the same `fetch` the parse line
       uses. That log line is the durable version of finding 2.
-- [ ] Style the fallback with the deep-night palette inline, not with tokens —
+- [x] Style the fallback with the deep-night palette inline, not with tokens —
       it must render with zero CSS files loaded.
-- [ ] **Fix the header date** (finding 7): `formatMonthDay`/`formatWeekday` take
+- [x] **Fix the header date** (finding 7): `formatMonthDay`/`formatWeekday` take
       `now`, never `generatedAt`. The snapshot's age is Phase 4's business, not
       the calendar's.
 
 ## Phase 4 — The red dot
 
-- [ ] **Turn `clientLogger` into an error feed.** Add a bounded ring buffer
+- [x] **Turn `clientLogger` into an error feed.** Add a bounded ring buffer
       (64 entries, dropping oldest) holding every `warn` and `error` it
       enqueues, plus `subscribe(fn)` / `getEntries()`. No call site changes:
       the [17 existing `clientLogger.error` sites](../../src/Aerie.Web/apps/dashboard/src/lib/clientLogger.ts)
       across the hooks and components become the feed for free. The window
       `error` (capture-phase, so resource failures are already included) and
       `unhandledrejection` listeners are in that count.
-- [ ] **Capture console errors.** Wrap `console.error` at module init, enqueueing
+- [x] **Capture console errors.** Wrap `console.error` at module init, enqueueing
       through the same path and then delegating to the original. Guard against
       re-entry so a logger failure cannot recurse.
-- [ ] **Capture network errors.** Wrap `window.fetch` at module init: log any
+- [x] **Capture network errors.** Wrap `window.fetch` at module init: log any
       non-`ok` response (method, path, status) and any thrown request. Exclude
       `/api/ui-logs` itself, or a logging outage becomes a logging storm.
       Dedupe by `method + path + status` within a short window so a 60s poll
       failing for an hour is one entry with a count, not sixty entries.
-- [ ] **A pure health-signal module** — `lib/healthSignal.ts`, next to
+- [x] **A pure health-signal module** — `lib/healthSignal.ts`, next to
       [`kioskLifecycle.ts`](../../src/Aerie.Web/apps/dashboard/src/lib/kioskLifecycle.ts)
       and unit-tested for the same reason: what it does is a state machine over
       time, and "the dot really did go away" has to be asserted rather than
@@ -310,12 +310,12 @@ Confirming what is already true, and fixing the one case where it isn't.
       `100%` on any error, stepping to `60%` / `30%` / gone at three, six and
       nine consecutive successful dashboard polls, resetting to `100%` on the
       next error.
-- [ ] **`HealthDot`** — a `position: fixed` dot in the top-left of `.hf-page`
+- [x] **`HealthDot`** — a `position: fixed` dot in the top-left of `.hf-page`
       (inside it, so the circadian custom properties resolve), colored
       `color-mix(in srgb, #d14343 <level>%, var(--card))`, with a generous
       invisible tap target around a small visible dot. `aria-label` naming the
       count. Renders nothing at level zero.
-- [ ] **`HealthModal`** — the same overlay idiom as
+- [x] **`HealthModal`** — the same overlay idiom as
       [`GatherOverlay`](../../src/Aerie.Web/apps/dashboard/src/components/GatherOverlay.tsx)
       (fixed, inside `.hf-page`), listing the buffer newest-first: time, level,
       message, and the metadata that matters per kind (status and path for a
@@ -323,12 +323,17 @@ Confirming what is already true, and fixing the one case where it isn't.
       bottom, and a footer line with the loaded app version from
       [`appVersion.ts`](../../src/Aerie.Web/apps/dashboard/src/lib/appVersion.ts)
       and the `deviceId`.
-- [ ] **Hold the lifecycle while it is open**, through the existing `hold` flag
+- [x] **Hold the lifecycle while it is open**, through the existing `hold` flag
       on [`useKioskLifecycle`](../../src/Aerie.Web/apps/dashboard/src/hooks/useKioskLifecycle.ts)
       — reading an error list is exactly the case where an idle reset or a
       deploy reload takes the evidence away mid-read.
-- [ ] Every control in the modal stays in the **top half of the screen**, per
-      the layout constraint in [kiosk-architecture.md](../kiosk-architecture.md#text-entry-on-the-wall).
+- [~] **Deviation:** the Reload button sits in a footer, not the top half. That
+      constraint exists because an IME owns the bottom fifth of the screen and
+      the viewport may not resize for it — and this modal has no text input, so
+      no keyboard ever rises over it. Against that, putting "Reload the
+      dashboard" next to the ✕ in the top bar puts two adjacent controls with
+      very different consequences under the same thumb. Separated, deliberately.
+      If an input is ever added here, this has to move.
 
 ## Phase 5 — Climate bars tell the truth about their age
 
