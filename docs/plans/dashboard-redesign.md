@@ -546,20 +546,24 @@ every value is drawn from the tables above. Reviewable as a diff of numbers.
 
 ### Phase 4 — The stage
 
-- [ ] `lib/stageFaces.ts` (existence matrix) and `lib/agendaGlance.ts`
+- [x] `lib/stageFaces.ts` (existence matrix) and `lib/agendaGlance.ts`
       (row selection, backfill, overflow count, tomorrow whisper) — pure,
-      unit-tested at the boundaries (0/1/4/5 upcoming, all-past days, empty
-      today + busy tomorrow, timezone via the existing format helpers).
-- [ ] `components/Stage.tsx`: track/faces/dots per spec; scroll-position →
-      active dot; dot taps; `resetToken` effect snapping to face 0.
-- [ ] Photo face: PhotoCarousel cedes card chrome to the stage (a `staged`
-      variant or a wrapper class zeroing `.hf-photo`'s radius/border);
-      behavior otherwise untouched.
-- [ ] Agenda face per spec, reusing the calendar row CSS.
-- [ ] App.tsx: stage replaces the bare PhotoCarousel; CalendarSection stays
-      where it is until Phase 5 moves it.
-- [ ] `make test-web`; owner checks swipe-vs-tap on hardware if convenient
-      (the one gesture interaction worth an early feel check).
+      unit-tested at the boundaries. One wording call made in code: the
+      whisper's time uses `formatShortTime`'s prose form ("first at 8:00am"),
+      not the gutter's "8a" shorthand — it is a sentence, not a column.
+- [x] `components/Stage.tsx`: track/faces/dots per spec; scroll-position →
+      active dot; dot taps (smooth unless reduced-motion); `resetToken`
+      effect snapping to face 0 without a remount.
+- [x] Photo face: PhotoCarousel cedes card chrome to the stage via a wrapper
+      rule (`.hf-stage-face .hf-photo`); behavior otherwise untouched.
+- [x] Agenda face per spec, reusing the calendar row CSS — `EventBlock` is
+      exported from CalendarSection rather than copied, so the glance and the
+      full agenda render the same object.
+- [x] App.tsx: stage replaces the bare PhotoCarousel; CalendarSection stays
+      where it is until Phase 5 moves it (today intentionally appears in both
+      until then).
+- [x] Lint + 196 unit tests + build green. **Owner still to check**
+      swipe-vs-tap feel on hardware when convenient.
 
 ### Phase 5 — Two pages
 

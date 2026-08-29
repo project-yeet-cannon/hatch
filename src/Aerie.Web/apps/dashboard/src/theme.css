@@ -1563,6 +1563,116 @@ body {
   }
 }
 
+/* ---- The stage (components/Stage.tsx) ---------------------------------
+   The photo frame's box, now holding two faces: photos at rest, today's
+   agenda one horizontal swipe away. The pager is CSS scroll snap on an inner
+   track - no gesture code, no router. touch-action pan-x pan-y is the load-
+   bearing line: a horizontal drag scrolls the track, a vertical drag falls
+   through to the page, so the stage never traps the page-two swipe
+   (docs/plans/dashboard-redesign.md). */
+.hf-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--card);
+  overflow: hidden;
+}
+.hf-stage-track {
+  display: flex;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  touch-action: pan-x pan-y;
+  /* A drag past the last face must not scroll the page sideways or trigger
+     anything resembling navigation. */
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.hf-stage-track::-webkit-scrollbar {
+  display: none;
+}
+.hf-stage-face {
+  flex: 0 0 100%;
+  height: 100%;
+  scroll-snap-align: start;
+  min-width: 0;
+}
+/* Inside the stage, the photo button cedes its card chrome - the stage owns
+   the border and the radius - and fills the face instead of imposing its own
+   aspect box. */
+.hf-stage-face .hf-photo {
+  height: 100%;
+  aspect-ratio: auto;
+  border: none;
+  border-radius: 0;
+}
+
+/* The agenda face: the full agenda's row idiom under the section-header
+   idiom, capped by lib/agendaGlance.ts rather than scrolled. Bottom padding
+   clears the dots. */
+.hf-stage-agenda {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 18px 30px;
+  overflow: hidden;
+}
+.hf-stage-agenda-empty {
+  font: 500 15px/1.4 var(--ui);
+  color: var(--muted);
+  padding-left: 66px;
+}
+.hf-stage-agenda-more,
+.hf-stage-agenda-whisper {
+  font: 500 13px/1.3 var(--ui);
+  color: var(--muted);
+  /* Aligned with the event titles, like the empty-day label in the full
+     agenda - a continuation of the column, not a stray footnote. */
+  padding-left: 66px;
+}
+.hf-stage-agenda-whisper {
+  margin-top: auto;
+}
+
+/* Two 8px targets drawn as 6px dots, centered over whichever face is up.
+   Over a photo they borrow the caption scrim's white; over the agenda card
+   they use the palette. Buttons, because a tap should flip too. */
+.hf-stage-dots {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 10px;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  pointer-events: none;
+}
+.hf-stage-dot {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ink) 25%, transparent);
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+.hf-stage-dot.active {
+  background: var(--muted);
+}
+.hf-stage-dots.on-photo .hf-stage-dot {
+  background: rgba(255, 255, 255, 0.45);
+}
+.hf-stage-dots.on-photo .hf-stage-dot.active {
+  background: rgba(255, 255, 255, 0.9);
+}
+
 /* ---------------------------------------------------------------------------
    Health dot and its modal (components/HealthDot.tsx, HealthModal.tsx).
 

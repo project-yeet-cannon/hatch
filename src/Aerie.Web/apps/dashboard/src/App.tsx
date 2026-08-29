@@ -12,7 +12,7 @@ import { RoutinesSection } from './components/RoutinesSection';
 import { CamerasSection } from './components/CamerasSection';
 import { PanelsSection } from './components/PanelsSection';
 import { CalendarSection } from './components/CalendarSection';
-import { PhotoCarousel } from './components/PhotoCarousel';
+import { Stage } from './components/Stage';
 import { AlertBanner } from './components/AlertBanner';
 import { DashboardSkeleton } from './components/DashboardSkeleton';
 import { GatherTile } from './components/GatherTile';
@@ -274,15 +274,22 @@ export function App() {
                 />
               ))}
             </div>
-            {/* Directly under the room cards: the top of the column is the
+            {/* Directly under the climate card: the top of the column is the
                 house as it is right now, and this is the first thing below it
-                that is there to be looked at rather than read. Renders nothing
-                until an album is included on the admin Photos page, which is
-                what keeps a house that never set Immich up from having a hole
-                in its dashboard. */}
-            {photos.length > 0 && (
-              <PhotoCarousel photos={photos} source={photoSource} timeZone={data.timezone} />
-            )}
+                that is there to be looked at rather than read. Photos at rest,
+                today's agenda one swipe away; renders nothing at all when
+                neither is configured, so a fresh house has no hole where a
+                stage would be. resetToken lands it back on photos without a
+                remount - see the note in Stage.tsx. */}
+            <Stage
+              photos={photos}
+              photoSource={photoSource}
+              calendar={data.calendar}
+              timeZone={data.timezone}
+              now={now}
+              resetToken={resetToken}
+            />
+
             {/* Below the zones, above the routines: the agenda is read, the
                 routines are touched, so the reachable half of the screen stays
                 the tappable one. An agenda whose every day is empty renders
