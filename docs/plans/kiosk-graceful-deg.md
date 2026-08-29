@@ -398,40 +398,57 @@ Small, and everything in Phase 5 depends on it.
       window, and a zone whose only value came from a bucket.
 - [x] Note the field in [dashboard-api-manifest.md](../dashboard-api-manifest.md).
 
-## Phase 7 — The sweep
+## Phase 7 — The sweep ✅
 
 The failure modes that are not blank screens but are the same bug.
 
-- [ ] **Audit every data path for its degraded state.** `useGatherLists`,
-      `usePhotoCarousel`, `usePanelState`, `useCameraStream`, `useRoutineTaps`
-      and `useMotionEvents` all log an error today; what each *shows* varies.
-      One pass, one rule: every one either renders a muted "unavailable" in the
-      space it owns, or renders nothing at all — and never a half-drawn control
-      that does nothing when tapped. All of them feed the dot for free once
-      Phase 4 lands.
-- [ ] **Sanity-check the device clock.** The clock is the floor this whole plan
-      stands on, and a tablet that has been offline long enough can drift. On
-      each successful poll, compare `Date.now()` against the response's `Date`
-      header; past a couple of minutes' skew, log it and show the offset in the
-      health modal. Do not silently correct the displayed time — a wall that
-      disagrees with the phone in your hand is a bug worth seeing.
-- [ ] **`handledUnauthorized` returns a promise that never settles**
-      ([`apiDataSource.ts`](../../src/Aerie.Web/apps/dashboard/src/api/apiDataSource.ts)),
-      deliberately, so the caller stops rendering while the browser navigates.
-      Confirm the 60s poll interval doesn't stack pending promises behind it
-      during a slow navigation, and cancel the interval on the 401 path if it
-      does.
-- [ ] **`KioskLogger` spawns a raw `Thread` per line.** Harmless at today's
-      volume; a wall in a bad state is exactly when volume goes up. Give it a
-      single-thread executor and a bounded queue that drops rather than grows.
-- [ ] **`DisplayController`'s sun-events fetch** falls back to its
-      `SharedPreferences` cache. Confirm what a tablet with *no* cached events
-      and no network does on first boot — a curve with no anchors must degrade
-      to a fixed mid brightness, not to zero.
-- [ ] **The portal page** ([`src/Aerie.Web/index.html`](../../src/Aerie.Web/index.html))
-      gets the font fix from Phase 3. It already degrades correctly for
-      unreachable subdomains, which is the pattern the rest of this plan is
-      copying.
+- [x] **Audited every data path, and most of them were already right.**
+      `useGatherLists` and `usePhotoCarousel` both keep the last good data and
+      log rather than blanking (the carousel says so in a comment: "the photos
+      already on screen are still photos"). `CameraFeedModal`, `PanelOverlay`
+      and `RoutineTile` each render their own error text in the space they own.
+      All six now feed the health dot for free. Two deliberate designs left
+      alone: `GatherTile` renders nothing when the list array is empty, so a
+      failed first load looks like "no lists configured" — changing that would
+      put a dead tile on the wall of every household that hasn't made one, and
+      the dot now covers the ambiguity. And `DisplayController` with no cached
+      sun events leaves the backlight at the system default rather than guessing
+      a curve from the clock, which is already the right call for the reason it
+      states: a wrongly-dimmed wall is worse than an undimmed one.
+- [x] **Device clock sanity check** — `lib/clockSkew.ts`, compared against the
+      snapshot's `generatedAt` rather than a `Date` header, since that is a
+      server timestamp already in hand and latency is immaterial against a
+      two-minute threshold. Logged as a **warning**, so it appears in the health
+      modal without raising the dot: a wrong clock is worth seeing and is not an
+      outage. Deliberately not corrected — a wall that silently disagrees with
+      the phone in your hand is the bug, and papering over it removes its only
+      visible symptom. Re-arms after the clocks agree again, so a second drift
+      is reportable; restated only when it moves by a minute, so a tablet an
+      hour out does not fill a 64-slot buffer with one fact.
+- [x] **`handledUnauthorized`'s never-settling promise leaks, but only in one
+      shape** — and it is a shape that happens. The 401 path navigates to the
+      sign-in shell; if *that* cannot be reached (the API being down is a common
+      way to get a 401 storm in the first place) the browser stays put, and the
+      60s poll leaks one never-settling promise, and the snapshot closure behind
+      it, every minute for as long as the tablet is on. `signIn.ts` now exports
+      `isLeaving()` and the poll returns early.
+- [x] **`KioskLogger` now uses a single-thread executor with a bounded,
+      dropping queue.** Harmless at a healthy tablet's volume; the moment that
+      matters is when volume goes up, which is exactly when something is wrong —
+      a reconnect ladder logging every rung against an endpoint that is not
+      answering, each line holding a thread for its 5s timeout. The timestamp is
+      stamped at the call rather than on the worker, so a queued line still
+      reports when it happened.
+- [x] **A failed log batch now retries once** (Phase 0's third finding).
+      Session `d7560a19` logged `parse started` and then jumped straight to
+      `Dashboard data *refreshed*` — the word "refreshed" proves the initial
+      load succeeded, so all four of that page's boot lines existed and were
+      lost in transit, in one batch, silently. Two attempts, because the failure
+      this covers is a POST landing on a replica that is shutting down and one
+      more lands somewhere else. A retry can duplicate a line the server did
+      receive; a duplicate in OpenSearch is cosmetic, and the alternative is the
+      hole this closes.
+- [x] **The portal page** got the font fix in Phase 3.
 
 ## Verification
 

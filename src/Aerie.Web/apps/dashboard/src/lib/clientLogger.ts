@@ -98,7 +98,22 @@ function buildEntry(level: LogLevel, message: string, extra?: Record<string, unk
   };
 }
 
-function send(entries: OutgoingEntry[], useBeacon: boolean): void {
+/**
+ * How many times a batch is allowed to fail before it is given up on. Two,
+ * because the failure this covers is a single POST landing on a replica that is
+ * shutting down, and one more attempt lands somewhere else.
+ *
+ * This exists because of a session in the Phase 0 log query: it logged
+ * `kiosk index.html parse started` and then jumped straight to
+ * `Dashboard data *refreshed*`. The word "refreshed" proves the initial load
+ * succeeded - so all four of that page's boot lines existed in the app and were
+ * lost in transit, in one batch, silently. They are the four most
+ * diagnostically valuable lines a page ever produces, and `send` caught and
+ * dropped them.
+ */
+const MAX_SEND_ATTEMPTS = 2;
+
+function send(entries: OutgoingEntry[], useBeacon: boolean, attempt = 1): void {
   if (entries.length === 0) return;
   const body = JSON.stringify(entries);
 
@@ -106,9 +121,29 @@ function send(entries: OutgoingEntry[], useBeacon: boolean): void {
     return;
   }
 
-  fetch(ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {
-    // Best-effort - there's nowhere left to report a logging failure to.
-  });
+  // The global fetch here is this module's own wrapper by the time anything
+  // calls send(). That is safe because the wrapper excludes ENDPOINT by path -
+  // without that exclusion a logging outage would log itself forever.
+  //
+  // A retry can duplicate a line the server did receive, when the response is
+  // what got lost rather than the request. That is the right trade: a duplicate
+  // in OpenSearch is a cosmetic problem, and the alternative is the silent hole
+  // in the boot window this exists to close.
+  fetch(ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true })
+    .then((response) => {
+      if (!response.ok) retry(entries, attempt);
+    })
+    .catch(() => {
+      retry(entries, attempt);
+    });
+}
+
+function retry(entries: OutgoingEntry[], attempt: number): void {
+  // Not on a page that is going away: `useBeacon` callers are in pagehide and
+  // visibilitychange, and a timer set there never fires. Those keep the old
+  // best-effort behaviour, which is all that is available to them.
+  if (attempt >= MAX_SEND_ATTEMPTS) return;
+  setTimeout(() => send(entries, false, attempt + 1), 2_000);
 }
 
 function flush(useBeacon = false): void {

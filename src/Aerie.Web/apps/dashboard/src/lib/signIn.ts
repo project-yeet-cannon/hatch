@@ -45,6 +45,22 @@ export function redirectToSignIn(): boolean {
 }
 
 /**
+ * Whether this document has already given up and started navigating to sign in.
+ *
+ * Callers on a timer use it to stop doing work for a page that is leaving. That
+ * matters more than it looks: `handledUnauthorized` answers a 401 with a
+ * promise that never settles - deliberately, so the caller stops rendering
+ * rather than showing an error for a page about to be replaced - and if the
+ * sign-in shell itself cannot be reached (the API is down, which is a common
+ * way to get a 401 storm in the first place), the browser stays put and a 60s
+ * poll leaks one never-settling promise, and the snapshot closure behind it,
+ * every minute for as long as the tablet is on.
+ */
+export function isLeaving(): boolean {
+  return leaving;
+}
+
+/**
  * The one-liner every fetch caller needs: hands back true when the response was
  * a refusal and the browser is now on its way to sign in.
  */

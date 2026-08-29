@@ -26,6 +26,8 @@ import { useGatherLists } from './hooks/useGatherLists';
 import { usePhotoCarousel } from './hooks/usePhotoCarousel';
 import { useMotionEvents } from './hooks/useMotionEvents';
 import { useHealthSignal } from './hooks/useHealthSignal';
+import { createSkewWatcher } from './lib/clockSkew';
+import { isLeaving } from './lib/signIn';
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -111,10 +113,16 @@ export function App() {
   useEffect(() => {
     clientLogger.info('App mounted, starting dashboard data source');
     const source = getDashboardDataSource();
+    // Per mount rather than module-level, so a remount re-arms it.
+    const skewWatcher = createSkewWatcher();
     let cancelled = false;
     let firstLoad = true;
 
     const load = () => {
+      // Nothing to do for a page that is on its way to sign in - and if that
+      // navigation cannot complete, this is what stops the poll leaking a
+      // never-settling promise a minute forever. See lib/signIn.ts.
+      if (isLeaving()) return;
       source
         .getDashboardData()
         .then((snapshot) => {
@@ -127,6 +135,22 @@ export function App() {
           setSnapshotReceivedAt(Date.now());
           setError(null);
           notePollSuccess();
+
+          // The device clock is the floor the fallback screen, the native error
+          // screen and the header all stand on, and a tablet that has been
+          // offline can drift. Warn rather than error - a wrong clock is worth
+          // seeing in the health modal, but it is not an outage and should not
+          // raise the dot. Deliberately not corrected: a wall that silently
+          // disagrees with the phone in your hand is the bug, and papering over
+          // it removes its only visible symptom.
+          const skewMs = skewWatcher.note(Date.now(), snapshot.generatedAt);
+          if (skewMs !== null) {
+            clientLogger.warn('Device clock disagrees with the server', {
+              skewMinutes: Math.round(skewMs / 60_000),
+              deviceNow: new Date().toISOString(),
+              serverNow: snapshot.generatedAt,
+            });
+          }
         })
         .catch((err: unknown) => {
           if (cancelled) return;
