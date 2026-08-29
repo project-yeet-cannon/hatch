@@ -10,12 +10,17 @@ interface OutgoingEntry {
   sessionId: string;
   deviceId: string;
   url: string;
+  revision: string;
+  sequence: number;
   metadata: Record<string, unknown>;
 }
 
 declare global {
   interface Window {
     __uiLogSessionId?: string;
+    // Stamped into index.html by Aerie.Web/vite-plugin-aerie-revision.mts.
+    __aerieRevision?: string;
+    __aerieSequence?: string;
   }
 }
 
@@ -52,6 +57,16 @@ const staticMetadata = collectStaticMetadata();
 let queue: OutgoingEntry[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
+// Which build produced this line. Read off the globals the inline bootstrap in
+// index.html sets (Aerie.Web/vite-plugin-aerie-revision.mts), the same channel
+// window.__uiLogSessionId already arrives through - not from an API call,
+// because a page that asked a replica for its own version could be told the
+// wrong one mid-rolling-deploy and would then never correct itself.
+//
+// Read once at module load: neither can change without a new document.
+const revision = window.__aerieRevision ?? 'dev';
+const sequence = Number(window.__aerieSequence) || 0;
+
 function buildEntry(level: LogLevel, message: string, extra?: Record<string, unknown>): OutgoingEntry {
   return {
     app: APP_NAME,
@@ -60,6 +75,8 @@ function buildEntry(level: LogLevel, message: string, extra?: Record<string, unk
     timestamp: new Date().toISOString(),
     sessionId,
     deviceId,
+    revision,
+    sequence,
     url: location.href,
     metadata: { ...staticMetadata, ...collectDynamicMetadata(), ...extra },
   };

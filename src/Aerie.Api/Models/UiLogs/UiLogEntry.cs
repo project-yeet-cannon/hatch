@@ -16,4 +16,15 @@ public record UiLogEntry(
     // device's lines correlate across page loads/process restarts, unlike
     // SessionId which is per-load. Client-supplied and thus spoofable, same
     // trust level as every other field here - see UiLogsController's remarks.
-    string? DeviceId = null);
+    string? DeviceId = null,
+    // The build that emitted this line - the bundle running in the browser,
+    // not the API relaying it (docs/plans/version.md). Stamped into index.html
+    // by Aerie.Web/vite-plugin-aerie-revision.mts and read from there by
+    // clientLogger.ts.
+    //
+    // Nullable, and expected to stay null for a long while: a browser holding a
+    // bundle from before this shipped is exactly the stale device an
+    // administrator wants to find, so the field has to tolerate its own absence
+    // rather than reject the line that proves the point.
+    string? Revision = null,
+    int? Sequence = null);
