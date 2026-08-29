@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { aerieRevision } from '../../vite-plugin-aerie-revision.mjs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
@@ -10,7 +11,7 @@ const projectRoot = resolve(__dirname, '../../../..')
 
 export default defineConfig({
   base: '/apps/docs/',
-  plugins: [react()],
+  plugins: [react(), aerieRevision({ app: 'docs' })],
   build: {
     outDir: resolve(projectRoot, 'src/Aerie.Api/wwwroot/apps/docs'),
     emptyOutDir: true,

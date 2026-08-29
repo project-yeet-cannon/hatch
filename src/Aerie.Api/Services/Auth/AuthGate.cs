@@ -101,6 +101,14 @@ public class AuthGate(
         // ones that can't report.
         "/api/ui-logs",
 
+        // Which commit this replica is running. The value names a commit of a
+        // repository headed for public release, and the caller who most needs
+        // it is the one holding a stale build that is about to be refused -
+        // gating it would hide the answer from exactly that caller. The
+        // cluster's own state is *not* part of the unauthenticated answer; the
+        // controller withholds that separately.
+        "/api/aerie-revision",
+
         // Server-to-server from Hyper-V scheduled tasks, which hold no cookie -
         // and it carries its own X-Vm-Log-Token gate, which is strictly
         // stronger than a cookie would be (VmConsoleLogsController).

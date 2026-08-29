@@ -128,6 +128,14 @@ builder.Services.AddSingleton<IDocsService, DocsService>();
 // per poll - every kiosk tablet hits this on a timer for as long as it's up.
 builder.Services.AddSingleton<IAppVersionService, AppVersionService>();
 
+// The build's own git identity, and what Flux has reconciled from it
+// (docs/plans/version.md). Singletons: the first is immutable for the life of
+// the process, the second holds one HttpClient and one short-lived cache.
+// Registered next to IAppVersionService deliberately - the two answer
+// different questions and the comment on each says which.
+builder.Services.AddSingleton<IAerieRevision, AerieRevision>();
+builder.Services.AddSingleton<IFluxRevisionReader, FluxRevisionReader>();
+
 // Dashboard data services
 builder.Services.AddSingleton<IForecastService, ForecastService>();
 builder.Services.AddSingleton<ISiteSettingsService, SiteSettingsService>();
@@ -410,6 +418,11 @@ forwardedHeadersOptions.KnownProxies.Clear();
 app.UseForwardedHeaders(forwardedHeadersOptions);
 
 app.UseHttpsRedirection();
+
+// Ahead of the wall, so a refusal carries the header too - "which replica
+// refused me, and on what build" is unanswerable exactly when the wall is the
+// thing misbehaving. Costs one header per response and nothing else.
+app.UseMiddleware<AerieRevisionMiddleware>();
 
 // The wall. After UseForwardedHeaders because a refusal logs the client IP, and
 // before the /apps static file handlers below because otherwise every SPA

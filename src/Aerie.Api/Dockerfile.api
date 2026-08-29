@@ -1,46 +1,82 @@
 # Build the SPAs (Aerie.Web/apps/*) separately - the .NET SDK image
 # has no Node runtime, and their outputs are committed to wwwroot/apps/* as static
 # web assets of Aerie.Api.
+#
+# AERIE_REVISION/AERIE_SEQUENCE are the git identity of this build (see
+# docs/plans/version.md). Each SPA stage takes them because
+# ../Aerie.Web/vite-plugin-aerie-revision.mts stamps them into that app's
+# index.html; the SDK stage takes them because the API reads its own out of the
+# assembly. Declared per stage rather than once at the top: a build arg is
+# scoped to the stage that declares it, and a global ARG before the first FROM
+# is *not* inherited by the stages below it.
+#
+# The ARG lines sit after `npm ci` on purpose. A build arg only invalidates the
+# layers that reference it, so a new commit rebuilds index.html without
+# re-resolving any app's dependency tree.
 FROM node:22-alpine AS dashboard-build
 WORKDIR /repo
 COPY src/Aerie.Web/apps/dashboard/package.json src/Aerie.Web/apps/dashboard/package-lock.json src/Aerie.Web/apps/dashboard/
 RUN npm --prefix src/Aerie.Web/apps/dashboard ci
+COPY src/Aerie.Web/vite-plugin-aerie-revision.mts src/Aerie.Web/
 COPY src/Aerie.Web/apps/dashboard src/Aerie.Web/apps/dashboard
+ARG AERIE_REVISION
+ARG AERIE_SEQUENCE
+ENV AERIE_REVISION=$AERIE_REVISION AERIE_SEQUENCE=$AERIE_SEQUENCE
 RUN npm --prefix src/Aerie.Web/apps/dashboard run build
 
 FROM node:22-alpine AS admin-build
 WORKDIR /repo
 COPY src/Aerie.Web/apps/admin/package.json src/Aerie.Web/apps/admin/package-lock.json src/Aerie.Web/apps/admin/
 RUN npm --prefix src/Aerie.Web/apps/admin ci
+COPY src/Aerie.Web/vite-plugin-aerie-revision.mts src/Aerie.Web/
 COPY src/Aerie.Web/apps/admin src/Aerie.Web/apps/admin
+ARG AERIE_REVISION
+ARG AERIE_SEQUENCE
+ENV AERIE_REVISION=$AERIE_REVISION AERIE_SEQUENCE=$AERIE_SEQUENCE
 RUN npm --prefix src/Aerie.Web/apps/admin run build
 
 FROM node:22-alpine AS modeler-build
 WORKDIR /repo
 COPY src/Aerie.Web/apps/modeler/package.json src/Aerie.Web/apps/modeler/package-lock.json src/Aerie.Web/apps/modeler/
 RUN npm --prefix src/Aerie.Web/apps/modeler ci
+COPY src/Aerie.Web/vite-plugin-aerie-revision.mts src/Aerie.Web/
 COPY src/Aerie.Web/apps/modeler src/Aerie.Web/apps/modeler
+ARG AERIE_REVISION
+ARG AERIE_SEQUENCE
+ENV AERIE_REVISION=$AERIE_REVISION AERIE_SEQUENCE=$AERIE_SEQUENCE
 RUN npm --prefix src/Aerie.Web/apps/modeler run build
 
 FROM node:22-alpine AS docs-build
 WORKDIR /repo
 COPY src/Aerie.Web/apps/docs/package.json src/Aerie.Web/apps/docs/package-lock.json src/Aerie.Web/apps/docs/
 RUN npm --prefix src/Aerie.Web/apps/docs ci
+COPY src/Aerie.Web/vite-plugin-aerie-revision.mts src/Aerie.Web/
 COPY src/Aerie.Web/apps/docs src/Aerie.Web/apps/docs
+ARG AERIE_REVISION
+ARG AERIE_SEQUENCE
+ENV AERIE_REVISION=$AERIE_REVISION AERIE_SEQUENCE=$AERIE_SEQUENCE
 RUN npm --prefix src/Aerie.Web/apps/docs run build
 
 FROM node:22-alpine AS family-build
 WORKDIR /repo
 COPY src/Aerie.Web/apps/family/package.json src/Aerie.Web/apps/family/package-lock.json src/Aerie.Web/apps/family/
 RUN npm --prefix src/Aerie.Web/apps/family ci
+COPY src/Aerie.Web/vite-plugin-aerie-revision.mts src/Aerie.Web/
 COPY src/Aerie.Web/apps/family src/Aerie.Web/apps/family
+ARG AERIE_REVISION
+ARG AERIE_SEQUENCE
+ENV AERIE_REVISION=$AERIE_REVISION AERIE_SEQUENCE=$AERIE_SEQUENCE
 RUN npm --prefix src/Aerie.Web/apps/family run build
 
 FROM node:22-alpine AS auth-build
 WORKDIR /repo
 COPY src/Aerie.Web/apps/auth/package.json src/Aerie.Web/apps/auth/package-lock.json src/Aerie.Web/apps/auth/
 RUN npm --prefix src/Aerie.Web/apps/auth ci
+COPY src/Aerie.Web/vite-plugin-aerie-revision.mts src/Aerie.Web/
 COPY src/Aerie.Web/apps/auth src/Aerie.Web/apps/auth
+ARG AERIE_REVISION
+ARG AERIE_SEQUENCE
+ENV AERIE_REVISION=$AERIE_REVISION AERIE_SEQUENCE=$AERIE_SEQUENCE
 RUN npm --prefix src/Aerie.Web/apps/auth run build
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build-env
@@ -61,7 +97,15 @@ RUN dotnet restore src/Aerie.Api/Aerie.Api.csproj
 
 # Build and publish a release. The SPAs (from Aerie.Web) were already built above, so skip
 # the MSBuild targets that would otherwise shell out to npm (unavailable here).
-RUN dotnet publish src/Aerie.Api/Aerie.Api.csproj -c Release -o out -p:SkipDashboardBuild=true -p:SkipAdminBuild=true -p:SkipModelerBuild=true -p:SkipDocsBuild=true -p:SkipFamilyBuild=true -p:SkipAuthBuild=true
+#
+# SourceRevisionId is .NET's own mechanism rather than an env var on the runtime
+# image: it appends "+<sha>" to AssemblyInformationalVersion, which puts the
+# revision *in the binary*. That is the point - a revision the deployment can
+# supply is a revision the deployment can get wrong, and every use of this value
+# is a use that has to trust it (see Services/AerieRevision.cs).
+ARG AERIE_REVISION
+ARG AERIE_SEQUENCE
+RUN dotnet publish src/Aerie.Api/Aerie.Api.csproj -c Release -o out -p:SkipDashboardBuild=true -p:SkipAdminBuild=true -p:SkipModelerBuild=true -p:SkipDocsBuild=true -p:SkipFamilyBuild=true -p:SkipAuthBuild=true -p:SourceRevisionId=$AERIE_REVISION -p:AerieSequence=$AERIE_SEQUENCE
 
 # Build runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:10.0

@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { aerieRevision } from '../../vite-plugin-aerie-revision.mjs'
 import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -65,7 +66,7 @@ function serviceWorker(): Plugin {
 
 export default defineConfig({
   base,
-  plugins: [react(), serviceWorker()],
+  plugins: [react(), aerieRevision({ app: 'family' }), serviceWorker()],
   server: {
     // Aerie.Api (see Properties/launchSettings.json) - the shell is all API
     // data, so `npm run dev` is useless without the real backend behind it.
