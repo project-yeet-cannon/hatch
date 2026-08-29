@@ -474,18 +474,26 @@ which white screen it was.
 Pure consistency: after this phase the page *composition* is identical and
 every value is drawn from the tables above. Reviewable as a diff of numbers.
 
-- [ ] State the radius tokens in `:root`; migrate every `border-radius` in
+- [x] State the radius tokens in `:root`; migrate every `border-radius` in
       [theme.css](../../src/Aerie.Web/apps/dashboard/src/theme.css) to one
       (mapping table in [the token pass](#the-token-pass-phase-1-makes-this-real)).
-- [ ] Migrate every font size/weight to a register; kill the strays (16→17
+- [x] Migrate every font size/weight to a register; kill the strays (16→17
       tile names, 24→22 pick counts, 16→15 meta, badge pill 30px→999px).
-- [ ] Normalize gaps and paddings to the 6-base scale.
-- [ ] Extract `.hf-sec-head` from the agenda's header pair and re-point the
+      Two deliberate stay-behinds, commented in the CSS: the chart axis sits
+      at Micro 11 rather than Label 12 (five stamps share one row), and the
+      panel overlay's 68px setpoint is sized against its 84px steppers, not
+      against the page.
+- [x] Normalize gaps and paddings to the 6-base scale. (The Extreme alert's
+      heavier padding survives as the ladder's top rung, commented.)
+- [x] Extract `.hf-sec-head` from the agenda's header pair and re-point the
       agenda at it. (Its page-two consumers arrive in Phase 5.)
-- [ ] Delete the inline styles from OutsideCard and App.tsx's error note in
+- [x] Delete the inline styles from OutsideCard and App.tsx's error note in
       favor of real classes; replace the `☀` stat with a plain "sun left"
-      stat matching its siblings.
-- [ ] `make test-web`; owner eyeballs `?source=mock` and the dev scrubber
+      stat matching its siblings. (Data-driven inline styles — swatch colors,
+      `--cal-color`, list tints, `--health-level` — are the sanctioned
+      pattern and stay.)
+- [x] Lint + 166 unit tests + build green. **Owner still to eyeball**
+      `?source=mock` and the dev scrubber
       ([dev-theme.html](../../src/Aerie.Web/apps/dashboard/dev-theme.html))
       for regressions at noon, dusk, and 3am.
 

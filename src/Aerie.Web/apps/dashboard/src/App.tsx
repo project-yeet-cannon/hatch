@@ -296,7 +296,7 @@ export function App() {
             {data.panels.length > 0 && <PanelsSection panels={data.panels} onOpen={setPanelId} />}
           </>
         ) : error ? (
-          <div className="hf-note" role="alert" style={{ margin: 0 }}>
+          <div className="hf-load-error" role="alert">
             Couldn’t load dashboard data — {error}
           </div>
         ) : (

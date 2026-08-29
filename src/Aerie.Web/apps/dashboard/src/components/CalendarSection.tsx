@@ -52,9 +52,11 @@ export function CalendarSection({
 
         return (
           <div className="hf-cal-day" key={day.date}>
-            <div className="hf-cal-head">
-              <span className="hf-cal-label">{isToday ? 'Today' : formatAgendaDate(day.date)}</span>
-              <span className="hf-cal-rule" aria-hidden="true" />
+            {/* The generalized section header (.hf-sec-head, theme.css) - the
+                agenda is where the idiom was born, and it keeps using it. */}
+            <div className="hf-sec-head">
+              <span className="hf-sec-label">{isToday ? 'Today' : formatAgendaDate(day.date)}</span>
+              <span className="hf-sec-rule" aria-hidden="true" />
             </div>
             {day.events.length === 0 ? (
               <div className="hf-cal-empty">Nothing scheduled</div>

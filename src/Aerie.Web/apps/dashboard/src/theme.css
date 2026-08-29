@@ -26,9 +26,19 @@ body {
 }
 
 :root {
-  /* Static across all circadian phases - see src/theme/tokens.ts for the
-     color tokens, which are blended and applied as inline styles instead. */
+  /* The radius scale - four steps, stated once and used everywhere
+     (docs/plans/dashboard-redesign.md, "The token pass"). --r is a card or any
+     card-sized surface; --r-ctl is anything a finger presses - buttons,
+     inputs, tappable rows; --r-in is a content block nested inside a card;
+     --r-chip is the smallest chips and marks. Badges are fully-rounded pills
+     (999px) rather than a fifth step. A radius stated as a number instead of
+     one of these is a bug. */
   --r: 26px;
+  --r-ctl: 18px;
+  --r-in: 14px;
+  --r-chip: 10px;
+  /* Color tokens are blended per circadian phase and applied as inline styles
+     instead - see src/theme/tokens.ts and lib/circadianTheme.ts. */
   /* 'Manrope' second so a device with it installed locally still uses it if
      the bundled face somehow fails to decode. */
   --ui: 'Manrope Variable', 'Manrope', sans-serif;
@@ -68,8 +78,8 @@ body {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 13px;
-  padding: 24px 22px 26px;
+  gap: 12px;
+  padding: 24px 20px;
   color: var(--ink);
   font-family: var(--ui);
   transition: color 0.4s;
@@ -107,9 +117,12 @@ body {
   align-items: flex-end;
   gap: 8px;
 }
+/* The clamp is insurance for the incidental viewers Phase 0 found in the logs
+   (phones at ~393px), not for the walls: at the tablets' 800px viewport it
+   resolves to the ceiling, which is the size this was always designed at. */
 .hf-clock {
   font-family: var(--num);
-  font-size: 108px;
+  font-size: clamp(88px, 18.5vw, 112px);
   line-height: 0.85;
   font-weight: 700;
   letter-spacing: -0.03em;
@@ -117,14 +130,14 @@ body {
   font-variant-numeric: tabular-nums;
 }
 .hf-ampm {
-  font-size: 32px;
+  font-size: 30px;
   font-weight: 700;
   margin-left: 6px;
 }
 .hf-zones {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 .hf-zone {
   border-radius: var(--r);
@@ -141,7 +154,7 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 15px 17px;
+  padding: 12px 18px;
 }
 .hf-zsum::-webkit-details-marker {
   display: none;
@@ -165,7 +178,7 @@ body {
 .hf-temp {
   font-family: var(--num);
   font-weight: 600;
-  font-size: 25px;
+  font-size: 22px;
   line-height: 1;
   letter-spacing: -0.02em;
   margin-left: auto;
@@ -175,9 +188,9 @@ body {
   height: 40px;
 }
 .hf-badge {
-  font: 600 11px/1 var(--ui);
+  font: 600 12px/1 var(--ui);
   padding: 6px 11px;
-  border-radius: 30px;
+  border-radius: 999px;
   flex: none;
   white-space: nowrap;
 }
@@ -195,27 +208,45 @@ body {
   display: none;
 }
 .hf-body {
-  padding: 2px 17px 17px;
+  padding: 2px 18px 18px;
 }
 .hf-brow {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 9px;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 .hf-note {
-  font: 500 12px/1.3 var(--ui);
+  font: 500 13px/1.3 var(--ui);
   color: var(--muted);
   margin-left: auto;
+}
+/* The condition summary on the outside card. Its own class rather than an
+   inline patch: the warm ink is a statement about what the text is (weather,
+   not chrome), and belongs where the other statements live. */
+.hf-out-note {
+  margin-left: 0;
+  margin-top: 12px;
+  color: var(--warm-ink);
+}
+/* The pre-first-snapshot failure note. Standalone in the column rather than in
+   a flex row, so it states its own margins instead of inheriting .hf-note's
+   auto push. */
+.hf-load-error {
+  margin: 0;
+  font: 500 15px/1.4 var(--ui);
+  color: var(--muted);
 }
 .hf-chart {
   width: 100%;
   height: 130px;
 }
+/* 11px, not the Label register's 12: five stamps share one row and density
+   wins by a point. Micro is the register for that. */
 .hf-xax {
   display: flex;
   justify-content: space-between;
-  font: 600 9px/1 var(--num);
+  font: 600 11px/1 var(--num);
   letter-spacing: 0.05em;
   color: var(--muted);
   margin-top: 7px;
@@ -225,11 +256,11 @@ body {
   display: flex;
   gap: 18px;
   margin-top: 12px;
-  padding-top: 11px;
+  padding-top: 12px;
   border-top: 1px solid var(--line);
 }
 .hf-stat {
-  font: 500 12px/1.2 var(--ui);
+  font: 500 13px/1.2 var(--ui);
   color: var(--muted);
 }
 .hf-stat b {
@@ -241,8 +272,13 @@ body {
   border-radius: var(--r);
   background: var(--outbg);
   border: 1px solid var(--line);
-  padding: 16px 18px 15px;
+  padding: 18px;
   box-shadow: var(--shadow);
+}
+/* "Outside" is a heading here, not a row label in a column of rows - it has no
+   siblings to line up with, so it does not reserve their width. */
+.hf-out .hf-name {
+  min-width: 0;
 }
 
 .g-band {
@@ -310,14 +346,38 @@ body {
 .hf-skel {
   display: inline-block;
   background: var(--skel);
-  border-radius: 6px;
+  border-radius: var(--r-chip);
   animation: hf-pulse 1.6s ease-in-out infinite;
 }
 .hf-skel.hf-chart,
 .hf-skel.hf-spark {
   width: 100%;
-  border-radius: 12px;
+  border-radius: var(--r-in);
 }
+
+/* The section header: a Label-register title and a hairline rule to the edge.
+   Born on the agenda's day headings and generalized in the redesign - every
+   named section below the fold introduces itself with this and nothing else
+   (docs/plans/dashboard-redesign.md). */
+.hf-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 4px;
+}
+.hf-sec-label {
+  font: 700 12px/1 var(--ui);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+  flex: none;
+}
+.hf-sec-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
 /* The camera and panel rows share the routine tile's geometry by sharing its
    rules, not by repeating its numbers - "the same size as the Routines buttons"
    is then true by construction rather than by three values somebody has to keep
@@ -329,7 +389,7 @@ body {
 .hf-panels {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 16px;
+  gap: 18px;
 }
 .hf-routine-btn,
 .hf-camera-tile,
@@ -390,7 +450,7 @@ body {
 .hf-panel-tile-name {
   font-family: var(--display);
   font-weight: 700;
-  font-size: 16px;
+  font-size: 17px;
   color: var(--ink);
   text-align: center;
   line-height: 1.2;
@@ -435,30 +495,12 @@ body {
 .hf-cal {
   display: flex;
   flex-direction: column;
-  gap: 15px;
+  gap: 12px;
 }
 .hf-cal-day {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-.hf-cal-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 4px;
-}
-.hf-cal-label {
-  font: 700 12px/1 var(--ui);
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--muted);
-  flex: none;
-}
-.hf-cal-rule {
-  flex: 1;
-  height: 1px;
-  background: var(--line);
+  gap: 6px;
 }
 .hf-cal-empty {
   font: 500 13px/1 var(--ui);
@@ -517,7 +559,7 @@ body {
   flex-direction: column;
   gap: 3px;
   padding: 9px 14px;
-  border-radius: 14px;
+  border-radius: var(--r-in);
   border-left: 4px solid var(--cal-color);
   background: color-mix(in srgb, var(--cal-color) 14%, var(--card));
 }
@@ -535,7 +577,7 @@ body {
   color: var(--ink);
 }
 .hf-cal-meta {
-  font: 500 12px/1.2 var(--ui);
+  font: 500 13px/1.2 var(--ui);
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -584,13 +626,13 @@ body {
 .hf-alerts {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 .hf-alert {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  padding: 11px 16px;
+  padding: 12px 18px;
   border-radius: var(--r);
   border-left: 4px solid var(--sev-color);
   background: color-mix(in srgb, var(--sev-color) 16%, var(--card));
@@ -608,7 +650,7 @@ body {
   min-width: 0;
 }
 .hf-alert-when {
-  font: 600 12px/1 var(--ui);
+  font: 600 13px/1 var(--ui);
   color: var(--muted);
   margin-left: auto;
   white-space: nowrap;
@@ -617,7 +659,8 @@ body {
 
 /* The severity ladder. Each step raises how much of the card the severity
    color owns; none of them raise absolute brightness, because every tint is
-   still mixed into the current circadian --card. */
+   still mixed into the current circadian --card. The Extreme step's heavier
+   padding is the ladder speaking, not a stray off the spacing scale. */
 .hf-alert.sev-severe {
   background: color-mix(in srgb, var(--sev-color) 24%, var(--card));
 }
@@ -642,7 +685,7 @@ body {
 .hf-gather {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 16px;
+  gap: 18px;
 }
 .hf-gather-tile {
   display: flex;
@@ -651,7 +694,7 @@ body {
   gap: 12px;
   width: 100%;
   min-height: 78px;
-  padding: 14px 18px;
+  padding: 12px 18px;
   border: 1px solid var(--line);
   border-radius: var(--r);
   background: var(--card);
@@ -681,12 +724,12 @@ body {
   width: 46px;
   height: 46px;
   flex: none;
-  border-radius: 14px;
+  border-radius: var(--r-in);
   font-size: 24px;
   line-height: 1;
 }
 .hf-gather-tile-name {
-  font: 600 19px/1.2 var(--ui);
+  font: 700 19px/1.2 var(--ui);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -713,7 +756,7 @@ body {
   z-index: 20;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   padding: 18px 18px 0;
   box-sizing: border-box;
   background: var(--bg);
@@ -747,7 +790,7 @@ body {
   height: 56px;
   flex: none;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: var(--r-ctl);
   background: var(--card);
   color: var(--ink);
   font-size: 22px;
@@ -776,7 +819,7 @@ body {
   height: 64px;
   padding: 0 18px;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: var(--r-ctl);
   background: var(--card);
   color: var(--ink);
   font: 500 22px/1 var(--ui);
@@ -793,7 +836,7 @@ body {
   height: 64px;
   flex: none;
   border: none;
-  border-radius: 18px;
+  border-radius: var(--r-ctl);
   background: var(--comfort);
   color: var(--card);
   font-size: 24px;
@@ -812,7 +855,7 @@ body {
 }
 .hf-gather-counts {
   min-width: 0;
-  font: 500 16px/1.3 var(--ui);
+  font: 500 15px/1.3 var(--ui);
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -830,10 +873,10 @@ body {
   min-height: 44px;
   padding: 0 18px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: var(--r-ctl);
   background: var(--card);
   color: var(--muted);
-  font: 600 16px/1 var(--ui);
+  font: 600 15px/1 var(--ui);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
@@ -847,7 +890,7 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   padding-bottom: 24px;
   overflow-y: auto;
   /* The dashboard underneath must not scroll when this list hits its end. */
@@ -863,7 +906,7 @@ body {
   min-height: 72px;
   padding: 12px 18px;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: var(--r-ctl);
   background: var(--card);
   color: var(--ink);
   font-family: var(--ui);
@@ -883,7 +926,7 @@ body {
   height: 34px;
   flex: none;
   border: 2px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--r-chip);
   color: var(--comfort);
   font-size: 18px;
 }
@@ -919,7 +962,7 @@ body {
   flex: none;
   max-width: 40%;
   padding: 5px 12px;
-  border-radius: 10px;
+  border-radius: var(--r-chip);
   background: var(--band);
   color: var(--ink);
   font: 600 16px/1.2 var(--num);
@@ -927,7 +970,7 @@ body {
 }
 .hf-gather-empty {
   margin: 8px 4px;
-  font: 500 17px/1.4 var(--ui);
+  font: 500 15px/1.4 var(--ui);
   color: var(--muted);
 }
 .hf-gather-pick-name {
@@ -939,7 +982,7 @@ body {
   white-space: nowrap;
 }
 .hf-gather-pick-count {
-  font: 800 24px/1 var(--num);
+  font: 600 22px/1 var(--num);
   font-variant-numeric: tabular-nums;
 }
 
@@ -997,7 +1040,7 @@ body {
   height: 56px;
   flex: none;
   border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 18px;
+  border-radius: var(--r-ctl);
   background: rgba(255, 255, 255, 0.12);
   color: #fff;
   font-size: 22px;
@@ -1031,7 +1074,7 @@ body {
    feed can fail is the one place the reason has to be readable. */
 .hf-camera-overlay .hf-note {
   margin: 0;
-  font: 500 17px/1.4 var(--ui);
+  font: 500 15px/1.4 var(--ui);
   color: rgba(255, 255, 255, 0.75);
 }
 
@@ -1053,7 +1096,7 @@ body {
   z-index: 20;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   padding: 18px 18px 0;
   box-sizing: border-box;
   background: var(--bg);
@@ -1084,7 +1127,7 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   padding-bottom: 24px;
   overflow-y: auto;
   /* The dashboard underneath must not scroll when this column hits its end. */
@@ -1094,7 +1137,7 @@ body {
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   padding: 18px;
   border: 1px solid var(--line);
   border-radius: var(--r);
@@ -1116,7 +1159,7 @@ body {
 }
 .hf-panel-card-label {
   min-width: 0;
-  font: 700 21px/1.2 var(--display);
+  font: 700 19px/1.2 var(--display);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1142,10 +1185,10 @@ body {
   flex: 1;
   min-height: 64px;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: var(--r-ctl);
   background: var(--bg);
   color: var(--muted);
-  font: 700 20px/1 var(--ui);
+  font: 700 19px/1 var(--ui);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
@@ -1179,7 +1222,7 @@ body {
   height: 84px;
   flex: none;
   border: 1px solid var(--line);
-  border-radius: 26px;
+  border-radius: var(--r-ctl);
   background: var(--bg);
   color: var(--ink);
   font-size: 28px;
@@ -1199,6 +1242,9 @@ body {
   cursor: default;
   opacity: 0.35;
 }
+/* 68px is deliberately off the page's type registers: this is the overlay's
+   across-the-room number, sized against the 84px steppers beside it rather
+   than against anything on the dashboard. */
 .hf-panel-temp {
   flex: 1;
   min-width: 0;
@@ -1221,7 +1267,7 @@ body {
   margin: 0;
   min-height: 1.4em;
   text-align: center;
-  font: 600 17px/1.4 var(--ui);
+  font: 500 15px/1.4 var(--ui);
   color: var(--muted);
 }
 .hf-panel-error {
@@ -1231,7 +1277,7 @@ body {
 }
 .hf-panel-empty {
   margin: 0;
-  font: 500 17px/1.4 var(--ui);
+  font: 500 15px/1.4 var(--ui);
   color: var(--muted);
 }
 
@@ -1430,7 +1476,7 @@ body {
   height: 56px;
   flex: none;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: var(--r-ctl);
   background: var(--card);
   color: var(--ink);
   font-size: 22px;
@@ -1442,7 +1488,7 @@ body {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   padding-bottom: 12px;
 }
 .hf-health-empty {
@@ -1454,8 +1500,8 @@ body {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 2px 12px;
-  padding: 12px 14px;
-  border-radius: 18px;
+  padding: 12px 18px;
+  border-radius: var(--r-ctl);
   background: var(--card);
   /* The rail carries the level, so warn and error are told apart without
      reading either one - the same ladder-of-presence the alerts use. */
@@ -1483,16 +1529,16 @@ body {
 .hf-health-foot {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 0 0 16px;
+  gap: 12px;
+  padding: 0 0 18px;
 }
 .hf-health-reload {
-  padding: 14px 26px;
+  padding: 12px 24px;
   border: 1px solid var(--line);
-  border-radius: 22px;
+  border-radius: var(--r-ctl);
   background: var(--card);
   color: var(--ink);
-  font: 600 16px/1 var(--ui);
+  font: 600 15px/1 var(--ui);
   cursor: pointer;
 }
 .hf-health-build {
@@ -1517,7 +1563,7 @@ body {
   opacity: 0.45;
 }
 .hf-asof {
-  font: 500 12px/1.3 var(--ui);
+  font: 500 13px/1.3 var(--ui);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;

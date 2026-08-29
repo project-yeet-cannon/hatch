@@ -28,11 +28,9 @@ export function OutsideCard({ outside, timeZone, nowOnServerClock }: OutsideCard
 
   return (
     <div className={`hf-out${freshness === 'stale' ? ' stale' : ''}`}>
-      <div className="hf-brow" style={{ marginBottom: 12 }}>
+      <div className="hf-brow">
         <span className="hf-swatch" style={{ background: freshness === 'none' ? 'var(--muted)' : 'var(--warm)' }} />
-        <span className="hf-name" style={{ width: 'auto' }}>
-          Outside
-        </span>
+        <span className="hf-name">Outside</span>
         <span className="hf-temp">
           {freshness !== 'none' && outside.currentTempF !== null ? `${Math.round(outside.currentTempF)}°` : '—'}
         </span>
@@ -45,7 +43,7 @@ export function OutsideCard({ outside, timeZone, nowOnServerClock }: OutsideCard
       <TempChartAxis history={outside.history} forecast={outside.forecast} timeZone={timeZone} />
       <div className="hf-foot">
         <span className="hf-stat">
-          <b>☀ {outside.sunHoursRemaining}h</b> sun left
+          <b>{outside.sunHoursRemaining}h</b> sun left
         </span>
         <span className="hf-stat">
           <b>{outside.humidityPct !== null ? `${outside.humidityPct}%` : '—'}</b> humidity
@@ -59,9 +57,7 @@ export function OutsideCard({ outside, timeZone, nowOnServerClock }: OutsideCard
           <b>{formatShortTime(outside.sunsetTime, timeZone)}</b> sunset
         </span>
       </div>
-      <div className="hf-note" style={{ marginTop: 11, color: 'var(--warm-ink)' }}>
-        {outside.note}
-      </div>
+      <div className="hf-note hf-out-note">{outside.note}</div>
     </div>
   );
 }
