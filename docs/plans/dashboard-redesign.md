@@ -1,10 +1,10 @@
 # Dashboard redesign — two pages, one design language
 
-**Status:** Not started. Seven phases. Phase 0 is a measurement and costs one
-log field — run it first; its numbers finalize the fold budget that Phases 3–5
-build against. Phase 1 is a pure consistency sweep with no layout change and
-can land independently. Phases 2→3→4→5 are ordered (contract, then the two new
-composites, then the page structure). Phase 6 is the hardware pass.
+**Status:** Phase 0 done — the walls are 800×1280 CSS px and the fold budget
+holds with ~340px of slack; no levers engaged. Phase 1 is a pure consistency
+sweep with no layout change and can land independently. Phases 2→3→4→5 are
+ordered (contract, then the two new composites, then the page structure).
+Phase 6 is the hardware pass.
 **This plan is design-only on the data side**: everything new renders from the
 mock first, and the API work it needs is specified at the end under
 [Follow-up: the data contract to fulfill](#follow-up-the-data-contract-to-fulfill)
@@ -440,18 +440,34 @@ The fold budget above is arithmetic on an assumed viewport. Make it measured,
 the way [Degrading gracefully](../kiosk-architecture.md#why-the-fallback-screen-is-not-paranoia) asked the logs
 which white screen it was.
 
-- [ ] Add `innerWidth`, `innerHeight`, `devicePixelRatio` to the existing
-      `kiosk main.tsx module evaluated` log line in
-      [main.tsx](../../src/Aerie.Web/apps/dashboard/src/main.tsx) — fields on
-      a line that already exists, not a new line.
-- [ ] Deploy, let the tablets pick it up (the deploy-reload path is landed),
-      query `aerie-logs` for the fields, and record every distinct wall
-      viewport **in this section**.
-- [ ] Query the same window for `zoneCount` (already logged on every load)
-      and note the live zone count, plus the routine/camera/panel/list counts
-      from the admin pages — the numbers that decide how full page two starts.
-- [ ] Re-run the fold table against the measured viewport; commit to the
-      levers here (chart height, stage aspect, clock floor) if needed.
+- [x] ~~Add viewport fields to the boot log line~~ — **not needed, the data
+      was already flowing**: `clientLogger` attaches a metadata blob with
+      `screen`, `viewport`, and `devicePixelRatio` to every line it posts.
+      Nothing was deployed for this phase; it was a query.
+- [x] Queried `aerie-logs` (2026-08-29, ~40 recent `module evaluated` lines).
+- [x] `zoneCount` from the current `Dashboard data refreshed` lines.
+- [x] Fold table re-run; **no levers needed** — see below.
+
+**What the logs said (queried 2026-08-29):**
+
+| Device class | Viewport (CSS px) | DPR | Orientation |
+|---|---|---|---|
+| Wall tablet ×2 (GeckoView, `Linux armv81`) | **800×1280** | 1.5 | portrait-primary |
+| Dev browsers ×2 | ~1158×773 | 2 | landscape |
+| Phones ×2 | 393×695–793 | 3 | portrait |
+
+- **The walls are 800×1280.** The column clamp (`clamp(480px, 75vw, 960px)`)
+  resolves to **600px**, so the stage runs 560×373 at 3:2. Page one's calm-day
+  budget lands ≈ 940px against 1280 available — ~340px of slack, enough that
+  an alert day still fits and the design gets air instead of levers. Chart
+  height stays 110, stage stays 3:2, the Clock clamp stays as insurance for
+  the phone-sized incidental viewers the logs also show.
+- **`zoneCount` is 2.** Outside + 2 zone tabs in the climate card, and the
+  no-pins fallback ("first two lead") makes the real wall's day-one render
+  identical to the designed one before the admin flag exists.
+- Page two starts small: the counts on the wall today are single-digit per
+  section, so `proximity` snap is comfortable and revisiting `mandatory`
+  stays a Phase 6 feel call.
 
 ### Phase 1 — The token pass (no layout change)
 
