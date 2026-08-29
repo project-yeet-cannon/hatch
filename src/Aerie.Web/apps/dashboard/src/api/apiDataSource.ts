@@ -1,10 +1,12 @@
 import { handledUnauthorized } from '../lib/signIn';
+import { withSnapshotDefaults } from '../lib/snapshotDefaults';
 import type { DashboardData, DashboardDataSource } from '../types';
 
 /**
  * The real data source: fetches a DashboardData snapshot from Aerie.Api's
- * `GET /api/dashboard`. The API returns exactly the contract shape (camelCase,
- * ISO timestamps), so no transformation is needed here.
+ * `GET /api/dashboard`. The API returns the contract shape (camelCase, ISO
+ * timestamps); the only massaging is the absent-field defaults for contract
+ * fields the API doesn't send yet.
  */
 export class ApiDashboardDataSource implements DashboardDataSource {
   private readonly endpoint: string;
@@ -21,6 +23,9 @@ export class ApiDashboardDataSource implements DashboardDataSource {
     if (!res.ok) {
       throw new Error(`Dashboard API request failed: ${res.status} ${res.statusText}`);
     }
-    return (await res.json()) as DashboardData;
+    // The one seam where "the API hasn't caught up to the contract yet" is
+    // resolved - absent fields become the contract's null/false so nothing
+    // downstream has to re-ask. See lib/snapshotDefaults.ts.
+    return withSnapshotDefaults(await res.json());
   }
 }

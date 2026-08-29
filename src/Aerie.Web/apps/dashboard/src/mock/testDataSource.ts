@@ -131,6 +131,9 @@ function xZone(index: number, now: Date): ZoneClimate {
     forecast: xSeries(forecast),
     low: xExtreme(history[0]),
     high: xExtreme(forecast[forecast.length - 1]),
+    // Split, so the climate card's tabs and the "More rooms" rows both have
+    // an all-X occupant on this source.
+    pinned: index % 2 === 1,
   };
 }
 
@@ -156,6 +159,12 @@ function xOutside(now: Date): OutsideClimate {
     history: xSeries(history),
     forecast: xSeries(forecast),
     hourly: xHourly([...history, ...forecast]),
+    // Conditions and the band stay real values for the severity-field reason
+    // above: they are enums on the wire, and an X would only prove the
+    // fallback runs. The numbers take the 9999 treatment as usual.
+    todayOutlook: { highF: NUM, lowF: NUM, condition: 'clear' },
+    tomorrowOutlook: { highF: NUM, lowF: NUM, condition: 'snow' },
+    airQuality: { usAqi: NUM, band: 'Moderate', asOf: now.toISOString() },
   };
 }
 

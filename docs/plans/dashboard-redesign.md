@@ -405,8 +405,8 @@ export interface DayOutlook {
 
 export interface OutsideAirQuality {
   usAqi: number;
-  /** Mirrors AirQualityBands.cs words, e.g. "Good", "Moderate". */
-  band: 'Good' | 'Moderate' | 'UnhealthyForSensitive' | 'Unhealthy' | 'VeryUnhealthy' | 'Hazardous';
+  /** Mirrors the AirQualityBands.cs enum name for name. */
+  band: 'Good' | 'Moderate' | 'UnhealthyForSensitiveGroups' | 'Unhealthy' | 'VeryUnhealthy' | 'Hazardous';
   /** ISO 8601. The pill mutes past 2h and the client trusts this, not itself. */
   asOf: string;
 }
@@ -428,9 +428,16 @@ interface ZoneClimate {
 
 Mock coverage requirements: at least one snapshot shape with two pinned zones
 and two unpinned; a `null` outlook and a `null` AQI variant; an AQI in each
-color band reachable (a `?source=mock` knob or time-based rotation, matching
-how the mock already exercises staleness); the test source renders the new
-strings as all-X and the numbers as 9999 per its rule.
+color band reachable; the test source renders the new strings as all-X and
+the numbers as 9999 per its rule (condition and band stay real values — they
+are enums on the wire, the severity-field precedent).
+
+As built, the knobs are URL params beside `?source=mock`: `mock-aqi=<index>`
+for any band, `mock-aqi=stale` for a muted pill, `mock-aqi=none` for no pill,
+`mock-outlook=none` for no cells. The mock grew a fourth zone (Sunroom) so
+the pinned partition shows two tabs *and* two "More rooms" rows, and the
+stale zone is one of the pinned ones on purpose — the dimmed-tab treatment
+has to be visible without unplugging anything.
 
 ## Phases
 
@@ -499,14 +506,18 @@ every value is drawn from the tables above. Reviewable as a diff of numbers.
 
 ### Phase 2 — Contract and mocks
 
-- [ ] Extend [types.ts](../../src/Aerie.Web/apps/dashboard/src/types.ts) per
+- [x] Extend [types.ts](../../src/Aerie.Web/apps/dashboard/src/types.ts) per
       [the contract](#the-mock-first-data-contract), comments carrying the
-      null semantics.
-- [ ] Mock + test sources produce the coverage matrix above; the API source
+      null semantics. (One correction against the sketch: the band enum is
+      `UnhealthyForSensitiveGroups`, matching AirQualityBands.cs exactly.)
+- [x] Mock + test sources produce the coverage matrix above; the API source
       defaults absent fields (`?? null`, `?? false`) so a pre-follow-up API
       renders a wall with no outlook cells, no AQI pill, and first-two-lead
       zones — degraded exactly as designed, never broken.
-- [ ] Unit tests: the absent-field defaults, and the mock's variant knobs.
+- [x] Unit tests: the absent-field defaults
+      ([snapshotDefaults.test.ts](../../src/Aerie.Web/apps/dashboard/src/lib/snapshotDefaults.test.ts))
+      and the mock's index→band mirror at every EPA boundary
+      ([mockDataSource.test.ts](../../src/Aerie.Web/apps/dashboard/src/mock/mockDataSource.test.ts)).
 
 ### Phase 3 — The climate card
 

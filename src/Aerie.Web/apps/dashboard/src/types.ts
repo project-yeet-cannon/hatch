@@ -54,6 +54,14 @@ export interface ZoneClimate {
   forecast: TempPoint[];
   low: DailyExtreme | null;
   high: DailyExtreme | null;
+  /**
+   * The admin's "lead on the wall" flag: pinned zones take the climate card's
+   * tabs, the rest render under "More rooms". False when the API predates the
+   * flag (absent reads as false via lib/snapshotDefaults.ts); when *no* zone
+   * is pinned, the client leads with the first two by sort order so the card
+   * never renders empty-tabbed - see lib/leadZones.ts.
+   */
+  pinned: boolean;
 }
 
 export interface HourlyOutside {
@@ -61,6 +69,58 @@ export interface HourlyOutside {
   humidityPct: number;
   cloudCoverPct: number;
   precipIn: number;
+}
+
+/**
+ * The condition vocabulary for a day's outlook - deliberately small, one FA
+ * glyph each. The API's half maps WMO weather codes onto these words
+ * (docs/plans/dashboard-redesign.md, the follow-up section); the client never
+ * sees a code.
+ */
+export type OutlookCondition =
+  | 'clear'
+  | 'partlyCloudy'
+  | 'cloudy'
+  | 'fog'
+  | 'drizzle'
+  | 'rain'
+  | 'snow'
+  | 'storm';
+
+/** One day's shape, for the outside pane's Today/Tomorrow cells. */
+export interface DayOutlook {
+  highF: number;
+  lowF: number;
+  condition: OutlookCondition;
+}
+
+/**
+ * The six US AQI bands, mirroring AirQualityBands.cs
+ * (src/Aerie.Api/Services/Hazards) name for name - the enum is on the wire,
+ * and the pill's color is keyed by it.
+ */
+export type AirQualityBand =
+  | 'Good'
+  | 'Moderate'
+  | 'UnhealthyForSensitiveGroups'
+  | 'Unhealthy'
+  | 'VeryUnhealthy'
+  | 'Hazardous';
+
+/**
+ * The always-on outdoor air quality reading - a different statement from the
+ * bad-air HazardAlert, which stays the loud path. This one is quiet furniture
+ * on the outside pane.
+ */
+export interface OutsideAirQuality {
+  usAqi: number;
+  band: AirQualityBand;
+  /**
+   * ISO 8601. When the index was measured. The pill mutes past two hours and
+   * trusts this field for it, not its own fetch time - the same "the server
+   * dates the reading" rule currentAsOf follows.
+   */
+  asOf: string;
 }
 
 export interface OutsideClimate {
@@ -82,6 +142,18 @@ export interface OutsideClimate {
   history: TempPoint[];
   forecast: TempPoint[];
   hourly: HourlyOutside[];
+  /**
+   * Null until the follow-up forecast provider lands (and null after it when
+   * the provider is unreachable) - the outlook cells render nothing on null,
+   * never a placeholder. The API omitting the field entirely reads as null
+   * via lib/snapshotDefaults.ts, so the client and the API need no lockstep
+   * deploy.
+   */
+  todayOutlook: DayOutlook | null;
+  /** Same contract as todayOutlook. */
+  tomorrowOutlook: DayOutlook | null;
+  /** Null when no air quality provider is configured or its reading went stale server-side. Same absent-means-null rule as the outlooks. */
+  airQuality: OutsideAirQuality | null;
 }
 
 /**

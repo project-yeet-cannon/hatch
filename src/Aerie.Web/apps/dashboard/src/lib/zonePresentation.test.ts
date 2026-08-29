@@ -18,6 +18,7 @@ function zone(overrides: Partial<ZoneClimate> = {}): ZoneClimate {
     forecast: [{ time: GENERATED_AT, tempF: 70 }],
     low: null,
     high: null,
+    pinned: false,
     ...overrides,
   };
 }

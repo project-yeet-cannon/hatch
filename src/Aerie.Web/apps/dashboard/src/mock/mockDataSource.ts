@@ -6,8 +6,10 @@ import type {
   DailyExtreme,
   DashboardData,
   DashboardDataSource,
+  DayOutlook,
   HazardAlert,
   HourlyOutside,
+  OutsideAirQuality,
   OutsideClimate,
   RoutineSummary,
   SunEvents,
@@ -29,17 +31,23 @@ const STEP_HOURS = 0.5;
 const TIME_ZONE = DEFAULT_TIME_ZONE;
 
 /**
- * `staleMinutes` is how long ago this zone last reported, and the three values
- * are deliberately one per band of lib/staleness.ts - fresh, stale, and past
- * the point where the number is worth showing at all. Same reasoning as the
- * unconfigured camera below: a state that can only be reached by unplugging a
- * sensor is a state nobody will look at twice, and it will look wrong the first
- * time it happens for real.
+ * `staleMinutes` is how long ago this zone last reported, and the first three
+ * values are deliberately one per band of lib/staleness.ts - fresh, stale, and
+ * past the point where the number is worth showing at all. Same reasoning as
+ * the unconfigured camera below: a state that can only be reached by unplugging
+ * a sensor is a state nobody will look at twice, and it will look wrong the
+ * first time it happens for real.
+ *
+ * `pinned` splits two-and-two so both halves of the lead-zone partition are on
+ * screen against this source: two tabs on the climate card, two rows under
+ * "More rooms". The stale zone is one of the pinned ones on purpose - the tab
+ * treatment of a dimmed reading has to be visible without unplugging anything.
  */
-const ZONE_CURVES: Record<string, { name: string; curve: DiurnalCurve; staleMinutes: number }> = {
-  living_room: { name: 'Living Room', curve: { meanF: 70, amplitudeF: 4, peakHour: 17 }, staleMinutes: 1 },
-  bedroom: { name: 'Bedroom', curve: { meanF: 69.5, amplitudeF: 1, peakHour: 14 }, staleMinutes: 14 },
-  office: { name: 'Office', curve: { meanF: 67.5, amplitudeF: 1.5, peakHour: 12 }, staleMinutes: 45 },
+const ZONE_CURVES: Record<string, { name: string; curve: DiurnalCurve; staleMinutes: number; pinned: boolean }> = {
+  living_room: { name: 'Living Room', curve: { meanF: 70, amplitudeF: 4, peakHour: 17 }, staleMinutes: 1, pinned: true },
+  bedroom: { name: 'Bedroom', curve: { meanF: 69.5, amplitudeF: 1, peakHour: 14 }, staleMinutes: 14, pinned: true },
+  office: { name: 'Office', curve: { meanF: 67.5, amplitudeF: 1.5, peakHour: 12 }, staleMinutes: 45, pinned: false },
+  sunroom: { name: 'Sunroom', curve: { meanF: 73, amplitudeF: 6, peakHour: 15 }, staleMinutes: 3, pinned: false },
 };
 
 const INDOOR_COMFORT_RANGE: ComfortRange = { lowF: 68, highF: 71 };
@@ -112,7 +120,7 @@ function extremesOf(points: TempPoint[]): { low: DailyExtreme; high: DailyExtrem
 }
 
 function buildZone(id: string, now: Date): ZoneClimate {
-  const { name, curve, staleMinutes } = ZONE_CURVES[id];
+  const { name, curve, staleMinutes, pinned } = ZONE_CURVES[id];
   const { history, forecast } = buildSeries(now, curve);
   const { low, high } = extremesOf([...history, ...forecast]);
   return {
@@ -125,6 +133,7 @@ function buildZone(id: string, now: Date): ZoneClimate {
     forecast,
     low,
     high,
+    pinned,
   };
 }
 
@@ -155,6 +164,57 @@ function derivePrecipitation(hourly: HourlyOutside[]): OutsideClimate['precipita
   return {
     amountIn,
     window: start === end ? formatShortTime(start, TIME_ZONE) : `${formatShortTime(start, TIME_ZONE)}–${formatShortTime(end, TIME_ZONE)}`,
+  };
+}
+
+/**
+ * The mock's variant knobs, so every state of the new outside fields is
+ * reachable from a URL rather than by editing this file
+ * (docs/plans/dashboard-redesign.md, "The mock-first data contract"):
+ *
+ *   ?source=mock&mock-aqi=118      any US AQI index; the band is derived
+ *   ?source=mock&mock-aqi=stale    a reading three hours old (the pill mutes)
+ *   ?source=mock&mock-aqi=none     no reading (the pill is absent)
+ *   ?source=mock&mock-outlook=none no outlooks (the cells are absent)
+ */
+function mockKnob(name: string): string | null {
+  return new URLSearchParams(window.location.search).get(name);
+}
+
+/** AirQualityBands.Of, mirrored - the mock plays the server here, so it owes the server's mapping. Exported for the boundary test alone. */
+export function bandOf(usAqi: number): OutsideAirQuality['band'] {
+  if (usAqi <= 50) return 'Good';
+  if (usAqi <= 100) return 'Moderate';
+  if (usAqi <= 150) return 'UnhealthyForSensitiveGroups';
+  if (usAqi <= 200) return 'Unhealthy';
+  if (usAqi <= 300) return 'VeryUnhealthy';
+  return 'Hazardous';
+}
+
+function buildAirQuality(now: Date): OutsideAirQuality | null {
+  const knob = mockKnob('mock-aqi');
+  if (knob === 'none') return null;
+  const usAqi = knob !== null && /^\d+$/.test(knob) ? Number(knob) : 42;
+  const asOf = knob === 'stale' ? new Date(now.getTime() - 3 * HOUR_MS) : new Date(now.getTime() - 20 * 60_000);
+  return { usAqi, band: bandOf(usAqi), asOf: asOf.toISOString() };
+}
+
+/**
+ * Today from the outside curve's own extremes, tomorrow a couple of degrees
+ * warmer with a different condition - so the two cells never render as twins
+ * and both glyph paths are exercised. Rain in the hourly series wins today's
+ * condition, matching what a provider's daily code would do.
+ */
+function buildOutlooks(
+  outside: { history: TempPoint[]; forecast: TempPoint[] },
+  hourly: HourlyOutside[],
+): { todayOutlook: DayOutlook | null; tomorrowOutlook: DayOutlook | null } {
+  if (mockKnob('mock-outlook') === 'none') return { todayOutlook: null, tomorrowOutlook: null };
+  const { low, high } = extremesOf([...outside.history, ...outside.forecast]);
+  const raining = hourly.some((h) => h.precipIn > 0);
+  return {
+    todayOutlook: { highF: high.tempF, lowF: low.tempF, condition: raining ? 'rain' : 'partlyCloudy' },
+    tomorrowOutlook: { highF: high.tempF + 3, lowF: low.tempF + 2, condition: 'clear' },
   };
 }
 
@@ -268,9 +328,9 @@ function buildOutside(now: Date, zones: ZoneClimate[], sunEvents: SunEvents): Ou
 
   return {
     currentTempF,
-    // Outside is always fresh in the mock: the three interior zones already
-    // cover the staleness ladder, and a permanently stale outside card would
-    // just be noise behind every other thing the mock is for.
+    // Outside is always fresh in the mock: the interior zones already cover
+    // the staleness ladder, and a permanently stale outside card would just
+    // be noise behind every other thing the mock is for.
     currentAsOf: now.toISOString(),
     humidityPct: currentHumidity,
     sunHoursRemaining,
@@ -280,6 +340,8 @@ function buildOutside(now: Date, zones: ZoneClimate[], sunEvents: SunEvents): Ou
     history,
     forecast,
     hourly,
+    ...buildOutlooks({ history, forecast }, hourly),
+    airQuality: buildAirQuality(now),
   };
 }
 
