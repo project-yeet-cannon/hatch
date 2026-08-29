@@ -160,18 +160,64 @@ spec:
       # Host is the Service name (../opensearch.yaml's chart-default host,
       # confirmed there against the same chart version); everything else -
       # Logstash_Format, the aerie-logs prefix, Suppress_Type_Name - is
-      # unchanged from the compose config, except Retry_Limit, which the
-      # compose config also left unset (default: 1). Found live, 2026-08-20:
-      # against one compose project that default was never visible; against
-      # a whole node's worth of concurrent tail coroutines hitting a single
-      # small OpenSearch pod, a debug capture showed chunks failing with no
-      # response ever logged (a client-side timeout, not a rejected bulk
-      # item - every response body this cluster captured came back
-      # "errors":false) and getting permanently dropped after that one
-      # retry. Mem_Buf_Limit above already bounds how much can back up
-      # in memory, so unlimited retries can't grow without limit - they
-      # just mean a transient contention spike delays delivery instead of
-      # losing it.
+      # unchanged from the compose config.
+      #
+      # Replace_Dots On - the fix for the 2026-08-29 crashloop (fluent-bit
+      # pods at 84 and 86 restarts, all OOMKilled). Off is the plugin
+      # default, and it is wrong for any Kubernetes log pipeline. The
+      # kubernetes filter above attaches the source pod's labels verbatim
+      # under kubernetes.labels, and OpenSearch's dynamic mapper reads a dot
+      # inside a *field name* as object nesting. A pod labelled both
+      # `app: longhorn-manager` and `app.kubernetes.io/name: longhorn`
+      # therefore asks the same index to map kubernetes.labels.app as a
+      # concrete string and as an object holding `kubernetes.io/name`. First
+      # one to arrive wins the mapping; every document carrying the other
+      # shape is rejected for as long as that index exists:
+      #
+      #   "type": "mapper_parsing_exception", "reason": "object mapping for
+      #   [kubernetes.labels.app] tried to parse field [app] as object, but
+      #   found a concrete value"
+      #
+      # 21 of this cluster's 97 pods carry such a pair (cert-manager,
+      # flux-system, kube-system, longhorn-system, observability), so this
+      # was never a rare edge. Replace_Dots rewrites the dots in the key to
+      # underscores before the bulk body is built - app_kubernetes_io/name -
+      # so the nesting, and the collision, never form. It is deliberately on
+      # the OUTPUT rather than solved with a filter: it covers every dotted
+      # key in the record, not only the label subtree. The other half of the
+      # fix is at the OpenSearch end, in
+      # ../../config/provisioning/apply-index-template.sh - see there for
+      # why both halves exist and why neither repairs an index that already
+      # guessed the broken mapping.
+      #
+      # Retry_Limit 10, not False. The 2026-08-20 note this replaces set it
+      # to False (unlimited) after a debug capture showed chunks failing
+      # with no response logged, read as a client-side timeout, and argued
+      # that "Mem_Buf_Limit above already bounds how much can back up in
+      # memory, so unlimited retries can't grow without limit". Both halves
+      # of that were wrong, and a packet capture on 2026-08-29 is what
+      # showed it. The bulk response was never absent - it was HTTP 200 with
+      # a per-item 400 inside, which is why the plugin's `errors` counter
+      # stayed at 0 and nothing was ever logged above debug. And a rejected
+      # item is deterministic, so unlimited retries meant a chunk that can
+      # never succeed was retried forever: fluent-bit re-serialises the
+      # whole chunk to a JSON bulk body on every attempt, and the pinned
+      # chunks plus that churn drove anon memory to 119.5 MB against the
+      # 128Mi limit below (measured in the cgroup on aerie-node-0) until the
+      # kernel killed it. Mem_Buf_Limit bounds the *chunk* bytes - 47.7 MB
+      # at the time - not the process holding them.
+      #
+      # The failure that mattered was not the OOM but the silence before it:
+      # the plugin retries the whole chunk when any single item in it is
+      # rejected, so the ~50 good records sharing a chunk with one poisoned
+      # one never landed either. aerie-node-0's pod had read 36,959 records
+      # in four days and delivered 854 - that node's logs were simply absent
+      # from the index, with nothing above [ warn] to say so. A bound is
+      # what keeps one undeliverable record from costing a node its
+      # observability. 10 attempts with fluent-bit's exponential backoff is
+      # a window of hours, so the transient contention the 08-20 note was
+      # reacting to is still absorbed; what changes is that a permanently
+      # rejected chunk is now dropped instead of held forever.
       outputs: |
         [OUTPUT]
             Name                opensearch
@@ -183,7 +229,8 @@ spec:
             Logstash_Prefix     aerie-logs
             tls                 Off
             Suppress_Type_Name  On
-            Retry_Limit         False
+            Replace_Dots        On
+            Retry_Limit         10
 
     # Three mount details that each fail silently (the cluster plan's own
     # phrasing) if any one of them is skipped:
@@ -227,16 +274,47 @@ spec:
         subPath: service_tag.lua
         readOnly: true
 
-    # 7 MiB observed on the old host's one-project DaemonSet (phase-6-observability.md's
-    # sizing table); no CPU limit, per that same table's "whole stack peaked at
-    # 5% of one core" finding, which every other HelmRelease in this phase
-    # leaves uncapped on the same evidence.
+    # The chart sets only httpGet path/port here, leaving timeoutSeconds at
+    # Kubernetes' own default of 1s. That is too tight for this probe: `GET /`
+    # is served by the same single-threaded event loop that does the flushing,
+    # so a busy engine answers late rather than not at all, and three late
+    # answers restart a pod that is working. aerie-node-2's pod recorded 13
+    # such kills ("Liveness probe failed: context deadline exceeded") on top
+    # of its OOMs. 5s still catches a genuinely wedged engine within 15s;
+    # what it stops catching is a busy one. failureThreshold and period are
+    # left at the chart/Kubernetes defaults (3 and 10s).
+    livenessProbe:
+      httpGet:
+        path: /
+        port: http
+      timeoutSeconds: 5
+
+    # No CPU limit, per phase-6-observability.md's sizing table's "whole stack
+    # peaked at 5% of one core" finding, which every other HelmRelease in this
+    # phase leaves uncapped on the same evidence.
+    #
+    # The memory limit was 128Mi, carried over from the 7 MiB that same table
+    # observed on the old host's one-project DaemonSet. That number did not
+    # survive the move: this DaemonSet tails a whole node (46 open files on
+    # aerie-node-1, against a compose project's handful), and it holds
+    # Mem_Buf_Limit's 50MB of chunks in the same process. Measured in the
+    # cgroup on aerie-node-0, 2026-08-29: 47.7 MB of buffered chunks came with
+    # 119.5 MB of anon memory - roughly 2.5x, because the opensearch plugin
+    # re-serialises each chunk into a JSON bulk body to send it, and the
+    # kubernetes filter keeps a metadata cache per pod on the node. 128Mi was
+    # therefore under the process's own configured buffer, and the pods sat at
+    # 96% of the limit in steady state with nothing left for a burst.
+    #
+    # 256Mi is Mem_Buf_Limit's 50MB at the measured 2.5x, plus headroom. It is
+    # sized to the buffer that is already configured above rather than to an
+    # observed peak, because the peak that was being observed was a runaway -
+    # see the Retry_Limit note above for what was actually filling it.
     resources:
       requests:
         cpu: 10m
         memory: 64Mi
       limits:
-        memory: 128Mi
+        memory: 256Mi
 
     # 6b.14's PriorityClass. A DaemonSet, same as
     # ../controllers/kube-prometheus-stack.yaml's prometheus-node-exporter -

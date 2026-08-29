@@ -49,6 +49,33 @@ INDEX_PATTERN="aerie-logs-*"
 MAX_ATTEMPTS=30
 RETRY_DELAY_SECONDS=5
 
+# kubernetes.labels is pinned to flat_object - the OpenSearch half of the
+# 2026-08-29 fluent-bit crashloop fix; the other half is Replace_Dots On in
+# ../../controllers/fluent-bit.yaml, and that file's own comment carries the
+# full account. Short version: pod labels are arbitrary operator-chosen keys,
+# and OpenSearch's dynamic mapper reads a dot inside a field *name* as object
+# nesting, so a pod labelled both `app: x` and `app.kubernetes.io/name: y`
+# asks one index to map kubernetes.labels.app as a string and as an object at
+# once. Whichever arrived first won, and every document with the other shape
+# was rejected with a mapper_parsing_exception for the life of that index -
+# 21 of this cluster's 97 pods carried such a pair.
+#
+# flat_object indexes the whole subtree as one field instead of mapping each
+# label key on its own, so no key under it can collide with another, and the
+# subtree cannot contribute to the 1000-field mapping limit either - which
+# matters here for the same reason: the key space is arbitrary and grows with
+# every chart this cluster installs. Replace_Dots already removes the dots
+# that caused *this* collision; this is what makes the class of it
+# unreachable, including for keys that arrive from somewhere other than the
+# kubernetes filter.
+#
+# Both halves are prevention, not repair. As the header above says, a
+# composable index template is consulted only when an index is created, and
+# field mappings are immutable once guessed - so an aerie-logs-* index that
+# already mapped kubernetes.labels.app as an object keeps rejecting those
+# documents until ISM (./apply-ism-policy.sh) ages it out. The daily index
+# pattern is what bounds that: the fix takes effect on the next UTC day's
+# index without anything being deleted or reindexed.
 TEMPLATE_BODY=$(cat <<'JSON'
 {
   "index_patterns": ["aerie-logs-*"],
@@ -58,7 +85,13 @@ TEMPLATE_BODY=$(cat <<'JSON'
     },
     "mappings": {
       "properties": {
-        "service": { "type": "keyword" }
+        "service": { "type": "keyword" },
+        "kubernetes": {
+          "properties": {
+            "labels": { "type": "flat_object" },
+            "annotations": { "type": "flat_object" }
+          }
+        }
       }
     }
   }
