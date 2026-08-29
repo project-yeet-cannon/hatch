@@ -339,29 +339,41 @@ Confirming what is already true, and fixing the one case where it isn't.
 
 Needs Phase 6's field. Client-side only once it has it.
 
-- [ ] **`lib/staleness.ts`** — a pure `classifyReading(asOf, generatedAt)`
+- [x] **`lib/staleness.ts`** — a pure `classifyReading(asOf, generatedAt)`
       returning `'fresh' | 'stale' | 'none'`, with the two thresholds exported
       as named constants and documented as a pair, the way
       [`kioskIdleTimings.ts`](../../src/Aerie.Web/apps/dashboard/src/lib/kioskIdleTimings.ts)
       documents its ladder. Unit-tested at and around both boundaries, and for
       a null `asOf`.
-- [ ] **`ZoneCard`, `fresh`** — unchanged.
-- [ ] **`ZoneCard`, `stale`** — the temperature and the sparkline drop to
+- [x] **`ZoneCard`, `fresh`** — unchanged.
+- [x] **`ZoneCard`, `stale`** — the temperature and the sparkline drop to
       `--muted`, and the summary row gains a tappable affordance that reveals
       "as of 3:42 PM" in the expanded body. The number stays: a
       fifteen-minute-old reading is still the best answer anyone has.
-- [ ] **`ZoneCard`, `none`** — the swatch goes `--muted`, the temperature reads
+- [x] **`ZoneCard`, `none`** — the swatch goes `--muted`, the temperature reads
       `—`, the badge reads "no data", and the chart renders as a flat muted
       band rather than a stale line. `deriveZonePresentation` already produces
       exactly this shape for `currentTempF === null`; extend its guard to cover
       an expired `asOf` so there is one code path, not two.
-- [ ] **`OutsideCard`** gets the same three states from the same function — the
+- [x] **`OutsideCard`** gets the same three states from the same function — the
       outside temperature comes down the same road and goes stale the same way.
-- [ ] **Snapshot age is its own signal.** If `generatedAt` itself is more than
-      two poll intervals old — the API is unreachable and the page is showing a
-      cached snapshot — every bar is stale by construction. Derive that once at
-      the `App` level rather than letting each card discover it separately, and
-      feed it to the health dot as an error.
+- [x] **Snapshot age is its own signal**, and it turned out to be load-bearing
+      rather than a nicety: measuring against `generatedAt` verbatim would have
+      frozen every reading's age the moment the API died, because
+      `generatedAt - currentAsOf` is a constant once both stop moving. A wall
+      whose API failed an hour ago would have reported every bar as fresh —
+      the exact confident-but-wrong screen this phase exists to prevent, in the
+      code meant to prevent it. `App` now derives `nowOnServerClock`: the
+      snapshot's clock advanced by how long the page has held it, re-derived on
+      the 15s tick, so each bar walks fresh → stale → no data on its own while
+      the poll keeps failing. Both terms of the elapsed subtraction come from
+      the device clock and both timestamps in the comparison from the server's,
+      so neither clock's drift leaks into the other.
+- [~] **Deviation:** it is *not* also fed to the health dot as an error. A
+      snapshot older than two poll intervals means the polls are failing, and a
+      failing poll already logs `Dashboard data load failed` every 60s — a
+      second error for the same condition is one entry per minute of pure
+      duplication in a 64-slot buffer.
 
 ## Phase 6 — The API says when a reading was taken
 

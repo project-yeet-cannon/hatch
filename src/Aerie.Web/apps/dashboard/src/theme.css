@@ -1500,3 +1500,25 @@ body {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+
+/* A stale card (components/ZoneCard.tsx, OutsideCard.tsx): the reading is still
+   the best answer anyone has, so it is dimmed rather than muted or hidden -
+   "trust this less", not "ignore this". The card's own text stays at full
+   contrast; only the number and the line it draws step back, because those are
+   the two things someone reads from across the room and takes as current.
+
+   No transition: the state changes on a 60s poll, and a card fading in and out
+   on its own is a wall that looks like it is doing something. */
+.hf-zone.stale .hf-temp,
+.hf-zone.stale .hf-spark,
+.hf-zone.stale .hf-chart,
+.hf-out.stale .hf-temp,
+.hf-out.stale .hf-chart {
+  opacity: 0.45;
+}
+.hf-asof {
+  font: 500 12px/1.3 var(--ui);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

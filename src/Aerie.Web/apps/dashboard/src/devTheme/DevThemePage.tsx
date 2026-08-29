@@ -242,8 +242,10 @@ export function DevThemePage() {
 
       {fixture && (
         <div className="hf-zones devtheme-fixture">
-          <OutsideCard outside={fixture.outside} timeZone={fixture.timezone} />
-          {fixture.zones[0] && <ZoneCard zone={fixture.zones[0]} timeZone={fixture.timezone} defaultOpen />}
+          <OutsideCard outside={fixture.outside} timeZone={fixture.timezone} nowOnServerClock={fixture.generatedAt} />
+          {fixture.zones[0] && (
+            <ZoneCard zone={fixture.zones[0]} timeZone={fixture.timezone} nowOnServerClock={fixture.generatedAt} defaultOpen />
+          )}
         </div>
       )}
     </div>

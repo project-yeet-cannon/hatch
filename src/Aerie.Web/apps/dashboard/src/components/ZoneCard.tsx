@@ -6,6 +6,12 @@ import { TempChart, TempChartAxis } from './TempChart';
 interface ZoneCardProps {
   zone: ZoneClimate;
   timeZone: string;
+  /**
+   * Now, on the server's clock - the snapshot's `generatedAt` advanced by how
+   * long the page has held it. What a reading's age is measured against; see
+   * App.tsx for why it is not `generatedAt` itself.
+   */
+  nowOnServerClock: string;
   defaultOpen?: boolean;
 }
 
@@ -23,12 +29,17 @@ const BADGE_CLASS: Record<ComfortStatus, string> = {
   unknown: 'b-unknown',
 };
 
-export function ZoneCard({ zone, timeZone, defaultOpen }: ZoneCardProps) {
-  const presentation = deriveZonePresentation(zone, timeZone);
+export function ZoneCard({ zone, timeZone, nowOnServerClock, defaultOpen }: ZoneCardProps) {
+  const presentation = deriveZonePresentation(zone, timeZone, nowOnServerClock);
   const badgeClass = BADGE_CLASS[presentation.status];
+  // 'none' is already carried by presentation.status ('unknown'), which mutes
+  // the swatch, the badge and the chart on its own. 'stale' has no status of
+  // its own - the reading is still the best answer anyone has - so it dims the
+  // card instead, which says "trust this less" without saying "ignore this".
+  const stale = presentation.freshness === 'stale';
 
   return (
-    <details className="hf-zone" open={defaultOpen}>
+    <details className={`hf-zone${stale ? ' stale' : ''}`} open={defaultOpen}>
       <summary className="hf-zsum">
         <span className="hf-swatch" style={{ background: SWATCH_VAR[presentation.status] }} />
         <span className="hf-name">{zone.name}</span>
@@ -39,13 +50,23 @@ export function ZoneCard({ zone, timeZone, defaultOpen }: ZoneCardProps) {
           status={presentation.status}
           compact
         />
-        <span className="hf-temp">{zone.currentTempF !== null ? `${Math.round(zone.currentTempF)}°` : '—'}</span>
+        {/* Reads presentation rather than the raw value: at 'none' the number
+            is still in the payload and is no longer worth showing, and a card
+            that draws it anyway is exactly the confident-but-wrong wall this
+            all exists to stop. */}
+        <span className="hf-temp">
+          {presentation.freshness !== 'none' && zone.currentTempF !== null ? `${Math.round(zone.currentTempF)}°` : '—'}
+        </span>
         <span className={`hf-badge ${badgeClass}`}>{presentation.summaryLabel}</span>
         <span className="hf-chev">›</span>
       </summary>
       <div className="hf-body">
         <div className="hf-brow">
           <span className={`hf-badge ${badgeClass}`}>{presentation.bodyBadgeLabel}</span>
+          {/* The "as of" only appears when it is load-bearing, and only in the
+              expanded body - the interaction to find out how old a reading is
+              is opening the card, which is the interaction that already exists. */}
+          {presentation.asOfLabel && <span className="hf-asof">{presentation.asOfLabel}</span>}
           <span className="hf-note">{presentation.statusNote}</span>
         </div>
         <TempChart

@@ -33,6 +33,10 @@ export function App() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
+  // Device-clock reading of when the snapshot in `data` arrived. Only ever
+  // subtracted from another device-clock reading, so a tablet whose own clock
+  // is wrong cannot skew it - see nowOnServerClock below.
+  const [snapshotReceivedAt, setSnapshotReceivedAt] = useState<number | null>(null);
   // null when the overlay is closed; the id of the list it is showing otherwise.
   const [gatherListId, setGatherListId] = useState<string | null>(null);
   // Likewise for Panels - null when closed, the opened panel's id otherwise.
@@ -120,6 +124,7 @@ export function App() {
           });
           firstLoad = false;
           setData(snapshot);
+          setSnapshotReceivedAt(Date.now());
           setError(null);
           notePollSuccess();
         })
@@ -150,6 +155,27 @@ export function App() {
   // so fall back to the configured default — it's only used for a couple of
   // seconds' worth of header rendering and gets replaced once `data` loads.
   const timeZone = data?.timezone ?? DEFAULT_TIME_ZONE;
+  /**
+   * Now, expressed on the server's clock: the snapshot's own `generatedAt`
+   * advanced by how long this page has been holding it.
+   *
+   * The cards measure a reading's age against this rather than against
+   * `generatedAt` itself, and the difference only shows up during an outage -
+   * which is the only time it matters. A frozen `generatedAt` freezes the age
+   * with it, so a wall whose API died an hour ago would keep reporting every
+   * bar as fresh: `generatedAt - currentAsOf` is a constant once both stop
+   * moving. Advancing it makes each bar walk fresh -> stale -> no data on its
+   * own while the poll keeps failing, which is the truth.
+   *
+   * Both terms of the elapsed subtraction come from the device clock and both
+   * timestamps in the comparison from the server's, so neither clock's drift
+   * leaks into the other. Re-derived on the 15s tick below, which is what
+   * drives the cards through the ladder.
+   */
+  const nowOnServerClock =
+    data === null || snapshotReceivedAt === null
+      ? undefined
+      : new Date(Date.parse(data.generatedAt) + (now.getTime() - snapshotReceivedAt)).toISOString();
   const theme = useCircadianTheme(now, data?.sunEvents);
   const clock = formatClockParts(now, timeZone);
   // The snapshot's row for whichever camera is on screen, if it has one. A
@@ -204,9 +230,18 @@ export function App() {
                 Outside is the one card that stays expanded; every zone below it
                 opens only when someone taps it. */}
             <div className="hf-zones" key={resetToken}>
-              <OutsideCard outside={data.outside} timeZone={data.timezone} />
+              <OutsideCard
+                outside={data.outside}
+                timeZone={data.timezone}
+                nowOnServerClock={nowOnServerClock ?? data.generatedAt}
+              />
               {data.zones.map((zone) => (
-                <ZoneCard key={zone.id} zone={zone} timeZone={data.timezone} />
+                <ZoneCard
+                  key={zone.id}
+                  zone={zone}
+                  timeZone={data.timezone}
+                  nowOnServerClock={nowOnServerClock ?? data.generatedAt}
+                />
               ))}
             </div>
             {/* Directly under the room cards: the top of the column is the
