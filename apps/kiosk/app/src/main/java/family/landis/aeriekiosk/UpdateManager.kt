@@ -16,15 +16,9 @@ private const val TAG = "UpdateManager"
 private const val VERSION_URL = "https://files.landis.family/version.json"
 private const val APK_URL = "https://files.landis.family/app-release.apk"
 
-// Deploys often land right after a dev session, and iteration on this app
-// tends to happen in focused spurts — so check aggressively for the first
-// hour after launch, then settle down to a steady background poll. Windows
-// are measured from UpdateManager.start(), not wall-clock time of day.
-private const val FAST_WINDOW_MS = 20 * 60 * 1000L
-private const val FAST_INTERVAL_MS = 60 * 1000L
-private const val MEDIUM_WINDOW_MS = 60 * 60 * 1000L
-private const val MEDIUM_INTERVAL_MS = 5 * 60 * 1000L
-private const val STEADY_INTERVAL_MS = 6 * 60 * 60 * 1000L
+// The two schedules - the ladder and the failure backoff - live in
+// UpdateSchedule.kt, where they are unit-tested. This file is the thing that
+// performs the check; that one is when.
 
 /**
  * Polls files.<DOMAIN> — the same static host CI publishes the APK to for QR
@@ -43,6 +37,9 @@ class UpdateManager(private val context: Context) {
     private val handler = Handler(Looper.getMainLooper())
     private var checkInFlight = false
     private var startedAtElapsedMs = 0L
+    // Read on the main thread (nextIntervalMs) and written from the check
+    // thread, so @Volatile rather than a plain Int.
+    @Volatile private var consecutiveFailures = 0
 
     private val checkRunnable = object : Runnable {
         override fun run() {
@@ -53,7 +50,7 @@ class UpdateManager(private val context: Context) {
 
     fun start() {
         startedAtElapsedMs = SystemClock.elapsedRealtime()
-        handler.postDelayed(checkRunnable, FAST_INTERVAL_MS)
+        handler.postDelayed(checkRunnable, UpdateSchedule.FAST_INTERVAL_MS)
     }
 
     fun stop() {
@@ -62,15 +59,16 @@ class UpdateManager(private val context: Context) {
 
     // SystemClock.elapsedRealtime() rather than wall-clock time, so this
     // can't be thrown off by a timezone/NTP correction mid-window.
-    private fun nextIntervalMs(): Long {
-        val sinceStart = SystemClock.elapsedRealtime() - startedAtElapsedMs
-        return when {
-            sinceStart < FAST_WINDOW_MS -> FAST_INTERVAL_MS
-            sinceStart < MEDIUM_WINDOW_MS -> MEDIUM_INTERVAL_MS
-            else -> STEADY_INTERVAL_MS
-        }
-    }
+    private fun nextIntervalMs(): Long =
+        UpdateSchedule.nextIntervalMs(SystemClock.elapsedRealtime() - startedAtElapsedMs, consecutiveFailures)
 
+    /**
+     * Nothing on this path may touch the UI thread or the error screen. The
+     * whole method body after the guard runs on its own Thread with bounded
+     * connect/read timeouts, which is what makes an unreachable file server a
+     * non-event for the display rather than a cause of one - the Thread
+     * boundary being the first statement is the invariant, not an accident.
+     */
     private fun checkForUpdate() {
         if (checkInFlight) return
         checkInFlight = true
@@ -78,24 +76,50 @@ class UpdateManager(private val context: Context) {
             try {
                 val latestVersionCode = fetchLatestVersionCode()
                 if (latestVersionCode == null) {
-                    KioskLogger.warn("Update check: version.json unreadable")
+                    // Explicitly a failure rather than a quiet no-op: this is
+                    // the common shape of "the file server is unreachable", and
+                    // counting it is what makes the backoff apply at all.
+                    noteFailure("version.json unreadable")
                 } else if (latestVersionCode > BuildConfig.VERSION_CODE) {
                     Log.i(TAG, "Update available: $latestVersionCode > ${BuildConfig.VERSION_CODE}")
                     KioskLogger.info(
                         "Update check: newer version available",
                         mapOf("currentVersionCode" to BuildConfig.VERSION_CODE, "latestVersionCode" to latestVersionCode),
                     )
+                    noteSuccess()
                     downloadAndInstall(latestVersionCode)
                 } else {
+                    noteSuccess()
                     KioskLogger.info("Update check: already up to date", mapOf("versionCode" to BuildConfig.VERSION_CODE))
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Update check failed", e)
-                KioskLogger.warn("Update check failed", mapOf("error" to e.message))
+                noteFailure(e.message ?: e.javaClass.simpleName)
             } finally {
                 checkInFlight = false
             }
         }.start()
+    }
+
+    private fun noteSuccess() {
+        consecutiveFailures = 0
+    }
+
+    /**
+     * Logged with the backoff state rather than as a bare warning, so a tablet
+     * that cannot reach the file server is visible in OpenSearch before someone
+     * notices it is three versions behind.
+     */
+    private fun noteFailure(reason: String) {
+        consecutiveFailures += 1
+        KioskLogger.warn(
+            "Update check failed",
+            mapOf(
+                "reason" to reason,
+                "consecutiveFailures" to consecutiveFailures,
+                "nextDelayMs" to nextIntervalMs(),
+            ),
+        )
     }
 
     private fun fetchLatestVersionCode(): Int? {
@@ -124,6 +148,10 @@ class UpdateManager(private val context: Context) {
                     "Update download failed",
                     mapOf("targetVersionCode" to targetVersionCode, "httpStatus" to connection.responseCode),
                 )
+                // Counts against the backoff too: a version.json that reads and
+                // an APK that doesn't is still a file server we cannot update
+                // from, and waiting six hours to try again is the same bug.
+                noteFailure("APK download HTTP ${connection.responseCode}")
                 return
             }
 

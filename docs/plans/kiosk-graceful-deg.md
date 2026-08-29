@@ -235,24 +235,24 @@ that route around it get closed.
 
 Confirming what is already true, and fixing the one case where it isn't.
 
-- [ ] **Assert the invariant in code, not just in prose.** Add a comment at
+- [x] **Assert the invariant in code, not just in prose.** Add a comment at
       `checkForUpdate` stating that nothing on this path may touch the UI
       thread or the error view, and keep the `Thread` boundary as the first
       statement in the method.
-- [ ] **Give failures their own backoff.** Today a failed check simply waits for
+- [x] **Give failures their own backoff.** Today a failed check simply waits for
       the next ladder interval, which is six hours once the tablet has been up
       an hour — so a router reboot during a deploy can cost most of a day. Add a
       separate failure schedule (30s → 30min, doubling) that runs *alongside*
       the ladder without disturbing it, and resets on the first success. The
       ladder stays the description of "how often do we expect a new build"; the
       backoff is "how fast do we recover from not being able to ask".
-- [ ] **Never download on an unread version.** `fetchLatestVersionCode()`
+- [x] **Never download on an unread version.** `fetchLatestVersionCode()`
       returning `null` already skips the download; make that explicit rather
       than incidental, and count it as a failure for the backoff above.
-- [ ] **Log the backoff state** (`consecutiveFailures`, `nextDelayMs`) on each
+- [x] **Log the backoff state** (`consecutiveFailures`, `nextDelayMs`) on each
       failed check, so a tablet that cannot reach `files.<DOMAIN>` is visible
       before someone notices it is three versions behind.
-- [ ] Unit-test the interval selection — ladder and backoff together — against a
+- [x] Unit-test the interval selection — ladder and backoff together — against a
       fake clock.
 
 ## Phase 3 — The page cannot go white ✅
