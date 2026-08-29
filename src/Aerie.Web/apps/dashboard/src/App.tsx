@@ -6,7 +6,8 @@ import { DEFAULT_TIME_ZONE } from './config';
 import { formatClockParts, formatMonthDay, formatWeekday } from './lib/format';
 import { useCircadianTheme } from './hooks/useCircadianTheme';
 import { ZoneCard } from './components/ZoneCard';
-import { OutsideCard } from './components/OutsideCard';
+import { ClimateCard } from './components/ClimateCard';
+import { partitionZones } from './lib/leadZones';
 import { RoutinesSection } from './components/RoutinesSection';
 import { CamerasSection } from './components/CamerasSection';
 import { PanelsSection } from './components/PanelsSection';
@@ -206,6 +207,8 @@ export function App() {
   // motion event can arrive while the dashboard poll is failing, so this is
   // allowed to be missing and the modal falls back to fetching the name.
   const shownCamera = cameraDeviceId === null ? undefined : data?.cameras.find((camera) => camera.id === cameraDeviceId);
+  // The climate card's tabs and the "More rooms" rows - see lib/leadZones.ts.
+  const zonesPartition = data === null ? null : partitionZones(data.zones);
 
   return (
     <div className="hf-page" style={theme.style as CSSProperties}>
@@ -248,18 +251,21 @@ export function App() {
                 renders nothing when there is nothing active, which is most
                 days - so sitting here costs a calm day no space at all. */}
             <AlertBanner alerts={data.alerts} timeZone={data.timezone} />
-            {/* Keyed on resetToken so an idle reset remounts the cards, which is
-                what puts each <details> back to collapsed - `open` is
+            {/* Keyed on resetToken so an idle reset remounts everything here:
+                the climate card's selection lands back on Outside, and each
+                "More rooms" <details> goes back to collapsed - `open` is
                 uncontrolled DOM state that no re-render would otherwise undo.
-                Outside is the one card that stays expanded; every zone below it
-                opens only when someone taps it. */}
+                The un-pinned rows render below the card until Phase 5 gives
+                them their own section on page two
+                (docs/plans/dashboard-redesign.md). */}
             <div className="hf-zones" key={resetToken}>
-              <OutsideCard
+              <ClimateCard
                 outside={data.outside}
+                leadZones={zonesPartition?.leads ?? []}
                 timeZone={data.timezone}
                 nowOnServerClock={nowOnServerClock ?? data.generatedAt}
               />
-              {data.zones.map((zone) => (
+              {(zonesPartition?.rest ?? []).map((zone) => (
                 <ZoneCard
                   key={zone.id}
                   zone={zone}

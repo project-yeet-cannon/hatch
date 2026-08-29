@@ -1,7 +1,7 @@
 import type { ComfortStatus, ZoneClimate } from '../types';
 import { deriveZonePresentation } from '../lib/zonePresentation';
-import { formatShortTime } from '../lib/format';
-import { TempChart, TempChartAxis } from './TempChart';
+import { TempChart } from './TempChart';
+import { ZoneReadingBody } from './ZoneReadingBody';
 
 interface ZoneCardProps {
   zone: ZoneClimate;
@@ -29,6 +29,13 @@ const BADGE_CLASS: Record<ComfortStatus, string> = {
   unknown: 'b-unknown',
 };
 
+/**
+ * One un-pinned zone as a collapsed row under "More rooms" - the original
+ * dashboard interaction, kept where a stacked list is still the right shape.
+ * The pinned zones render as the climate card's tabs instead, and the
+ * expanded body here is the same ZoneReadingBody that card's pane shows, so
+ * the two presentations cannot drift.
+ */
 export function ZoneCard({ zone, timeZone, nowOnServerClock, defaultOpen }: ZoneCardProps) {
   const presentation = deriveZonePresentation(zone, timeZone, nowOnServerClock);
   const badgeClass = BADGE_CLASS[presentation.status];
@@ -61,45 +68,7 @@ export function ZoneCard({ zone, timeZone, nowOnServerClock, defaultOpen }: Zone
         <span className="hf-chev">›</span>
       </summary>
       <div className="hf-body">
-        <div className="hf-brow">
-          <span className={`hf-badge ${badgeClass}`}>{presentation.bodyBadgeLabel}</span>
-          {/* The "as of" only appears when it is load-bearing, and only in the
-              expanded body - the interaction to find out how old a reading is
-              is opening the card, which is the interaction that already exists. */}
-          {presentation.asOfLabel && <span className="hf-asof">{presentation.asOfLabel}</span>}
-          <span className="hf-note">{presentation.statusNote}</span>
-        </div>
-        <TempChart
-          history={zone.history}
-          forecast={zone.forecast}
-          comfortRange={zone.comfortRange}
-          status={presentation.status}
-        />
-        <TempChartAxis history={zone.history} forecast={zone.forecast} timeZone={timeZone} />
-        <div className="hf-foot">
-          <span className="hf-stat">
-            {zone.low ? (
-              <>
-                <b>{zone.low.tempF}°</b> low · {formatShortTime(zone.low.time, timeZone)}
-              </>
-            ) : (
-              <>
-                <b>—</b> low
-              </>
-            )}
-          </span>
-          <span className="hf-stat">
-            {zone.high ? (
-              <>
-                <b>{zone.high.tempF}°</b> high · {formatShortTime(zone.high.time, timeZone)}
-              </>
-            ) : (
-              <>
-                <b>—</b> high
-              </>
-            )}
-          </span>
-        </div>
+        <ZoneReadingBody zone={zone} timeZone={timeZone} presentation={presentation} />
       </div>
     </details>
   );

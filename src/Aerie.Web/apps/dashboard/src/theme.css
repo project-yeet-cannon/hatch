@@ -281,6 +281,173 @@ body {
   min-width: 0;
 }
 
+/* ---- The climate card (components/ClimateCard.tsx) --------------------
+   Outside plus the lead zones in one card: a tab row of miniature readings
+   over one full-size pane. The tabs are the old collapsed zone row shrunk -
+   swatch, name, temperature - so every room stays glanceable while only one
+   chart's worth of height is spent (docs/plans/dashboard-redesign.md). */
+.hf-climate {
+  border-radius: var(--r);
+  background: var(--card);
+  border: 1px solid var(--line);
+  padding: 18px;
+  box-shadow: var(--shadow);
+}
+/* The negative margin lets the selected tab's fill reach toward the card edge
+   without the unselected row looking inset. */
+.hf-ctabs {
+  display: flex;
+  gap: 6px;
+  margin: -6px -6px 0;
+}
+.hf-ctab {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  border: none;
+  border-radius: var(--r-ctl);
+  background: none;
+  color: var(--ink);
+  font-family: var(--ui);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s;
+}
+/* The same fill the panel power buttons use for "on" - selection is a state,
+   and states share a look. */
+.hf-ctab[aria-selected='true'] {
+  background: color-mix(in srgb, var(--ink) 8%, var(--card));
+}
+.hf-ctab:active {
+  transform: scale(0.97);
+}
+.hf-ctab-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+.hf-ctab .hf-swatch {
+  width: 10px;
+  height: 10px;
+}
+.hf-ctab-label {
+  font: 700 15px/1 var(--display);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hf-ctab-temp {
+  font: 600 22px/1 var(--num);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+/* A quiet room's tab dims its number the way the old row dimmed - the tab is
+   that row, shrunk, and it keeps telling the same truth. */
+.hf-ctab.stale .hf-ctab-temp {
+  opacity: 0.45;
+}
+.hf-climate-rule {
+  height: 1px;
+  background: var(--line);
+  margin: 12px 0;
+}
+.hf-cpane-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.hf-cpane-temp {
+  font: 700 44px/1 var(--display);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+/* The condition note, in the warm ink the old outside card gave it. One line;
+   the mock's storytelling sentence truncates, the API's "Partly Cloudy"
+   never does. */
+.hf-cpane-note {
+  min-width: 0;
+  font: 500 15px/1.3 var(--ui);
+  color: var(--warm-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hf-cpane-side {
+  margin-left: auto;
+}
+/* The same stale treatment the standalone cards use, on the pane's number and
+   line. See the note at the .hf-zone.stale rules below. */
+.hf-cpane.stale .hf-cpane-temp,
+.hf-cpane.stale .hf-chart {
+  opacity: 0.45;
+}
+
+/* The AQI pill: badge anatomy, hazard-ladder color handling. --aqi-color
+   arrives inline from lib/aqiPresentation.ts - the comfort accent for clean
+   air, the ladder's fixed hexes for bad - and only ever appears mixed into
+   --card, so luminance follows the hour either way. */
+.hf-aqi {
+  font: 600 12px/1 var(--ui);
+  padding: 6px 11px;
+  border-radius: 999px;
+  flex: none;
+  white-space: nowrap;
+  margin-left: auto;
+  align-self: center;
+  background: color-mix(in srgb, var(--aqi-color) 20%, var(--card));
+  color: var(--ink);
+}
+.hf-aqi.stale {
+  opacity: 0.45;
+}
+
+/* The Today / Tomorrow cells under the outside pane's stats. */
+.hf-outlook {
+  display: flex;
+  gap: 18px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.hf-outlook-cell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hf-outlook-label {
+  font: 700 12px/1 var(--ui);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.hf-outlook-vals {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 700 17px/1 var(--num);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.hf-outlook-lo {
+  color: var(--muted);
+  font-weight: 600;
+}
+.hf-outlook-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+
 .g-band {
   fill: var(--band);
 }

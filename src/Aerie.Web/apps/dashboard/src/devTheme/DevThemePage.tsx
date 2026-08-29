@@ -15,7 +15,8 @@ import { circadianTimeline, FALLBACK_MOOD } from '../theme/tokens';
 import { DEFAULT_TIME_ZONE } from '../config';
 import { MockDashboardDataSource } from '../mock/mockDataSource';
 import { ZoneCard } from '../components/ZoneCard';
-import { OutsideCard } from '../components/OutsideCard';
+import { ClimateCard } from '../components/ClimateCard';
+import { partitionZones } from '../lib/leadZones';
 
 const MINUTES_PER_DAY = 24 * 60;
 const SUN_EVENTS_DEBOUNCE_MS = 300;
@@ -242,7 +243,12 @@ export function DevThemePage() {
 
       {fixture && (
         <div className="hf-zones devtheme-fixture">
-          <OutsideCard outside={fixture.outside} timeZone={fixture.timezone} nowOnServerClock={fixture.generatedAt} />
+          <ClimateCard
+            outside={fixture.outside}
+            leadZones={partitionZones(fixture.zones).leads}
+            timeZone={fixture.timezone}
+            nowOnServerClock={fixture.generatedAt}
+          />
           {fixture.zones[0] && (
             <ZoneCard zone={fixture.zones[0]} timeZone={fixture.timezone} nowOnServerClock={fixture.generatedAt} defaultOpen />
           )}

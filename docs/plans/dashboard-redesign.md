@@ -521,23 +521,28 @@ every value is drawn from the tables above. Reviewable as a diff of numbers.
 
 ### Phase 3 — The climate card
 
-- [ ] `lib/leadZones.ts`: `partition(zones)` → pinned leads (fallback: first
-      two when none pinned) + the rest. Unit-tested both ways plus the empty
-      case.
-- [ ] `lib/aqiPresentation.ts`: band → {label text, color class/hue} per the
-      severity-precedent mapping. Unit-tested across bands + stale.
-- [ ] `components/ClimateCard.tsx` per the anatomy sketch: tab row
+- [x] `lib/leadZones.ts`: `partitionZones(zones)` → pinned leads (fallback:
+      first two when none pinned) + the rest. Unit-tested both ways plus the
+      empty case.
+- [x] `lib/aqiPresentation.ts`: band → {label text, hue} per the
+      severity-precedent mapping. Unit-tested across bands + stale. The pill
+      uses short band words ("Sensitive groups"); the EPA's full phrasing
+      stays where the server writes it, the bad-air alert title.
+- [x] `components/ClimateCard.tsx` per the anatomy sketch: tab row
       (role=tablist, aria-selected), keyed pane, Outside pane (note, stats,
-      outlook cells, AQI pill), zone pane (existing expanded-body content),
-      all three staleness states in both tabs and panes.
-- [ ] App.tsx: climate card replaces OutsideCard + page-one ZoneCards, keyed
+      outlook cells, AQI pill), zone pane, all three staleness states in both
+      tabs and panes. The zone reading (status row, chart, low/high footer)
+      extracted to `components/ZoneReadingBody.tsx`, shared with ZoneCard so
+      the pane and the "More rooms" rows cannot drift.
+- [x] App.tsx: climate card replaces OutsideCard + page-one ZoneCards, keyed
       on `resetToken`; selection falls back to Outside when a poll drops the
-      zone. ZoneCard itself stays (page two consumes it in Phase 5 — until
-      then unpinned zones render under the climate card as today's rows, so
-      this phase ships alone).
-- [ ] Delete OutsideCard once nothing imports it.
-- [ ] `make test-web`; owner eyeballs mock variants (stale zone, none zone,
-      null outlook/AQI, each AQI band).
+      zone. ZoneCard itself stays; unpinned zones render under the climate
+      card as today's rows until Phase 5.
+- [x] Delete OutsideCard once nothing imports it. (The dev scrubber was the
+      last importer; it previews the ClimateCard now.)
+- [x] Lint + 181 unit tests + build green. **Owner still to eyeball** the
+      mock variants (stale zone, none zone, `mock-outlook=none`,
+      `mock-aqi=none|stale|<index>` per band).
 
 ### Phase 4 — The stage
 
