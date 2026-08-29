@@ -1,10 +1,9 @@
 # Dashboard redesign — two pages, one design language
 
-**Status:** Phase 0 done — the walls are 800×1280 CSS px and the fold budget
-holds with ~340px of slack; no levers engaged. Phase 1 is a pure consistency
-sweep with no layout change and can land independently. Phases 2→3→4→5 are
-ordered (contract, then the two new composites, then the page structure).
-Phase 6 is the hardware pass.
+**Status:** Phases 0–5 done — the wall builds and tests green as two pages
+with the climate card and the stage; what remains is Phase 6, the owner's
+hardware pass, plus the owner-eyeball items noted inside Phases 1/3/4. The
+follow-up section (the API's half of the contract) stays open by design.
 **This plan is design-only on the data side**: everything new renders from the
 mock first, and the API work it needs is specified at the end under
 [Follow-up: the data contract to fulfill](#follow-up-the-data-contract-to-fulfill)
@@ -567,19 +566,25 @@ every value is drawn from the tables above. Reviewable as a diff of numbers.
 
 ### Phase 5 — Two pages
 
-- [ ] Restructure App.tsx into `.hf-p1` / `.hf-p2`; snap CSS on `html`;
-      `100dvh` with the `100vh` fallback line.
-- [ ] Page two sections in order with `.hf-sec-head` headers: Routines,
-      Cameras, Panels, Lists, More rooms (unpinned ZoneCards), Agenda (the
-      full CalendarSection moves here).
-- [ ] The `hasPageTwo` guard and the swipe hint (tap → `scrollIntoView`,
-      reduced-motion honored).
-- [ ] Redraw DashboardSkeleton as page one's shapes.
-- [ ] Verify the lifecycle end-to-end on the dev build: idle reset lands on
-      page one with the stage on photos and the climate card on Outside;
-      scroll presence still registers; overlays still cover both pages;
-      the veil still covers a mid-page-two flip.
-- [ ] `make test-web`.
+- [x] Restructure App.tsx into `.hf-p1` / `.hf-p2`; snap CSS on `html`;
+      `100dvh` with the `100vh` fallback line. Vertical padding moved from
+      `.hfdev` into the pages, so page one's padding lives inside its 100dvh
+      and the fold math holds.
+- [x] Page two sections in order with `.hf-sec-head` headers: Routines,
+      Cameras, Panels, Lists, More rooms (unpinned ZoneCards), Agenda. One
+      deviation, commented in App.tsx: the agenda carries no "Agenda" header —
+      its own day labels are this idiom's original home, and an AGENDA label
+      directly above a TODAY label is a stutter.
+- [x] The `hasPageTwo` guard and the swipe hint (tap → `scrollIntoView`,
+      reduced-motion honored). Gather counts toward page two on its own,
+      because it rides its own data path.
+- [x] Redraw DashboardSkeleton as page one's shapes (climate card + stage;
+      the orphaned `.hf-out` rules left with it).
+- [x] Lifecycle verified in code: the reset's `scrollTo(0,0)` is page one's
+      snap point; presence listens to touches, which every swipe starts with;
+      overlays and the veil are `position: fixed` and cover both pages.
+      **Owner confirms the same on hardware in Phase 6.**
+- [x] Lint + 196 unit tests + build green.
 
 ### Phase 6 — The hardware pass
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { DashboardData } from './types';
 import { getDashboardDataSource } from './dataSource';
@@ -31,6 +31,16 @@ import { createSkewWatcher } from './lib/clockSkew';
 import { isLeaving } from './lib/signIn';
 
 const REFRESH_INTERVAL_MS = 60_000;
+
+/** The section-header idiom (.hf-sec-head, theme.css) - every named section on page two introduces itself with this and nothing else. */
+function SectionHead({ label }: { label: string }) {
+  return (
+    <div className="hf-sec-head">
+      <span className="hf-sec-label">{label}</span>
+      <span className="hf-sec-rule" aria-hidden="true" />
+    </div>
+  );
+}
 
 export function App() {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -209,6 +219,24 @@ export function App() {
   const shownCamera = cameraDeviceId === null ? undefined : data?.cameras.find((camera) => camera.id === cameraDeviceId);
   // The climate card's tabs and the "More rooms" rows - see lib/leadZones.ts.
   const zonesPartition = data === null ? null : partitionZones(data.zones);
+  const calendarHasContent = data !== null && data.calendar.some((day) => day.events.length > 0);
+  // Whether page two exists at all. No content means no .hf-p2, no snap point
+  // and no swipe hint - a fresh deployment with nothing configured is a
+  // one-page wall, which is the truth. Gather counts on its own because it
+  // rides its own data path and can have lists while the snapshot is down.
+  const hasPageTwo =
+    gatherLists.length > 0 ||
+    (data !== null &&
+      (data.routines.length > 0 ||
+        data.cameras.length > 0 ||
+        data.panels.length > 0 ||
+        (zonesPartition?.rest.length ?? 0) > 0 ||
+        calendarHasContent));
+  const pageTwoRef = useRef<HTMLDivElement | null>(null);
+  const scrollToPageTwo = useCallback(() => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    pageTwoRef.current?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth' });
+  }, []);
 
   return (
     <div className="hf-page" style={theme.style as CSSProperties}>
@@ -226,99 +254,138 @@ export function App() {
           all when the wall is healthy, which is nearly always. */}
       <HealthDot level={healthLevel} count={healthEntries.length} onOpen={() => setHealthOpen(true)} />
       <div className="hfdev">
-        <div className="hf-head">
-          {/* The date comes from `now`, never from the snapshot. A snapshot
-              that went stale before midnight and a device clock that did not
-              would otherwise leave the wall reading "Thursday 3rd" above
-              "12:20 AM" on Friday - the header would be reporting the age of
-              the data while looking like it was reporting the date. How old
-              the snapshot is belongs to the health dot, not the calendar. */}
-          <div className="hf-hl">
-            <span className="hf-day">{formatMonthDay(now.toISOString(), timeZone)}</span>
-            <span className="hf-date">{formatWeekday(now.toISOString(), timeZone)}</span>
+        {/* Page one: the wall at rest, sized to the viewport so a calm day
+            never scrolls. Page two is one deliberate swipe below - the
+            document itself is the pager, through the scroll-snap rules on
+            html/.hf-p1/.hf-p2 in theme.css, so the lifecycle's scroll
+            presence signal and the idle reset's scrollTo(0,0) keep working
+            untouched (docs/plans/dashboard-redesign.md). */}
+        <div className="hf-p1">
+          <div className="hf-head">
+            {/* The date comes from `now`, never from the snapshot. A snapshot
+                that went stale before midnight and a device clock that did not
+                would otherwise leave the wall reading "Thursday 3rd" above
+                "12:20 AM" on Friday - the header would be reporting the age of
+                the data while looking like it was reporting the date. How old
+                the snapshot is belongs to the health dot, not the calendar. */}
+            <div className="hf-hl">
+              <span className="hf-day">{formatMonthDay(now.toISOString(), timeZone)}</span>
+              <span className="hf-date">{formatWeekday(now.toISOString(), timeZone)}</span>
+            </div>
+            <div className="hf-hr">
+              <span className="hf-clock">
+                {clock.time}
+                <span className="hf-ampm">{clock.period}</span>
+              </span>
+            </div>
           </div>
-          <div className="hf-hr">
-            <span className="hf-clock">
-              {clock.time}
-              <span className="hf-ampm">{clock.period}</span>
-            </span>
-          </div>
-        </div>
-        {data ? (
-          <>
-            {/* The top of the column, above everything: a hazard is the one
-                thing here that changes what you do on the way out the door. It
-                renders nothing when there is nothing active, which is most
-                days - so sitting here costs a calm day no space at all. */}
-            <AlertBanner alerts={data.alerts} timeZone={data.timezone} />
-            {/* Keyed on resetToken so an idle reset remounts everything here:
-                the climate card's selection lands back on Outside, and each
-                "More rooms" <details> goes back to collapsed - `open` is
-                uncontrolled DOM state that no re-render would otherwise undo.
-                The un-pinned rows render below the card until Phase 5 gives
-                them their own section on page two
-                (docs/plans/dashboard-redesign.md). */}
-            <div className="hf-zones" key={resetToken}>
-              <ClimateCard
-                outside={data.outside}
-                leadZones={zonesPartition?.leads ?? []}
-                timeZone={data.timezone}
-                nowOnServerClock={nowOnServerClock ?? data.generatedAt}
-              />
-              {(zonesPartition?.rest ?? []).map((zone) => (
-                <ZoneCard
-                  key={zone.id}
-                  zone={zone}
+          {data ? (
+            <>
+              {/* The top of the column, above everything: a hazard is the one
+                  thing here that changes what you do on the way out the door.
+                  It renders nothing when there is nothing active, which is
+                  most days - and on a hazard day it pushes the stage toward
+                  the fold, which is the right trade. */}
+              <AlertBanner alerts={data.alerts} timeZone={data.timezone} />
+              {/* Keyed on resetToken so an idle reset remounts the card and
+                  lands its selection back on Outside - the same reset that
+                  used to collapse the <details> rows. */}
+              <div className="hf-zones" key={resetToken}>
+                <ClimateCard
+                  outside={data.outside}
+                  leadZones={zonesPartition?.leads ?? []}
                   timeZone={data.timezone}
                   nowOnServerClock={nowOnServerClock ?? data.generatedAt}
                 />
-              ))}
+              </div>
+              {/* Directly under the climate card: the first thing that is
+                  there to be looked at rather than read. Photos at rest,
+                  today's agenda one swipe away; renders nothing at all when
+                  neither is configured, so a fresh house has no hole where a
+                  stage would be. resetToken lands it back on photos without a
+                  remount - see the note in Stage.tsx. */}
+              <Stage
+                photos={photos}
+                photoSource={photoSource}
+                calendar={data.calendar}
+                timeZone={data.timezone}
+                now={now}
+                resetToken={resetToken}
+              />
+            </>
+          ) : error ? (
+            <div className="hf-load-error" role="alert">
+              Couldn’t load dashboard data — {error}
             </div>
-            {/* Directly under the climate card: the top of the column is the
-                house as it is right now, and this is the first thing below it
-                that is there to be looked at rather than read. Photos at rest,
-                today's agenda one swipe away; renders nothing at all when
-                neither is configured, so a fresh house has no hole where a
-                stage would be. resetToken lands it back on photos without a
-                remount - see the note in Stage.tsx. */}
-            <Stage
-              photos={photos}
-              photoSource={photoSource}
-              calendar={data.calendar}
-              timeZone={data.timezone}
-              now={now}
-              resetToken={resetToken}
-            />
-
-            {/* Below the zones, above the routines: the agenda is read, the
-                routines are touched, so the reachable half of the screen stays
-                the tappable one. An agenda whose every day is empty renders
-                nothing at all - an empty day is only worth saying when some
-                other day isn't. */}
-            {data.calendar.some((day) => day.events.length > 0) && (
+          ) : (
+            <DashboardSkeleton />
+          )}
+          {/* The one hint that page two exists: a quiet pill in the bottom
+              padding. Tapping it is the swipe. It sits in the bottom half of
+              the screen, which is fine - the top-half rule exists for
+              keyboard overlap, and nothing on page one raises a keyboard. */}
+          {hasPageTwo && (
+            <button type="button" className="hf-page-hint" aria-label="Show controls" onClick={scrollToPageTwo} />
+          )}
+        </div>
+        {hasPageTwo && (
+          <div className="hf-p2" ref={pageTwoRef}>
+            {/* Tap-density descends: things you trigger, then things you
+                watch, then things you adjust, then lists, then the rooms not
+                pinned to page one, and pure reading last. */}
+            {data !== null && data.routines.length > 0 && (
+              <section className="hf-sec">
+                <SectionHead label="Routines" />
+                <RoutinesSection routines={data.routines} resetToken={resetToken} />
+              </section>
+            )}
+            {data !== null && data.cameras.length > 0 && (
+              <section className="hf-sec">
+                <SectionHead label="Cameras" />
+                <CamerasSection cameras={data.cameras} onOpen={setManualCameraId} />
+              </section>
+            )}
+            {data !== null && data.panels.length > 0 && (
+              <section className="hf-sec">
+                <SectionHead label="Panels" />
+                <PanelsSection panels={data.panels} onOpen={setPanelId} />
+              </section>
+            )}
+            {/* Outside the snapshot's null-check on purpose: Gather has its
+                own data path, so a dashboard API that is down doesn't take
+                the shopping list off the wall with it. */}
+            {gatherLists.length > 0 && (
+              <section className="hf-sec">
+                <SectionHead label="Lists" />
+                <GatherTile lists={gatherLists} onOpen={setGatherListId} />
+              </section>
+            )}
+            {/* Keyed on resetToken for the <details> collapse - `open` is
+                uncontrolled DOM state that no re-render would otherwise undo. */}
+            {data !== null && (zonesPartition?.rest.length ?? 0) > 0 && (
+              <section className="hf-sec" key={resetToken}>
+                <SectionHead label="More rooms" />
+                <div className="hf-zones">
+                  {(zonesPartition?.rest ?? []).map((zone) => (
+                    <ZoneCard
+                      key={zone.id}
+                      zone={zone}
+                      timeZone={data.timezone}
+                      nowOnServerClock={nowOnServerClock ?? data.generatedAt}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+            {/* No SectionHead of its own: the agenda introduces itself with
+                its day labels - Today, then the dates - which are this idiom's
+                original home, and an "Agenda" label directly above a "Today"
+                label is a stutter. */}
+            {data !== null && calendarHasContent && (
               <CalendarSection calendar={data.calendar} timeZone={data.timezone} now={now} />
             )}
-            {data.routines.length > 0 && <RoutinesSection routines={data.routines} resetToken={resetToken} />}
-            {/* Its own row directly below: same tile, same band of the screen,
-                but tapping one opens a live feed rather than changing something
-                in the house, and that is worth a row break. */}
-            {data.cameras.length > 0 && <CamerasSection cameras={data.cameras} onOpen={setManualCameraId} />}
-            {/* Below the cameras and above Gather: a panel is the tier between
-                a routine's one tap and a sub-UI of its own, and it sits in that
-                order on the screen too. */}
-            {data.panels.length > 0 && <PanelsSection panels={data.panels} onOpen={setPanelId} />}
-          </>
-        ) : error ? (
-          <div className="hf-load-error" role="alert">
-            Couldn’t load dashboard data — {error}
           </div>
-        ) : (
-          <DashboardSkeleton />
         )}
-        {/* Outside the snapshot's ternary on purpose: Gather has its own data
-            path, so a dashboard API that is down doesn't have to take the
-            shopping list off the wall with it. */}
-        <GatherTile lists={gatherLists} onOpen={setGatherListId} />
       </div>
       {/* Inside .hf-page rather than portalled: the circadian palette is inline
           custom properties on that element, and an overlay mounted anywhere

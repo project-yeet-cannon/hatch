@@ -8,60 +8,61 @@ function Skel({ width, height, style }: SkelProps) {
   return <span className="hf-skel" style={{ width, height, ...style }} />;
 }
 
-// Mirrors OutsideCard's DOM shape so the real card slots in without shifting
-// layout once data arrives.
-function OutsideCardSkeleton() {
+// Mirrors the ClimateCard's DOM shape - tab row, rule, pane - so the real
+// card slots in without shifting layout once data arrives.
+function ClimateCardSkeleton() {
   return (
-    <div className="hf-out">
-      <div className="hf-brow" style={{ marginBottom: 12 }}>
-        <span className="hf-swatch" style={{ background: 'var(--skel)' }} />
-        <span className="hf-name" style={{ width: 'auto' }}>
-          Outside
-        </span>
-        <Skel width={44} height={25} style={{ marginLeft: 'auto' }} />
+    <div className="hf-climate">
+      <div className="hf-ctabs">
+        {Array.from({ length: 3 }, (_, i) => (
+          <div key={i} className="hf-ctab" style={{ cursor: 'default' }}>
+            <span className="hf-ctab-name">
+              <span className="hf-swatch" style={{ background: 'var(--skel)' }} />
+              <Skel width={72} height={15} />
+            </span>
+            <Skel width={40} height={22} />
+          </div>
+        ))}
       </div>
-      <span className="hf-skel hf-chart" style={{ height: 130, display: 'block' }} />
+      <div className="hf-climate-rule" aria-hidden="true" />
+      <div className="hf-cpane-head">
+        <Skel width={92} height={44} />
+        <Skel width="40%" height={15} />
+      </div>
+      <span className="hf-skel hf-chart" style={{ height: 110, display: 'block' }} />
       <span className="hf-skel hf-xax" />
       <div className="hf-foot">
         <Skel width={92} height={13} />
         <Skel width={78} height={13} />
         <Skel width={100} height={13} />
       </div>
-      <Skel width="70%" height={13} style={{ marginTop: 11 }} />
     </div>
   );
 }
 
-// Mirrors ZoneCard's collapsed <summary> row.
-function ZoneCardSkeleton() {
+// The stage's box with nothing to show yet - the same fixed shape, so the
+// column doesn't jump when the first photo or agenda row lands.
+function StageSkeleton() {
   return (
-    <div className="hf-zone">
-      <div className="hf-zsum">
-        <span className="hf-swatch" style={{ background: 'var(--skel)' }} />
-        <Skel width={100} height={19} />
-        <span className="hf-skel hf-spark" />
-        <Skel width={38} height={25} />
-        <Skel width={64} height={26} style={{ borderRadius: 30 }} />
-        <span className="hf-chev" style={{ visibility: 'hidden' }}>
-          ›
-        </span>
-      </div>
+    <div className="hf-stage">
+      <span className="hf-skel" style={{ position: 'absolute', inset: 0, borderRadius: 0 }} />
     </div>
   );
 }
 
 /**
- * Placeholder shown in place of the zone/outside cards while the initial
- * `/api/dashboard` fetch is in flight, so the page paints immediately
- * instead of staying blank for the few seconds the request takes.
+ * Placeholder for page one while the initial `/api/dashboard` fetch is in
+ * flight, so the page paints immediately instead of staying blank for the
+ * few seconds the request takes. Page one's shapes only - page two is below
+ * the fold by definition, and a skeleton nobody can see is noise.
  */
-export function DashboardSkeleton({ zoneCount = 3 }: { zoneCount?: number }) {
+export function DashboardSkeleton() {
   return (
-    <div className="hf-zones">
-      <OutsideCardSkeleton />
-      {Array.from({ length: zoneCount }, (_, i) => (
-        <ZoneCardSkeleton key={i} />
-      ))}
-    </div>
+    <>
+      <div className="hf-zones">
+        <ClimateCardSkeleton />
+      </div>
+      <StageSkeleton />
+    </>
   );
 }

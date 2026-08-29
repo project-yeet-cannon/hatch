@@ -20,9 +20,21 @@ body {
   /* Belt and braces with index.html's user-scalable=no: the meta tag stops
      zoom being applied, this stops the gesture being recognised at all, so a
      pinch doesn't first get interpreted as a swallowed interaction. pan-y (not
-     manipulation) because nothing in this layout scrolls horizontally - see
-     .hf-zone, the only overflow rule in this file. */
+     manipulation) because the page never scrolls horizontally - the stage's
+     track declares its own pan-x on top of this. */
   touch-action: pan-y;
+}
+
+/* The pager. The document is the pager: two full-height pages with snap
+   points, so "swipe up to the controls" is just a scroll and every existing
+   mechanism - the lifecycle's scroll presence signal, scrollTo(0,0) on idle
+   reset, fixed overlays - works untouched. `proximity`, not `mandatory`:
+   page two is allowed to outgrow one viewport, and mandatory snap makes
+   resting mid-page impossible. If page two stays short in practice,
+   flipping this word is the Phase 6 feel call
+   (docs/plans/dashboard-redesign.md). */
+html {
+  scroll-snap-type: y proximity;
 }
 
 :root {
@@ -78,14 +90,68 @@ body {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 24px 20px;
+  /* Horizontal only - the two pages own their vertical rhythm, because page
+     one's padding has to live inside its 100dvh for the fold math to hold. */
+  padding: 0 20px;
   color: var(--ink);
   font-family: var(--ui);
   transition: color 0.4s;
 }
 .hfdev * {
   box-sizing: border-box;
+}
+/* Page one: everything the wall is for at a glance, sized to the viewport so
+   a calm day never scrolls. min-height rather than height - an alert day is
+   allowed to push past the fold, and scrolling within the page still snaps
+   back to its start. dvh with the vh line as fallback: the kiosk is
+   immersive so the two are equal there; dev browsers get the honest one. */
+.hf-p1 {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px 0 14px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  scroll-snap-align: start;
+}
+/* Page two: the wall you walk up to. Every section under one .hf-sec-head;
+   the 24px gap is the section rhythm, the top padding is its breathing room
+   below the snap edge. */
+.hf-p2 {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 18px 0 24px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  scroll-snap-align: start;
+}
+.hf-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* The hint that page two exists: a quiet pill drawn inside a 24px-tall tap
+   target, centered in page one's bottom padding. Tapping it is the swipe. */
+.hf-page-hint {
+  align-self: center;
+  margin-top: auto;
+  width: 72px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.hf-page-hint::after {
+  content: '';
+  display: block;
+  margin: 0 auto;
+  width: 36px;
+  height: 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--ink) 18%, transparent);
 }
 .hf-head {
   display: flex;
@@ -221,14 +287,6 @@ body {
   color: var(--muted);
   margin-left: auto;
 }
-/* The condition summary on the outside card. Its own class rather than an
-   inline patch: the warm ink is a statement about what the text is (weather,
-   not chrome), and belongs where the other statements live. */
-.hf-out-note {
-  margin-left: 0;
-  margin-top: 12px;
-  color: var(--warm-ink);
-}
 /* The pre-first-snapshot failure note. Standalone in the column rather than in
    a flex row, so it states its own margins instead of inheriting .hf-note's
    auto push. */
@@ -268,19 +326,6 @@ body {
   color: var(--ink);
   font-weight: 700;
 }
-.hf-out {
-  border-radius: var(--r);
-  background: var(--outbg);
-  border: 1px solid var(--line);
-  padding: 18px;
-  box-shadow: var(--shadow);
-}
-/* "Outside" is a heading here, not a row label in a column of rows - it has no
-   siblings to line up with, so it does not reserve their width. */
-.hf-out .hf-name {
-  min-width: 0;
-}
-
 /* ---- The climate card (components/ClimateCard.tsx) --------------------
    Outside plus the lead zones in one card: a tab row of miniature readings
    over one full-size pane. The tabs are the old collapsed zone row shrunk -
@@ -1824,7 +1869,7 @@ body {
   overflow-wrap: anywhere;
 }
 
-/* A stale card (components/ZoneCard.tsx, OutsideCard.tsx): the reading is still
+/* A stale card (components/ZoneCard.tsx): the reading is still
    the best answer anyone has, so it is dimmed rather than muted or hidden -
    "trust this less", not "ignore this". The card's own text stays at full
    contrast; only the number and the line it draws step back, because those are
@@ -1834,9 +1879,7 @@ body {
    on its own is a wall that looks like it is doing something. */
 .hf-zone.stale .hf-temp,
 .hf-zone.stale .hf-spark,
-.hf-zone.stale .hf-chart,
-.hf-out.stale .hf-temp,
-.hf-out.stale .hf-chart {
+.hf-zone.stale .hf-chart {
   opacity: 0.45;
 }
 .hf-asof {
