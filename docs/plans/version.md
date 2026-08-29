@@ -1,8 +1,28 @@
 # Aerie revision — one identity, from a commit to a wall tablet
 
-**Status: designed, nothing built.** Eight findings, all read from the repo and
-from the live cluster on **2026-08-28**. Seven phases; Phase 0 is the only one
-every other phase depends on.
+**Status: built, except Phase 3 and the two steps that are gated on watching.**
+Phases 0, 1, 2, 4, 5.1-5.2 and 6 landed on **2026-08-29**. Phase 3 (the kiosk
+shell) is untouched on purpose - another session was working in `apps/kiosk` -
+and 0.5 goes with it, since it is a change to that app's Gradle build.
+
+What is left, and why each is left:
+
+- **Phase 3 and 0.5** — the kiosk shell. Waiting on `apps/kiosk`.
+- **5.3** — acting on a `behind` verdict. Gated on a week of reading 5.2's
+  lines, as written. The number nobody has is how often `Ahead` really occurs
+  during a rollout, and 5.2 is now producing it.
+- **The gates that need production** — 1.5, 2.5's second half, 4.7, 5.4, 6.6.
+  Each needs the image deployed and reconciled; every one of them has a
+  local-equivalent that has passed (noted per phase below).
+
+Three things the implementation found that the plan had wrong or missing, all
+recorded in place: the SDK already stamps the sha locally (finding 9), the
+four `:latest` images cannot be reached by Phase 4 at all (finding 10), and
+5.2 belongs on the server rather than in the six clients (finding 11).
+
+Eleven findings; the first eight were read from the repo and the live cluster
+on **2026-08-28**, the last three came out of building it. Seven phases;
+Phase 0 is the only one every other phase depends on.
 
 Every piece of the ecosystem should be able to say which commit it came from,
 in the same words, wherever you happen to be looking — an HTTP response, a log
@@ -59,9 +79,9 @@ Node names and cluster readings are observations of one installation.
 
 ## Findings
 
-Eight. The first three decide the shape of the work, the next two decide the
-mechanism, and the last three are each a piece of the job that turns out to be
-already done.
+Eleven. The first three decide the shape of the work, the next two decide the
+mechanism, and 6-8 are each a piece of the job that turns out to be already
+done. **9-11 came out of building it** and are the ones that changed the plan.
 
 ### 1. Nothing in the running system can name its own commit
 
@@ -236,99 +256,175 @@ kubeconfig.
 Two repositories, so the endpoint reports a list rather than a value: this repo
 under `flux-system`, and the per-installation site repo under `aerie-site`.
 
+### 9. The SDK already stamps the sha - just not where it matters
+
+Found by a test written to assert the opposite. The .NET SDK's built-in
+SourceLink sets `SourceRevisionId` from git without being asked, so any build
+made inside a checkout carries the **full** sha in
+`AssemblyInformationalVersion` already. `make run` reports the commit it is
+actually running, for free.
+
+Where it does not fire is inside the container - `.dockerignore` excludes
+`.git` - which is exactly the case the build arg exists for. Both paths now
+land in the same reader, and the invariant worth asserting turned out to be
+"either a full sha or `dev`, never a third thing" rather than anything about
+which one a given build gets.
+
+The related trap: the SDK is happy to stamp a **short** sha if something sets
+`SourceRevisionId` to one, and the image tags carried exactly that until 0.4.
+`ParseRevision` rejects anything that isn't 40 hex characters, so a
+half-finished migration reads as `dev` instead of as a value that silently
+never matches anything.
+
+### 10. Phase 4 cannot reach the four images that deploy at `:latest`
+
+The plan said the Lua tag-parse "covers all five built images". It covers two.
+`aerie-db`, `aerie-backup` and `aerie-kuma-provision` are deployed as
+`${IMAGE_REGISTRY}/<name>:latest` from raw manifests, and only `aerie-api` and
+`aerie-kiosk-files` are under Flux image automation and therefore pinned to a
+tag with a revision in it. A moving tag carries no revision, so those three get
+no `aerie_revision` field.
+
+Not worked around, for a stated reason: pinning them means new ImageRepository
+and ImagePolicy objects **plus** `$imagepolicy` markers in the per-installation
+site repo, which is not in this tree. The Lua accepts a bare 40-hex tag as well
+as the stamped form, so the moment any of them is pinned it resolves with no
+further change.
+
+What they do have, already, is `org.opencontainers.image.revision` as an OCI
+label - `docker/metadata-action` emits it by default and `publish.yml` passes
+its labels through - so the artifacts do record their commit. It just isn't
+reachable from a log line, because pod-level metadata is what fluent-bit sees
+and an image label is not.
+
+### 11. The drift measurement belongs on the server, not in six clients
+
+5.2 was written as a client-side poll. Every web app's fetch wrapper already
+sends `Aerie-Client-Revision` on **every** request, which makes the API a
+strictly better place to watch from: it sees all traffic from all apps rather
+than one probe per app per interval, it needs no code in any frontend, and it
+cannot itself be the thing that breaks a page.
+
+It needs a throttle to be usable. A wall tablet makes a request every few
+seconds, so one stale tablet would otherwise be the loudest thing in the index
+and would bury the signal it is producing. Once per distinct client revision
+per five minutes, in a bounded map - the key is a client-supplied header, and
+an unbounded dictionary keyed on one of those is a memory leak with an open
+door.
+
 ---
 
 ## Phases
 
-### Phase 0 — the sha reaches every artifact `[ ]`
+### Phase 0 — the sha reaches every artifact `[x]`
 
 The dependency of everything else. Nothing here is observable on its own, which
 is why 0.7 is a gate rather than a hope.
 
-- [ ] **0.1** — `publish.yml`: `fetch-depth: 0` on the API build job, and a
+- [x] **0.1** — `publish.yml`: `fetch-depth: 0` on the API build job, and a
       `version` step emitting `sha` (full) and `sequence`
       (`git rev-list --count HEAD`). Finding 4's trap; copy the kiosk job's
       comment, it explains the failure better than a fresh one would.
-- [ ] **0.2** — `Dockerfile.api`: `ARG AERIE_REVISION` / `ARG AERIE_SEQUENCE`
+- [x] **0.2** — `Dockerfile.api`: `ARG AERIE_REVISION` / `ARG AERIE_SEQUENCE`
       in the six SPA stages and the SDK stage. The publish becomes
       `dotnet publish … -p:SourceRevisionId=$AERIE_REVISION`, which appends
       `+<sha>` to `AssemblyInformationalVersion` — the .NET-native mechanism, in
       the binary rather than in the environment, per this plan's framing.
       `AERIE_SEQUENCE` needs its own property; a `<Version>` suffix or an
       `AssemblyMetadata` item, whichever reads more plainly.
-- [ ] **0.3** — Each SPA's `index.html` gets
+- [x] **0.3** — Each SPA's `index.html` gets
       `<meta name="aerie-revision" content="%VITE_AERIE_REVISION%">` and a
       sequence sibling, with `VITE_AERIE_REVISION` supplied to `npm run build`.
       **Finding 3 is the whole point of this step** — a `define` here would look
       identical and quietly cost every tablet a reload per deploy. Leave a
       comment saying so, next to the meta tag.
-- [ ] **0.4** — Tag format `{{date 'YYYYMMDDHHmmss'}}-<full sha>` for all five
+- [x] **0.4** — Tag format `{{date 'YYYYMMDDHHmmss'}}-<full sha>` for all five
       images, replacing `{{sha}}`'s 7 characters. `ImagePolicy`'s
       `filterTags` already accepts it (finding 2); confirm rather than assume,
       it is one `kubectl get imagepolicy -o yaml` after the first push.
-- [ ] **0.5** — Kiosk: `-PkioskRevision=${{ github.sha }}` →
+- [ ] **0.5** — *Deferred with Phase 3 — a change to `apps/kiosk`'s Gradle
+      build, and that app is being worked on elsewhere.* Kiosk:
+      `-PkioskRevision=${{ github.sha }}` →
       `buildConfigField("String", "AERIE_REVISION", …)`. `versionCode` is
       already the sequence and does not change. `version.json` gains
       `revision`, so the update check can log what it is moving to.
-- [ ] **0.6** — Local builds: absent the build arg, the value is the literal
+- [x] **0.6** — Local builds: absent the build arg, the value is the literal
       `dev` and the sequence `0`, everywhere. Not a git call at build time —
       `make build` must not require a repository, and a dev machine's sha in a
       dev machine's artifact answers nobody's question.
-- [ ] **0.7** — **Gate.** `docker build` the API image locally with
-      `--build-arg AERIE_REVISION=<a real sha>`, run it, and read the sha back
-      out of the binary and out of all six `index.html` files. Then push and
-      confirm the published tag carries 40 hex characters.
+- [x] **0.7** — **Gate — passed locally.** Built with
+      `-p:SourceRevisionId=<sha> -p:AerieSequence=4127` and read both back out
+      of the assembly. All six SPAs stamp their `index.html`. **And the check
+      finding 3 is really about:** two builds an arbitrary revision apart emit
+      byte-identical asset filenames (`index-DGKf0NkE.js`,
+      `index-DraR7aiR.css`), so `AppVersionService`'s token does not move and
+      no tablet reloads for a backend-only deploy.
+      *Still to confirm in production:* that the published tag carries 40 hex
+      characters and that `ImagePolicy` still selects it.
 
 *Exit: a built artifact can be asked what commit produced it, by six different
 routes, and answers the same thing six times.*
 
-### Phase 1 — the API says so `[ ]`
+### Phase 1 — the API says so `[x]`
 
-- [ ] **1.1** — `IAerieRevision` singleton: `Revision`, `Sequence`, `BuiltAt`,
+- [x] **1.1** — `IAerieRevision` singleton: `Revision`, `Sequence`, `BuiltAt`,
       read once from the assembly attribute at startup. A singleton because it
       is immutable for the process's whole life and re-parsing it per request
       is work with no possible new answer.
-- [ ] **1.2** — Middleware setting `Aerie-Revision` on every response.
+- [x] **1.2** — Middleware setting `Aerie-Revision` on every response.
       Placement: **before** `AuthMiddleware`, so a 401 and a 302 carry it too —
       "which replica refused me" is a question worth being able to answer.
       Confirm it survives Traefik rather than assuming it; a response header is
       passed through by default, and this takes one `curl -I` to know.
-- [ ] **1.3** — `GET /api/aerie-revision` returning
+- [x] **1.3** — `GET /api/aerie-revision` returning
       `{ revision, sequence, builtAt }`, `Cache-Control: no-store` for the same
       reason `AppVersionController` sets it. Exempt from the auth wall — it
       names a commit, which is about to be public in a GitHub repository, and
       an unauthenticated client needs it to know it should re-authenticate
       against a newer build.
-- [ ] **1.4** — Unit tests: the assembly-attribute parse (including the `dev`
+- [x] **1.4** — Unit tests: the assembly-attribute parse (including the `dev`
       fallback and a malformed attribute, which must degrade to `dev` rather
       than throw at startup), and the middleware's presence on a refused
       request.
-- [ ] **1.5** — **Gate.** `curl -I https://<domain>/` shows `Aerie-Revision`;
-      `curl https://<domain>/api/aerie-revision` matches the sha in the running
-      pod's image tag.
+- [ ] **1.5** — **Gate — passed locally, pending in production.** Against a
+      local run: `Aerie-Revision` on the response, the endpoint reporting its
+      own stamp, and the drift verdict correct in all five cases over real HTTP
+      (`Behind`, `Ahead`, `Current`, and `Unknown` both for divergent history
+      and for an unstamped build). Ten identical stale requests produced one log
+      line, so the throttle holds. *Production:* `curl -I https://<domain>/`
+      shows the header, and the endpoint matches the running pod's image tag.
 
 *Exit: `curl -sI https://<domain>/ | grep Aerie-Revision` is how you learn what
 production is running.*
 
-### Phase 2 — the web apps say so `[ ]`
+### Phase 2 — the web apps say so `[x]`
 
-- [ ] **2.1** — `aerieRevision.ts`, written **once** and shared, not copied six
-      times (finding 6). Reads the meta tags, exports `{ revision, sequence }`.
-      Where "shared" lives is the open question — a workspace package is the
-      right answer and the largest change; a path alias into a common directory
-      is the smaller one. Decide it here, in this step, rather than letting six
-      copies happen by default while the question stays open.
-- [ ] **2.2** — A `fetch` interceptor installed at each app's bootstrap, adding
-      `Aerie-Client-Revision` to **same-origin requests only**. The
-      same-origin restriction is not caution, it is correctness: a cross-origin
-      request with a custom header triggers a CORS preflight, which turns one
-      round trip into two on a request that was working fine.
-- [ ] **2.3** — `clientLogger` includes `revision` and `sequence` on every
+- [x] **2.1** — **Resolved as: no runtime module at all.** A workspace package
+      would have meant one root `package.json`, one lockfile and a Dockerfile
+      rewrite; a path alias would have fought two different `moduleResolution`
+      settings and Vite's dev-server `fs.allow`. Instead the *build-time* plugin
+      owns both the value and the behaviour, and emits them into `index.html` —
+      so there is nothing per-app to keep in step. What the six apps share is
+      one `.mts` file above them, imported only by their Vite configs, which are
+      Node-side and so free of all of the above.
+      *Two tsconfig generations live here* — `admin`/`docs` on `bundler`, the
+      rest on `nodenext`. `.mts` imported as `.mjs` is the one spelling both
+      accept. The two legacy `composite` projects also needed an `outDir`, or
+      `tsc -b` drops a `.mjs` next to the source that Vite would resolve *ahead*
+      of it — a stale emit silently winning over the file everyone edits.
+- [x] **2.2** — Installed by the plugin as an inline `head-prepend` script, not
+      at each app's bootstrap: that puts it in front of the ui-logs ping
+      `index.html` itself fires, so even the first request of a page load
+      carries the header. **Same-origin only**, and that is correctness rather
+      than caution — a custom header on a cross-origin request triggers a CORS
+      preflight, turning one round trip into two on a request that was working
+      fine.
+- [x] **2.3** — `clientLogger` includes `revision` and `sequence` on every
       entry. `UiLogEntry` gains the matching nullable fields —
       nullable because an old bundle in a browser that has not reloaded yet is
       the normal case for months after this ships, and it is precisely the case
       the administrator story wants to see.
-- [ ] **2.4** — All six apps wired. `docs` and `modeler` included: an app too
+- [x] **2.4** — All six apps wired. `docs` and `modeler` included: an app too
       minor to version is an app that will be the one confusing outlier during
       an incident.
 - [ ] **2.5** — **Gate.** Load each app; confirm the request header on a network
@@ -341,7 +437,7 @@ production is running.*
 *Exit: a log line from a browser names the bundle that browser is running, and
 2.5's second half proves the kiosks did not become chattier.*
 
-### Phase 3 — the kiosk shell says so, separately `[ ]`
+### Phase 3 — the kiosk shell says so, separately `[ ]` — NOT STARTED
 
 - [ ] **3.1** — `MainActivity` appends `?aerieShellRevision=<BuildConfig…>` to
       the URL it loads.
@@ -363,20 +459,20 @@ production is running.*
 *Exit: the administrator story is answerable — one OpenSearch query, grouped by
 `aerie_revision`, listing every `deviceId` on an old shell.*
 
-### Phase 4 — one field in OpenSearch `[ ]`
+### Phase 4 — one field in OpenSearch `[x]`
 
-- [ ] **4.1** — `service_tag.lua` gains `set_aerie_revision`, in the shape
+- [x] **4.1** — `service_tag.lua` gains `set_aerie_revision`, in the shape
       finding 5 describes: default from the `<14 digits>-<40 hex>` tag in
       `kubernetes.container_image`, overridden by `State.AerieRevision`. Match
       on tag **shape**, not registry prefix — the registry is a per-installation
       parameter and the tag format is structural.
-- [ ] **4.2** — `aerie_sequence` by the same rules. It has no container-level
+- [x] **4.2** — `aerie_sequence` by the same rules. It has no container-level
       default (the tag carries a build timestamp, not a commit count, and
       quietly mixing the two scales would make the field a lie), so it is
       present only where an application emits it. Absent is correct.
-- [ ] **4.3** — `aerie_relay_revision`, set only when `State.AerieRelayRevision`
+- [x] **4.3** — `aerie_relay_revision`, set only when `State.AerieRelayRevision`
       is present — that is, only on lines through `/api/ui-logs`.
-- [ ] **4.4** — `UiLogsController` logs the client's revision as
+- [x] **4.4** — `UiLogsController` logs the client's revision as
       `State.AerieRevision` and its own as `State.AerieRelayRevision`, plus the
       **actor**: `HttpContext.GetAuthGrant()` gives `Id` and `Label`. Log the
       **id**, not the label —
@@ -384,37 +480,47 @@ production is running.*
       remarks are explicit that a label is free text an administrator typed,
       and free text is not what you want flowing into a log field people will
       later filter on.
-- [ ] **4.5** — Refresh the Dashboards index pattern
-      ([`create-index-pattern.sh`](../../deploy/cluster/observability/config/provisioning/create-index-pattern.sh))
-      so the new fields are queryable rather than merely present.
-- [ ] **4.6** — A saved search: revisions in the fleet, last 24h, grouped by
+- [x] **4.5** — **Already done, by other work.**
+      [`create-index-pattern.sh`](../../deploy/cluster/observability/config/provisioning/create-index-pattern.sh)
+      re-fetches the live field list from the cluster on every provisioning run
+      and re-posts it with `overwrite=true`, so a new field becomes queryable on
+      its own. That behaviour arrived with the fix for the E2BIG cliff on that
+      POST, which had nothing to do with this plan. No change needed.
+- [x] **4.6** — A saved search: revisions in the fleet, last 24h, grouped by
       `service` and `aerie_revision`. This is the SRE story, and it is a saved
       object rather than a documented query because a query nobody saved is a
       query nobody runs.
-- [ ] **4.7** — **Gate.** In OpenSearch: an `aerie-api` line carries
-      `aerie_revision` from its tag with no application change; a `dashboard`
-      line carries the browser's and an `aerie_relay_revision` that differs; a
-      `traefik` line carries neither and still carries
-      `kubernetes.container_image`.
+- [ ] **4.7** — **Gate — the Lua half passed, the cluster half is pending.**
+      [`service_tag_test.lua`](../../deploy/cluster/observability/controllers/fluent-bit/service_tag_test.lua)
+      covers 15 cases against the real script, including every case that looks
+      right and is wrong: a digest read as a git sha, a registry port read as a
+      tag, a Hyper-V console line inheriting a revision, and above all a relayed
+      browser line falling back to the relay's image. *In OpenSearch, once
+      deployed:* an `aerie-api` line carrying `aerie_revision` from its tag with
+      no application change; a `dashboard` line carrying the browser's and an
+      `aerie_relay_revision` that differs; a `traefik` line carrying neither and
+      still carrying `kubernetes.container_image`.
 
 *Exit: `aerie_revision` is one field, one meaning, one path — and
 `NOT _exists_:aerie_revision` is a working definition of "not ours".*
 
-### Phase 5 — the drift answer `[ ]`
+### Phase 5 — the drift answer `[~]`
 
 The self-update story, built beside `AppVersionService` rather than on top of
 it. Read finding 3 before starting.
 
-- [ ] **5.1** — `GET /api/aerie-revision` accepts the client's revision and
+- [x] **5.1** — `GET /api/aerie-revision` accepts the client's revision and
       sequence and answers `behind` / `current` / `ahead`. **`ahead` is the
       case that earns this step**: mid-rolling-deploy, a browser loaded from a
       new replica can ask an old one, and a client that reloads on any
       difference will thrash between two answers until the rollout finishes.
       Only `behind` may trigger anything.
-- [ ] **5.2** — A client-side check on the existing poll cadence, logging drift
-      at `warn`. **Logging only, in this step.** The measurement comes before
-      the action, and a week of seeing how often `ahead` actually occurs is
-      what tells you whether 5.3 is safe.
+- [x] **5.2** — **Moved to the server** — finding 11. `AerieRevisionMiddleware`
+      compares every request's `Aerie-Client-Revision` against its own and logs
+      `Behind`/`Ahead` at warning, throttled to once per client revision per
+      five minutes. **Logging only, in this step.** The measurement comes before
+      the action, and a week of seeing how often `Ahead` actually occurs is what
+      tells you whether 5.3 is safe.
 - [ ] **5.3** — *Gated on 5.2's week.* A `behind` verdict, sustained across two
       consecutive checks, triggers the same reload path `AppVersionService`
       drift already uses. Two consecutive checks because one is a race with a
@@ -430,31 +536,35 @@ it. Read finding 3 before starting.
 the new revision yet" has a screen, and rolling out a breaking change stops
 being a guess.*
 
-### Phase 6 — what the cluster has reconciled `[ ]`
+### Phase 6 — what the cluster has reconciled `[x]`
 
 The only phase needing access the API does not have today. Separated for that
 reason, and can ship long after Phase 5.
 
-- [ ] **6.1** — A ServiceAccount with a `ClusterRole` scoped to `get`/`list` on
+- [x] **6.1** — A ServiceAccount with a `ClusterRole` scoped to `get`/`list` on
       `gitrepositories` and `kustomizations` in `source.toolkit.fluxcd.io` /
       `kustomize.toolkit.fluxcd.io`, and **nothing else**. The API has no
       Kubernetes access at all right now; this is the step that changes that,
       and it is worth the narrowest possible grant.
-- [ ] **6.2** — `/api/aerie-revision` gains a `cluster` block for an
+- [x] **6.2** — `/api/aerie-revision` gains a `cluster` block for an
       authenticated admin caller: per source, the artifact revision and the
       `lastAppliedRevision` of each Kustomization reading from it, parsed out of
       `main@sha1:<sha>` (finding 8). Both repositories.
-- [ ] **6.3** — Cached, short TTL. This is a Kubernetes API call behind an HTTP
+- [x] **6.3** — Cached, short TTL. This is a Kubernetes API call behind an HTTP
       endpoint, and an endpoint an admin screen polls must not become a way to
       generate load against the control plane.
-- [ ] **6.4** — Absent or degraded when Flux is unreachable — an API that fails
+- [x] **6.4** — Absent or degraded when Flux is unreachable — an API that fails
       its own version endpoint because the cluster is unhealthy has failed at
       the moment it was most needed.
-- [ ] **6.5** — An admin app screen: every revision in the system on one page,
+- [x] **6.5** — An admin app screen: every revision in the system on one page,
       app tier and cluster, with the gap called out where it exists.
-- [ ] **6.6** — **Gate.** Push a commit, then watch the screen show the source
-      ahead of `lastAppliedRevision` and converge — the exact gap finding 8
-      caught by accident, now visible on purpose.
+- [ ] **6.6** — **Gate — the parser is verified, the screen is pending.** Every
+      field path the reader reads was confirmed against live objects before it
+      was written: `status.artifact.revision`, `spec.sourceRef.name`,
+      `status.lastAppliedRevision`, and the `Ready` condition, including Flux's
+      `main@sha1:<sha>` form. *Once deployed:* push a commit and watch the
+      screen show the source ahead of `lastAppliedRevision` and converge — the
+      exact gap finding 8 caught by accident, now visible on purpose.
 
 *Exit: the SRE story is answerable without a kubeconfig.*
 
