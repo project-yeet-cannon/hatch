@@ -115,14 +115,77 @@ main.tsx module evaluated` as its first line. The gap between those two, per
 - **Both, then nothing** → a render-time throw, which the `ErrorBoundary`
   should already be reporting.
 
-- [ ] Query `aerie-logs` in OpenSearch for `app: dashboard` sessions over the
+- [x] Query `aerie-logs` in OpenSearch for `app: dashboard` sessions over the
       last 30 days, grouped by `sessionId`, and classify them by which of the
       two lines is present.
-- [ ] Cross-reference `app: kiosk-android` lines by `deviceId` for the same
-      window — `Kiosk app started` with no dashboard session following it is a
-      strong finding-3/4 signal.
-- [ ] Write the answer into this section. It does not change *whether* any
-      phase ships — all four are real gaps — but it decides which ships first.
+- [x] Cross-reference `app: kiosk-android` lines by `deviceId` for the same
+      window.
+- [x] Write the answer into this section.
+
+### What the logs said (queried 2026-08-28, over `aerie-logs-2026.08.20`…`.08.29`)
+
+| Line | Sessions |
+|---|---|
+| `kiosk index.html parse started` | 87 |
+| `kiosk main.tsx module evaluated` | 85 |
+| `kiosk root render invoked` | 85 |
+| `App mounted, starting dashboard data source` | 85 |
+| `Initial dashboard data loaded` | 80 |
+
+**Eight sessions produced exactly one log line, ever.** The document parsed, the
+inline beacon fired, and nothing else was ever heard from that page — no module
+evaluation, no mount, no poll, no error. That is finding 2, observed, eight
+times in nine days. Not a hypothesis.
+
+**They arrive in bursts.** Four within 83 seconds on 08-21 (20:19:20, 20:19:20,
+20:20:42, 20:20:43) and four within six minutes on 08-25 (23:26:46, 23:32:28,
+23:32:29, 23:32:30). A single tablet failing once does not produce four
+sessions; a tablet *retrying* does. The spacing is roughly the shell's
+2s → 30s ladder and the page's own drift reload, each retry dying at the same
+point — which is why the wall stays white rather than recovering.
+
+**And the 08-25 burst has a cause sitting right next to it.** Filtering
+`Dashboard data load failed` to after the 08-22 auth fix leaves 14 real
+failures, and three of them are in the 08-25T23 hour, the same hour as four of
+the eight dead sessions:
+
+| Reason | Count (since 08-23) |
+|---|---|
+| `Dashboard API request failed: 500` | 7 |
+| `Dashboard API request failed: 502` | 3 |
+| `NetworkError when attempting to fetch resource.` | 3 |
+| `Failed to fetch` | 1 |
+
+So the sequence is: **the API goes unhealthy → the page reloads (drift check or
+shell retry) → the reload lands on a document/bundle mismatch → white → retry →
+white.** Findings 2 and 5 are not two problems; they are the two halves of one
+incident, and the fallback screen in Phase 3 is what would have turned it into
+a clock and a sentence instead of a white rectangle.
+
+Three more things fell out of the query that were not in the original list:
+
+- **The 678 total `Dashboard data load failed` lines are overwhelmingly the
+  08-21 401 storm** (397 of a 400-doc sample), which
+  [`signIn.ts`](../../src/Aerie.Web/apps/dashboard/src/lib/signIn.ts) already
+  fixed. The 14 that remain are 500s, 502s and network errors — every one of
+  them invisible on the wall, per finding 5. This is the number that justifies
+  the health dot: not "the API might fail" but "the API failed 14 times this
+  week and nobody watching the wall could have known."
+- **A failed log POST erases the boot window.** Session `d7560a19` logged
+  `parse started`, then jumped straight to `Dashboard data refreshed` — the
+  *refresh* wording proves the initial load succeeded, so all four boot lines
+  existed in the app and were lost in transit. They share one batch, and
+  `send()` catches and drops, so a single POST landing on a terminating replica
+  takes the most diagnostically valuable four lines of the page's life with it.
+  Added to Phase 7.
+- **The shell barely restarts.** Four `Kiosk app started` lines against 87
+  document parses, so essentially every white screen was an in-page reload, not
+  an app relaunch. `Display: no cached sun events; backlight unmanaged until
+  first fetch` appears once, confirming that path is reachable.
+
+**Ordering, decided:** Phase 3 first — it is the one that would have covered the
+observed incident. Phase 4 second, since the 14 silent failures are the
+next-most-visible gap. Phase 6 then 5, then 1–2 on their own APK rollout, then 7.
 
 ## Phase 1 — The shell always draws something
 
