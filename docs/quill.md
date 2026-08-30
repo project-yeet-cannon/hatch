@@ -28,29 +28,28 @@ Three properties carry the design:
 - **Offline is a first-class read.** The shell mirrors every note this person
   has onto the device. Writing them back is deliberately not attempted.
 
-## What changed to make it possible
+## The first module that reads a person
 
-Quill trips a rule that four modules kept, and it is worth stating plainly
-rather than leaving to be discovered in a diff.
-
-[`Modules/README.md`](../src/Aerie.Api/Modules/README.md) and
-[`auth-architecture.md`](auth-architecture.md) both said that **a person is not
-an authorization input — nothing branches on one**. That was true and load
-bearing: it is what kept "a person" a name you hang on a grant rather than an
+Four modules never had to. A crate is in the garage whoever opens the app, so
+`Modules/README.md` and [`auth-architecture.md`](auth-architecture.md) could
+both say that nothing branched on a person — and while that was true it was
+worth saying, because it is what kept a person a name on a grant rather than an
 account with a permission model growing quietly behind it.
 
-Quill changes it in exactly one direction, and the direction is the whole of the
-concession:
+It is not true any more, and that is the intended direction rather than a
+concession. A person identifies an individual; who someone is belongs in an
+authorization decision. Ownership is the first and simplest form of that, and
+[sharing](#deferred) — this note, that person, read or write — is the next, with
+nothing in the current shape needing to change for it.
 
-> A person may decide what you can **reach**. A person never decides what you
-> are **allowed to do**.
-
-Reachability is ownership — your notes are yours — and it is enforced by the
-`WHERE` clause of a query rather than by a rule some code path could forget to
-consult. What has *not* changed: nothing reads `Person.IsAdmin`, no endpoint
-behaves differently for one person than another, and there is still no role, no
-scope, and no permission table. The lockout path that `IsAdmin` is waiting on is
-untouched — see [Whose device is this](auth-architecture.md#whose-device-is-this).
+What Quill does *not* do is invent a permission model on the way past. There is
+still no role, no scope, no permission table, and nothing reads
+`Person.IsAdmin`; a household-wide administrator is the coarsest possible answer
+to a question nobody has asked, and the deploy that first enforces one is the
+deploy that can lock everyone out
+([Whose device is this](auth-architecture.md#whose-device-is-this)). Ownership
+needs none of that: it is a `WHERE` clause, in one place, that no code path can
+forget to consult.
 
 The seam that made it one line rather than a refactor is
 [`ICallerIdentity`](../src/Aerie.Api/Services/Auth/CallerIdentity.cs): "who is
@@ -89,12 +88,16 @@ you start typing the body and may never name the thing — so nothing in the wri
 path treats it as incomplete, and the list renders the placeholder plus the
 start of the body.
 
-### Sharing, and why there is no column for it
+### Where sharing attaches
 
-A note has one owner and no shared-with list. When sharing arrives it is a join
-table beside this one, so nothing about this shape has to change — and until it
-does, "who can read this note" has exactly one answer. That is worth having
-while the protection underneath is obfuscation rather than encryption.
+A note has one owner and no shared-with list, and `PersonId` stays the owner
+when there is one — sharing is a join table beside this one (note, person,
+whether they may write), not a second column here. So this shape does not change
+when it arrives, and the module's one query grows from `PersonId == me` into
+"mine, plus the ones shared with me" in the same single place it lives now.
+
+Until then, "who can read this note" has exactly one answer, which is worth
+having while the protection underneath is obfuscation rather than encryption.
 
 ## Protection at rest
 
@@ -277,8 +280,16 @@ so whoever meant to name it never finds out they did not.
 
 Named so they are decisions rather than oversights.
 
-- **Sharing.** A join table beside `Notes`, when there is a second person who
-  wants to read one. Nothing in the current shape has to change for it.
+- **Sharing** — the next feature, not a maybe. A join table beside `Notes`
+  (note, person, and whether they may write), and "the notes you may read" stops
+  being `PersonId == me` and becomes a slightly larger expression *in the same
+  one place*. The rules that hold it together are already in force: ownership is
+  a clause in the query rather than a check after the load, and every refusal is
+  the same blank `404` — a shared note you have lost access to must go back to
+  looking like a note that does not exist. Write access is where the module
+  first has to answer a question it currently ducks, which is what two people
+  editing one note at once means; the answer is likely the same conflict work
+  offline writes need, which is why the two are worth designing together.
 - **Offline writes.** As above, and as everywhere else in the shell.
 - **Real encryption.** A new `SecretProtector` scheme, which the type is built
   for. Worth doing before this holds anything whose exposure would matter more

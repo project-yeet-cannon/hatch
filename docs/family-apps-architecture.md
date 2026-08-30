@@ -49,7 +49,7 @@ code, in [`src/Aerie.Api/Modules/README.md`](../src/Aerie.Api/Modules/README.md)
 | Client platform | **PWA** (installed to home screen). Native iOS deferred, not rejected |
 | Access | **Tailnet only** — no public DNS, no public ingress |
 | Auth | **One wall, device grants** — [`auth-architecture.md`](auth-architecture.md). Was deferred; the tripwire below is what tripped |
-| Identity | **A person owns rows, never permissions** — one module reads one ([Quill](quill.md)); nothing gates behaviour on one |
+| Identity | **A person is an authorization input** — [Quill](quill.md) scopes rows to one; sharing is next. No permission model yet, so no global roles |
 | Search | **Postgres full-text**, not OpenSearch |
 | Blobs / photos | **Deferred** until after the k3s cutover — see [Deferred](#deferred) |
 
@@ -137,12 +137,20 @@ so that identity is something a module *reads* rather than something a module
 invents.
 
 [Quill](quill.md) is the something that needed it: a note belongs to a person,
-which makes it the first module whose rows are not the household's. The rule it
-runs under is narrow on purpose — **a person may decide what a caller can reach,
-never what a caller is allowed to do** — and the seam that made it one line
-rather than a refactor is `ICallerIdentity`, the one way anything outside
-`Services/Auth/` asks who is calling. Nothing gates behaviour on a person, and
-nothing reads `IsAdmin`.
+which makes it the first module whose rows are not the household's. The seam
+that made that one line rather than a refactor is `ICallerIdentity`, the one way
+anything outside `Services/Auth/` asks who is calling.
+
+**A person is an authorization input, and increasingly will be** — sharing a
+note with a named person, read or write, is the next step and is per-resource
+authorization keyed on nothing else. What is still missing is the vocabulary to
+express that generally, so a module doing it today owns the shape of its own
+answer and should copy Quill's: the person is a clause in the query rather than
+a check after the load, "who may read this" is one expression in one place, and
+every refusal is the same blank `404`. The two things that stay out of a module
+folder are a household-wide role (`IsAdmin` is read by nothing, and wants a
+lockout path designed first) and any endpoint whose *behaviour* changes with who
+is asking.
 
 The tailnet boundary has not gone away either. It is now the outer of two, and
 the wall is what covers the devices on the house LAN that were never on the
@@ -296,13 +304,14 @@ Named so they're decisions rather than oversights.
   most of the point. Deferred on *timing*, not value: blob storage should land on
   Longhorn after the k3s cutover rather than on the current host's disk and then
   get migrated. Revisit at [the cluster plan](plans/swarm/phase-7-cutover.md) Phase 7.
-- **Roles and scopes.** People landed
-  ([`auth-architecture.md`](auth-architecture.md#whose-device-is-this)) — a grant
-  can name its owner, and `Person.IsAdmin` is carried but unenforced. The wall
-  still authenticates devices, so *enforcement* is what remains, and it wants a
-  lockout path designed before a single check is written. Ownership is
-  explicitly not that: [Quill](quill.md) scopes its rows to a person, and no
-  endpoint anywhere behaves differently for one person than for another.
+- **A permission model.** People landed
+  ([`auth-architecture.md`](auth-architecture.md#whose-device-is-this)) and
+  [Quill](quill.md) reads one, so what remains is the vocabulary rather than the
+  principal. The nearer half is contextual — a person, a resource, a verb, which
+  is what "share this note with Ada, read only" is, and it has a feature waiting
+  on it. The further half is global roles: `Person.IsAdmin` is carried and
+  unenforced, and wants a lockout path designed before a single check is
+  written.
 - **Offline writes** — offline reads ship with the shell; write sync needs
   conflict resolution that no current use case justifies. Quill, which needs
   offline reads more than anything else here, mirrors every note to the device

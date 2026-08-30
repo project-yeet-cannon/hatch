@@ -78,9 +78,9 @@ a person never revokes their devices; they simply become unclaimed.
 ([docs/quill.md](docs/quill.md)), holds notes that belong to a person rather
 than to the house — so it does not appear at all on a device that is not linked
 to one. If somebody says the notes app is missing, that is where to look: set
-the **Person** on their session, and it is there on the next launch. This is
-also the only place a person changes what an app does; nothing else in Aerie
-behaves differently for one person than for another.
+the **Person** on their session, and it is there on the next launch. It is the
+first place a person changes what an app shows, and it will not be the last —
+sharing a note with somebody is the follow-on this points at.
 
 Three things stay reachable without a grant, on purpose:
 `files.${DOMAIN}` (the kiosk APK and its checksum), the media library that Sonos

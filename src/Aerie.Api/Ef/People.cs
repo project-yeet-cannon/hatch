@@ -11,12 +11,15 @@ namespace Aerie.Api.Ef;
 /// people live in the core <c>public</c> schema precisely so that every module
 /// can read one without depending on another module.
 ///
-/// A person is not an account. There is nothing to sign in as, no password, no
-/// scope - the wall still authenticates a *device* (docs/auth-architecture.md).
-/// A person is the name you hang on one, so that a log line, a session list, or
-/// a future permission has a human to point at - and, in Quill alone, so that a
-/// row can have an owner (docs/quill.md). That is scoping, not permission: a
-/// person decides what a caller can reach, never what a caller may do.
+/// A person is not an account: there is nothing to sign in as and no password,
+/// and the wall still authenticates a *device* (docs/auth-architecture.md).
+/// A person is who that device belongs to - the name on a log line and a
+/// session list, and in Quill the owner of a row (docs/quill.md).
+///
+/// Being an authorization input is where this goes rather than an exception to
+/// it: sharing a note with a named person, read or write, is authorization
+/// keyed on this row and nothing else. What is missing is a permission model to
+/// express that generally, which is why IsAdmin below is still read by nothing.
 ///
 /// Deliberately two columns wide. Everything a person will eventually carry -
 /// a birthday, a colour, a pronoun, a phone - is additive against this, and

@@ -53,13 +53,15 @@ public class EfAuthGrant
     /// out of the house.
     ///
     /// This puts a human in the Sessions list and in a log line
-    /// (UiLogsController). One module also reads it: Quill's notes belong to a
-    /// person, so PersonId is the first clause of every query in that module
-    /// (docs/quill.md). The rule that keeps that from being the first step into
-    /// an accidental permission model is narrow and worth quoting - a person may
-    /// decide what a caller can *reach*, never what a caller is *allowed to do*.
-    /// Nothing anywhere reads Person.IsAdmin, and nothing behaves differently
-    /// for one person than for another.
+    /// (UiLogsController), and it is what an authorization decision reads when
+    /// one needs a person: Quill's notes belong to one, so PersonId is the
+    /// first clause of every query in that module, and sharing a note with
+    /// somebody is the next thing to key on this column (docs/quill.md).
+    ///
+    /// Which makes what this is *not* worth stating: there is no permission
+    /// model behind it yet. Nothing reads Person.IsAdmin, and no endpoint
+    /// answers differently for one person than for another - a global role
+    /// wants the lockout path in docs/auth-architecture.md designed first.
     /// </summary>
     public Guid? PersonId { get; set; }
 

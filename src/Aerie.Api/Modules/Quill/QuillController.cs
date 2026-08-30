@@ -24,12 +24,18 @@ namespace Aerie.Api.Modules.Quill;
 /// app at all.
 /// </para>
 /// <para>
-/// This is the first controller in Aerie where a person decides an outcome. The
-/// rule it changes - "no authorization decision anywhere reads one" - is
-/// changed deliberately and in one direction only: a person may decide what you
-/// can *reach*, never what you are *allowed to do*. Nothing here reads
-/// Person.IsAdmin, and the lockout path that column is waiting on is untouched
-/// (docs/auth-architecture.md).
+/// This is the first controller in Aerie where a person decides an outcome, and
+/// it will not be the last - sharing a note with somebody, read or write, is
+/// per-resource authorization keyed on a person and nothing else
+/// (docs/quill.md). What does not exist yet is a permission model to say that
+/// in, so the shape here is the one worth copying rather than improvising on:
+/// the person is a *clause in the query* (see LoadAsync), never a check after
+/// the rows are loaded, and "who may read this" is one expression that sharing
+/// widens rather than a second one beside it.
+///
+/// What that deliberately is not: nothing here reads Person.IsAdmin, and no
+/// endpoint answers differently for one person than for another. A global role
+/// wants the lockout path in docs/auth-architecture.md designed first.
 /// </para>
 /// </remarks>
 [ApiController]

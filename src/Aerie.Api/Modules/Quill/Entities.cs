@@ -15,11 +15,15 @@ namespace Aerie.Api.Modules.Quill;
 /// in the module is filtered by it.
 /// </summary>
 /// <remarks>
-/// Sharing is deliberately absent rather than deferred badly. It would be a
-/// join table beside this row, not a second column here, so nothing about this
-/// shape has to change when it arrives - and until it does, "who can read this"
-/// has exactly one answer, which is the property worth having while the
-/// protection underneath is obfuscation rather than encryption.
+/// Sharing is the next feature rather than an absent one, and it attaches
+/// beside this row: a join table of note, person, and whether they may write.
+/// Not a second column here - PersonId stays the owner - so this shape does not
+/// change, and the module's one query grows from "mine" into "mine, plus the
+/// ones shared with me" in the same single place it already lives.
+///
+/// Until then "who can read this" has exactly one answer, which is the property
+/// worth having while the protection underneath is obfuscation rather than
+/// encryption.
 /// </remarks>
 [Table("Notes")]
 // The one query the module runs: this person's notes, most recently touched

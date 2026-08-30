@@ -318,6 +318,36 @@ already signed in to — which is what lets the photo frame need no second auth,
 no second origin, and no CORS story, and what keeps the library's credential a
 server-side secret.
 
+## Quill
+
+Private notes, one person's own. Design in [`quill.md`](quill.md).
+
+**Every route here answers `404` to a caller with no person behind it**, which
+is the same answer it gives for another person's note id and for a note that
+does not exist — identical empty bodies, because a `403` would confirm that an
+id names a real note belonging to a real person. The refusal is also checked
+*before* validation, so a malformed request cannot come back as a `400` and
+thereby reveal that a `404` was coming. The family shell does not show the app
+at all on a device with no person, so in practice this is the braces rather than
+the belt.
+
+| Method & route | Returns | Notes |
+|---|---|---|
+| `GET /api/quill/notes` | `NoteDto[]` | Every note this person has, most recently edited first, **bodies included**. Whole notes rather than summaries on purpose: the shell mirrors this response to IndexedDB, and a mirror filled from summaries could only offer the notes someone had happened to open. The tripwire for when that stops fitting in one response is in `Modules/Quill/Dtos.cs`. |
+| `GET /api/quill/notes/{id:guid}` | `NoteDto` | One note — for a link opened cold into a note written on another device since this one last synced. |
+| `POST /api/quill/notes` | `NoteDto` | `201`. Refuses a note with nothing in it: the editor saves as you type, so without that every abandoned "New" would leave a row. |
+| `PUT /api/quill/notes/{id:guid}` | `NoteDto` | Overwrites both fields. **May blank a note without deleting it** — a server that removed the row when someone selected all and started retyping would be a server that eats notes. Deleting is its own verb. |
+| `DELETE /api/quill/notes/{id:guid}` | 204 | |
+
+Title and body are **protected at rest** by a value converter on the context,
+not by a call at each write path — so no write path can forget, and a test
+asserts every string on the entity has one. The consequence is load-bearing: no
+SQL predicate over the note text can be correct, because it would run against
+obfuscated bytes. Search is client-side and ordering is by `UpdatedAt`. Lengths
+are validated rather than truncated (title 120, body 100,000), counted on what a
+person typed rather than on the stored form. The title is trimmed; the body
+never is.
+
 ## Settings
 
 | Method & route | Returns | Notes |
@@ -343,8 +373,11 @@ Design and reasoning in [`auth-architecture.md`](auth-architecture.md).
 
 ## People
 
-The household's members. A person is not an account: nothing signs in as one,
-and no authorization decision anywhere reads one. Design in
+The household's members. A person is not an account — nothing signs in as one —
+but a person *is* an authorization input: [Quill](#quill) scopes its rows to
+one, and sharing is where that goes. What does not exist yet is a permission
+model, so nothing reads `IsAdmin` and no endpoint on this page answers
+differently for one person than for another. Design in
 [`auth-architecture.md`](auth-architecture.md#whose-device-is-this).
 
 | Method & route | Returns | Notes |

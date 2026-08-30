@@ -85,24 +85,28 @@ wire.
   parameter, resolved once per request — and never by reading the cookie for
   yourself.
 
-  **A person may decide what a caller can reach. A person never decides what a
-  caller is allowed to do.** Quill is the one module that reads one
-  ([`docs/quill.md`](../../../docs/quill.md)): a note belongs to a person, so
-  `PersonId` is the first clause of every query in the module. That is
-  ownership, enforced by a `WHERE` clause rather than by a rule a code path
-  could forget to consult, and it is the whole of the concession.
+  **A person is an authorization input**, and scoping rows to one is ordinary —
+  Quill does it ([`docs/quill.md`](../../../docs/quill.md)), and sharing a note
+  with a named person, read or write, is where that goes. What does not exist
+  yet is a permission *model*, so a module doing this owns the shape of its own
+  answer. Do it the way Quill does:
 
-  Everything on the other side of that line is unchanged and stays that way.
-  **Nothing reads `IsAdmin`.** No endpoint behaves differently for one person
-  than for another. There is no role, no scope, and no permission table — a
-  module that starts gating behaviour on a person is inventing a permission
-  model in a corner rather than adding a column, and the lockout path in
-  `docs/auth-architecture.md` has to be designed first.
+  - The person is **a clause in the query**, never a check after the rows are
+    loaded. `Where(n => n.PersonId == me)` cannot be forgotten by a code path
+    the way an `if` can, and a mistake in it is an empty result rather than a
+    leak.
+  - "Who may read this" is **one expression, in one place**. When it grows from
+    ownership to sharing it widens; it must not sprout a second copy beside it.
+  - Every refusal is **the same blank `404`** — no person, someone else's row,
+    and no such row alike. A `403` confirms that an id names a real row
+    belonging to a real person.
+  - Ask who is calling through `ICallerIdentity` and nothing else.
 
-  If a module does scope rows to a person, do it the way Quill does: the person
-  is a clause in the query, not a check after the load, and every refusal is the
-  same blank `404`. A `403` confirms that the id names a real row belonging to a
-  real person, which is the fact a private row has to keep.
+  Two things are still nobody's to invent in a module folder. **Nothing reads
+  `IsAdmin`** — a household-wide role needs the lockout path in
+  `docs/auth-architecture.md` designed first. And no endpoint changes *what a
+  verb does* based on who is asking; that is the permission model arriving, and
+  it should arrive on purpose rather than as one module's `if`.
 - **Nothing operator-specific in module code** — domains, hostnames, and paths
   come from config, per [`docs/ethos.md`](../../../docs/ethos.md). The install's
   own public URL is already solved: [`AppsOptions`](AppsOptions.cs)

@@ -15,11 +15,13 @@ say exactly where each one would attach.
 
 People are the first of those to have arrived, and arriving changed nothing
 about the sentence above: a `Person` is a name you hang on a grant, not a thing
-that signs in. See [Whose device is this](#whose-device-is-this). One thing
-downstream of a grant does now read that name — Quill's notes belong to a person
-— under a rule narrow enough to state in one line: **a person may decide what a
-caller can reach, never what a caller is allowed to do.** See
-[What a person decides](#what-a-person-decides).
+that signs in. See [Whose device is this](#whose-device-is-this).
+
+What a person *is* to an authorization decision is a separate question, and the
+answer is that they are an input to one. Quill's notes belong to a person, and
+sharing one with somebody — read, or write — is the next step in that direction.
+What does not exist yet is a permission model to express it in. See
+[A person is an authorization input](#a-person-is-an-authorization-input).
 
 Two properties are worth stating up front because most of the rest follows from
 them:
@@ -435,30 +437,45 @@ than by a second step somebody has to remember afterwards.
 minutes ago must still get in after an unrelated tidy-up in the admin app; a
 stale id links nothing and the device still enrolls.
 
-### What a person decides
+### A person is an authorization input
 
-For four modules, nothing. A crate is in the garage whoever opens the app, and
-the household's data is the household's. Then Quill arrived
+For four modules, they were not. A crate is in the garage whoever opens the app,
+and the household's data is the household's. Then Quill arrived
 ([`quill.md`](quill.md)) — private notes, one person's own — and a person became
 something a query reads.
 
-The rule that keeps that from being the first step into an accidental permission
-model is a single sentence:
+That is the direction, not an exception to be contained. **A person identifies
+an individual, and who someone is belongs in an authorization decision.** The
+next feature in this direction is already visible: sharing a note with a named
+person, with read or write, which is per-resource authorization keyed on a
+person and nothing else. Contextual authorization — *this* person, on *this*
+row, for *this* verb — is where this goes, and the model has always had room
+for it.
 
-> A person may decide what a caller can **reach**. A person never decides what a
-> caller is **allowed to do**.
+So the thing to be careful about is not whether a person may decide something.
+It is that there is not yet a permission *model*, and the shapes below are the
+two ways one gets built badly:
 
-Reachability is ownership: your notes are yours, expressed as the first clause
-of every query in the module rather than as a rule some code path could forget
-to consult. Its refusals are indistinguishable from "no such thing" — a `403`
-would confirm that an id names a real note belonging to a real person, which is
-the fact a private note has to keep.
+- **A global role bolted on early.** `IsAdmin` exists and nothing reads it, and
+  that is still correct — not because a person may not decide things, but
+  because a household-wide "administrator" is the coarsest possible answer to a
+  question nobody has asked yet, and the deploy that first enforces it is the
+  deploy that can lock everyone out. See below, and
+  [Deferred on purpose](#deferred-on-purpose).
+- **Per-module rules invented in a corner.** Quill's ownership is the first
+  clause of every query in the module — a `WHERE`, not a check some code path
+  can forget to consult — and every refusal is a blank `404`, because a `403`
+  would confirm that the id names a real note belonging to a real person. When
+  sharing arrives, "the notes you may read" is still one expression in one
+  place; it just stops being `PersonId == me`. A second module wanting the same
+  thing is the signal to promote that expression, the way `ICallerIdentity` was
+  promoted, rather than to write a second version of it.
 
-What is on the other side of the line, and stays there: no endpoint behaves
-differently for one person than for another, no role, no scope, no permission
-table, and nothing reads `IsAdmin`. Adding a module that scopes rows to a person
-is ordinary. Adding a module that *gates behaviour* on one is the thing that
-needs the design below first.
+What holds today, as a description of the code rather than a rule for all time:
+no endpoint behaves differently for one person than for another, and there is no
+role, scope, or permission table. Ownership scoping is ordinary and needs no
+ceremony. Changing what a *verb* does based on who is asking is the thing that
+should arrive with a design attached.
 
 The mechanism is [`ICallerIdentity`](../src/Aerie.Api/Services/Auth/CallerIdentity.cs),
 the one way anything outside `Services/Auth/` asks who is calling. It resolves
@@ -481,10 +498,11 @@ what turned it into a seam.
   in a field people will filter on is a field that cannot be filtered on. A
   person's `Name` went through `PersonName`, so it is a value rather than a
   note, and it travels in full.
-- **A person scopes rows, never behaviour.** See
-  [What a person decides](#what-a-person-decides). The day an endpoint answers
-  differently *for the same rows* depending on who is asking is the day this
-  needs a permission model rather than another `WHERE` clause.
+- **Who may read a row is one expression, in one place.** Quill's is the
+  `PersonId` clause on every query in the module
+  ([A person is an authorization input](#a-person-is-an-authorization-input)).
+  Sharing will widen that expression; it must not add a second one beside it,
+  and it must not become a check that runs after the rows are already loaded.
 - **`IsAdmin` grants nothing.** No branch reads it. It exists early so that
   whatever eventually does — roles, scopes, RBAC — inherits a column with real
   answers in it, rather than an empty one whose first population is also the
@@ -608,14 +626,17 @@ decision above.
   *re-authentication* — a lapsed device proves itself with Face ID instead of
   finding the operator — which a permanent grant means you rarely do. It is also
   the point at which a grant stops being a device and starts being a person.
-- **Roles and scopes.** People shipped (see
-  [Whose device is this](#whose-device-is-this)); enforcement did not, and
-  ownership scoping in Quill is deliberately not it — see
-  [What a person decides](#what-a-person-decides). What is left is a
-  `[RequireScope]` filter and a decision about what the levels are — plus,
-  before any of it, a lockout path, since the household member holding the
-  bootstrap invite is the one who would need it. `Person.IsAdmin` is already
-  being carried and edited, so that work starts against a populated column.
+- **A permission model.** People shipped (see
+  [Whose device is this](#whose-device-is-this)) and are read by one module;
+  what is missing is the vocabulary for saying so generally. The near-term
+  shape is *contextual* rather than global — a person, a resource, and a verb,
+  which is what "share this note with Ada, read only" is — and the model that
+  answers that also answers most of what a `[RequireScope]` filter would, from
+  the other end. Global roles are the part that wants care: before a single
+  household-wide check is enforced there needs to be a lockout path, since the
+  member holding the bootstrap invite is the one who would need it.
+  `Person.IsAdmin` is already being carried and edited, so that work starts
+  against a populated column rather than an empty one.
 - **`logs.` and `status.` behind the same wall.** One annotation each, once
   OpenSearch Dashboards' and Uptime Kuma's own logins can be told to trust
   `X-Aerie-Label` as a proxy-authenticated user.
