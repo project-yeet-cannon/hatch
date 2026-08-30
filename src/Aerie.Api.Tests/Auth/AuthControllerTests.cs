@@ -421,7 +421,7 @@ public class AuthControllerTests
         // elsewhere moves the QR target with it.
         Assert.Equal("/apps/auth/r/K3M9P2QT", dto.RedeemPath);
         Assert.Equal("Ada's iPhone", dto.Label);
-        Assert.Equal([("Ada's iPhone", false)], auth.InvitesCreated);
+        Assert.Equal([("Ada's iPhone", (Guid?)null, false)], auth.InvitesCreated);
         // A live credential has no business in a cache, anyone's.
         Assert.Equal("no-store", context.Response.Headers.CacheControl.ToString());
     }
@@ -443,6 +443,64 @@ public class AuthControllerTests
         context.Request.Headers["X-Forwarded-Proto"] = "https";
         context.Request.Headers["X-Forwarded-Host"] = host;
         context.Request.Headers["X-Forwarded-Uri"] = uri;
+    }
+
+    [Fact]
+    public async Task LinksADeviceToAPerson()
+    {
+        var auth = new StubAuthService();
+        var controller = NewController(out _, auth);
+        var grantId = Guid.NewGuid();
+        var personId = Guid.NewGuid();
+
+        Assert.IsType<NoContentResult>(await controller.LinkGrantPerson(grantId, new LinkPersonRequest(personId), CancellationToken.None));
+
+        Assert.Equal([(grantId, personId)], auth.PersonLinks);
+    }
+
+    [Fact]
+    public async Task UnlinksOnANullPersonRatherThanIgnoringTheCall()
+    {
+        // "Nobody" has to be something the API can be *told*. A handler that
+        // treated a null as "nothing to do" would leave the Sessions page with
+        // no way to undo a mistaken link at all.
+        var auth = new StubAuthService();
+        var controller = NewController(out _, auth);
+        var grantId = Guid.NewGuid();
+
+        Assert.IsType<NoContentResult>(await controller.LinkGrantPerson(grantId, new LinkPersonRequest(null), CancellationToken.None));
+
+        Assert.Equal([(grantId, (Guid?)null)], auth.PersonLinks);
+    }
+
+    [Fact]
+    public async Task TellsAStaleListApartFromAStaleDropdown()
+    {
+        // Two failures, two status codes, because they send whoever is standing
+        // at the Sessions page to two different next actions: refresh the list,
+        // or refresh the people.
+        var missingGrant = new StubAuthService { LinkResult = GrantLinkResult.NoSuchGrant };
+        Assert.IsType<NotFoundResult>(
+            await NewController(out _, missingGrant).LinkGrantPerson(Guid.NewGuid(), new LinkPersonRequest(Guid.NewGuid()), CancellationToken.None));
+
+        var missingPerson = new StubAuthService { LinkResult = GrantLinkResult.NoSuchPerson };
+        var refused = Assert.IsType<BadRequestObjectResult>(
+            await NewController(out _, missingPerson).LinkGrantPerson(Guid.NewGuid(), new LinkPersonRequest(Guid.NewGuid()), CancellationToken.None));
+        Assert.Equal(AuthController.UnknownPersonError, Assert.IsType<AuthErrorDto>(refused.Value).Error);
+    }
+
+    [Fact]
+    public async Task CarriesThePersonThroughToTheInvite()
+    {
+        var auth = new StubAuthService();
+        var controller = NewController(out _, auth);
+        var personId = Guid.NewGuid();
+
+        await controller.CreateInvite(new CreateInviteRequest("Ada's iPhone", personId), CancellationToken.None);
+
+        // The link is set by the redemption rather than as a second step on the
+        // Sessions page afterwards.
+        Assert.Equal([("Ada's iPhone", (Guid?)personId, false)], auth.InvitesCreated);
     }
 
     private static AuthController NewController(

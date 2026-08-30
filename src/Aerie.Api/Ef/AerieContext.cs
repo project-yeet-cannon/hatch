@@ -33,6 +33,9 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
     public DbSet<EfAuthGrant> AuthGrants => Set<EfAuthGrant>();
     public DbSet<EfAuthInvite> AuthInvites => Set<EfAuthInvite>();
 
+    public DbSet<EfPerson> People => Set<EfPerson>();
+    public DbSet<EfPersonPhoto> PersonPhotos => Set<EfPersonPhoto>();
+
     public DbSet<EfCommand> Commands => Set<EfCommand>();
     public DbSet<EfControlDecision> ControlDecisions => Set<EfControlDecision>();
     public DbSet<EfControlOverride> ControlOverrides => Set<EfControlOverride>();
@@ -138,10 +141,39 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
         // Auth lives in the core context and the public schema on purpose: it
         // is infrastructure every module sits behind, and a Modules/ schema
         // would make every module depend on one module (Modules/README.md).
-        // Neither entity has a relationship - a grant outlives the invite that
-        // made it, which is why EfAuthInvite.RedeemedGrantId is a bare Guid.
-        modelBuilder.Entity<EfAuthGrant>();
+        // An invite still has no relationships - a grant outlives the invite
+        // that made it, which is why both EfAuthInvite.RedeemedGrantId and its
+        // PersonId are bare Guids rather than foreign keys.
+        //
+        // A grant now has exactly one: its optional owner. SetNull rather than
+        // Cascade, and it is the single most important word in this file -
+        // Cascade here would mean deleting a person revokes their devices,
+        // turning an administrative tidy-up into a lockout.
+        modelBuilder.Entity<EfAuthGrant>()
+            .HasOne(g => g.Person)
+            .WithMany(p => p.Grants)
+            .HasForeignKey(g => g.PersonId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         modelBuilder.Entity<EfAuthInvite>();
+
+        // People sit beside auth for the same reason auth sits here: they are
+        // infrastructure the whole install shares rather than one family app's
+        // data, and a module schema would make every module depend on one
+        // module. A person is not an account - see EfPerson.
+        //
+        // One-to-one, declared rather than inferred, for the reason
+        // EfCameraConnection spells out: PersonId is both the key and the
+        // foreign key, so convention would otherwise invent a second shadow
+        // column. Cascade is the part that matters - a deleted person takes
+        // their photo with it, and an orphaned two-megabyte blob is not
+        // something anything else in the app would ever notice.
+        modelBuilder.Entity<EfPerson>();
+        modelBuilder.Entity<EfPersonPhoto>()
+            .HasOne(p => p.Person)
+            .WithOne(p => p.Photo)
+            .HasForeignKey<EfPersonPhoto>(p => p.PersonId)
+            .OnDelete(DeleteBehavior.Cascade);
 
         // A calendar has no meaning without the account whose grant reaches it,
         // and an event has none without its calendar - disconnecting an account

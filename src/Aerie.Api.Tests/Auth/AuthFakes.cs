@@ -19,7 +19,13 @@ internal sealed class StubAuthService(EfAuthGrant? grant = null) : IAuthService
 
     public List<(string? Code, string? Label, string? UserAgent, string? ClientIp)> Redemptions { get; } = [];
 
-    public List<(string? Label, bool IsBootstrap)> InvitesCreated { get; } = [];
+    public List<(string? Label, Guid? PersonId, bool IsBootstrap)> InvitesCreated { get; } = [];
+
+    /// <summary>Every link the controller asked for, so a test can prove the endpoint passed on a null (unclaim) rather than skipping the call.</summary>
+    public List<(Guid GrantId, Guid? PersonId)> PersonLinks { get; } = [];
+
+    /// <summary>What SetGrantPersonAsync answers. Both refusals are reachable by setting this, which is the only way to test the two different 4xx.</summary>
+    public GrantLinkResult LinkResult { get; set; } = GrantLinkResult.Linked;
 
     /// <summary>What ListGrantsAsync answers - every enrolled device, as the admin Sessions page would see it.</summary>
     public List<EfAuthGrant> Grants { get; } = [];
@@ -73,10 +79,16 @@ internal sealed class StubAuthService(EfAuthGrant? grant = null) : IAuthService
         return Task.FromResult(RevokeResult);
     }
 
-    public Task<AuthInviteCreated> CreateInviteAsync(string? label, bool isBootstrap, CancellationToken ct)
+    public Task<AuthInviteCreated> CreateInviteAsync(string? label, Guid? personId, bool isBootstrap, CancellationToken ct)
     {
-        InvitesCreated.Add((label, isBootstrap));
+        InvitesCreated.Add((label, personId, isBootstrap));
         return Task.FromResult(InviteResult with { Label = label });
+    }
+
+    public Task<GrantLinkResult> SetGrantPersonAsync(Guid grantId, Guid? personId, CancellationToken ct)
+    {
+        PersonLinks.Add((grantId, personId));
+        return Task.FromResult(LinkResult);
     }
 
     public Task<IReadOnlyList<EfAuthGrant>> ListGrantsAsync(CancellationToken ct) =>

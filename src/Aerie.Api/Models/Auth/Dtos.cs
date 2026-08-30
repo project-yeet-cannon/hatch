@@ -17,7 +17,12 @@ public record AuthGrantDto(
     string? UserAgent,
     // True for the grant the caller is holding - what stops someone revoking
     // their own way out of the room.
-    bool IsCurrent)
+    bool IsCurrent,
+    // Whose device this is, or null for one nobody has claimed. The name rides
+    // along with the id because the Sessions page renders it in a cell and
+    // would otherwise have to join two lists client-side to draw one column.
+    Guid? PersonId = null,
+    string? PersonName = null)
 {
     public static AuthGrantDto From(EfAuthGrant grant, bool isCurrent) => new(
         grant.Id,
@@ -27,7 +32,13 @@ public record AuthGrantDto(
         grant.LastSeenAt,
         grant.LastSeenIp,
         grant.UserAgent,
-        isCurrent);
+        isCurrent,
+        grant.PersonId,
+        // Null when the grant was loaded without its owner - `me` and the
+        // redemption response both build a DTO from a grant they have in hand
+        // rather than from a query that joined. Those two callers describe the
+        // device to itself, where the owner is not the question being asked.
+        grant.Person?.Name);
 }
 
 /// <summary>
@@ -45,7 +56,21 @@ public record AuthErrorDto(string Error);
 /// name the grant will carry if the person redeeming doesn't supply one - "Ada's
 /// iPhone" typed by the operator who is about to hand the code over.
 /// </summary>
-public record CreateInviteRequest(string? Label);
+/// <param name="PersonId">
+/// Who this device will belong to, if the operator already knows - the link is
+/// then set by the redemption rather than as a second step on the Sessions page
+/// afterwards. Optional, and a person deleted before the code is read out
+/// simply leaves the grant unclaimed (AuthService.RedeemAsync).
+/// </param>
+public record CreateInviteRequest(string? Label, Guid? PersonId = null);
+
+/// <summary>
+/// Claims a device for a person, or unclaims it. A record with one nullable
+/// field rather than a bare Guid in the URL, precisely so that "nobody" is
+/// something the API can be *told* - a DELETE would say the same thing in a
+/// second endpoint, and unlinking is not a deletion of anything.
+/// </summary>
+public record LinkPersonRequest(Guid? PersonId);
 
 /// <summary>
 /// A freshly minted invite, on its way to a QR code and a screen.

@@ -22,7 +22,7 @@ public class AuthServiceTests
     {
         var (service, db, _) = NewService();
 
-        var invite = await service.CreateInviteAsync("Ada's iPhone", isBootstrap: false, CancellationToken.None);
+        var invite = await service.CreateInviteAsync("Ada's iPhone", null, isBootstrap: false, CancellationToken.None);
 
         Assert.Equal(AuthTokens.InviteCodeLength, invite.Code.Length);
         Assert.Equal($"AERIE-{invite.Code[..4]}-{invite.Code[4..]}", invite.FormattedCode);
@@ -39,7 +39,7 @@ public class AuthServiceTests
     {
         var (service, _, _) = NewService();
 
-        var invite = await service.CreateInviteAsync(null, isBootstrap: true, CancellationToken.None);
+        var invite = await service.CreateInviteAsync(null, null, isBootstrap: true, CancellationToken.None);
 
         // Nobody is standing at the tablet when a deploy finishes - it has to
         // survive the walk from the terminal to the room.
@@ -50,10 +50,10 @@ public class AuthServiceTests
     public async Task CreatingAnInviteSweepsExpiredOnes()
     {
         var (service, db, time) = NewService();
-        var stale = await service.CreateInviteAsync(null, isBootstrap: false, CancellationToken.None);
+        var stale = await service.CreateInviteAsync(null, null, isBootstrap: false, CancellationToken.None);
 
         time.Advance(TimeSpan.FromMinutes(16));
-        var fresh = await service.CreateInviteAsync(null, isBootstrap: false, CancellationToken.None);
+        var fresh = await service.CreateInviteAsync(null, null, isBootstrap: false, CancellationToken.None);
 
         // The EfOAuthState pattern: expired rows are unusable by definition and
         // a household never makes enough of them to be worth a job.
@@ -66,7 +66,7 @@ public class AuthServiceTests
     public async Task RedeemingMintsAGrantAndReturnsItsTokenExactlyOnce()
     {
         var (service, db, _) = NewService();
-        var invite = await service.CreateInviteAsync(null, isBootstrap: false, CancellationToken.None);
+        var invite = await service.CreateInviteAsync(null, null, isBootstrap: false, CancellationToken.None);
 
         var result = await service.RedeemAsync(
             AuthTokens.FormatInviteCode(invite.Code), "Kitchen tablet", "GeckoView/1.0", "10.0.0.7", CancellationToken.None);
@@ -91,7 +91,7 @@ public class AuthServiceTests
     public async Task RedemptionFallsBackToTheLabelTheAdminPreFilled()
     {
         var (service, _, _) = NewService();
-        var invite = await service.CreateInviteAsync("Ada's iPhone", isBootstrap: false, CancellationToken.None);
+        var invite = await service.CreateInviteAsync("Ada's iPhone", null, isBootstrap: false, CancellationToken.None);
 
         var result = await service.RedeemAsync(invite.Code, label: "  ", userAgent: null, clientIp: null, CancellationToken.None);
 
@@ -102,7 +102,7 @@ public class AuthServiceTests
     public async Task AnInviteIsSingleUse()
     {
         var (service, db, _) = NewService();
-        var invite = await service.CreateInviteAsync(null, isBootstrap: false, CancellationToken.None);
+        var invite = await service.CreateInviteAsync(null, null, isBootstrap: false, CancellationToken.None);
         Assert.True((await service.RedeemAsync(invite.Code, null, null, null, CancellationToken.None)).Succeeded);
 
         var second = await service.RedeemAsync(invite.Code, null, null, null, CancellationToken.None);
@@ -116,7 +116,7 @@ public class AuthServiceTests
     public async Task AnExpiredInviteIsRefusedWithoutMintingAnything()
     {
         var (service, db, time) = NewService();
-        var invite = await service.CreateInviteAsync(null, isBootstrap: false, CancellationToken.None);
+        var invite = await service.CreateInviteAsync(null, null, isBootstrap: false, CancellationToken.None);
 
         time.Advance(TimeSpan.FromMinutes(15));
         var result = await service.RedeemAsync(invite.Code, null, null, null, CancellationToken.None);
@@ -233,7 +233,7 @@ public class AuthServiceTests
         var (service, _, time) = NewService();
         Assert.False(await service.HasAnyAccessAsync(CancellationToken.None));
 
-        await service.CreateInviteAsync(null, isBootstrap: true, CancellationToken.None);
+        await service.CreateInviteAsync(null, null, isBootstrap: true, CancellationToken.None);
         Assert.True(await service.HasAnyAccessAsync(CancellationToken.None));
 
         // An invite nobody redeemed in time is not a way in - otherwise a
@@ -266,9 +266,140 @@ public class AuthServiceTests
         Assert.Equal(["Ada's iPhone", "Kitchen tablet"], grants.Select(g => g.Label));
     }
 
+    // ---- People (docs/auth-architecture.md, "Whose device is this") ----
+
+    [Fact]
+    public async Task AGrantStartsBelongingToNobody()
+    {
+        // Which is not a degraded state: the wall tablet in the hallway belongs
+        // to the house, and every grant enrolled before people existed is here
+        // too.
+        var (service, db, _) = NewService();
+        await Enroll(service);
+
+        Assert.Null((await Grant(db)).PersonId);
+    }
+
+    [Fact]
+    public async Task ClaimsADeviceForAPerson()
+    {
+        var (service, db, _) = NewService();
+        await Enroll(service);
+        var person = await AddPerson(db, "Ada");
+        var grant = await Grant(db);
+
+        Assert.Equal(GrantLinkResult.Linked, await service.SetGrantPersonAsync(grant.Id, person.Id, CancellationToken.None));
+
+        Assert.Equal(person.Id, (await Grant(db)).PersonId);
+    }
+
+    [Fact]
+    public async Task UnclaimsADeviceWithoutRevokingIt()
+    {
+        var (service, db, _) = NewService();
+        var token = await Enroll(service);
+        var person = await AddPerson(db, "Ada");
+        var grant = await Grant(db);
+        await service.SetGrantPersonAsync(grant.Id, person.Id, CancellationToken.None);
+
+        Assert.Equal(GrantLinkResult.Linked, await service.SetGrantPersonAsync(grant.Id, null, CancellationToken.None));
+
+        Assert.Null((await Grant(db)).PersonId);
+        // The device still gets in. Unlinking is not a revocation, and nothing
+        // in the gate reads this column at all.
+        Assert.NotNull(await service.VerifyAsync([token], null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RefusesToLinkAGrantOrAPersonThatIsNotThere()
+    {
+        // Two different sentences on the Sessions page: a missing grant means
+        // the list is stale, a missing person means the dropdown is.
+        var (service, db, _) = NewService();
+        await Enroll(service);
+        var person = await AddPerson(db, "Ada");
+        var grant = await Grant(db);
+
+        Assert.Equal(GrantLinkResult.NoSuchGrant, await service.SetGrantPersonAsync(Guid.NewGuid(), person.Id, CancellationToken.None));
+        Assert.Equal(GrantLinkResult.NoSuchPerson, await service.SetGrantPersonAsync(grant.Id, Guid.NewGuid(), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AnInvitesPersonBecomesTheGrantsPerson()
+    {
+        // The operator generating the code already knows whose phone they are
+        // about to hand it to. Carrying that through the ceremony is the
+        // difference between the link being set and it being a second thing to
+        // remember afterwards.
+        var (service, db, _) = NewService();
+        var person = await AddPerson(db, "Ada");
+
+        var invite = await service.CreateInviteAsync("Ada's iPhone", person.Id, isBootstrap: false, CancellationToken.None);
+        await service.RedeemAsync(invite.Code, null, null, null, CancellationToken.None);
+
+        Assert.Equal(person.Id, (await Grant(db)).PersonId);
+    }
+
+    [Fact]
+    public async Task ACodeStillRedeemsWhenThePersonItNamedIsGone()
+    {
+        // EfAuthInvite.PersonId is deliberately not a foreign key. Someone
+        // standing in the hall with a code read out five minutes ago must still
+        // get in after an unrelated tidy-up in the admin app - they end up with
+        // an unclaimed device, not a refusal.
+        var (service, db, _) = NewService();
+        var person = await AddPerson(db, "Ada");
+        var invite = await service.CreateInviteAsync(null, person.Id, isBootstrap: false, CancellationToken.None);
+
+        db.People.Remove(await db.People.SingleAsync(p => p.Id == person.Id));
+        await db.SaveChangesAsync();
+
+        var result = await service.RedeemAsync(invite.Code, "Ada's iPhone", null, null, CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Null((await Grant(db)).PersonId);
+    }
+
+    [Fact]
+    public async Task TheGateHandsTheOwnerToWhoeverAsksWhoIsCalling()
+    {
+        // Verify joins the person deliberately, so that everything downstream -
+        // the Sessions page, a log line - can name a human without a second
+        // query or a cache to invalidate when someone is renamed.
+        var (service, db, _) = NewService();
+        var token = await Enroll(service);
+        var person = await AddPerson(db, "Ada");
+        await service.SetGrantPersonAsync((await Grant(db)).Id, person.Id, CancellationToken.None);
+
+        var verified = await service.VerifyAsync([token], null, CancellationToken.None);
+
+        Assert.Equal("Ada", verified!.Grant.Person!.Name);
+    }
+
+    [Fact]
+    public async Task ListedGrantsCarryTheirOwner()
+    {
+        var (service, db, _) = NewService();
+        await Enroll(service, "Ada's iPhone");
+        var person = await AddPerson(db, "Ada");
+        await service.SetGrantPersonAsync((await Grant(db)).Id, person.Id, CancellationToken.None);
+
+        var listed = Assert.Single(await service.ListGrantsAsync(CancellationToken.None));
+
+        Assert.Equal("Ada", listed.Person!.Name);
+    }
+
+    private static async Task<EfPerson> AddPerson(AerieContext db, string name)
+    {
+        var person = new EfPerson { Name = name, CreatedAt = Now, UpdatedAt = Now };
+        db.People.Add(person);
+        await db.SaveChangesAsync();
+        return person;
+    }
+
     private static async Task<string> Enroll(IAuthService service, string? label = "Kitchen tablet", string? clientIp = null)
     {
-        var invite = await service.CreateInviteAsync(null, isBootstrap: false, CancellationToken.None);
+        var invite = await service.CreateInviteAsync(null, null, isBootstrap: false, CancellationToken.None);
         var result = await service.RedeemAsync(invite.Code, label, null, clientIp, CancellationToken.None);
         return result.Token!;
     }

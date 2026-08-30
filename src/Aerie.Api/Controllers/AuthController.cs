@@ -30,6 +30,9 @@ public class AuthController(
     /// <summary>Named so Program.cs can configure the partition and this file can apply it, without either restating the numbers.</summary>
     public const string RedeemRateLimitPolicy = "auth-redeem";
 
+    /// <summary>Why a link was refused - the person is gone, so the Sessions page is holding a stale dropdown. See <see cref="LinkGrantPerson"/>.</summary>
+    public const string UnknownPersonError = "unknown_person";
+
     /// <summary>Why a revocation was refused - the caller aimed it at the device it is sitting on. See <see cref="RevokeGrant"/>.</summary>
     public const string OwnGrantError = "own_grant";
 
@@ -206,6 +209,33 @@ public class AuthController(
     }
 
     /// <summary>
+    /// Claims a device for a person, or unclaims it with a null person.
+    ///
+    /// This is the *only* write path for that link, and it lives on the grant
+    /// rather than on the person because that is the shape of the data: a
+    /// session has at most one person, so this is a single value on a row that
+    /// already exists. Inverting it - editing a person's list of sessions -
+    /// would turn a one-to-many into a multi-picker, and would put the control
+    /// on a page nobody is looking at during the one moment it is wanted, which
+    /// is while enrolling the device.
+    ///
+    /// Nothing about the wall changes here. The grant is as valid before as
+    /// after; this writes a name onto it, and no gate reads it.
+    /// </summary>
+    [HttpPut("grants/{id:guid}/person")]
+    public async Task<IActionResult> LinkGrantPerson(Guid id, [FromBody] LinkPersonRequest? request, CancellationToken ct)
+    {
+        var result = await auth.SetGrantPersonAsync(id, request?.PersonId, ct);
+
+        return result switch
+        {
+            GrantLinkResult.NoSuchGrant => NotFound(),
+            GrantLinkResult.NoSuchPerson => BadRequest(new AuthErrorDto(UnknownPersonError)),
+            _ => NoContent(),
+        };
+    }
+
+    /// <summary>
     /// Mints an invite for whoever is standing next to the operator. The
     /// response body carries the code in plaintext - the only moment it exists
     /// outside a hash - so it can be drawn as a QR and read aloud, and never
@@ -215,7 +245,7 @@ public class AuthController(
     [HttpPost("invites")]
     public async Task<IActionResult> CreateInvite([FromBody] CreateInviteRequest? request, CancellationToken ct)
     {
-        var invite = await auth.CreateInviteAsync(request?.Label, isBootstrap: false, ct);
+        var invite = await auth.CreateInviteAsync(request?.Label, request?.PersonId, isBootstrap: false, ct);
 
         // A live credential has no business in a cache, anyone's.
         Response.Headers.CacheControl = "no-store";

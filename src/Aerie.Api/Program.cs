@@ -357,7 +357,7 @@ if (builder.Configuration["AERIE_MIGRATE"] == "1")
     var authService = scope.ServiceProvider.GetRequiredService<IAuthService>();
     if (!await authService.HasAnyAccessAsync(CancellationToken.None))
     {
-        var bootstrap = await authService.CreateInviteAsync("Bootstrap", isBootstrap: true, CancellationToken.None);
+        var bootstrap = await authService.CreateInviteAsync("Bootstrap", personId: null, isBootstrap: true, CancellationToken.None);
         app.Logger.LogWarning(
             "\n" +
             "========================================================\n" +

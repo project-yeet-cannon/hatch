@@ -23,9 +23,11 @@ public enum AuthGrantKind { Interactive, Device }
 /// rather than a key rotation - see docs/auth-architecture.md's credential-format
 /// decision for why this is an opaque token and not a JWT or an auth cookie.
 ///
-/// PersonId is deliberately absent. Grants become people when people exist;
-/// adding a nullable column later is cheaper than a nullable FK to a table
-/// that hasn't been designed.
+/// People exist now, and <see cref="PersonId"/> is the nullable column this
+/// comment used to promise. It changes nothing about what a grant *is*: the
+/// wall still authenticates a device, the FK is still optional, and no
+/// authorization decision anywhere reads it. It is an owner's name on a
+/// credential, not a credential belonging to an owner.
 /// </summary>
 [Table("AuthGrants")]
 [Index(nameof(TokenHash), IsUnique = true)]
@@ -40,6 +42,24 @@ public class EfAuthGrant
 
     /// <summary>What the Sessions page calls this device ("Ada's iPhone"). Free text an admin or the sign-in shell chose - the list is unusable if it's a wall of user agents.</summary>
     public required string Label { get; set; }
+
+    /// <summary>
+    /// Whose device this is, or null for one nobody has claimed - which is
+    /// every grant that existed before people did, and the wall tablet in the
+    /// hallway that belongs to the house rather than to anyone.
+    ///
+    /// Nullable and <c>SetNull</c> on delete, both deliberately: deleting a
+    /// person must never revoke a credential. A tablet whose owner was removed
+    /// is a tablet with an unknown owner, not a tablet that has been locked
+    /// out of the house.
+    ///
+    /// Nothing branches on this. It is what puts a human in the Sessions list
+    /// and in a log line (UiLogsController); the day it becomes an
+    /// authorization input is the day it needs a design, not just a column.
+    /// </summary>
+    public Guid? PersonId { get; set; }
+
+    public EfPerson? Person { get; set; }
 
     public required AuthGrantKind Kind { get; set; }
 
@@ -95,6 +115,20 @@ public class EfAuthInvite
 
     /// <summary>Optional label to pre-fill on the grant this becomes, for when the admin knows whose phone it's for before they hand the code over.</summary>
     public string? Label { get; set; }
+
+    /// <summary>
+    /// Optional person to link the grant this becomes to. Same reasoning as
+    /// <see cref="Label"/> taken one step further: the operator generating the
+    /// code already knows whose phone they are about to hand it to, and
+    /// carrying that through the ceremony is the difference between the link
+    /// being set and the link being a second thing to remember afterwards.
+    ///
+    /// Deliberately *not* a foreign key, matching
+    /// <see cref="RedeemedGrantId"/>: a person deleted between minting and
+    /// redemption must leave the code redeemable. The redemption checks the
+    /// person still exists and links nothing if they don't.
+    /// </summary>
+    public Guid? PersonId { get; set; }
 
     public required DateTimeOffset CreatedAt { get; set; }
 

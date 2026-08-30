@@ -31,6 +31,14 @@ public record AuthInviteCreated(Guid Id, string Code, DateTimeOffset ExpiresAt, 
 /// </summary>
 public record AuthVerification(EfAuthGrant Grant, string Token);
 
+/// <summary>
+/// How linking a device to a person went. Three outcomes rather than a bool
+/// because the two failures are different sentences to whoever is standing at
+/// the Sessions page: a missing grant means the list is stale, a missing person
+/// means the dropdown is.
+/// </summary>
+public enum GrantLinkResult { Linked, NoSuchGrant, NoSuchPerson }
+
 public record AuthRedemption(EfAuthGrant? Grant, string? Token, string? Error)
 {
     public const string InvalidCode = "invalid_code";
@@ -49,7 +57,7 @@ public interface IAuthService
     /// EfOAuthState pattern - no job). The returned code is not recoverable
     /// afterwards; only its hash is stored.
     /// </summary>
-    Task<AuthInviteCreated> CreateInviteAsync(string? label, bool isBootstrap, CancellationToken ct);
+    Task<AuthInviteCreated> CreateInviteAsync(string? label, Guid? personId, bool isBootstrap, CancellationToken ct);
 
     /// <summary>Turns a code into a grant. Never throws on a bad code - the reason comes back on the result.</summary>
     Task<AuthRedemption> RedeemAsync(string? code, string? label, string? userAgent, string? clientIp, CancellationToken ct);
@@ -76,6 +84,14 @@ public interface IAuthService
     /// <summary>Revocation is a DELETE. Returns false if there was no such grant, which a caller turns into a 404.</summary>
     Task<bool> RevokeGrantAsync(Guid id, CancellationToken ct);
 
+    /// <summary>
+    /// Claims a device for a person, or unclaims it with a null
+    /// <paramref name="personId"/>. The single write path for the link - the
+    /// People page reads it and does not set it, because one FK with two forms
+    /// writing it is two forms that can disagree about what they last saw.
+    /// </summary>
+    Task<GrantLinkResult> SetGrantPersonAsync(Guid grantId, Guid? personId, CancellationToken ct);
+
     /// <summary>Whether this install has any way in at all - what the migrate Job checks before minting a bootstrap invite.</summary>
     Task<bool> HasAnyAccessAsync(CancellationToken ct);
 }
@@ -96,7 +112,7 @@ public class AuthService(
     /// <summary>Codes are ~40 bits, so a collision is a rounding error away from impossible - but a unique index turns one into a 500 for whoever was standing there, and a retry costs three lines.</summary>
     private const int CodeCollisionRetries = 3;
 
-    public async Task<AuthInviteCreated> CreateInviteAsync(string? label, bool isBootstrap, CancellationToken ct)
+    public async Task<AuthInviteCreated> CreateInviteAsync(string? label, Guid? personId, bool isBootstrap, CancellationToken ct)
     {
         var now = time.GetUtcNow();
         var expiresAt = now + (isBootstrap ? options.BootstrapInviteTtl : options.InviteTtl);
@@ -114,6 +130,7 @@ public class AuthService(
             {
                 CodeHash = AuthTokens.Hash(code),
                 Label = string.IsNullOrWhiteSpace(label) ? null : label.Trim(),
+                PersonId = personId,
                 CreatedAt = now,
                 ExpiresAt = expiresAt,
                 IsBootstrap = isBootstrap,
@@ -166,11 +183,21 @@ public class AuthService(
             return AuthRedemption.Failed(AuthRedemption.Expired);
         }
 
+        // The invite's person, if they are still here. Checked rather than
+        // trusted because EfAuthInvite.PersonId is deliberately not a foreign
+        // key: a person deleted between minting a code and reading it out must
+        // leave the code redeemable, so a stale id links nothing and the device
+        // still gets in.
+        Guid? personId = invite.PersonId is { } invitedPerson && await db.People.AnyAsync(p => p.Id == invitedPerson, ct)
+            ? invitedPerson
+            : null;
+
         var token = AuthTokens.NewToken();
         var grant = new EfAuthGrant
         {
             TokenHash = AuthTokens.Hash(token),
             Label = FirstNonBlank(label, invite.Label) ?? "Unnamed device",
+            PersonId = personId,
             Kind = AuthGrantKind.Interactive,
             CreatedAt = now,
             CookieIssuedAt = now,
@@ -219,7 +246,13 @@ public class AuthService(
             if (string.IsNullOrEmpty(token)) continue;
 
             var hash = AuthTokens.Hash(token);
-            var grant = await db.AuthGrants.FirstOrDefaultAsync(g => g.TokenHash == hash, ct);
+            // The owner comes along on the hot path deliberately. It is a LEFT
+            // JOIN on a primary key against a table holding a household's worth
+            // of rows, which Postgres answers inside the round trip it was
+            // already making - and it is what lets every caller downstream (the
+            // Sessions page, a log line) name a human without a second query or
+            // a cache to invalidate when someone is renamed.
+            var grant = await db.AuthGrants.Include(g => g.Person).FirstOrDefaultAsync(g => g.TokenHash == hash, ct);
 
             if (grant is null || !AuthTokens.Matches(grant.TokenHash, hash)) continue;
 
@@ -256,7 +289,7 @@ public class AuthService(
     }
 
     public async Task<IReadOnlyList<EfAuthGrant>> ListGrantsAsync(CancellationToken ct) =>
-        await db.AuthGrants.AsNoTracking().OrderByDescending(g => g.CreatedAt).ToListAsync(ct);
+        await db.AuthGrants.AsNoTracking().Include(g => g.Person).OrderByDescending(g => g.CreatedAt).ToListAsync(ct);
 
     public async Task<bool> RevokeGrantAsync(Guid id, CancellationToken ct)
     {
@@ -267,6 +300,34 @@ public class AuthService(
         await db.SaveChangesAsync(ct);
         logger.LogWarning("Grant {GrantId} ({Label}) revoked", grant.Id, grant.Label);
         return true;
+    }
+
+    public async Task<GrantLinkResult> SetGrantPersonAsync(Guid grantId, Guid? personId, CancellationToken ct)
+    {
+        var grant = await db.AuthGrants.Include(g => g.Person).FirstOrDefaultAsync(g => g.Id == grantId, ct);
+        if (grant is null) return GrantLinkResult.NoSuchGrant;
+
+        if (personId is { } id)
+        {
+            var person = await db.People.FirstOrDefaultAsync(p => p.Id == id, ct);
+            if (person is null) return GrantLinkResult.NoSuchPerson;
+            grant.Person = person;
+        }
+        else
+        {
+            grant.Person = null;
+        }
+
+        grant.PersonId = personId;
+        await db.SaveChangesAsync(ct);
+
+        // Information rather than Warning, unlike revocation: claiming a device
+        // grants nobody anything, since nothing in the app reads this column to
+        // decide anything. It is logged at all because "who did this tablet
+        // belong to in March" is a question that only has an answer if someone
+        // wrote it down.
+        logger.LogInformation("Grant {GrantId} ({Label}) linked to person {PersonId}", grant.Id, grant.Label, personId);
+        return GrantLinkResult.Linked;
     }
 
     public async Task<bool> HasAnyAccessAsync(CancellationToken ct)
