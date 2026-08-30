@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { Modal } from '../components/Modal';
-import { createInvite, deleteGrant, getAppsConfig, getGrants, signOutDevice } from '../api/client';
+import { createInvite, deleteGrant, getAppsConfig, getGrants, getPeople, linkGrantPerson, signOutDevice } from '../api/client';
 import { formatAge } from '../lib/format';
-import type { AuthGrant, AuthInvite } from '../types';
+import type { AuthGrant, AuthInvite, Person } from '../types';
 
 /**
  * Every enrolled device, and the one button that enrols another.
@@ -19,12 +19,27 @@ import type { AuthGrant, AuthInvite } from '../types';
  * browser holding a cookie no grant answers to, which is precisely the state
  * that makes "sign out and back in" fail to fix anything. Sign out does both
  * halves, so that row offers that instead.
+ *
+ * Whose device it is is edited here rather than on the People page, and this is
+ * the page that owns that write. A session has at most one person, so it is one
+ * select on a row that already exists; a person has any number of sessions, so
+ * the inverse would be a multi-picker. It is also the moment anyone actually
+ * cares - you are looking at this table while enrolling the tablet - which is
+ * why the invite carries a person too, and the link is already set by the time
+ * the row appears.
+ *
+ * Nothing about the wall changes with it. The dropdown writes a name onto a
+ * credential; no gate reads the column.
  */
 export function SessionsPage() {
   const [grants, setGrants] = useState<AuthGrant[]>([]);
+  const [people, setPeople] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [label, setLabel] = useState('');
+  // Who the *next* invite is for. Separate from the per-row dropdowns because
+  // it describes a device that does not exist yet.
+  const [invitePersonId, setInvitePersonId] = useState('');
   const [generating, setGenerating] = useState(false);
   const [invite, setInvite] = useState<AuthInvite | null>(null);
   // The install's canonical origin, or null when Apps:PublicBaseUrl is unset or
@@ -44,7 +59,11 @@ export function SessionsPage() {
     setLoading(true);
     setError(null);
     try {
-      setGrants(await getGrants());
+      // Together, because a Person column that renders before the names arrive
+      // is a column of blanks that looks like unclaimed devices.
+      const [loadedGrants, loadedPeople] = await Promise.all([getGrants(), getPeople()]);
+      setGrants(loadedGrants);
+      setPeople(loadedPeople);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -56,11 +75,34 @@ export function SessionsPage() {
     setGenerating(true);
     setError(null);
     try {
-      setInvite(await createInvite(label.trim() || null));
+      setInvite(await createInvite(label.trim() || null, invitePersonId || null));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function link(grant: AuthGrant, personId: string | null) {
+    setError(null);
+    // Written straight into the row rather than re-fetching the table: the
+    // answer is already known, and a full reload would collapse whatever else
+    // someone was in the middle of reading.
+    const previous = grants;
+    setGrants((prev) =>
+      prev.map((g) =>
+        g.id === grant.id ? { ...g, personId, personName: people.find((p) => p.id === personId)?.name ?? null } : g,
+      ),
+    );
+
+    try {
+      await linkGrantPerson(grant.id, personId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      // Put the table back. A dropdown showing a link the server refused is
+      // worse than the error, because it goes on being wrong after the message
+      // is dismissed.
+      setGrants(previous);
     }
   }
 
@@ -102,6 +144,16 @@ export function SessionsPage() {
             value={label}
             onChange={(e) => setLabel(e.target.value)}
           />
+          {/* Whose device this is about to be. Set here and the link is already
+              in place when the row appears, rather than being a second step
+              somebody has to remember after the tablet is in a stranger's
+              hands. */}
+          <PersonSelect
+            people={people}
+            value={invitePersonId || null}
+            unclaimedLabel="Nobody in particular"
+            onChange={(personId) => setInvitePersonId(personId ?? '')}
+          />
           <button className="btn-primary" disabled={generating} onClick={generate}>
             {generating ? 'Generating…' : 'Generate invite'}
           </button>
@@ -129,6 +181,7 @@ export function SessionsPage() {
             <thead>
               <tr>
                 <th>Device</th>
+                <th>Person</th>
                 <th>Kind</th>
                 <th>Enrolled</th>
                 <th>Last seen</th>
@@ -146,6 +199,14 @@ export function SessionsPage() {
                       <span title={grant.userAgent ?? undefined}>{grant.label}</span>
                       {grant.isCurrent && <span className="badge badge-success">This device</span>}
                     </div>
+                  </td>
+                  <td>
+                    <PersonSelect
+                      people={people}
+                      value={grant.personId}
+                      unclaimedLabel="Unclaimed"
+                      onChange={(personId) => link(grant, personId)}
+                    />
                   </td>
                   <td>{grant.kind}</td>
                   <td>{formatAge(grant.createdAt)}</td>
@@ -171,6 +232,46 @@ export function SessionsPage() {
 
       <InviteModal invite={invite} publicBaseUrl={publicBaseUrl} onClose={() => setInvite(null)} />
     </div>
+  );
+}
+
+/**
+ * Which person a device belongs to, or nobody.
+ *
+ * "Nobody" is a first-class choice rather than an absence, and it is worded for
+ * where it appears: an unclaimed *device* on a row, an unspecified *person* on
+ * the invite. The empty option is always present because unclaiming has to be
+ * as easy as claiming - a household tablet that was briefly assigned to whoever
+ * set it up is the ordinary case, not an error to be recovered from.
+ */
+function PersonSelect({
+  people,
+  value,
+  unclaimedLabel,
+  onChange,
+}: {
+  people: Person[];
+  value: string | null;
+  unclaimedLabel: string;
+  onChange: (personId: string | null) => void;
+}) {
+  return (
+    <select
+      value={value ?? ''}
+      // Disabled rather than hidden when there is nobody to pick: a missing
+      // control reads as a missing feature, where a disabled one with this
+      // title says where to go.
+      disabled={people.length === 0}
+      title={people.length === 0 ? 'Add someone on the People page first' : undefined}
+      onChange={(e) => onChange(e.target.value || null)}
+    >
+      <option value="">{unclaimedLabel}</option>
+      {people.map((person) => (
+        <option key={person.id} value={person.id}>
+          {person.name}
+        </option>
+      ))}
+    </select>
   );
 }
 

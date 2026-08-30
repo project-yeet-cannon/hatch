@@ -243,6 +243,43 @@ export interface ProvisioningInfo {
  * enrolled device: the credential itself is never in here, because it exists
  * in plaintext exactly once, in the Set-Cookie that minted it.
  */
+/** `GET /api/people` - one household member (Models/People/Dtos.cs). */
+export interface Person {
+  id: string;
+  name: string;
+  /**
+   * Unenforced. Nothing in the app branches on it yet - it is carried now so
+   * that whatever eventually reads it inherits a populated column rather than
+   * an empty one. See EfPerson.IsAdmin.
+   */
+  isAdmin: boolean;
+  createdAt: string;
+  updatedAt: string;
+  /**
+   * When the photo was last uploaded, or null for someone who has none. Doubles
+   * as the photo's version: the URL is stable, so this is what a cache-busting
+   * query has to carry for a new upload to show up.
+   */
+  photoUpdatedAt: string | null;
+  hasPhoto: boolean;
+  /** How many enrolled devices are linked to this person. Zero is ordinary. */
+  sessionCount: number;
+}
+
+export interface PersonWriteRequest {
+  name: string;
+  isAdmin: boolean;
+}
+
+/** One of a person's devices, as the People page lists them - read-only here; revoking lives on Sessions. */
+export interface PersonSession {
+  id: string;
+  label: string;
+  kind: AuthGrantKind;
+  createdAt: string;
+  lastSeenAt: string | null;
+}
+
 export type AuthGrantKind = 'Interactive' | 'Device';
 
 export interface AuthGrant {
@@ -255,6 +292,10 @@ export interface AuthGrant {
   userAgent: string | null;
   /** The device asking. It gets a badge instead of a Delete button - see SessionsPage. */
   isCurrent: boolean;
+  /** Whose device this is, or null for one nobody has claimed. Editable here; the People page only reads it. */
+  personId: string | null;
+  /** Their name, sent alongside the id so the table can draw the column without joining two lists. */
+  personName: string | null;
 }
 
 export interface AuthInvite {

@@ -9,6 +9,7 @@ import { DevicesPage } from './pages/DevicesPage';
 import { DiscoveryPage } from './pages/DiscoveryPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ProvisioningPage } from './pages/ProvisioningPage';
+import { PeoplePage } from './pages/PeoplePage';
 import { SessionsPage } from './pages/SessionsPage';
 import { RevisionsPage } from './pages/RevisionsPage';
 
@@ -38,6 +39,7 @@ export function App() {
           <NavLink to="/discovery" className={navLinkClass}>Discovery</NavLink>
           <NavLink to="/settings" className={navLinkClass}>Settings</NavLink>
           <NavLink to="/provisioning" className={navLinkClass}>Provisioning</NavLink>
+          <NavLink to="/people" className={navLinkClass}>People</NavLink>
           <NavLink to="/sessions" className={navLinkClass}>Sessions</NavLink>
           <NavLink to="/revisions" className={navLinkClass}>Revisions</NavLink>
         </div>
@@ -55,6 +57,7 @@ export function App() {
           <Route path="/discovery" element={<DiscoveryPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/provisioning" element={<ProvisioningPage />} />
+          <Route path="/people" element={<PeoplePage />} />
           <Route path="/sessions" element={<SessionsPage />} />
           <Route path="/revisions" element={<RevisionsPage />} />
           <Route path="*" element={<Navigate to="/zones" replace />} />

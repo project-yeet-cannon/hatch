@@ -25,6 +25,9 @@ import type {
   HazardAlert,
   Panel,
   PanelWriteRequest,
+  Person,
+  PersonSession,
+  PersonWriteRequest,
   PhotoAlbum,
   PhotoAlbumSelectionRequest,
   PhotoAlbumSync,
@@ -49,11 +52,40 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
     return await new Promise<T>(() => {});
   }
   if (!res.ok) {
-    throw new Error(`${init?.method ?? 'GET'} ${path} failed: ${res.status} ${res.statusText}`);
+    throw new Error(await failureMessage(res, init?.method ?? 'GET', path));
   }
   // 202/204 responses (e.g. POST .../backfill) have no body - res.json() throws on empty input.
   const text = await res.text();
   return (text ? JSON.parse(text) : undefined) as T;
+}
+
+/**
+ * What a failed request says out loud.
+ *
+ * Prefers the server's own sentence when there is one: a 400 from
+ * PeopleController is "A name can be at most 60 characters", written to be read
+ * by whoever is standing at the form. Reporting "PUT /api/people/… failed: 400"
+ * instead throws that away and leaves them to guess.
+ *
+ * Falls back to the status line for the cases where the body is not a sentence
+ * - empty, HTML, a ProblemDetails blob, or long enough to be a stack trace.
+ * Showing one of those in a red line under a text input is worse than showing
+ * nothing, which is why this has a length bound rather than just a null check.
+ */
+async function failureMessage(res: Response, method: string, path: string): Promise<string> {
+  const fallback = `${method} ${path} failed: ${res.status} ${res.statusText}`;
+
+  try {
+    const body = (await res.text()).trim();
+    if (body === '' || body.length > 300) return fallback;
+
+    // A bare string body arrives JSON-quoted; anything structured is left to
+    // the fallback rather than guessed at.
+    const parsed: unknown = body.startsWith('"') ? JSON.parse(body) : body;
+    return typeof parsed === 'string' && parsed !== '' && !parsed.startsWith('<') ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 const asJson = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
@@ -202,14 +234,58 @@ export const getUnmappedDevices = () => fetchJson<UnmappedHaDevice[]>('/api/disc
 
 export const getKioskProvisioningInfo = () => fetchJson<ProvisioningInfo>('/api/kiosk/provisioning-info');
 
+// ---- People ----
+
+export const getPeople = () => fetchJson<Person[]>('/api/people');
+export const createPerson = (request: PersonWriteRequest) =>
+  fetchJson<Person>('/api/people', { method: 'POST', ...asJson(request) });
+export const updatePerson = (id: string, request: PersonWriteRequest) =>
+  fetchJson<Person>(`/api/people/${id}`, { method: 'PUT', ...asJson(request) });
+/** Their photo goes with them; their sessions do not - those keep working, just unclaimed. */
+export const deletePerson = (id: string) => fetchJson<void>(`/api/people/${id}`, { method: 'DELETE' });
+
+/** Read-only here. The link is written on the Sessions page, where the device is. */
+export const getPersonSessions = (id: string) => fetchJson<PersonSession[]>(`/api/people/${id}/sessions`);
+
+/**
+ * The photo goes up as a raw body rather than a multipart form: there is one
+ * file and no fields beside it, and a Blob is already exactly that. The
+ * server ignores the Content-Type this sets and sniffs the bytes instead.
+ */
+export const uploadPersonPhoto = (id: string, image: Blob) =>
+  fetchJson<Person>(`/api/people/${id}/photo`, {
+    method: 'PUT',
+    body: image,
+    // Spelled out because fetchJson's default would otherwise label these bytes
+    // application/json. The server does not read it either way - it sniffs -
+    // but a request that describes itself wrongly is a request that will
+    // mislead whoever is reading it in a network tab at 1am.
+    headers: { Accept: 'application/json', 'Content-Type': image.type || 'application/octet-stream' },
+  });
+export const deletePersonPhoto = (id: string) => fetchJson<void>(`/api/people/${id}/photo`, { method: 'DELETE' });
+
+/**
+ * A URL rather than a fetch - it goes straight into an <img src>, same-origin,
+ * with the cookie the page already has (the pattern photoAssetUrl uses).
+ *
+ * The `v` is the upload time, and it is load-bearing: the path is deliberately
+ * stable across uploads so nothing has to rebuild it, which means the browser
+ * would otherwise happily show the cached previous photo forever.
+ */
+export const personPhotoUrl = (person: Person) =>
+  `/api/people/${person.id}/photo${qs({ v: person.photoUpdatedAt ?? undefined })}`;
+
 // ---- Sessions ----
 
 export const getGrants = () => fetchJson<AuthGrant[]>('/api/auth/grants');
 /** Revocation is deletion; the server refuses the caller's own grant, which signOutDevice is for. */
 export const deleteGrant = (id: string) => fetchJson<void>(`/api/auth/grants/${id}`, { method: 'DELETE' });
 /** The only response in the app that carries a live credential, and it carries it once - it cannot be fetched again. */
-export const createInvite = (label: string | null) =>
-  fetchJson<AuthInvite>('/api/auth/invites', { method: 'POST', ...asJson({ label }) });
+export const createInvite = (label: string | null, personId: string | null) =>
+  fetchJson<AuthInvite>('/api/auth/invites', { method: 'POST', ...asJson({ label, personId }) });
+/** Claims a device for a person, or unclaims it with a null. The only write path for the link. */
+export const linkGrantPerson = (id: string, personId: string | null) =>
+  fetchJson<void>(`/api/auth/grants/${id}/person`, { method: 'PUT', ...asJson({ personId }) });
 export const signOutDevice = () => fetchJson<void>('/api/auth/sign-out', { method: 'POST' });
 
 // ---- Platform config ----

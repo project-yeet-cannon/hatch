@@ -288,3 +288,62 @@ mark.search-match {
   border-radius: 6px;
   background: var(--bg);
 }
+
+/* People — a household's members. The avatar is a fixed circle for the same
+   reason .photo-cover is a fixed box: names are all lengths and photos are all
+   orientations, and a column that sizes itself per row reads as a broken page
+   rather than as a list. */
+.person-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  /* The fallback is initials rather than a silhouette icon: a household is
+     small enough that two letters identify someone at a glance, and a wall of
+     identical grey figures identifies nobody. */
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--muted);
+  /* Emoji initials can be wider than a Latin one, and one overflowing avatar
+     would push the whole column. */
+  overflow: hidden;
+}
+
+.person-avatar-empty {
+  border: 1px dashed var(--line);
+}
+
+/* The avatar is the photo control. A separate "Upload" button would be a
+   second thing to find for the one action anyone wants from this cell. */
+.person-avatar-button {
+  padding: 0;
+  background: none;
+  border-radius: 50%;
+  line-height: 0;
+}
+
+.person-avatar-button:hover:not(:disabled) .person-avatar {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.person-link {
+  padding: 0;
+  background: none;
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.person-link:hover {
+  text-decoration: underline;
+}
+
+.person-sessions {
+  margin: 0 0 8px;
+  padding-left: 20px;
+  font-size: 14px;
+}
