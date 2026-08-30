@@ -1,6 +1,7 @@
 using Aerie.Api.Modules.Gather;
 using Aerie.Api.Modules.Game;
 using Aerie.Api.Modules.Photos;
+using Aerie.Api.Modules.Quill;
 using Aerie.Api.Modules.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -29,6 +30,7 @@ public static class ModuleRegistration
         services.AddGatherModule(configuration);
         services.AddGameModule(configuration);
         services.AddPhotosModule(configuration);
+        services.AddQuillModule(configuration);
 
         return services;
     }
