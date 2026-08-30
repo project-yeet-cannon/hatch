@@ -25,6 +25,26 @@ Style the module out of the tokens in `src/theme.css` and nothing else. That is
 the entire mechanism keeping the suite looking like one product; a module that
 introduces its own palette is how ten apps stop matching.
 
+### Modules that belong to a person
+
+An entry may set `requiresPerson: true`. That module gets no card, no tab and no
+route unless the session has a person behind it — see
+[`docs/quill.md`](../../../../docs/quill.md), which is the only one so far.
+
+Two things to know before reaching for it:
+
+- **It is courtesy, not enforcement.** The API refuses the same requests
+  independently, with the same blank 404. A module that relies on this flag for
+  its privacy has no privacy.
+- **It is a flag, not a predicate.** `canSee: (session) => boolean` would move
+  the decision about who may read a module's data into the shell, in a file a
+  module author is invited to edit, and away from the API that enforces it.
+
+The session comes from `src/lib/session.ts` (`GET /api/auth/me`), cached in
+`localStorage` so a cold launch with no network still knows whose device this
+is — an owner-requiring module that vanished whenever the API was unreachable
+would vanish exactly when it was wanted.
+
 ## Development
 
 Requires Node >= 22 (`.nvmrc`).
@@ -75,6 +95,14 @@ The caching policy, per `docs/family-apps-architecture.md`:
 
 Offline *writes* are deliberately out of scope; they need conflict resolution
 that no current use case justifies.
+
+The worker is also the floor rather than the ceiling. It can only serve URLs
+this device happened to request, and it cannot tell a screen that what it served
+was stale. A module that needs more than that — Quill, whose whole point is
+being readable on a plane — keeps its own IndexedDB mirror on top of it and says
+on screen when it is reading from one
+(`src/modules/quill/store.ts`). Copy that rather than widening the worker's
+policy for everyone.
 
 Deploys fence on the cache name, which is a digest of the precache list and the
 worker source: a new build means a new cache, and `activate` drops the old one.

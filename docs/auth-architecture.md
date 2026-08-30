@@ -15,7 +15,11 @@ say exactly where each one would attach.
 
 People are the first of those to have arrived, and arriving changed nothing
 about the sentence above: a `Person` is a name you hang on a grant, not a thing
-that signs in. See [Whose device is this](#whose-device-is-this).
+that signs in. See [Whose device is this](#whose-device-is-this). One thing
+downstream of a grant does now read that name — Quill's notes belong to a person
+— under a rule narrow enough to state in one line: **a person may decide what a
+caller can reach, never what a caller is allowed to do.** See
+[What a person decides](#what-a-person-decides).
 
 Two properties are worth stating up front because most of the rest follows from
 them:
@@ -405,11 +409,11 @@ unenforced admin flag. A grant may point at one; a person may be pointed at by
 any number of grants, including none.
 
 That is the whole model, and the restraint is the point. A person is not an
-account: there is nothing to sign in as, no password, no scope, and **no
-authorization decision anywhere reads one**. The wall still authenticates a
-device exactly as it did before. What a person adds is a human for a session
-list and a log line to name, which is the difference between "Kitchen tablet
-loaded the dashboard at 6am" and "Adam did".
+account: there is nothing to sign in as, no password, and no scope. The wall
+still authenticates a device exactly as it did before. What a person adds is a
+human for a session list and a log line to name, which is the difference between
+"Kitchen tablet loaded the dashboard at 6am" and "Adam did" — and, in exactly
+one module, an owner for a row.
 
 ### Which end the link is edited from
 
@@ -431,6 +435,41 @@ than by a second step somebody has to remember afterwards.
 minutes ago must still get in after an unrelated tidy-up in the admin app; a
 stale id links nothing and the device still enrolls.
 
+### What a person decides
+
+For four modules, nothing. A crate is in the garage whoever opens the app, and
+the household's data is the household's. Then Quill arrived
+([`quill.md`](quill.md)) — private notes, one person's own — and a person became
+something a query reads.
+
+The rule that keeps that from being the first step into an accidental permission
+model is a single sentence:
+
+> A person may decide what a caller can **reach**. A person never decides what a
+> caller is **allowed to do**.
+
+Reachability is ownership: your notes are yours, expressed as the first clause
+of every query in the module rather than as a rule some code path could forget
+to consult. Its refusals are indistinguishable from "no such thing" — a `403`
+would confirm that an id names a real note belonging to a real person, which is
+the fact a private note has to keep.
+
+What is on the other side of the line, and stays there: no endpoint behaves
+differently for one person than for another, no role, no scope, no permission
+table, and nothing reads `IsAdmin`. Adding a module that scopes rows to a person
+is ordinary. Adding a module that *gates behaviour* on one is the thing that
+needs the design below first.
+
+The mechanism is [`ICallerIdentity`](../src/Aerie.Api/Services/Auth/CallerIdentity.cs),
+the one way anything outside `Services/Auth/` asks who is calling. It resolves
+the grant once per request and hides two things deliberately: the cookie, so a
+second implementation of "who is this" cannot drift into existence for the day
+the ceremony changes; and `Auth:Enabled`, since the browser still holds a
+perfectly good cookie when the wall is off and a person-scoped feature that went
+dark under `AUTH_MODE=none` would be dark for every developer. `AuthController`
+had carried that fallback privately since the wall landed — the second asker is
+what turned it into a seam.
+
 ### The rules that must not quietly change
 
 - **`SetNull`, never `Cascade`.** Deleting a person must not revoke their
@@ -442,6 +481,10 @@ stale id links nothing and the device still enrolls.
   in a field people will filter on is a field that cannot be filtered on. A
   person's `Name` went through `PersonName`, so it is a value rather than a
   note, and it travels in full.
+- **A person scopes rows, never behaviour.** See
+  [What a person decides](#what-a-person-decides). The day an endpoint answers
+  differently *for the same rows* depending on who is asking is the day this
+  needs a permission model rather than another `WHERE` clause.
 - **`IsAdmin` grants nothing.** No branch reads it. It exists early so that
   whatever eventually does — roles, scopes, RBAC — inherits a column with real
   answers in it, rather than an empty one whose first population is also the
@@ -566,9 +609,11 @@ decision above.
   finding the operator — which a permanent grant means you rarely do. It is also
   the point at which a grant stops being a device and starts being a person.
 - **Roles and scopes.** People shipped (see
-  [Whose device is this](#whose-device-is-this)); enforcement did not. What is
-  left is a `[RequireScope]` filter and a decision about what the levels are —
-  plus, before any of it, a lockout path, since the household member holding the
+  [Whose device is this](#whose-device-is-this)); enforcement did not, and
+  ownership scoping in Quill is deliberately not it — see
+  [What a person decides](#what-a-person-decides). What is left is a
+  `[RequireScope]` filter and a decision about what the levels are — plus,
+  before any of it, a lockout path, since the household member holding the
   bootstrap invite is the one who would need it. `Person.IsAdmin` is already
   being carried and edited, so that work starts against a populated column.
 - **`logs.` and `status.` behind the same wall.** One annotation each, once

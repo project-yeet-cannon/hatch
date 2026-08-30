@@ -2,9 +2,10 @@
 
 ## Summary
 
-Aerie hosts a suite of small household apps — [Storage Helper](storage-helper.md)
-and [Gather](gather.md) so far — as **modules inside the existing `Aerie.Api`
-process**, surfaced through **one shell PWA** at `/apps/family/`.
+Aerie hosts a suite of small household apps — [Storage Helper](storage-helper.md),
+[Gather](gather.md), [Game](game.md) and [Quill](quill.md) so far — as **modules
+inside the existing `Aerie.Api` process**, surfaced through **one shell PWA** at
+`/apps/family/`.
 
 The design goal is not any individual app. It is that app #2 costs a folder and
 an afternoon: one folder under `src/Aerie.Api/Modules/`, one folder under the
@@ -48,6 +49,7 @@ code, in [`src/Aerie.Api/Modules/README.md`](../src/Aerie.Api/Modules/README.md)
 | Client platform | **PWA** (installed to home screen). Native iOS deferred, not rejected |
 | Access | **Tailnet only** — no public DNS, no public ingress |
 | Auth | **One wall, device grants** — [`auth-architecture.md`](auth-architecture.md). Was deferred; the tripwire below is what tripped |
+| Identity | **A person owns rows, never permissions** — one module reads one ([Quill](quill.md)); nothing gates behaviour on one |
 | Search | **Postgres full-text**, not OpenSearch |
 | Blobs / photos | **Deferred** until after the k3s cutover — see [Deferred](#deferred) |
 
@@ -130,10 +132,17 @@ adding auth later be middleware plus a `Person` table rather than a refactor.
 
 **That tripwire has since been tripped, and the wall exists** —
 [`auth-architecture.md`](auth-architecture.md). It landed as predicted: one
-middleware, no refactor. What it did *not* build is the `Person` table. A grant
-belongs to a device, not a person, so the rule below survives the wall intact —
-a module still does not invent its own notion of a user, and identity attaches
-to a grant when there is something that needs it.
+middleware, no refactor. A `Person` table followed, in the core `public` schema,
+so that identity is something a module *reads* rather than something a module
+invents.
+
+[Quill](quill.md) is the something that needed it: a note belongs to a person,
+which makes it the first module whose rows are not the household's. The rule it
+runs under is narrow on purpose — **a person may decide what a caller can reach,
+never what a caller is allowed to do** — and the seam that made it one line
+rather than a refactor is `ICallerIdentity`, the one way anything outside
+`Services/Auth/` asks who is calling. Nothing gates behaviour on a person, and
+nothing reads `IsAdmin`.
 
 The tailnet boundary has not gone away either. It is now the outer of two, and
 the wall is what covers the devices on the house LAN that were never on the
@@ -151,7 +160,8 @@ Aerie.Api (one process, one deploy)
 │   │   ├── StorageController.cs        /api/storage/*
 │   │   ├── StorageService.cs
 │   │   └── Migrations/
-│   └── Gather/                         ← app #2, same shape, schema "gather"
+│   ├── Gather/                         ← app #2, same shape, schema "gather"
+│   └── Quill/                          ← app #5, schema "quill", rows owned by a person
 └── wwwroot/apps/
     ├── dashboard/ admin/ docs/ modeler/    standalone SPAs, separate builds
     └── family/                             ← the shell PWA
@@ -159,7 +169,8 @@ Aerie.Api (one process, one deploy)
 Postgres (one database, one backup)
 ├── public.*      home-automation tables
 ├── storage.*     locations, crates, items
-└── gather.*      lists, items
+├── gather.*      lists, items
+└── quill.*       notes, protected at rest and scoped to a person
 ```
 
 ### The seams that make an app cheap
@@ -188,6 +199,14 @@ that app #2 edits nothing outside its own two folders:
   from one array entry, so "one nav entry" is literally one line. The shell never
   learns a module's internal screens: a module renders its own `<Routes>` under
   `/apps/family/<id>/`.
+
+  Quill added one field to that entry: `requiresPerson`, which removes the card,
+  the tab *and* the route for a session with no person behind it. Deliberately a
+  flag rather than a predicate — the moment it becomes
+  `canSee: (session) => boolean`, the decision about who may read a module's
+  data lives in the shell instead of behind the API that enforces it, in a file
+  a module author is invited to edit. Hiding is courtesy; the API refuses
+  independently and identically.
 
 Three smaller conventions belong with those, because all three have already
 bitten:
@@ -234,7 +253,14 @@ manifest, icons, and hashed assets resolving as real files.
 The service worker's policy — cache-first for the shell, network-first for `/api`
 GETs — follows from the same scenario: an offline *read* of a crate you've
 already opened is useful in the far corner of a garage; an offline write isn't
-worth the sync complexity yet. Details, including why there is no `skipWaiting()`
+worth the sync complexity yet.
+
+That policy is the floor rather than the ceiling. It can only serve URLs a
+device happened to request, and it cannot tell a screen that what it served was
+old — both of which matter to a module whose whole point is being readable with
+no network, so [Quill](quill.md#offline) keeps its own IndexedDB mirror on top
+of it and says on screen when it is reading from one. A module that needs the
+same should copy Quill's rather than change the worker's policy for everyone. Details, including why there is no `skipWaiting()`
 and why the precache list is generated at build time, are in the
 [shell README](../src/Aerie.Web/apps/family/README.md#service-worker).
 
@@ -274,9 +300,13 @@ Named so they're decisions rather than oversights.
   ([`auth-architecture.md`](auth-architecture.md#whose-device-is-this)) — a grant
   can name its owner, and `Person.IsAdmin` is carried but unenforced. The wall
   still authenticates devices, so *enforcement* is what remains, and it wants a
-  lockout path designed before a single check is written.
+  lockout path designed before a single check is written. Ownership is
+  explicitly not that: [Quill](quill.md) scopes its rows to a person, and no
+  endpoint anywhere behaves differently for one person than for another.
 - **Offline writes** — offline reads ship with the shell; write sync needs
-  conflict resolution that no current use case justifies.
+  conflict resolution that no current use case justifies. Quill, which needs
+  offline reads more than anything else here, mirrors every note to the device
+  and is honestly read-only while it is showing them.
 - **Notifications, domain events, shared attachments, OpenSearch indexing** — all
   real platform services, none needed by one app. Build each when the second app
   makes it a duplication rather than a guess.

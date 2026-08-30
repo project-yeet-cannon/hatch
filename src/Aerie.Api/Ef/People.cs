@@ -14,7 +14,9 @@ namespace Aerie.Api.Ef;
 /// A person is not an account. There is nothing to sign in as, no password, no
 /// scope - the wall still authenticates a *device* (docs/auth-architecture.md).
 /// A person is the name you hang on one, so that a log line, a session list, or
-/// a future permission has a human to point at.
+/// a future permission has a human to point at - and, in Quill alone, so that a
+/// row can have an owner (docs/quill.md). That is scoping, not permission: a
+/// person decides what a caller can reach, never what a caller may do.
 ///
 /// Deliberately two columns wide. Everything a person will eventually carry -
 /// a birthday, a colour, a pronoun, a phone - is additive against this, and

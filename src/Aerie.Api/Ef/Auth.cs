@@ -25,9 +25,8 @@ public enum AuthGrantKind { Interactive, Device }
 ///
 /// People exist now, and <see cref="PersonId"/> is the nullable column this
 /// comment used to promise. It changes nothing about what a grant *is*: the
-/// wall still authenticates a device, the FK is still optional, and no
-/// authorization decision anywhere reads it. It is an owner's name on a
-/// credential, not a credential belonging to an owner.
+/// wall still authenticates a device and the FK is still optional. It is an
+/// owner's name on a credential, not a credential belonging to an owner.
 /// </summary>
 [Table("AuthGrants")]
 [Index(nameof(TokenHash), IsUnique = true)]
@@ -53,9 +52,14 @@ public class EfAuthGrant
     /// is a tablet with an unknown owner, not a tablet that has been locked
     /// out of the house.
     ///
-    /// Nothing branches on this. It is what puts a human in the Sessions list
-    /// and in a log line (UiLogsController); the day it becomes an
-    /// authorization input is the day it needs a design, not just a column.
+    /// This puts a human in the Sessions list and in a log line
+    /// (UiLogsController). One module also reads it: Quill's notes belong to a
+    /// person, so PersonId is the first clause of every query in that module
+    /// (docs/quill.md). The rule that keeps that from being the first step into
+    /// an accidental permission model is narrow and worth quoting - a person may
+    /// decide what a caller can *reach*, never what a caller is *allowed to do*.
+    /// Nothing anywhere reads Person.IsAdmin, and nothing behaves differently
+    /// for one person than for another.
     /// </summary>
     public Guid? PersonId { get; set; }
 

@@ -80,12 +80,29 @@ wire.
   ([`docs/auth-architecture.md`](../../../docs/auth-architecture.md)) still
   authenticates a *device*, not a person. There is now a `People` table, and it
   is in the core `public` schema for exactly this reason: a module-owned one
-  would make every module depend on one module. Read a person through
-  `AerieContext` or `AuthService` and leave the seam where it is.
+  would make every module depend on one module. Ask who is calling through
+  [`ICallerIdentity`](../Services/Auth/CallerIdentity.cs) — one constructor
+  parameter, resolved once per request — and never by reading the cookie for
+  yourself.
 
-  A person is **not** an authorization input. Nothing branches on one, including
-  `IsAdmin` — a module that starts gating on it is inventing a permission model
-  in a corner rather than adding a column.
+  **A person may decide what a caller can reach. A person never decides what a
+  caller is allowed to do.** Quill is the one module that reads one
+  ([`docs/quill.md`](../../../docs/quill.md)): a note belongs to a person, so
+  `PersonId` is the first clause of every query in the module. That is
+  ownership, enforced by a `WHERE` clause rather than by a rule a code path
+  could forget to consult, and it is the whole of the concession.
+
+  Everything on the other side of that line is unchanged and stays that way.
+  **Nothing reads `IsAdmin`.** No endpoint behaves differently for one person
+  than for another. There is no role, no scope, and no permission table — a
+  module that starts gating behaviour on a person is inventing a permission
+  model in a corner rather than adding a column, and the lockout path in
+  `docs/auth-architecture.md` has to be designed first.
+
+  If a module does scope rows to a person, do it the way Quill does: the person
+  is a clause in the query, not a check after the load, and every refusal is the
+  same blank `404`. A `403` confirms that the id names a real row belonging to a
+  real person, which is the fact a private row has to keep.
 - **Nothing operator-specific in module code** — domains, hostnames, and paths
   come from config, per [`docs/ethos.md`](../../../docs/ethos.md). The install's
   own public URL is already solved: [`AppsOptions`](AppsOptions.cs)

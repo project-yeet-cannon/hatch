@@ -74,6 +74,14 @@ human name on a session row and on every log line that device ships, which is
 what makes "who opened the dashboard at 6am" a question with an answer. Deleting
 a person never revokes their devices; they simply become unclaimed.
 
+**One app depends on that link.** Quill, the notes app in the family shell
+([docs/quill.md](docs/quill.md)), holds notes that belong to a person rather
+than to the house — so it does not appear at all on a device that is not linked
+to one. If somebody says the notes app is missing, that is where to look: set
+the **Person** on their session, and it is there on the next launch. This is
+also the only place a person changes what an app does; nothing else in Aerie
+behaves differently for one person than for another.
+
 Three things stay reachable without a grant, on purpose:
 `files.${DOMAIN}` (the kiosk APK and its checksum), the media library that Sonos
 speakers fetch from directly, and the health endpoints Kubernetes probes. The

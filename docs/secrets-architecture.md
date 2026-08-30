@@ -160,6 +160,15 @@ must say in writing which phase adds one.
   password is typed into the devices admin UI by whoever set the camera up — a
   store an operator seeds by hand is the wrong shape for both, and the client
   secret follows the credential it belongs with.
+- **The household's private notes** ([`quill.md`](quill.md)) — also rows in
+  Postgres, also through `SecretProtector`, and worth naming here because they
+  are the first thing under that protection that is not a machine credential.
+  The bar is different and lower on purpose: scheme `v1` is XOR obfuscation, so
+  it keeps writing out of a database dump, a backup on someone else's disk, and
+  a `psql` session opened for another reason — and defends against nothing that
+  has the source as well. That is the operator's stated bar for this data, and
+  the honest version of it, rather than a claim of encryption. Real crypto is a
+  new scheme beside `v1` when something warrants it.
 
   Protection is not encryption, and it is a deliberate parity with the existing
   store rather than a claim about strength. What changed when cameras arrived
