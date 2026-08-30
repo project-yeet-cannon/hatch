@@ -57,8 +57,18 @@ public class AuthMiddleware(RequestDelegate next, IOptions<AuthOptions> options,
         // Checked before the cookie is even read, so an exempt path costs
         // nothing on the hot paths that need it most - the health probes and
         // every byte Sonos streams out of /media.
+        //
+        // Exempt is not the same as anonymous, though, and one path says so:
+        // log shipping is let through unconditionally *and* wants a name on it
+        // when there is one. See AuthGate.IdentifiesWithoutEnforcing for why
+        // that distinction is a fix rather than a feature.
         if (gate.IsExempt(request.Path, host))
         {
+            if (gate.IdentifiesWithoutEnforcing(request.Path))
+            {
+                await IdentifyAsync(context, auth, request);
+            }
+
             await next(context);
             return;
         }
@@ -80,6 +90,27 @@ public class AuthMiddleware(RequestDelegate next, IOptions<AuthOptions> options,
         }
 
         await next(context);
+    }
+
+    /// <summary>
+    /// Names the caller on a request that was never going to be refused.
+    ///
+    /// Everything the enforcing path does *except* deciding anything: no
+    /// challenge, and no cookie re-issue either - a request that does not have
+    /// to present a credential is a poor place to renew one, and the sliding
+    /// window belongs to the requests that actually go through the wall.
+    ///
+    /// Failure is silent by design. An unenrolled browser shipping logs is the
+    /// ordinary case here (the sign-in shell itself does it), so "no grant" is
+    /// an answer rather than an event.
+    /// </summary>
+    private async Task IdentifyAsync(HttpContext context, IAuthService auth, HttpRequest request)
+    {
+        var tokens = AuthCookie.ReadAll(request, options);
+        if (tokens.Count == 0) return;
+
+        var verified = await auth.VerifyAsync(tokens, context.Connection.RemoteIpAddress?.ToString(), context.RequestAborted);
+        if (verified is not null) context.SetAuthGrant(verified.Grant);
     }
 
     /// <summary>

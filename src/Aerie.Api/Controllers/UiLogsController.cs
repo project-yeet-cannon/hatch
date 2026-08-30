@@ -20,11 +20,30 @@ public class UiLogsController(ILogger<UiLogsController> logger, IAerieRevision r
     [HttpPost]
     public IActionResult Post([FromBody] UiLogEntry[] entries)
     {
-        // The actor, for the lines that have one. Deliberately the grant *id*
-        // and not its label: AuthContextExtensions is explicit that a label is
-        // free text an administrator typed, and free text written into a field
-        // people will later filter on is a field that cannot be filtered on.
-        var actorId = HttpContext.GetAuthGrant()?.Id.ToString();
+        // Who this batch came from, for the lines that have someone.
+        //
+        // This path is on the gate's allow-list - a gated log endpoint means
+        // the failures you most want to see are the ones that cannot report -
+        // so the grant here is the one AuthMiddleware attached *without*
+        // enforcing anything (AuthGate.IdentifiesWithoutEnforcing). An
+        // unenrolled browser shipping logs is ordinary and all three fields are
+        // simply absent on those lines.
+        var grant = HttpContext.GetAuthGrant();
+        var actorId = grant?.Id.ToString();
+
+        // The person, both halves. The id is the field to filter on; the name
+        // is the field to read, and it is here rather than left to a join
+        // because the person doing the reading is looking at one log line in
+        // OpenSearch with no way to resolve a GUID against a table.
+        //
+        // Which is the exact opposite of the reasoning for the *device*, one
+        // field over: a grant's Label is free text an administrator typed, so
+        // it stays out. A person's name went through PersonName, so it is a
+        // value rather than a note - and a rename that changes what future
+        // lines say while leaving past lines alone is the correct behaviour
+        // for a log, which records what was true when it was written.
+        var personId = grant?.PersonId?.ToString();
+        var personName = grant?.Person?.Name;
 
         foreach (var entry in entries)
         {
@@ -65,7 +84,7 @@ public class UiLogsController(ILogger<UiLogsController> logger, IAerieRevision r
             // told apart in OpenSearch even though they share IPs from the same LAN.
             logger.Log(
                 level,
-                "{Service}[{SessionId}] {Message} ({Url}) :: {Metadata} :: ip={ClientIp} device={DeviceId} rev={AerieRevision} seq={AerieSequence} relay={AerieRelayRevision} actor={ActorId}",
+                "{Service}[{SessionId}] {Message} ({Url}) :: {Metadata} :: ip={ClientIp} device={DeviceId} rev={AerieRevision} seq={AerieSequence} relay={AerieRelayRevision} actor={ActorId} person={PersonId} personName={PersonName}",
                 entry.App,
                 entry.SessionId,
                 entry.Message,
@@ -76,7 +95,9 @@ public class UiLogsController(ILogger<UiLogsController> logger, IAerieRevision r
                 ClientRevision(entry),
                 ClientSequence(entry),
                 revision.Revision,
-                actorId);
+                actorId,
+                personId,
+                personName);
         }
 
         return NoContent();

@@ -47,6 +47,16 @@ public interface IAuthGate
     bool IsExempt(PathString path, string? host);
 
     /// <summary>
+    /// Whether an exempt path should still have its caller *identified* - let
+    /// through either way, but with a name attached if one is presented.
+    ///
+    /// This exists because "exempt" and "anonymous" are not the same thing, and
+    /// conflating them silently empties a field. See the remarks on
+    /// <see cref="AuthGate.IdentifiesWithoutEnforcing"/>.
+    /// </summary>
+    bool IdentifiesWithoutEnforcing(PathString path);
+
+    /// <summary>
     /// The decision for one request. <paramref name="path"/> and
     /// <paramref name="host"/> are the *original* request's, which for the
     /// forwardAuth endpoint means the ones Traefik forwarded rather than the
@@ -152,7 +162,35 @@ public class AuthGate(
     /// </summary>
     private static readonly PathString[] exemptExactPaths = ["/auth", "/auth/"];
 
+    /// <summary>
+    /// Exempt paths whose caller is still worth identifying. Deliberately one
+    /// entry rather than "all of them": identification costs a credential
+    /// lookup, and the reason the list above exists is that the health probes
+    /// and the media stream must cost nothing.
+    ///
+    /// The one entry is log shipping, and it is here because of a bug this
+    /// method exists to fix. UiLogsController has always logged an `actor`
+    /// field read from the authenticated grant - but /api/ui-logs is on the
+    /// allow-list, so the middleware returned before ever setting one, and the
+    /// field was silently null on every line the app has ever shipped. A gate
+    /// that must not refuse a request is not the same as a gate that must not
+    /// look at it: refusing log shipping would hide exactly the failures worth
+    /// seeing, while declining to identify it costs the operator the one field
+    /// that says whose browser a page load came from.
+    /// </summary>
+    private static readonly PathString[] identifyOnlyPaths = ["/api/ui-logs"];
+
     public bool Enabled => options.Enabled;
+
+    public bool IdentifiesWithoutEnforcing(PathString path)
+    {
+        foreach (var prefix in identifyOnlyPaths)
+        {
+            if (path.StartsWithSegments(prefix, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
+    }
 
     public bool IsExempt(PathString path, string? host)
     {

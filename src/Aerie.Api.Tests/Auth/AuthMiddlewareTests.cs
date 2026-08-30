@@ -249,6 +249,78 @@ public class AuthMiddlewareTests
         Assert.False(context.Request.Headers.ContainsKey(AuthChallenge.LabelHeader));
     }
 
+    [Fact]
+    public async Task NamesTheCallerOnLogShippingEvenThoughItIsExempt()
+    {
+        // The bug this fixes: /api/ui-logs is on the allow-list, so the
+        // middleware used to return before ever attaching a grant - and
+        // UiLogsController's `actor` field, which reads exactly that grant, was
+        // silently null on every line the app had ever shipped. Exempt from
+        // refusal is not the same as exempt from being looked at.
+        var grant = Grant();
+        var auth = new StubAuthService(grant);
+        var request = Request("/api/ui-logs");
+        request.Headers.Cookie = "aerie_grant=a-token";
+
+        var (context, served) = await Run(request, auth: auth);
+
+        Assert.True(served);
+        Assert.Same(grant, context.GetAuthGrant());
+    }
+
+    [Fact]
+    public async Task ShipsLogsForABrowserThatHasNoGrantAtAll()
+    {
+        // The ordinary case, and the reason identification is silent about
+        // failing: the sign-in shell ships logs too, and it is by definition
+        // holding nothing. A gated log endpoint hides exactly the failures
+        // worth seeing.
+        var request = Request("/api/ui-logs");
+
+        var (context, served) = await Run(request, auth: new StubAuthService());
+
+        Assert.True(served);
+        Assert.Null(context.GetAuthGrant());
+    }
+
+    [Theory]
+    [InlineData("/health/ready")]
+    [InlineData("/media/Beatles/Revolver/01.flac")]
+    public async Task DoesNotSpendACredentialLookupOnTheExemptPathsThatMustCostNothing(string path)
+    {
+        // Identification is one entry on a list, not a blanket. The health
+        // probes fire on every pod forever and Sonos streams every byte of
+        // every song through here; a database round trip on either is the
+        // reason the allow-list exists in the first place.
+        var auth = new StubAuthService(Grant());
+        var request = Request(path);
+        request.Headers.Cookie = "aerie_grant=a-token";
+
+        var (context, served) = await Run(request, auth: auth);
+
+        Assert.True(served);
+        Assert.Empty(auth.Verified);
+        Assert.Null(context.GetAuthGrant());
+    }
+
+    [Fact]
+    public async Task DoesNotRenewACookieOnARequestThatNeverHadToPresentOne()
+    {
+        // The sliding window belongs to requests that actually go through the
+        // wall. Renewing here would mean a browser that only ever ships logs
+        // keeps itself signed in forever without ever being asked for anything.
+        var grant = Grant();
+        grant.CookieIssuedAt = Now.AddDays(-400);
+        var auth = new StubAuthService(grant);
+        var request = Request("/api/ui-logs");
+        request.Headers.Cookie = "aerie_grant=a-token";
+
+        var (context, _) = await Run(request, auth: auth);
+
+        Assert.Empty(auth.CookieIssued);
+        Assert.False(context.Response.Headers.ContainsKey("Set-Cookie"));
+    }
+
     private static EfAuthGrant Grant() => new()
     {
         Id = Guid.NewGuid(),
