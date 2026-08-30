@@ -77,11 +77,15 @@ wire.
 - **A module registers its own services**, via one `Add<Name>Module` extension.
   `AddAerieModules` gains exactly one line per app and never grows a section.
 - **No module invents a user.** The wall
-  ([`docs/auth-architecture.md`](../../../docs/auth-architecture.md)) authenticates
-  a *device*, not a person: a grant is a row with room for an owner, and there is
-  no `Person` table yet. Read identity from `AuthService` when you need it and
-  leave the seam where it is — a module growing its own notion of a user is what
-  turns adding people into a refactor rather than a column.
+  ([`docs/auth-architecture.md`](../../../docs/auth-architecture.md)) still
+  authenticates a *device*, not a person. There is now a `People` table, and it
+  is in the core `public` schema for exactly this reason: a module-owned one
+  would make every module depend on one module. Read a person through
+  `AerieContext` or `AuthService` and leave the seam where it is.
+
+  A person is **not** an authorization input. Nothing branches on one, including
+  `IsAdmin` — a module that starts gating on it is inventing a permission model
+  in a corner rather than adding a column.
 - **Nothing operator-specific in module code** — domains, hostnames, and paths
   come from config, per [`docs/ethos.md`](../../../docs/ethos.md). The install's
   own public URL is already solved: [`AppsOptions`](AppsOptions.cs)

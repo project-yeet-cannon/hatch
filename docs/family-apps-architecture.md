@@ -270,9 +270,11 @@ Named so they're decisions rather than oversights.
   most of the point. Deferred on *timing*, not value: blob storage should land on
   Longhorn after the k3s cutover rather than on the current host's disk and then
   get migrated. Revisit at [the cluster plan](plans/swarm/phase-7-cutover.md) Phase 7.
-- **Identity** — people, roles and scopes. The wall (see above) authenticates
-  devices, not people; a grant is a row with room for an owner when one is
-  needed.
+- **Roles and scopes.** People landed
+  ([`auth-architecture.md`](auth-architecture.md#whose-device-is-this)) — a grant
+  can name its owner, and `Person.IsAdmin` is carried but unenforced. The wall
+  still authenticates devices, so *enforcement* is what remains, and it wants a
+  lockout path designed before a single check is written.
 - **Offline writes** — offline reads ship with the shell; write sync needs
   conflict resolution that no current use case justifies.
 - **Notifications, domain events, shared attachments, OpenSearch indexing** — all

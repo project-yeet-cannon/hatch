@@ -338,7 +338,25 @@ Design and reasoning in [`auth-architecture.md`](auth-architecture.md).
 | `POST /api/auth/sign-out` | 204 | Deletes the grant and expires the cookie. |
 | `GET /api/auth/grants` | `AuthGrantDto[]` | The admin app's Sessions list, newest first. Never carries token material. |
 | `DELETE /api/auth/grants/{id:guid}` | 204 | Revocation is a row delete. Refuses to revoke the caller's own grant, so nobody revokes their way out of the room. |
-| `POST /api/auth/invites` | `AuthInviteDto` | Mints an invite. The plaintext code exists exactly once, in this response — only its hash is stored. |
+| `POST /api/auth/invites` | `AuthInviteDto` | Mints an invite. The plaintext code exists exactly once, in this response — only its hash is stored. Optionally carries a `personId`, which the redemption puts on the grant it creates. |
+| `PUT /api/auth/grants/{id:guid}/person` | 204 | Claims a device for a person, or unclaims it with a null `personId`. The **only** write path for that link — the People page reads it and does not set it. Nothing in the gate reads the column. |
+
+## People
+
+The household's members. A person is not an account: nothing signs in as one,
+and no authorization decision anywhere reads one. Design in
+[`auth-architecture.md`](auth-architecture.md#whose-device-is-this).
+
+| Method & route | Returns | Notes |
+|---|---|---|
+| `GET /api/people` | `PersonDto[]` | By name. Carries `sessionCount` and `photoUpdatedAt` rather than the photo itself — a list response that inlined avatars would be the size of the avatars. |
+| `GET /api/people/{id:guid}` | `PersonDto` | |
+| `POST /api/people` · `PUT /api/people/{id:guid}` | `PersonDto` | The name is normalized server-side (`Common/PersonName.cs`): NFC, whitespace collapsed, control and bidi characters stripped, zero-width joiner kept, at most 60 **grapheme clusters**. Not escaped — EF parameterizes the write and React escapes the render, and a pre-escaped name grows ampersands every time someone opens the edit form. A refusal is a 400 whose body is the sentence to show the person at the form. |
+| `DELETE /api/people/{id:guid}` | 204 | Takes the photo with it (cascade) and **not** the sessions (`SetNull`). Deleting a person must never revoke a credential. |
+| `GET /api/people/{id:guid}/sessions` | `PersonSessionDto[]` | That person's enrolled devices, newest first. Read-only; 404 rather than an empty list for someone who does not exist, because "she has never held a tablet" and "this page is stale" are different answers. |
+| `GET /api/people/{id:guid}/photo` | image bytes | Served with the type sniffed at upload, `X-Content-Type-Options: nosniff`, and an ETag from the upload time. The URL is deliberately stable across uploads, so freshness comes from the validator and from the `?v=` the client appends. |
+| `PUT /api/people/{id:guid}/photo` | `PersonDto` | The body is the image, not a multipart form — there is one file and no fields beside it. The request's `Content-Type` is **ignored**; the type comes from the magic bytes (PNG, JPEG, GIF, WebP; SVG is refused because it is a document that can carry script). Capped at 2 MB by `[RequestSizeLimit]`, which Kestrel enforces during the read rather than after it. |
+| `DELETE /api/people/{id:guid}/photo` | 204 | |
 
 ## Kiosk, apps, and logs
 
@@ -347,7 +365,7 @@ Design and reasoning in [`auth-architecture.md`](auth-architecture.md).
 | `GET /api/kiosk/provisioning-info` | `ProvisioningInfoDto` | Everything the admin app needs to build the Android QR provisioning payload — signing-cert checksum, APK URL, Wi-Fi credentials, timezone. The Wi-Fi password is deobfuscated here, by design. |
 | `GET /api/app-version/{app}` | `AppVersionInfo` | Lets a long-lived frontend notice its bundle was superseded. The kiosk is why this exists: it loads once at boot and never navigates again. |
 | `GET /api/docs` · `GET /api/docs/{**slug}` | `DocSummary[]` / `text/markdown` | Backs the docs browser app. Slugs are paths (`plans/swarm/design`). |
-| `POST /api/ui-logs` | 204 | Client-side log events from the frontend apps, written through `ILogger` so they reach the same OpenSearch index as everything else. Same-origin, so no CORS handling. |
+| `POST /api/ui-logs` | 204 | Client-side log events from the frontend apps, written through `ILogger` so they reach the same OpenSearch index as everything else. Same-origin, so no CORS handling. On the allow-list, but *identified*: the middleware attaches a grant here without enforcing one, so each line carries `actor` (the grant id), `person`, and `personName` when the browser holds a credential. All three are simply absent otherwise, which is the ordinary case for the sign-in shell's own logs. |
 | `POST /api/vm-console-logs` | 204 | Hyper-V serial console lines from the VM log shipper. Server-to-server across the LAN, so gated on the `X-Vm-Log-Token` shared secret rather than same-origin trust. |
 
 ## Home Assistant (legacy ingestion)

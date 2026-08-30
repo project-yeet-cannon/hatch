@@ -9,9 +9,13 @@ family member to remember. The operator enrolls a device once — a QR code or a
 eight-character invite read across the room — and that device never asks again.
 
 The design goal was *magic for the family, administrative overhead for the
-operator*. Everything a conventional identity system carries — people, roles,
-scopes, passkeys — is deferred behind a model with room for it, and the sections
-below say exactly where each one would attach.
+operator*. Everything a conventional identity system carries — roles, scopes,
+passkeys — is deferred behind a model with room for it, and the sections below
+say exactly where each one would attach.
+
+People are the first of those to have arrived, and arriving changed nothing
+about the sentence above: a `Person` is a name you hang on a grant, not a thing
+that signs in. See [Whose device is this](#whose-device-is-this).
 
 Two properties are worth stating up front because most of the rest follows from
 them:
@@ -66,9 +70,13 @@ grant and one `DbUpdateConcurrencyException`), `RedeemedGrantId`, and
 `IsBootstrap`. Modeled on `EfOAuthState`: same shape, same opportunistic sweep
 of expired rows when a new one is created, no job.
 
-`PersonId` is deliberately absent from the grant. Grants become people when
-people exist; adding a nullable column later is cheaper than a nullable FK to a
-table that has not been designed.
+**`People`** — one human the household knows about
+([`Ef/People.cs`](../src/Aerie.Api/Ef/People.cs)). `Name`, an unenforced
+`IsAdmin`, `CreatedAt`/`UpdatedAt`, and an optional `PersonPhotos` row hanging
+off it. `AuthGrants.PersonId` is the nullable FK this section used to promise
+was deliberately absent; `AuthInvites.PersonId` is the same value carried
+through the enrollment ceremony. Both are covered in
+[Whose device is this](#whose-device-is-this).
 
 ### The two secrets
 
@@ -330,6 +338,25 @@ silently and confusingly if they are ever dropped.
 | `/apps/auth/*`, `/api/auth/verify`, `/api/auth/redeem` | The sign-in shell and the two endpoints it calls. Gating these is an infinite redirect loop. |
 | `/auth` and `/auth/`, **exactly** | The shell's short alias — short enough to read out over the phone to someone holding a new tablet — which `Program.cs` redirects into `/apps/auth/`. Exempt *exactly* rather than by prefix, so nothing later mounted underneath it inherits the exemption. It has to be exempt in `AuthGate` rather than by reordering the rewriter, because in production the decision is Traefik's, asking about the original URI, and never reaches this app's rewrite rules. |
 
+### Exempt is not the same as anonymous
+
+One entry on that list is let through unconditionally *and* has its caller
+identified: `/api/ui-logs`. `AuthGate.IdentifiesWithoutEnforcing` names it, and
+`AuthMiddleware` responds by resolving the cookie and attaching the grant
+before calling `next` — no challenge, and no cookie re-issue either, since the
+sliding window belongs to requests that actually go through the wall.
+
+This is a fix rather than a feature. `UiLogsController` had always read the
+authenticated grant to stamp an `actor` field on each relayed browser line, and
+the middleware had always returned before attaching one on an exempt path — so
+that field was silently null on every line the app ever shipped. Conflating "we
+will not refuse this" with "we will not look at this" is what produced it, and
+the two lists are now separate.
+
+Deliberately one entry, not a blanket. Identification costs a credential
+lookup, and the reason the allow-list exists at all is that the health probes
+and every byte Sonos streams through `/media` must cost nothing.
+
 `Auth:ExemptHosts` does the same job for whole hosts, repeating what the chart
 expresses by not annotating an Ingress, so the in-process gate agrees with the
 proxy. Host comparison drops the port: an exemption written as
@@ -370,6 +397,106 @@ has never authenticated into one extra tap instead of a dead end.
 Sessions are also viewed and deleted from that page (`GET /api/auth/grants`,
 `DELETE /api/auth/grants/{id}`), which refuses to revoke the caller's own grant
 so nobody revokes their way out of the room.
+
+## Whose device is this
+
+A **person** is a row in `People` with a name, an optional photo, and an
+unenforced admin flag. A grant may point at one; a person may be pointed at by
+any number of grants, including none.
+
+That is the whole model, and the restraint is the point. A person is not an
+account: there is nothing to sign in as, no password, no scope, and **no
+authorization decision anywhere reads one**. The wall still authenticates a
+device exactly as it did before. What a person adds is a human for a session
+list and a log line to name, which is the difference between "Kitchen tablet
+loaded the dashboard at 6am" and "Adam did".
+
+### Which end the link is edited from
+
+The FK lives on the grant, and so does the only write path
+(`PUT /api/auth/grants/{id}/person`). The admin app follows: the **Sessions**
+page has the dropdown, the **People** page shows each person's devices
+read-only.
+
+A session has at most one person, so on Sessions it is one select on a row that
+already exists. A person has any number of sessions, so the inverse would be a
+multi-picker — on the page nobody is looking at during the one moment the
+question comes up, which is while enrolling a device. That is also why an invite
+can carry a `personId`: the operator generating the code already knows whose
+phone they are about to hand it to, and the link is set by the redemption rather
+than by a second step somebody has to remember afterwards.
+
+`AuthInvites.PersonId` is deliberately **not** a foreign key, matching
+`RedeemedGrantId`. Someone standing in the hall with a code read out five
+minutes ago must still get in after an unrelated tidy-up in the admin app; a
+stale id links nothing and the device still enrolls.
+
+### The rules that must not quietly change
+
+- **`SetNull`, never `Cascade`.** Deleting a person must not revoke their
+  devices. Cascade there turns an administrative tidy-up into a lockout whose
+  symptom is a wall tablet that stopped working for no visible reason, and it is
+  one word in `AerieContext.OnModelCreating`.
+- **The label is the device's, the name is the person's.** A grant's `Label` is
+  free text an operator typed, so only its *id* reaches a log line — free text
+  in a field people will filter on is a field that cannot be filtered on. A
+  person's `Name` went through `PersonName`, so it is a value rather than a
+  note, and it travels in full.
+- **`IsAdmin` grants nothing.** No branch reads it. It exists early so that
+  whatever eventually does — roles, scopes, RBAC — inherits a column with real
+  answers in it, rather than an empty one whose first population is also the
+  deploy that locks the household out. Do not start reading it for
+  authorization without designing that lockout path first.
+
+### What a name may be
+
+`Common/PersonName.cs` is the one place request text becomes a storable name.
+It is permissive on purpose — emoji, any script, a name that is one dinosaur —
+because this is a home, not a directory. What it removes is the set of
+characters that are not names but instructions to whatever renders them:
+control characters, and Unicode `Cf` format characters, which is the Trojan
+Source class (`U+202E` reverses everything after it, so a name could rearrange
+the log line it appears inside). The zero-width joiner is the one deliberate
+exception, since dropping it turns one family emoji into four separate people.
+Names are NFC-normalized so the two spellings of "José" are one string.
+
+There is **no SQL or HTML escaping here**, and that is deliberate rather than an
+oversight. EF Core parameterizes every write, and React escapes at the point of
+render; an escaping pass would be a second, weaker defence in front of a
+structural one, and its real failure mode is that someone later concatenates a
+query believing this class made it safe. A pre-escaped name also grows
+ampersands every time somebody opens the edit form.
+
+Length is counted in **grapheme clusters** — 60 of them — rather than in the
+UTF-16 code units the column is measured in. A flag is one character to a reader
+and two to .NET; a family emoji is one and eleven. Refusing a name that visibly
+fits is unexplainable to whoever is standing at the form. `MaxChars` (240) is
+the column's own bound and can only be reached deliberately.
+
+### The photo
+
+Bytes in Postgres, in a `PersonPhotos` table keyed by `PersonId`, not a path
+into a volume. A row and a file on a PVC can disagree — a restored database
+pointing at photos that are not there fails with no obvious symptom — whereas
+bytes in the row ride the existing CNPG backup and
+[`disaster-recovery.md`](disaster-recovery.md) unchanged. Its own table so that
+listing people never drags the blobs along.
+
+The type is **sniffed from the magic bytes** and the request's `Content-Type` is
+ignored, because the point of validating an upload is that the uploader may be
+lying; what is stored is what is served. PNG, JPEG, GIF and WebP. SVG is refused
+and is the exclusion worth stating: it is a document that can carry script, and
+"an image format that executes", served from the install's own origin, is stored
+XSS wearing an avatar.
+
+Nothing re-encodes. That avoids an imaging library — the obvious one is
+split-licensed in a way a repo headed for open-source release should not inherit
+([`ethos.md`](ethos.md)) — to solve a problem this design does not have: the
+bytes are never interpreted server-side, they are capped at 2 MB during the read
+by `[RequestSizeLimit]`, and they are served back with a sniffed type under
+`nosniff`. The admin app downscales in a canvas before uploading, which is a
+courtesy rather than a control and fails open on every browser capability it
+touches.
 
 ### Bootstrap and lockout recovery
 
@@ -438,9 +565,12 @@ decision above.
   *re-authentication* — a lapsed device proves itself with Face ID instead of
   finding the operator — which a permanent grant means you rarely do. It is also
   the point at which a grant stops being a device and starts being a person.
-- **People, roles, scopes.** `Person`, `PersonId` on the grant, a
-  `[RequireScope]` filter. The shape that keeps this cheap is already here: a
-  grant is a row with room for an owner.
+- **Roles and scopes.** People shipped (see
+  [Whose device is this](#whose-device-is-this)); enforcement did not. What is
+  left is a `[RequireScope]` filter and a decision about what the levels are —
+  plus, before any of it, a lockout path, since the household member holding the
+  bootstrap invite is the one who would need it. `Person.IsAdmin` is already
+  being carried and edited, so that work starts against a populated column.
 - **`logs.` and `status.` behind the same wall.** One annotation each, once
   OpenSearch Dashboards' and Uptime Kuma's own logins can be told to trust
   `X-Aerie-Label` as a proxy-authenticated user.

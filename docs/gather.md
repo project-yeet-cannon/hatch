@@ -268,10 +268,12 @@ Named so they're decisions rather than oversights.
 - **Voice entry** and **speed dials** on the kiosk. Both were named as the
   eventual goal in the original brief; both need the dumb version in daily use
   first, because which items deserve a speed dial is an observation, not a guess.
-- **Attribution** — who added an item. Blocked on the person-vs-device seam, not
-  on effort: the wall authenticates a device and there is no `Person` table, and
-  a module inventing its own user is what turns adding people into a refactor
-  ([`Modules/README.md`](../src/Aerie.Api/Modules/README.md)).
+- **Attribution** — who added an item. No longer blocked: `People` exists in the
+  core `public` schema, and a grant can name its owner
+  ([`auth-architecture.md`](auth-architecture.md#whose-device-is-this)). What is
+  left is a nullable `PersonId` on the item and a name in the list. Read the
+  person through `AerieContext`; the rule against a module inventing its own
+  user still stands ([`Modules/README.md`](../src/Aerie.Api/Modules/README.md)).
 - **Offline writes** in the PWA, and **realtime sync** — polling until someone
   reports the lag.
 - **A store-category taxonomy**, price tracking, recipes-to-list, and pantry

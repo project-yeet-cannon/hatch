@@ -50,7 +50,9 @@ To enroll a device:
 1. On the admin app's **Sessions** page
    (`https://home.${DOMAIN}/apps/admin/sessions`), click **Generate invite**.
    Label it with the device, not the person — "kitchen tablet" is what you will
-   be reading in the list a year from now when deciding what to revoke.
+   be reading in the list a year from now when deciding what to revoke. If the
+   device belongs to somebody in particular, pick them from the dropdown beside
+   the label; the link is then already in place when the row appears.
 2. The invite is shown two ways, and either is enough: a QR code, and an
    eight-character code like `AERIE-K3M9-P2QT`. Scan it from a phone; type it on
    a tablet's soft keyboard. The code has no character you can mistake for
@@ -63,6 +65,14 @@ To enroll a device:
 
 Revoke from the same page: delete the row. The device is refused on its next
 request.
+
+Whose device each one is can also be set from that page afterwards, from the
+**Person** column. People themselves are managed on the admin app's **People**
+page — a name, a photo, and an admin flag that nothing enforces yet. A person is
+not an account: there is still nothing to sign in as. What it buys you is a
+human name on a session row and on every log line that device ships, which is
+what makes "who opened the dashboard at 6am" a question with an answer. Deleting
+a person never revokes their devices; they simply become unclaimed.
 
 Three things stay reachable without a grant, on purpose:
 `files.${DOMAIN}` (the kiosk APK and its checksum), the media library that Sonos

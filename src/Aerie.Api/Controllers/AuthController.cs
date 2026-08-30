@@ -169,8 +169,9 @@ public class AuthController(
     ///
     /// Behind the wall like everything else, and no further: there are no roles
     /// yet, so any enrolled device can see and revoke any grant. That is the
-    /// gate-not-permissions call the plan makes deliberately, and a grant is
-    /// already a row with room for an owner when that changes
+    /// gate-not-permissions call the plan makes deliberately. The row now names
+    /// its owner where one is set, and Person.IsAdmin is carried alongside -
+    /// both unenforced, waiting on the design that reads them
     /// (docs/auth-architecture.md, "Deferred on purpose").
     /// </summary>
     [HttpGet("grants")]
