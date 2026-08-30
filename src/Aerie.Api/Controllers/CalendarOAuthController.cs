@@ -15,9 +15,12 @@ namespace Aerie.Api.Controllers;
 /// <c>start</c>, Google redirects the browser back to <c>callback</c>, and both
 /// outcomes end on the admin Calendars page rather than in a JSON body.
 ///
-/// Every route here sits behind the house wall (docs/auth-architecture.md),
-/// which is a gate rather than permissions: any enrolled device can start the
-/// connect flow or delete an account.
+/// Every route here sits behind the house wall (docs/auth-architecture.md), and
+/// <c>start</c> behind the admin flag on top of it - connecting the household's
+/// calendar account to Google is an operator's act. It is the one guarded
+/// endpoint in the app that a browser *navigates* to rather than fetches, so a
+/// refusal renders as a bare JSON body; that is tolerable because the only link
+/// to it lives on a page the same flag already withholds.
 /// </summary>
 [ApiController]
 [Route("api/calendar/oauth")]
@@ -36,6 +39,7 @@ public class CalendarOAuthController(
     private static readonly TimeSpan StateLifetime = TimeSpan.FromMinutes(10);
 
     /// <summary>Starts the flow: records what the callback will need, then hands the browser to Google.</summary>
+    [RequireAdmin]
     [HttpGet("start")]
     public async Task<IActionResult> Start(CancellationToken ct)
     {
@@ -74,7 +78,19 @@ public class CalendarOAuthController(
         return Redirect(oauth.BuildAuthorizationUrl(clientId, redirectUri, state, Pkce.ChallengeFor(verifier)));
     }
 
-    /// <summary>Finishes the flow: spends the authorization code and stores the grant against the account Google says it belongs to.</summary>
+    /// <summary>
+    /// Finishes the flow: spends the authorization code and stores the grant
+    /// against the account Google says it belongs to.
+    ///
+    /// Unguarded, alone among the calendar endpoints, and deliberately. Nobody
+    /// arrives here by choosing to: this is where Google sends the browser
+    /// back, and what makes the request legitimate is the single-use state row
+    /// spent below - a stronger claim than "an administrator is holding this
+    /// tab", since only the browser that started the flow has the value. A
+    /// guard here would add nothing and would turn a session that lapsed
+    /// during a consent screen into a half-finished authorization with no way
+    /// to retry.
+    /// </summary>
     [HttpGet("callback")]
     public async Task<IActionResult> Callback(
         [FromQuery] string? code,

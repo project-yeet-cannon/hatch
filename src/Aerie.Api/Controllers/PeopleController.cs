@@ -21,6 +21,14 @@ namespace Aerie.Api.Controllers;
 /// grant, so it is written where grants are written
 /// (<c>AuthController.LinkGrantPerson</c>) - one FK with one write path. What
 /// this controller offers is the read of it, on <see cref="GetSessions"/>.
+///
+/// Every write here is guarded, and one of them is the reason the guard is
+/// worth having at all: <c>IsAdmin</c> is set on this page, so an unguarded
+/// PUT would let any enrolled device make itself an administrator, which turns
+/// the whole boundary into a formality. The reads stay open - a name and a
+/// photo are what the family apps render next to a note - and so does
+/// <see cref="GetPhoto"/>, because an &lt;img src&gt; carries no more
+/// authority than the page around it.
 /// </summary>
 [ApiController]
 [Route("api/people")]
@@ -43,6 +51,7 @@ public class PeopleController(AerieContext db, TimeProvider time) : ControllerBa
         return person is null ? NotFound() : person;
     }
 
+    [RequireAdmin]
     [HttpPost]
     public async Task<ActionResult<PersonDto>> Create(PersonWriteRequest request, CancellationToken ct)
     {
@@ -59,6 +68,7 @@ public class PeopleController(AerieContext db, TimeProvider time) : ControllerBa
         return CreatedAtAction(nameof(Get), new { id = person.Id }, new PersonDto(person.Id, person.Name, person.IsAdmin, person.CreatedAt, person.UpdatedAt, null, 0));
     }
 
+    [RequireAdmin]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<PersonDto>> Update(Guid id, PersonWriteRequest request, CancellationToken ct)
     {
@@ -81,6 +91,7 @@ public class PeopleController(AerieContext db, TimeProvider time) : ControllerBa
     /// owner is now simply unknown. Deleting a person must never be a way to
     /// lock a tablet out of the house.
     /// </summary>
+    [RequireAdmin]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
@@ -94,7 +105,16 @@ public class PeopleController(AerieContext db, TimeProvider time) : ControllerBa
 
     // ---- Sessions (read-only here; the write lives on AuthController) ----
 
-    /// <summary>Which enrolled devices are this person's. Empty is the normal answer for someone who has never held a tablet.</summary>
+    /// <summary>
+    /// Which enrolled devices are this person's. Empty is the normal answer for
+    /// someone who has never held a tablet.
+    ///
+    /// Guarded despite being a read, for the same reason
+    /// <c>AuthController.ListGrants</c> is: it is an inventory of credentials,
+    /// sliced by owner rather than listed whole, and a boundary that stopped at
+    /// the unsliced version would not be one.
+    /// </summary>
+    [RequireAdmin]
     [HttpGet("{id:guid}/sessions")]
     public async Task<ActionResult<IReadOnlyList<PersonSessionDto>>> GetSessions(Guid id, CancellationToken ct)
     {
@@ -144,6 +164,7 @@ public class PeopleController(AerieContext db, TimeProvider time) : ControllerBa
     /// The request's own Content-Type is ignored entirely; see
     /// <see cref="PersonPhoto"/>.
     /// </summary>
+    [RequireAdmin]
     [HttpPut("{id:guid}/photo")]
     [RequestSizeLimit(PersonPhoto.MaxBytes + 1024)]
     public async Task<ActionResult<PersonDto>> PutPhoto(Guid id, CancellationToken ct)
@@ -180,6 +201,7 @@ public class PeopleController(AerieContext db, TimeProvider time) : ControllerBa
         return await Get(id, ct);
     }
 
+    [RequireAdmin]
     [HttpDelete("{id:guid}/photo")]
     public async Task<IActionResult> DeletePhoto(Guid id, CancellationToken ct)
     {

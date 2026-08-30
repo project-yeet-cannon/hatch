@@ -1,3 +1,4 @@
+using Aerie.Api.Common;
 using Aerie.Api.Services.DeviceMapping;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -15,9 +16,10 @@ namespace Aerie.Api.Modules.Photos;
 /// server-side secret rather than something baked into a tablet.
 ///
 /// Like the rest of the app these sit behind the house wall
-/// (docs/auth-architecture.md), which is a gate rather than permissions: any
-/// enrolled device can read this, and any enrolled device can change the
-/// selection.
+/// (docs/auth-architecture.md). Every read here is open to any enrolled device
+/// - the photo frame is the point - while the two endpoints that *arrange* the
+/// library, refreshing albums from Immich and setting which ones are included,
+/// are admin-guarded like the rest of the operator's configuration.
 /// </summary>
 [ApiController]
 [Route("api/photos")]
@@ -121,6 +123,7 @@ public class PhotosController(
     /// an album over there - and what the page presses on first load, since an
     /// installation that has never refreshed has nothing to choose from.
     /// </summary>
+    [RequireAdmin]
     [HttpPost("albums/refresh")]
     public async Task<ActionResult<PhotoAlbumSyncDto>> RefreshAlbums(CancellationToken ct)
     {
@@ -135,6 +138,7 @@ public class PhotosController(
     }
 
     /// <summary>Sets the admin-owned half of an album. The Immich-owned half only ever changes through a refresh.</summary>
+    [RequireAdmin]
     [HttpPut("albums/{id:guid}")]
     public async Task<ActionResult<PhotoAlbumDto>> UpdateAlbum(Guid id, PhotoAlbumSelectionRequest request, CancellationToken ct)
     {

@@ -168,13 +168,15 @@ public class AuthController(
     /// Every enrolled device, newest first - the whole of the admin Sessions
     /// page's list.
     ///
-    /// Behind the wall like everything else, and no further: there are no roles
-    /// yet, so any enrolled device can see and revoke any grant. That is the
-    /// gate-not-permissions call the plan makes deliberately. The row now names
-    /// its owner where one is set, and Person.IsAdmin is carried alongside -
-    /// both unenforced, waiting on the design that reads them
-    /// (docs/auth-architecture.md, "Deferred on purpose").
+    /// One of the two guarded *reads* in the app (SettingsController is the
+    /// other), and the exception is easy to justify: this is the inventory of
+    /// every credential in the household, with the label, the owner, the last
+    /// IP and the user agent of each. It is the list you would want before
+    /// deciding which device to take. Every other GET in Aerie stays open,
+    /// because every other GET answers a question about the house rather than
+    /// about who can get into it.
     /// </summary>
+    [RequireAdmin]
     [HttpGet("grants")]
     public async Task<IActionResult> ListGrants(CancellationToken ct)
     {
@@ -199,6 +201,7 @@ public class AuthController(
     /// out and back in" fail to fix anything. <see cref="SignOutDevice"/> does
     /// both halves, and is what the Sessions page offers on that one row.
     /// </summary>
+    [RequireAdmin]
     [HttpDelete("grants/{id:guid}")]
     public async Task<IActionResult> RevokeGrant(Guid id, CancellationToken ct)
     {
@@ -224,6 +227,7 @@ public class AuthController(
     /// Nothing about the wall changes here. The grant is as valid before as
     /// after; this writes a name onto it, and no gate reads it.
     /// </summary>
+    [RequireAdmin]
     [HttpPut("grants/{id:guid}/person")]
     public async Task<IActionResult> LinkGrantPerson(Guid id, [FromBody] LinkPersonRequest? request, CancellationToken ct)
     {
@@ -243,7 +247,17 @@ public class AuthController(
     /// outside a hash - so it can be drawn as a QR and read aloud, and never
     /// again after the tab is closed. A lost code is replaced by minting
     /// another, not by looking this one up.
+    ///
+    /// Guarded, which puts the only way to enrol a device behind being an
+    /// administrator - so an install that turns Auth:EnforceAdmin on with
+    /// nobody flagged can no longer let anybody in. That is not an oversight
+    /// and it is not unrecoverable: the migrate Job still mints a bootstrap
+    /// invite into an install with no live access (Program.cs), and the switch
+    /// itself is deploy-time config precisely so that the way out of this is a
+    /// deploy rather than a database edit. See docs/auth-architecture.md,
+    /// "Bootstrap and lockout recovery".
     /// </summary>
+    [RequireAdmin]
     [HttpPost("invites")]
     public async Task<IActionResult> CreateInvite([FromBody] CreateInviteRequest? request, CancellationToken ct)
     {

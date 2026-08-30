@@ -12,7 +12,19 @@ using Quartz;
 
 namespace Aerie.Api.Controllers;
 
-/// <summary>CRUD for Devices and their Channels, including assigning a Device to a Zone via Update (docs/device-architecture.md Phase 2).</summary>
+/// <summary>
+/// CRUD for Devices and their Channels, including assigning a Device to a Zone
+/// via Update (docs/device-architecture.md Phase 2).
+///
+/// This controller is where the admin flag's boundary is most visible, because
+/// it holds both kinds of verb. *Shaping* the house - what a device is, what
+/// channels it has, how to reach a camera - is guarded. *Operating* it - power,
+/// setpoint, mode, scene, media - is not, and never should be: a lamp is
+/// something a household member turns on, and the whole point of the dashboard
+/// is that nobody signs in to use it. RefreshOptions and Backfill sit on the
+/// guarded side despite reading rather than writing the house, because both are
+/// maintenance on the model rather than use of the thing modeled.
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
 public class DevicesController(
@@ -39,6 +51,7 @@ public class DevicesController(
         return ToDto(device, latest);
     }
 
+    [RequireAdmin]
     [HttpPost]
     public async Task<ActionResult<DeviceDto>> Create(DeviceWriteRequest request, CancellationToken ct)
     {
@@ -69,6 +82,7 @@ public class DevicesController(
     }
 
     /// <summary>Updates device scalars, including ZoneId - this is how a device is assigned to (or removed from) a Zone.</summary>
+    [RequireAdmin]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<DeviceDto>> Update(Guid id, DeviceWriteRequest request, CancellationToken ct)
     {
@@ -85,6 +99,7 @@ public class DevicesController(
         return ToDto(device, latest);
     }
 
+    [RequireAdmin]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
@@ -95,6 +110,7 @@ public class DevicesController(
         return NoContent();
     }
 
+    [RequireAdmin]
     [HttpPost("{id:guid}/channels")]
     public async Task<ActionResult<DeviceChannelDto>> AddChannel(Guid id, DeviceChannelWriteRequest request, CancellationToken ct)
     {
@@ -114,6 +130,7 @@ public class DevicesController(
         return ToDto(channel, default);
     }
 
+    [RequireAdmin]
     [HttpPut("{id:guid}/channels/{channelId:guid}")]
     public async Task<ActionResult<DeviceChannelDto>> UpdateChannel(Guid id, Guid channelId, DeviceChannelWriteRequest request, CancellationToken ct)
     {
@@ -130,6 +147,7 @@ public class DevicesController(
         return ToDto(channel, latest.GetValueOrDefault(channel.Id));
     }
 
+    [RequireAdmin]
     [HttpDelete("{id:guid}/channels/{channelId:guid}")]
     public async Task<IActionResult> DeleteChannel(Guid id, Guid channelId, CancellationToken ct)
     {
@@ -174,6 +192,7 @@ public class DevicesController(
     }
 
     /// <summary>Re-reads a HvacMode/FanMode channel's AvailableOptions from HA's live hvac_modes/fan_modes attributes - for a hand-added channel that skipped Discovery, or one whose supported modes changed in HA after import.</summary>
+    [RequireAdmin]
     [HttpPost("{id:guid}/channels/{channelId:guid}/refresh-options")]
     public async Task<ActionResult<DeviceChannelDto>> RefreshOptions(Guid id, Guid channelId, CancellationToken ct)
     {
@@ -241,7 +260,16 @@ public class DevicesController(
     /// not: an unconfigured Camera returns the defaults with no host, which is
     /// what the form needs to render itself, and is the normal state between
     /// importing a camera from discovery and filling this in.
+    ///
+    /// Guarded, unlike the other reads on this controller, because "how to
+    /// reach it" is a host, a port, a path and a username - a route straight
+    /// to the camera that bypasses Aerie entirely. The password is the one part
+    /// that never comes back out (SecretProtector), and the rest is still the
+    /// half of a credential worth withholding. Watching the feed is a different
+    /// question and stays open: CameraController's stream is what the dashboard
+    /// opens on a tablet nobody signed in to.
     /// </summary>
+    [RequireAdmin]
     [HttpGet("{id:guid}/camera-connection")]
     public async Task<ActionResult<CameraConnectionDto>> GetCameraConnection(Guid id, CancellationToken ct)
     {
@@ -256,6 +284,7 @@ public class DevicesController(
     /// than POST-then-PUT because the client already knows the id - the same
     /// reasoning SettingsController's key-addressed upsert uses.
     /// </summary>
+    [RequireAdmin]
     [HttpPut("{id:guid}/camera-connection")]
     public async Task<ActionResult<CameraConnectionDto>> UpsertCameraConnection(
         Guid id, CameraConnectionWriteRequest request, CancellationToken ct)
@@ -292,6 +321,7 @@ public class DevicesController(
     }
 
     /// <summary>Forgets this camera's connection settings, password included.</summary>
+    [RequireAdmin]
     [HttpDelete("{id:guid}/camera-connection")]
     public async Task<IActionResult> DeleteCameraConnection(Guid id, CancellationToken ct)
     {
@@ -321,6 +351,7 @@ public class DevicesController(
 
     private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
+    [RequireAdmin]
     [HttpPost("{id:guid}/backfill")]
     public async Task<IActionResult> Backfill(Guid id, BackfillRequest request, CancellationToken ct)
     {

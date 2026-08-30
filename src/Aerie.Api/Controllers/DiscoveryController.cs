@@ -1,3 +1,4 @@
+using Aerie.Api.Common;
 using Aerie.Api.Models.DeviceMapping;
 using Aerie.Api.Services.DeviceMapping;
 using Microsoft.AspNetCore.Mvc;
@@ -9,6 +10,7 @@ namespace Aerie.Api.Controllers;
 [Route("api/[controller]")]
 public class DiscoveryController(IDiscoveryService discovery) : ControllerBase
 {
+    [RequireAdmin]
     [HttpGet("unmapped")]
     public Task<IReadOnlyList<UnmappedHaDevice>> GetUnmapped(CancellationToken ct)
         => discovery.GetUnmappedAsync(ct);

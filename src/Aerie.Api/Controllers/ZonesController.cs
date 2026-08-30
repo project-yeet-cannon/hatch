@@ -1,3 +1,4 @@
+using Aerie.Api.Common;
 using Aerie.Api.Ef;
 using Aerie.Api.Models.Dashboard;
 using Aerie.Api.Models.DeviceMapping;
@@ -34,6 +35,7 @@ public class ZonesController(IZoneService zones, AerieContext db, TimeProvider t
         return zone is null ? NotFound() : ToDto(zone);
     }
 
+    [RequireAdmin]
     [HttpPost]
     public async Task<ActionResult<ZoneDto>> Create(ZoneWriteRequest request, CancellationToken ct)
     {
@@ -51,6 +53,7 @@ public class ZonesController(IZoneService zones, AerieContext db, TimeProvider t
         return CreatedAtAction(nameof(Get), new { id = zone.Id }, ToDto(zone));
     }
 
+    [RequireAdmin]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<ZoneDto>> Update(Guid id, ZoneWriteRequest request, CancellationToken ct)
     {
@@ -67,6 +70,7 @@ public class ZonesController(IZoneService zones, AerieContext db, TimeProvider t
         return ToDto(zone);
     }
 
+    [RequireAdmin]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
@@ -124,6 +128,7 @@ public class ZonesController(IZoneService zones, AerieContext db, TimeProvider t
         return comfort is null ? NotFound() : comfort;
     }
 
+    [RequireAdmin]
     [HttpPut("{id:guid}/comfort")]
     public async Task<ActionResult<ComfortRange>> PutComfort(Guid id, [FromBody] ComfortRange range, CancellationToken ct)
     {

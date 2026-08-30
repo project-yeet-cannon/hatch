@@ -1,3 +1,4 @@
+using Aerie.Api.Common;
 using Aerie.Api.Ef;
 using Aerie.Api.Models.Routines;
 using Aerie.Api.Services.ClimateControl;
@@ -36,6 +37,7 @@ public class RoutinesController(AerieContext db, IClimateCommandService commands
         return routine is null ? NotFound() : ToDto(routine);
     }
 
+    [RequireAdmin]
     [HttpPost]
     public async Task<ActionResult<RoutineDto>> Create(RoutineWriteRequest request, CancellationToken ct)
     {
@@ -55,6 +57,7 @@ public class RoutinesController(AerieContext db, IClimateCommandService commands
         return CreatedAtAction(nameof(Get), new { id = routine.Id }, ToDto(routine));
     }
 
+    [RequireAdmin]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<RoutineDto>> Update(Guid id, RoutineWriteRequest request, CancellationToken ct)
     {
@@ -76,6 +79,7 @@ public class RoutinesController(AerieContext db, IClimateCommandService commands
         return ToDto(routine);
     }
 
+    [RequireAdmin]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {

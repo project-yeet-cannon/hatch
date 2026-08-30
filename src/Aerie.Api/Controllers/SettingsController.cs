@@ -7,8 +7,20 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Aerie.Api.Controllers;
 
-/// <summary>CRUD over SiteSetting - the admin-editable scalars that replace the "Dashboard" appsettings section (docs/device-architecture.md Phase 2/6).</summary>
+/// <summary>
+/// CRUD over SiteSetting - the admin-editable scalars that replace the
+/// "Dashboard" appsettings section (docs/device-architecture.md Phase 2/6).
+///
+/// Guarded whole, reads included, which makes it one of two exceptions to
+/// "mutations only" (the other is AuthController's grant list). The reads here
+/// are the connection settings for everything the house talks to, and while
+/// Redact keeps the Home Assistant token itself out of the response, the host,
+/// the port and the shape of the install are exactly the reconnaissance a
+/// household member has no use for. Nothing outside the admin app has ever
+/// called it.
+/// </summary>
 [ApiController]
+[RequireAdmin]
 [Route("api/[controller]")]
 public class SettingsController(
     AerieContext db,

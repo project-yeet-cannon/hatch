@@ -36,8 +36,15 @@ public class AerieRevisionController(IAerieRevision revision, IFluxRevisionReade
         Response.Headers.CacheControl = "no-store";
 
         // The cluster's state is for an operator, not for every device on the
-        // LAN. There are no roles in this auth model - a grant is a grant - so
-        // "holds a grant" is the strongest available notion of an admin caller.
+        // LAN. "Holds a grant" was once the strongest notion of an admin caller
+        // available here; it no longer is, since Person.IsAdmin is read now
+        // (docs/auth-architecture.md, "The admin flag"). This deliberately
+        // stays as it is anyway: the flag's first release put a constraint
+        // where a boundary already existed and left every other route exactly
+        // as open as it was, and narrowing a field on an allow-listed endpoint
+        // is a second decision rather than a consequence of the first. Tighten
+        // it when somebody wants it tightened, not by drift.
+        //
         // When the wall is off entirely the API has no way to tell anyone
         // apart, and answering is consistent with how every other gated thing
         // behaves in that configuration.

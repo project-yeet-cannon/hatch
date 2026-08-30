@@ -1,3 +1,4 @@
+using Aerie.Api.Common;
 using System.Globalization;
 using Aerie.Api.Ef;
 using Aerie.Api.Models.Panels;
@@ -54,6 +55,7 @@ public class PanelsController(AerieContext db, IPanelService panels, IClimateCom
         return state is null ? NotFound() : state;
     }
 
+    [RequireAdmin]
     [HttpPost]
     public async Task<ActionResult<PanelDto>> Create(PanelWriteRequest request, CancellationToken ct)
     {
@@ -75,6 +77,7 @@ public class PanelsController(AerieContext db, IPanelService panels, IClimateCom
         return CreatedAtAction(nameof(Get), new { id = panel.Id }, ToDto(panel));
     }
 
+    [RequireAdmin]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<PanelDto>> Update(Guid id, PanelWriteRequest request, CancellationToken ct)
     {
@@ -101,6 +104,7 @@ public class PanelsController(AerieContext db, IPanelService panels, IClimateCom
         return ToDto(panel);
     }
 
+    [RequireAdmin]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {

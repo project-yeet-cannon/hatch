@@ -17,8 +17,10 @@ namespace Aerie.Api.Controllers;
 /// those two endpoints are navigated to rather than fetched.
 ///
 /// Every route here sits behind the house wall (docs/auth-architecture.md),
-/// which is a gate rather than permissions: any enrolled device can start the
-/// connect flow or delete an account.
+/// and every route that *changes* something is admin-guarded on top of it -
+/// connecting, disconnecting and re-syncing a household calendar account is an
+/// operator's act. Reading the account list is not, and stays open: the shell
+/// renders an agenda from it.
 /// </summary>
 [ApiController]
 [Route("api/calendar")]
@@ -43,6 +45,7 @@ public partial class CalendarsController(
     /// the OAuth callback does automatically - for a calendar shared with the
     /// account after it was connected, or one whose name changed since.
     /// </summary>
+    [RequireAdmin]
     [HttpPost("accounts/{id:guid}/refresh-calendars")]
     public async Task<ActionResult<CalendarDiscoveryDto>> RefreshCalendars(Guid id, CancellationToken ct)
     {
@@ -65,6 +68,7 @@ public partial class CalendarsController(
     /// contract, and the per-account reasons come back on the account rows.
     /// The counts are what tell the admin whether anything happened.
     /// </summary>
+    [RequireAdmin]
     [HttpPost("sync")]
     public async Task<CalendarSyncDto> Sync(CancellationToken ct)
     {
@@ -73,6 +77,7 @@ public partial class CalendarsController(
     }
 
     /// <summary>Sets the admin-owned half of a calendar. The provider-owned half (name, color, timezone) only ever changes through discovery.</summary>
+    [RequireAdmin]
     [HttpPut("calendars/{id:guid}")]
     public async Task<ActionResult<CalendarDto>> UpdateCalendar(Guid id, CalendarVisibilityRequest request, CancellationToken ct)
     {
@@ -100,6 +105,7 @@ public partial class CalendarsController(
     /// row behind so a remote call can be retried would be answering a
     /// different question than the one they asked.
     /// </summary>
+    [RequireAdmin]
     [HttpDelete("accounts/{id:guid}")]
     public async Task<IActionResult> DeleteAccount(Guid id, CancellationToken ct)
     {

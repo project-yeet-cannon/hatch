@@ -1,3 +1,4 @@
+using Aerie.Api.Common;
 using Aerie.Api.Models.Environment;
 using HADotNet.Core.Clients;
 using Microsoft.AspNetCore.Mvc;
@@ -17,6 +18,7 @@ public class HomeAssistantController(
         return await envSrv.GetReadings();
     }
 
+    [RequireAdmin]
     [HttpPost]
     public async Task FetchFromHomeAssistant()
     {
