@@ -24,6 +24,7 @@ namespace Aerie.Api.Controllers;
 public class AuthController(
     IAuthGate gate,
     IAuthService auth,
+    ICallerIdentity caller,
     IOptions<AuthOptions> options,
     ILogger<AuthController> logger) : ControllerBase
 {
@@ -271,17 +272,12 @@ public class AuthController(
     private string RedeemPath(string code) => $"{options.SignInPath.TrimEnd('/')}/r/{code}";
 
     /// <summary>
-    /// The grant behind this request. The middleware has usually already
-    /// resolved it, but it only runs when Auth:Enabled is true - and "who am I"
-    /// has to answer the same way with the wall down, which is AUTH_MODE=none
-    /// and all of local dev.
+    /// The grant behind this request. The wall-is-down fallback this used to
+    /// spell out for itself now lives in <see cref="ICallerIdentity"/>, because
+    /// Quill needed the same answer and two copies of "who is this" is one too
+    /// many.
     /// </summary>
-    private async Task<EfAuthGrant?> CurrentGrantAsync(CancellationToken ct) =>
-        HttpContext.GetAuthGrant()
-        ?? (await auth.VerifyAsync(
-            AuthCookie.ReadAll(Request, options),
-            HttpContext.Connection.RemoteIpAddress?.ToString(),
-            ct))?.Grant;
+    private Task<EfAuthGrant?> CurrentGrantAsync(CancellationToken ct) => caller.GrantAsync(ct);
 
     /// <summary>
     /// The path the origin server will actually serve, from the URI Traefik

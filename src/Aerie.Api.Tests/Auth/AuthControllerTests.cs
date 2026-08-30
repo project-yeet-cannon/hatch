@@ -535,7 +535,9 @@ public class AuthControllerTests
         httpContext.Request.Path = "/api/auth/verify";
         context = httpContext;
 
-        return new AuthController(gate, auth, options, NullLogger<AuthController>.Instance)
+        var caller = new CallerIdentity(new HttpContextAccessor { HttpContext = httpContext }, auth, options);
+
+        return new AuthController(gate, auth, caller, options, NullLogger<AuthController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext },
         };

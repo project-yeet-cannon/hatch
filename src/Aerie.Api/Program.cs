@@ -217,6 +217,15 @@ builder.Services.Configure<AuthOptions>(authSection);
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IAuthGate, AuthGate>();
 
+// "Who is making this request", for everything that isn't the wall itself. The
+// accessor is the only reason this needs a line here at all: ICallerIdentity is
+// resolved from a module's controller, which has an HttpContext but no way to
+// hand one to a service it did not construct. Two lines of platform, so that
+// asking costs a module one constructor parameter and no knowledge of cookies -
+// see Services/Auth/CallerIdentity.cs.
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICallerIdentity, CallerIdentity>();
+
 // Redemption is the only endpoint in the app that mints a credential, so it is
 // the only one with a limiter. Bound once at startup rather than per request:
 // AddPolicy's factory runs on the hot path, and the numbers are deploy-time
