@@ -99,6 +99,22 @@ spec:
     # clear the same bar - see that file's note.
     auth:
       mode: ${AUTH_MODE:=none}
+      # Whether Person.IsAdmin decides anything - none | enforced, and a second
+      # axis rather than a fourth rung on the ladder above: the mode says where
+      # the wall stands, this says whether the people behind it are all equal.
+      # Only meaningful at mode canary or full; there is no identity to read
+      # without a wall.
+      #
+      # Same type-safety bar as `mode`, and it is not hypothetical here either:
+      # the obvious vocabulary for this value is "off | on", which is precisely
+      # the pair that broke a release on 2026-08-21. Neither `none` nor
+      # `enforced` is a YAML scalar of any other type.
+      #
+      # Turning it on is a deploy and turning it off again is the same deploy,
+      # which is the whole reason it is config rather than something inferred
+      # from whether anybody is flagged - see docs/auth-architecture.md, "The
+      # admin flag".
+      admin: ${ADMIN_MODE:=none}
     # Both optional (scripts/k3s/cluster-config.json) - when unset, the key is
     # genuinely absent from the ConfigMap, not present with an empty value.
     # kustomize-controller substitutes in strict mode (confirmed live: an

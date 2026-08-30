@@ -154,6 +154,29 @@ public class AuthServiceTests
         Assert.Equal(token, verified.Token);
     }
 
+    /// <summary>
+    /// The include is load-bearing rather than convenient. ICallerIdentity
+    /// reads the person straight off this navigation property and issues no
+    /// query of its own, so a verification that stopped loading it would report
+    /// every administrator as nobody - and AdminGate would refuse the whole
+    /// household while every test that stubs a grant kept passing.
+    /// </summary>
+    [Fact]
+    public async Task VerifyLoadsTheOwnerAlongsideTheGrant()
+    {
+        var (service, db, _) = NewService();
+        var token = await Enroll(service);
+        var person = await AddPerson(db, "Ada");
+        person.IsAdmin = true;
+        await db.SaveChangesAsync();
+        await service.SetGrantPersonAsync((await Grant(db)).Id, person.Id, CancellationToken.None);
+
+        var verified = await service.VerifyAsync([token], null, CancellationToken.None);
+
+        Assert.Equal("Ada", verified!.Grant.Person!.Name);
+        Assert.True(verified.Grant.Person.IsAdmin);
+    }
+
     [Fact]
     public async Task ARevokedGrantStopsVerifying()
     {

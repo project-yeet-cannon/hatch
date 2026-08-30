@@ -240,6 +240,19 @@
       "description": "How much of the house sits behind the wall (docs/plans/auth.md). 'none' is the pre-auth behavior and the complete rollback; 'canary' walls apps/docs alone with Traefik as the only enforcer; 'full' walls home and kiosk and the pod refuses on its own as well. One value, one ladder - moving between them is a repository-variable change and a reconcile, not a code change. The vocabulary avoids off/on on purpose: this value is substituted textually into a manifest that is then parsed as YAML 1.1, where those words are booleans regardless of quoting."
     },
     {
+      "key": "ADMIN_MODE",
+      "env": "ADMIN_MODE",
+      "githubSource": "ADMIN_MODE",
+      "githubKind": "variable",
+      "required": false,
+      "pattern": "^(none|enforced)$",
+      "normalize": "lower",
+      "hint": "One of none, enforced. Unset means none - every enrolled device can do everything, which is how Aerie behaved before the flag was read. Not off/on, for the same YAML 1.1 reason AUTH_MODE gives.",
+      "example": "enforced",
+      "consumedBy": "5b.10 HelmRelease values (auth.admin), which sets api env Auth__EnforceAdmin",
+      "description": "Whether Person.IsAdmin decides anything (docs/auth-architecture.md, 'The admin flag'). 'none' is the pre-flag behavior and the complete rollback; 'enforced' withholds the admin app from anyone whose device is not linked to an administrator, and refuses the API verbs behind it with a 403. A second axis rather than a fourth rung on AUTH_MODE's ladder: that value says where the wall stands, this one says whether the people behind it are all equal, and it is meaningless without a wall to read an identity from. Flag at least one person before setting it - the endpoint that mints invites is itself guarded, so an install that enforces with nobody flagged can no longer enroll anyone, and the way back is this variable rather than a database edit."
+    },
+    {
       "key": "TZ",
       "env": "TZ",
       "githubSource": "TZ",

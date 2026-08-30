@@ -690,6 +690,10 @@ try {
     # check below is written against this value, so a run on an install with no
     # wall asserts that there is no wall, rather than skipping.
     $authMode = if ($configValues.ContainsKey('AUTH_MODE') -and $configValues['AUTH_MODE']) { $configValues['AUTH_MODE'].Trim().ToLowerInvariant() } else { 'none' }
+    # The second axis: whether Person.IsAdmin decides anything. Read the same
+    # way and defaulted the same way, so an install that never set it asserts
+    # the pre-flag posture rather than skipping.
+    $adminMode = if ($configValues.ContainsKey('ADMIN_MODE') -and $configValues['ADMIN_MODE']) { $configValues['ADMIN_MODE'].Trim().ToLowerInvariant() } else { 'none' }
 
     # ---------------------------------------------------------------- #
     Write-Stage 'Checks'
@@ -972,6 +976,28 @@ try {
         else {
             Add-Check -Step 'auth.5' -Name 'Middleware aerie-auth' -Status 'Pass' -Detail "forwardAuth to $actualAddress, returning $($responseHeaders -join ', ')"
         }
+    }
+
+    # --- the admin flag: the axis the wall does not cover ------------------
+    # docs/auth-architecture.md, "The admin flag". Nothing is rendered for this
+    # one - it is a single env var on the api container - so what is checkable
+    # from here is that the value is one the chart knows, and that it was not
+    # asked for on an install that cannot honour it.
+    if ($adminMode -notin @('none', 'enforced')) {
+        Add-Check -Step 'auth.5' -Name 'ADMIN_MODE is one of none/enforced' -Status 'Fail' -Detail "ADMIN_MODE='$adminMode' in aerie-cluster-config is not a value the chart knows - middleware-auth.yaml fails the render rather than half-applying, so this presents as a stuck HelmRelease. 'off' and 'on' are the likeliest wrong answers and are YAML 1.1 booleans, which is why they are not the vocabulary"
+    }
+    elseif ($adminMode -eq 'enforced' -and $authMode -eq 'none') {
+        # Not a chart error - it renders, and AdminGate reads both switches, so
+        # what actually happens is that enforcement stays dormant. An operator
+        # who asked for it and did not get it is exactly the half-state these
+        # checks exist to name.
+        Add-Check -Step 'auth.5' -Name 'ADMIN_MODE agrees with AUTH_MODE' -Status 'Fail' -Detail 'ADMIN_MODE=enforced but AUTH_MODE=none - there is no wall, so no request carries an identity and AdminGate stays dormant. The admin app is open to the LAN despite the setting; set AUTH_MODE to canary or full, or set ADMIN_MODE back to none'
+    }
+    elseif ($adminMode -eq 'enforced') {
+        Add-Check -Step 'auth.5' -Name 'ADMIN_MODE agrees with AUTH_MODE' -Status 'Pass' -Detail "ADMIN_MODE=enforced with AUTH_MODE=$authMode - the admin app and its verbs want a person carrying IsAdmin"
+    }
+    else {
+        Add-Check -Step 'auth.5' -Name 'ADMIN_MODE agrees with AUTH_MODE' -Status 'Pass' -Detail 'ADMIN_MODE=none - every enrolled device can do everything, which is the pre-flag posture and the rollback'
     }
 
     # Which Ingresses carry the annotation is the whole difference between the

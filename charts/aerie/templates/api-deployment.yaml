@@ -152,6 +152,14 @@ spec:
             {{- if ne .Values.auth.mode "none" }}
             - name: Auth__EnforceInProcess
               value: {{ eq .Values.auth.mode "full" | quote }}
+            # Whether Person.IsAdmin decides anything - the admin app's bundle
+            # and the verbs behind it (docs/auth-architecture.md, "The admin
+            # flag"). Inside the mode guard because it is meaningless without a
+            # wall to read an identity from, and rendered from a token
+            # comparison rather than substituted, so the YAML 1.1 boolean
+            # hazard that governs auth.mode itself does not reach this line.
+            - name: Auth__EnforceAdmin
+              value: {{ eq .Values.auth.admin "enforced" | quote }}
             # The hosts whose Ingress never gets the annotation, repeated here
             # so the in-process gate agrees with the proxy instead of being the
             # stricter of two. files. serves the kiosk APK and its checksum,

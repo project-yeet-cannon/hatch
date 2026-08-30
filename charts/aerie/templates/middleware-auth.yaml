@@ -28,6 +28,15 @@
 {{- if not (has (toString .Values.auth.mode) (list "none" "canary" "full")) }}
 {{- fail (printf "auth.mode must be none, canary or full - got %#v. If this is a bool, the value was one of YAML 1.1's boolean words (on/off/yes/no/true/false); those are not this chart's vocabulary precisely so that cannot happen - see charts/aerie/values.yaml." .Values.auth.mode) }}
 {{- end }}
+# The second axis, asserted for the same reasons and in the same place.
+# auth.admin has one comparison rather than four (api-deployment.yaml), and a
+# typo there renders as `false` - which is a half-state of exactly the shape
+# above: an operator who asked for enforcement, a reconcile that reported
+# success, and an admin app still open to the whole household. Failing loudly
+# is the only version of this anyone can act on.
+{{- if not (has (toString .Values.auth.admin) (list "none" "enforced")) }}
+{{- fail (printf "auth.admin must be none or enforced - got %#v. Note that off/on/yes/no are YAML 1.1 booleans and deliberately not this chart's vocabulary - see charts/aerie/values.yaml." .Values.auth.admin) }}
+{{- end }}
 {{- if ne .Values.auth.mode "none" }}
 apiVersion: traefik.io/v1alpha1
 kind: Middleware

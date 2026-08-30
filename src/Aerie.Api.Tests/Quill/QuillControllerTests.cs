@@ -307,5 +307,8 @@ public class QuillControllerTests
         public Task<EfAuthGrant?> GrantAsync(CancellationToken ct) => Task.FromResult<EfAuthGrant?>(null);
 
         public Task<Guid?> PersonIdAsync(CancellationToken ct) => Task.FromResult(PersonId);
+
+        /// <summary>Quill never asks for the row - it scopes by id, which is the shape the module's queries want. See ICallerIdentity.PersonAsync.</summary>
+        public Task<EfPerson?> PersonAsync(CancellationToken ct) => Task.FromResult<EfPerson?>(null);
     }
 }

@@ -45,6 +45,20 @@ public interface ICallerIdentity
     /// which one happened.
     /// </summary>
     Task<Guid?> PersonIdAsync(CancellationToken ct);
+
+    /// <summary>
+    /// The person themselves rather than their key - for the one caller that
+    /// needs a column off that row instead of something to compare a foreign
+    /// key against.
+    ///
+    /// That caller is <see cref="AdminGate"/>, and the distinction is the whole
+    /// reason this method exists next to the one above. Ownership scoping wants
+    /// an id, because <c>WHERE PersonId = @me</c> is the safe shape and a loaded
+    /// entity would only tempt someone into filtering in memory. An
+    /// authorization *role* wants the row, because the answer is a property on
+    /// it.
+    /// </summary>
+    Task<EfPerson?> PersonAsync(CancellationToken ct);
 }
 
 /// <summary>
@@ -83,4 +97,19 @@ public class CallerIdentity(
     }
 
     public async Task<Guid?> PersonIdAsync(CancellationToken ct) => (await GrantAsync(ct))?.PersonId;
+
+    /// <summary>
+    /// Reads the navigation property rather than issuing a second query, which
+    /// makes <see cref="AuthService.VerifyAsync"/>'s <c>Include(g =&gt; g.Person)</c>
+    /// load-bearing: this is the same row the wall already loaded, on the
+    /// hottest path in the app, and asking the database again for something it
+    /// just handed us would be a per-request join to answer a question most
+    /// requests never ask.
+    ///
+    /// A grant with a <see cref="EfAuthGrant.PersonId"/> and no
+    /// <see cref="EfAuthGrant.Person"/> would therefore read as "nobody" - so
+    /// every producer of a grant here goes through VerifyAsync, and
+    /// AuthServiceTests pins the include.
+    /// </summary>
+    public async Task<EfPerson?> PersonAsync(CancellationToken ct) => (await GrantAsync(ct))?.Person;
 }

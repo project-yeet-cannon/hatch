@@ -8,11 +8,12 @@ using System.Net;
 namespace Aerie.Api.Tests.Auth;
 
 /// <summary>
-/// The one place anything outside Services/Auth asks who is calling. Three
+/// The one place anything outside Services/Auth asks who is calling. Four
 /// properties carry it, and each one is a bug somewhere else if it breaks: the
 /// middleware's answer is preferred when there is one, the cookie is still read
-/// when the wall is off, and a device nobody has claimed reports the same
-/// nobody as a browser that never enrolled.
+/// when the wall is off, a device nobody has claimed reports the same nobody as
+/// a browser that never enrolled, and the person comes back as the row the wall
+/// already loaded rather than as a second query.
 /// </summary>
 public class CallerIdentityTests
 {
@@ -104,6 +105,47 @@ public class CallerIdentityTests
 
         Assert.Null(await NewIdentity(unclaimed, new StubAuthService()).PersonIdAsync(default));
         Assert.Null(await NewIdentity(NewContext(), new StubAuthService()).PersonIdAsync(default));
+    }
+
+    /// <summary>
+    /// The row, not the key - the one question that needs a column off the
+    /// person rather than something to compare a foreign key against, which is
+    /// AdminGate reading IsAdmin.
+    /// </summary>
+    [Fact]
+    public async Task Person_IsTheRowTheWallAlreadyLoaded()
+    {
+        var person = new EfPerson
+        {
+            Id = Guid.NewGuid(),
+            Name = "Ada",
+            IsAdmin = true,
+            CreatedAt = DateTimeOffset.UnixEpoch,
+            UpdatedAt = DateTimeOffset.UnixEpoch,
+        };
+        var grant = NewGrant(person.Id);
+        grant.Person = person;
+
+        var context = NewContext();
+        context.SetAuthGrant(grant);
+
+        Assert.Same(person, await NewIdentity(context, new StubAuthService()).PersonAsync(default));
+    }
+
+    /// <summary>
+    /// No second query, ever. This reads the navigation property, which is what
+    /// makes AuthService.VerifyAsync's Include load-bearing - and it is the
+    /// reason a grant assembled without that include reports "nobody" rather
+    /// than quietly issuing a join on the hottest path in the app.
+    /// </summary>
+    [Fact]
+    public async Task Person_IsNullWhenNobodyHoldsTheDevice_AndWhenNoDeviceHeldIt()
+    {
+        var unclaimed = NewContext();
+        unclaimed.SetAuthGrant(NewGrant(personId: null));
+
+        Assert.Null(await NewIdentity(unclaimed, new StubAuthService()).PersonAsync(default));
+        Assert.Null(await NewIdentity(NewContext(), new StubAuthService()).PersonAsync(default));
     }
 
     /// <summary>

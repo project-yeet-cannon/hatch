@@ -46,6 +46,29 @@ public class AuthOptions
     public bool EnforceInProcess { get; set; } = true;
 
     /// <summary>
+    /// Whether <see cref="Aerie.Api.Ef.EfPerson.IsAdmin"/> decides anything -
+    /// the admin app's bundle, and the API actions carrying
+    /// <see cref="Aerie.Api.Common.RequireAdminAttribute"/>. False everywhere
+    /// until an operator says otherwise, and false is the rollback.
+    ///
+    /// A switch rather than something inferred from the data, and the reason is
+    /// the lockout this whole column was carried early to avoid. Every
+    /// alternative shape - "enforce once somebody is an admin", "enforce once
+    /// an admin holds a device" - makes a checkbox on the People page the thing
+    /// that turns enforcement on, which means an operator can lock the
+    /// household out of the page they would fix it from without ever intending
+    /// to enable anything. Config cannot be tripped over: turning this on is a
+    /// deploy, turning it off again is the same deploy, and neither is
+    /// reachable from inside a browser session that is about to lose its
+    /// access.
+    ///
+    /// Read only through <see cref="AdminGate.Enabled"/>, which also requires
+    /// <see cref="Enabled"/>: an install with no wall has no identity to read,
+    /// so enforcing a role there would refuse everyone.
+    /// </summary>
+    public bool EnforceAdmin { get; set; }
+
+    /// <summary>
     /// The cookie the grant token rides in. The <c>__Secure-</c> prefix is
     /// correct rather than <c>__Host-</c>: <c>__Host-</c> forbids a Domain
     /// attribute, and the Domain attribute is the entire single-sign-on story

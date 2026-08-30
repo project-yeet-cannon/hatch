@@ -110,6 +110,31 @@ tz: ""
 auth:
   mode: none
 
+  # Whether Person.IsAdmin decides anything - none | enforced. A second axis
+  # rather than a fourth rung above: `mode` says where the wall stands, this
+  # says whether everyone behind it is equal.
+  #
+  #   admin     Auth__EnforceAdmin  Effect
+  #   none      false               every enrolled device can do everything
+  #   enforced  true                the admin app and its verbs want IsAdmin
+  #
+  # ${ADMIN_MODE}, defaulting to none. Only meaningful at mode canary or full,
+  # and the app enforces that pairing rather than trusting it: AdminGate reads
+  # both switches, because an install with no wall has no identity to read and
+  # a role enforced there would refuse everyone.
+  #
+  # Read the note above on the vocabulary before adding a value here. The
+  # obvious pair for this one is "off | on", which is exactly the pair that
+  # broke a release on 2026-08-21; neither `none` nor `enforced` is a YAML
+  # scalar of any other type.
+  #
+  # This is deliberately the *only* way enforcement turns on. Inferring it from
+  # the data - "enforce once somebody is flagged" - would make a checkbox on
+  # the People page the thing that enables it, and the operator who ticks it
+  # for the wrong person locks the household out of the page they would fix it
+  # from. A deploy can always be undone by another deploy.
+  admin: none
+
 # ${HA_HOST} / ${HA_PORT}, both optional - only read by the api container's
 # one-time SiteSettings import on a fresh install. Empty means unset, not "".
 haHost: ""
