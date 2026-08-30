@@ -44,6 +44,45 @@ public class PeopleControllerTests
     }
 
     [Fact]
+    public async Task CarriesTheAdminFlagWithoutEnforcingIt()
+    {
+        // Deliberately a column and an input with no branch behind it. The
+        // reason it exists before the thing that reads it is on EfPerson.
+        var (controller, db, _) = NewController();
+
+        var created = await controller.Create(new PersonWriteRequest("Ada", IsAdmin: true), CancellationToken.None);
+
+        Assert.True(Assert.IsType<PersonDto>(Assert.IsType<CreatedAtActionResult>(created.Result).Value).IsAdmin);
+        Assert.True((await db.People.SingleAsync()).IsAdmin);
+    }
+
+    [Fact]
+    public async Task DefaultsToNotAnAdministrator()
+    {
+        // The omission case, which is the one that matters: a caller who only
+        // meant to name someone must not promote them by leaving a field out.
+        var (controller, _, _) = NewController();
+
+        await controller.Create(new PersonWriteRequest("Ada"), CancellationToken.None);
+
+        Assert.False((await controller.GetAll(CancellationToken.None)).Single().IsAdmin);
+    }
+
+    [Fact]
+    public async Task TogglesTheAdminFlagBothWays()
+    {
+        var (controller, _, _) = NewController();
+        var id = await Create(controller, "Ada");
+
+        await controller.Update(id, new PersonWriteRequest("Ada", IsAdmin: true), CancellationToken.None);
+        Assert.True((await controller.GetAll(CancellationToken.None)).Single().IsAdmin);
+
+        // The half that a "set it if true" implementation would silently drop.
+        await controller.Update(id, new PersonWriteRequest("Ada", IsAdmin: false), CancellationToken.None);
+        Assert.False((await controller.GetAll(CancellationToken.None)).Single().IsAdmin);
+    }
+
+    [Fact]
     public async Task RefusesANameThePersonNameRulesRefuse()
     {
         var (controller, db, _) = NewController();

@@ -49,14 +49,14 @@ public class PeopleController(AerieContext db, TimeProvider time) : ControllerBa
         if (!PersonName.TryNormalize(request.Name, out var name, out var error)) return BadRequest(error);
 
         var now = time.GetUtcNow();
-        var person = new EfPerson { Name = name, CreatedAt = now, UpdatedAt = now };
+        var person = new EfPerson { Name = name, IsAdmin = request.IsAdmin, CreatedAt = now, UpdatedAt = now };
         db.People.Add(person);
         await db.SaveChangesAsync(ct);
 
         // Two people may share a name and that is not an error - households
         // contain a Sam and a Sam, and the id is what anything actually keys
         // on. There is deliberately no unique index behind this.
-        return CreatedAtAction(nameof(Get), new { id = person.Id }, new PersonDto(person.Id, person.Name, person.CreatedAt, person.UpdatedAt, null, 0));
+        return CreatedAtAction(nameof(Get), new { id = person.Id }, new PersonDto(person.Id, person.Name, person.IsAdmin, person.CreatedAt, person.UpdatedAt, null, 0));
     }
 
     [HttpPut("{id:guid}")]
@@ -68,6 +68,7 @@ public class PeopleController(AerieContext db, TimeProvider time) : ControllerBa
         if (person is null) return NotFound();
 
         person.Name = name;
+        person.IsAdmin = request.IsAdmin;
         person.UpdatedAt = time.GetUtcNow();
         await db.SaveChangesAsync(ct);
 
@@ -150,9 +151,12 @@ public class PeopleController(AerieContext db, TimeProvider time) : ControllerBa
         var person = await db.People.FirstOrDefaultAsync(p => p.Id == id, ct);
         if (person is null) return NotFound();
 
-        // Bounded read. Buffering an unbounded request body into memory to find
-        // out how big it is, is the bug this cap exists to prevent - so the
-        // cap is applied to the read itself, not to the result of it.
+        // The bound is the [RequestSizeLimit] above, which Kestrel enforces
+        // *during* this read rather than after it - an over-large body aborts
+        // with a 413 partway through instead of being buffered whole and then
+        // measured. Which is the point: reading an unbounded request into
+        // memory to find out how big it is, is the bug the cap exists to
+        // prevent, and a check placed after this line would be that bug.
         using var buffer = new MemoryStream();
         await Request.Body.CopyToAsync(buffer, ct);
         var bytes = buffer.ToArray();
@@ -197,6 +201,7 @@ public class PeopleController(AerieContext db, TimeProvider time) : ControllerBa
         p => new PersonDto(
             p.Id,
             p.Name,
+            p.IsAdmin,
             p.CreatedAt,
             p.UpdatedAt,
             p.Photo == null ? null : p.Photo.UpdatedAt,

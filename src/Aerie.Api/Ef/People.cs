@@ -38,6 +38,28 @@ public class EfPerson
     [MaxLength(Common.PersonName.MaxChars)]
     public required string Name { get; set; }
 
+    /// <summary>
+    /// Whether this person is an administrator. **Nothing enforces it.** Not
+    /// the wall, not a controller, not a filter - the column is written by the
+    /// admin app and read by the admin app, and that is the whole of it today.
+    ///
+    /// It is here early on purpose. The wall authenticates a device and every
+    /// enrolled device can currently do everything, which is the deliberate
+    /// gate-not-permissions call in docs/auth-architecture.md. When that
+    /// changes, the first question any design has to answer is "which of these
+    /// people is allowed", and a column that has been carried and edited for a
+    /// while has real answers in it - whereas a column added on the day
+    /// enforcement lands starts empty, which means the deploy that turns
+    /// enforcement on is also the deploy that locks everyone out.
+    ///
+    /// So: a bool now, an input on the People page, and no branch anywhere.
+    /// Whatever this eventually becomes - roles, scopes, RBAC - inherits a
+    /// populated column rather than an empty one. Do not start reading it for
+    /// authorization without designing the lockout path first; there is exactly
+    /// one household member holding the bootstrap invite.
+    /// </summary>
+    public bool IsAdmin { get; set; }
+
     public required DateTimeOffset CreatedAt { get; set; }
 
     /// <summary>

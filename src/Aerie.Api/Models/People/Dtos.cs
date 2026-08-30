@@ -16,9 +16,15 @@ namespace Aerie.Api.Models.People;
 /// this person actually get in?" - and computing it here costs one GROUP BY
 /// against a table with a household's worth of rows in it.
 /// </param>
+/// <param name="IsAdmin">
+/// Unenforced, and stated here so nobody reading the API mistakes it for a
+/// permission. See EfPerson.IsAdmin for why the column exists before the thing
+/// that will read it.
+/// </param>
 public record PersonDto(
     Guid Id,
     string Name,
+    bool IsAdmin,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     DateTimeOffset? PhotoUpdatedAt,
@@ -28,15 +34,19 @@ public record PersonDto(
 }
 
 /// <summary>
-/// What the People page posts. One field, deliberately: everything else a
+/// What the People page posts. Two fields, deliberately: everything else a
 /// person will grow is additive, and a write model with room for fields that do
 /// not exist yet is a write model nobody can read.
 ///
 /// <paramref name="Name"/> is raw text - normalization is the server's job
 /// (<see cref="Aerie.Api.Common.PersonName"/>), because a client that
 /// normalizes is a client that can be replaced by one that does not.
+///
+/// <paramref name="IsAdmin"/> defaults to false so that an older client, or a
+/// caller who only meant to rename someone, cannot promote anyone by omission.
+/// It grants nothing today either way (EfPerson.IsAdmin).
 /// </summary>
-public record PersonWriteRequest(string? Name);
+public record PersonWriteRequest(string? Name, bool IsAdmin = false);
 
 /// <summary>
 /// One enrolled device on a person's row. A deliberately thinner view than
