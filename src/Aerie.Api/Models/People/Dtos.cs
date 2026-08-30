@@ -17,9 +17,11 @@ namespace Aerie.Api.Models.People;
 /// against a table with a household's worth of rows in it.
 /// </param>
 /// <param name="IsAdmin">
-/// Unenforced, and stated here so nobody reading the API mistakes it for a
-/// permission. See EfPerson.IsAdmin for why the column exists before the thing
-/// that will read it.
+/// Whether this person is served the admin app and may take the operator verbs
+/// behind it - enforced only while Auth:EnforceAdmin is on, which is off until
+/// an operator asks for it. Read openly on purpose: this list is what the
+/// family shell renders names and faces from, and who the administrators are is
+/// not a secret in a household. See EfPerson.IsAdmin.
 /// </param>
 public record PersonDto(
     Guid Id,
@@ -44,7 +46,9 @@ public record PersonDto(
 ///
 /// <paramref name="IsAdmin"/> defaults to false so that an older client, or a
 /// caller who only meant to rename someone, cannot promote anyone by omission.
-/// It grants nothing today either way (EfPerson.IsAdmin).
+/// That default mattered less when the flag granted nothing; it is now the
+/// difference between a rename and a promotion, and the endpoint that accepts
+/// this request is guarded by the very flag it writes (PeopleController).
 /// </summary>
 public record PersonWriteRequest(string? Name, bool IsAdmin = false);
 

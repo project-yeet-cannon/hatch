@@ -247,7 +247,7 @@
           >
         </div>
         <div class="apps">
-          <a class="app" href="/apps/admin/">
+          <a class="app" href="/apps/admin/" data-withheld-if-404>
             <span class="icon">⚙️</span>
             <span class="app-info">
               <span class="app-name">Admin</span>
@@ -366,6 +366,28 @@
         } else {
           link.classList.add("unavailable");
         }
+      }
+
+      // The admin app is withheld from anyone whose device is not linked to an
+      // administrator - a flat 404 on the whole bundle, indistinguishable from
+      // an install that never built it (docs/auth-architecture.md, "The admin
+      // flag"). A card that links to a 404 undoes that: it says the app is
+      // there and that you are not welcome in it, which is the sentence the
+      // 404 was chosen to avoid.
+      //
+      // Removed rather than greyed out, unlike the cross-subdomain cards above.
+      // Those say "this exists, but not at an address this page can name",
+      // which is true and useful. Here there is nothing to point at.
+      //
+      // Failure leaves the card alone. A fetch that never answers means the
+      // page is offline or the API is down, and hiding an app over a network
+      // blip is a worse outcome than a link that 404s once.
+      for (const link of document.querySelectorAll("a[data-withheld-if-404]")) {
+        fetch(link.getAttribute("href"), { method: "HEAD" })
+          .then((response) => {
+            if (response.status === 404) link.remove();
+          })
+          .catch(() => {});
       }
     </script>
   </body>

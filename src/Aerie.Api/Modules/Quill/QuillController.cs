@@ -33,9 +33,12 @@ namespace Aerie.Api.Modules.Quill;
 /// the rows are loaded, and "who may read this" is one expression that sharing
 /// widens rather than a second one beside it.
 ///
-/// What that deliberately is not: nothing here reads Person.IsAdmin, and no
-/// endpoint answers differently for one person than for another. A global role
-/// wants the lockout path in docs/auth-architecture.md designed first.
+/// What that deliberately is not: nothing here reads Person.IsAdmin. There is
+/// a global role now - it guards the admin app and the operator verbs behind
+/// it (docs/auth-architecture.md, "The admin flag") - and it has nothing to say
+/// about a note. An administrator is not a person who may read everyone's
+/// notes, and the day somebody wants that, it is a sharing rule rather than a
+/// role check.
 /// </para>
 /// </remarks>
 [ApiController]

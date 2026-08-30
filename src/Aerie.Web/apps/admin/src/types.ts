@@ -248,9 +248,18 @@ export interface Person {
   id: string;
   name: string;
   /**
-   * Unenforced. Nothing in the app branches on it yet - it is carried now so
-   * that whatever eventually reads it inherits a populated column rather than
-   * an empty one. See EfPerson.IsAdmin.
+   * Whether this person is served this app at all, and may take the operator
+   * verbs behind it. Nothing on the client branches on it - by the time this
+   * page renders, the server has already decided: a device linked to nobody, or
+   * to somebody without this flag, is answered 404 for the whole bundle
+   * (AdminAppMiddleware), so a non-admin never gets far enough to read this
+   * field.
+   *
+   * Enforced only while the install sets ADMIN_MODE=enforced; off, everyone
+   * behind the wall sees everything, which is how Aerie behaved before the flag
+   * was read. Setting it is guarded by itself, which is why the checkbox below
+   * cannot be used to promote the device you are sitting on. See
+   * EfPerson.IsAdmin and docs/auth-architecture.md, "The admin flag".
    */
   isAdmin: boolean;
   createdAt: string;

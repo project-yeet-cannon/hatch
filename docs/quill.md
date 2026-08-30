@@ -43,13 +43,13 @@ authorization decision. Ownership is the first and simplest form of that, and
 nothing in the current shape needing to change for it.
 
 What Quill does *not* do is invent a permission model on the way past. There is
-still no role, no scope, no permission table, and nothing reads
-`Person.IsAdmin`; a household-wide administrator is the coarsest possible answer
-to a question nobody has asked, and the deploy that first enforces one is the
-deploy that can lock everyone out
-([Whose device is this](auth-architecture.md#whose-device-is-this)). Ownership
-needs none of that: it is a `WHERE` clause, in one place, that no code path can
-forget to consult.
+still no scope and no permission table, and nothing here reads `Person.IsAdmin`.
+That flag now guards something — the admin app and the operator verbs behind it
+([the admin flag](auth-architecture.md#the-admin-flag)) — and it is deliberately
+silent about notes: an administrator is not a person who may read everybody's,
+and the day somebody wants that, it is a sharing rule rather than a role check.
+Ownership needs none of it: a `WHERE` clause, in one place, that no code path
+can forget to consult.
 
 The seam that made it one line rather than a refactor is
 [`ICallerIdentity`](../src/Aerie.Api/Services/Auth/CallerIdentity.cs): "who is

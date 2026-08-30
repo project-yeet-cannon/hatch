@@ -59,9 +59,16 @@ public class EfAuthGrant
     /// somebody is the next thing to key on this column (docs/quill.md).
     ///
     /// Which makes what this is *not* worth stating: there is no permission
-    /// model behind it yet. Nothing reads Person.IsAdmin, and no endpoint
-    /// answers differently for one person than for another - a global role
-    /// wants the lockout path in docs/auth-architecture.md designed first.
+    /// model behind it yet. There is one global role - AdminGate reads
+    /// Person.IsAdmin off this link to decide who is served the admin app -
+    /// and outside the operator verbs it guards, no endpoint answers
+    /// differently for one person than for another.
+    ///
+    /// One consequence of the nullability above, now that something reads it:
+    /// a grant with no person is never an administrator. That is correct and
+    /// deliberate - the hallway tablet belongs to the house - but it means an
+    /// operator's own phone has to be *linked* on the Sessions page, not merely
+    /// enrolled, before the flag on their person does anything.
     /// </summary>
     public Guid? PersonId { get; set; }
 

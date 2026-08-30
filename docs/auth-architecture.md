@@ -23,6 +23,11 @@ sharing one with somebody — read, or write — is the next step in that direct
 What does not exist yet is a permission model to express it in. See
 [A person is an authorization input](#a-person-is-an-authorization-input).
 
+One global role does exist: `Person.IsAdmin` decides who is served the admin app
+and who may take the operator verbs behind it, behind a config switch that is
+off until an operator turns it on. It is one boolean and it is not the beginning
+of a role system. See [The admin flag](#the-admin-flag).
+
 Two properties are worth stating up front because most of the rest follows from
 them:
 
@@ -43,7 +48,7 @@ This document is the why.
 
 | Host | Gated | Notes |
 |---|---|---|
-| `home.${DOMAIN}` | Yes, at `/` | Every family app, the admin app, the docs browser. The allow-list below is what stays reachable through it, in one place, rather than a second list of unannotated paths that could disagree. |
+| `home.${DOMAIN}` | Yes, at `/` | Every family app, the admin app, the docs browser. The allow-list below is what stays reachable through it, in one place, rather than a second list of unannotated paths that could disagree. The admin app has a second boundary inside this one — see [The admin flag](#the-admin-flag) — which is about *which* enrolled person, not about being enrolled. |
 | `kiosk.${DOMAIN}` | Yes, at `/` | The dashboard the tablets load. Its Ingress carries auth *first* in the middleware list, ahead of the root rewrite: rewriting a request that is about to be refused wastes the work and puts the rewritten path into the return-to. |
 | `files.${DOMAIN}` | No | The kiosk APK and its signing checksum are public by design. This host simply never gets the annotation, and `Auth:ExemptHosts` repeats it so the in-process gate agrees with the proxy. |
 | `share.${DOMAIN}` | No | dufs holds its own credential ([`file-share.md`](file-share.md)). Deliberately left alone: the share is slated for a rebuild, and annotating an Ingress in front of something that is about to be replaced buys nothing. Its Ingress is the one line to add when that changes. |
@@ -207,6 +212,35 @@ Only an actual `302` from an un-enrolled client proves either one.
 > The `fail` guard in `middleware-auth.yaml` is what turned that into a named,
 > failed reconcile instead of a cluster reporting Ready with the wall down.
 > Keep it — the next bad value will be a typo.
+
+### `auth.admin` is the second axis
+
+`auth.mode` says *where the wall stands*. It does not say anything about who is
+behind it, because for the wall's whole first life everyone behind it was the
+same. `auth.admin` — `ADMIN_MODE`, `none | enforced` — is the value that
+changes that, and it is a second axis rather than a fourth rung for a reason
+worth stating: the two answer different questions and compose freely. A ladder
+with `admin` on the top rung would say enforcement implies `full`, which is
+false, and would make the two impossible to roll back independently.
+
+| `auth.admin` | `Auth__EnforceAdmin` | Effect |
+|---|---|---|
+| `none` | `false` | every enrolled device can do everything — the pre-flag posture |
+| `enforced` | `true` | the admin app and its verbs want a person carrying `IsAdmin` |
+
+It is meaningless without a wall, and
+[`AdminGate`](../src/Aerie.Api/Services/Auth/AdminGate.cs) enforces that pairing
+rather than trusting it: `Enabled` reads *both* switches, so `enforced` on an
+install at `auth.mode: none` stays dormant. That combination is not an error the
+chart can refuse — it renders fine — so `Test-AppTier.ps1` names it instead, in
+the auth.5 checks. An operator who asked for enforcement and silently did not
+get it is precisely the half-state those checks exist for.
+
+The vocabulary rule from the box above applies here unchanged, and this value is
+where it would have bitten next: the obvious pair for a yes/no is `off | on`,
+which is exactly the pair that broke a reconcile on 2026-08-21. Neither `none`
+nor `enforced` is a YAML scalar of any other type, and `middleware-auth.yaml`
+carries the same `fail` guard for it.
 
 ### Where the wall is, and is not, deployed
 
@@ -456,12 +490,11 @@ So the thing to be careful about is not whether a person may decide something.
 It is that there is not yet a permission *model*, and the shapes below are the
 two ways one gets built badly:
 
-- **A global role bolted on early.** `IsAdmin` exists and nothing reads it, and
-  that is still correct — not because a person may not decide things, but
-  because a household-wide "administrator" is the coarsest possible answer to a
-  question nobody has asked yet, and the deploy that first enforces it is the
-  deploy that can lock everyone out. See below, and
-  [Deferred on purpose](#deferred-on-purpose).
+- **A global role bolted on early.** `IsAdmin` is now read — by exactly one
+  boundary, behind a config switch, and the care it was owed is spent in
+  [The admin flag](#the-admin-flag) rather than skipped. It remains the coarsest
+  possible answer, and it is deliberately not the shape the *next* question gets
+  answered in.
 - **Per-module rules invented in a corner.** Quill's ownership is the first
   clause of every query in the module — a `WHERE`, not a check some code path
   can forget to consult — and every refusal is a blank `404`, because a `403`
@@ -472,10 +505,11 @@ two ways one gets built badly:
   promoted, rather than to write a second version of it.
 
 What holds today, as a description of the code rather than a rule for all time:
-no endpoint behaves differently for one person than for another, and there is no
-role, scope, or permission table. Ownership scoping is ordinary and needs no
-ceremony. Changing what a *verb* does based on who is asking is the thing that
-should arrive with a design attached.
+there is one global role and no scope or permission table, and outside the
+handful of operator verbs it guards, no endpoint behaves differently for one
+person than for another. Ownership scoping is ordinary and needs no ceremony.
+Changing what a *verb* does based on who is asking is the thing that should
+arrive with a design attached — which is what the section below is.
 
 The mechanism is [`ICallerIdentity`](../src/Aerie.Api/Services/Auth/CallerIdentity.cs),
 the one way anything outside `Services/Auth/` asks who is calling. It resolves
@@ -486,6 +520,78 @@ perfectly good cookie when the wall is off and a person-scoped feature that went
 dark under `AUTH_MODE=none` would be dark for every developer. `AuthController`
 had carried that fallback privately since the wall landed — the second asker is
 what turned it into a seam.
+
+### The admin flag
+
+`Person.IsAdmin` had been carried for one release and read by nothing, on the
+explicit condition that whatever eventually read it would design the lockout
+path first. This is that design.
+
+**What it guards.** Two boundaries, and neither is a permission model:
+
+- **The admin app's bundle.** `/apps/admin` and everything under it — the
+  assets *and* the client-side deep links, which is why
+  [`AdminAppMiddleware`](../src/Aerie.Api/Common/AdminAppMiddleware.cs) is a
+  path check in the pipeline rather than a filter on a route. Guarding only the
+  static files would leave `/apps/admin/devices` serving `index.html` through
+  `MapFallbackToFile` to anyone.
+- **The verbs behind it.** Roughly forty actions carrying
+  [`[RequireAdmin]`](../src/Aerie.Api/Common/RequireAdminAttribute.cs), listed
+  and justified in `AdminSurfaceTests`.
+
+**The shape of the audit**, which is the part worth carrying forward:
+
+- **Shaping the house is guarded; operating it is not.** Creating a zone,
+  importing a device, wiring a panel — guarded. Turning a lamp on, nudging a
+  thermostat, triggering a routine, playing music — open, and it has to stay
+  open, because the dashboard runs on a hallway tablet nobody signs in to and
+  the whole promise is that the family never has to.
+- **Reads stay open, with two exceptions.** Both are inventories of credentials
+  rather than facts about the house: the session lists
+  (`AuthController.ListGrants`, `PeopleController.GetSessions`) and the
+  connection settings (`SettingsController` whole, and a camera's host/port/user
+  on `DevicesController`). Watching a camera feed is a different question and
+  stays open.
+- **The family modules are untouched.** Quill, Gather, Storage and Game are the
+  household's own apps. Their authorization is ownership, expressed as a `WHERE`
+  clause inside the module, and a global role has nothing to say about them.
+
+**Two refusal codes, deliberately different.** The bundle 404s; the API 403s.
+A 404 on `/apps/admin` is indistinguishable from an install that never built
+that SPA — several installs have not, since `Program.cs` mounts each one only
+if its directory exists — so it conceals something real. A 404 on
+`DELETE /api/zones/{id}` conceals nothing, because the unguarded `GET` already
+listed the zone, and it would cost every future debugging session the
+difference between "gone" and "not yours".
+
+**Why enforcement is a config switch and not inferred from the data.** Every
+tempting alternative — *enforce once somebody is flagged*, *enforce once a
+flagged person holds a device* — makes a checkbox on the People page the thing
+that turns enforcement on. That is a trap with the exact shape of the lockout
+this column was carried early to avoid: an operator ticks the box for the wrong
+person and loses the page they would have fixed it from. `ADMIN_MODE` cannot be
+tripped over. Turning it on is a deploy; turning it off again is the same
+deploy; and neither is reachable from inside a browser session that is about to
+lose its access.
+
+**The order of operations, which the switch does not enforce for you.** Flag at
+least one person *and* link their device on the Sessions page, then set
+`ADMIN_MODE=enforced`. Doing it the other way locks the household out of the
+admin app until the next deploy, and the recovery is
+[the rollback](#bootstrap-and-lockout-recovery) rather than anything reachable
+from a browser. Note the sharpest edge: `POST /api/auth/invites` is itself
+guarded, so an install that enforces with nobody flagged can no longer enrol
+anybody at all. The migrate Job's bootstrap invite still fires — it runs
+server-side, on an install with no live access — but that is a floor, not a
+plan.
+
+**What it is not.** It is not a permission model, and adopting it as one would
+be the mistake this section is trying to prevent. `IsAdmin` answers "may this
+person operate the house", which is a question with two answers. The question
+the household is actually walking toward — *this* person, on *this* row, for
+*this* verb, which is what "share this note with Ada, read only" means — is not
+a coarser version of it and will not be built by adding flags next to this one.
+See [Deferred on purpose](#deferred-on-purpose).
 
 ### The rules that must not quietly change
 
@@ -503,11 +609,17 @@ what turned it into a seam.
   ([A person is an authorization input](#a-person-is-an-authorization-input)).
   Sharing will widen that expression; it must not add a second one beside it,
   and it must not become a check that runs after the rows are already loaded.
-- **`IsAdmin` grants nothing.** No branch reads it. It exists early so that
-  whatever eventually does — roles, scopes, RBAC — inherits a column with real
-  answers in it, rather than an empty one whose first population is also the
-  deploy that locks the household out. Do not start reading it for
-  authorization without designing that lockout path first.
+- **`IsAdmin` is enforced from config, never from the data.** The switch is
+  `ADMIN_MODE`, and the reason is in [The admin flag](#the-admin-flag): every
+  scheme that infers enforcement from whether anyone is flagged turns a checkbox
+  on the People page into the thing that enables it, and hands an operator a
+  lockout they did not ask for. If a future change wants enforcement to follow
+  the data, it needs a recovery path that is not "wait for the next deploy"
+  first.
+- **The write path for `IsAdmin` is guarded by `IsAdmin`.** `PeopleController`'s
+  `PUT` is where the flag is set, so leaving it open would let any enrolled
+  device promote itself and make the whole boundary a formality. Anything that
+  ever adds a second way to write that column inherits this.
 
 ### What a name may be
 
@@ -581,6 +693,25 @@ device has no way in through the front door. Two recoveries, in order:
 A tablet that lost its cookie is a physical visit either way; turning the wall
 off gets the house back, not the tablet's enrollment.
 
+**The admin flag adds a third lockout, with its own smaller rollback.** Everyone
+is enrolled and the house works, but the admin app 404s and nobody can enrol
+anyone new, because `POST /api/auth/invites` is guarded too
+([The admin flag](#the-admin-flag)). This is what an install that set
+`ADMIN_MODE=enforced` before flagging anybody looks like. Recover in this order:
+
+- **`ADMIN_MODE=none`**, re-run Provision 4, let Flux reconcile. Strictly
+  smaller than turning the wall off — every device stays enrolled and the wall
+  stays up — so reach for it first and re-enable once somebody is flagged and
+  linked.
+- **The bootstrap invite still fires** if the install also has no grants at all,
+  since that branch asks `HasAnyAccessAsync` rather than anything about people.
+  It is a floor under the worst case, not the recovery to plan around.
+
+The one recovery that is deliberately *not* here is a database edit. Setting
+`IsAdmin` in Postgres by hand would work, and every time it is described as a
+supported step it becomes the step people take instead of fixing the config that
+caused it.
+
 ## Verifying it
 
 `Test-AppTier.ps1` asserts the wall two-sidedly and mode-aware: at `none`
@@ -589,6 +720,15 @@ nothing is walled, at `full` an unauthenticated `home.${DOMAIN}/` is a `302` to
 and `files.`/`status.` are unchanged. With `AERIE_TEST_GRANT_TOKEN` set
 ([`secrets-architecture.md`](secrets-architecture.md)) it also proves the wall
 **serves** an enrolled device, which is the half a refusal check cannot cover.
+
+The admin flag is checked from the same auth.5 block, and what it can assert
+from outside the cluster is narrow on purpose: that `ADMIN_MODE` is a value the
+chart knows, and that `enforced` was not asked for on an install at
+`AUTH_MODE=none`, where it renders happily and then stays dormant. The rest of
+the boundary is unit-tested rather than probed — `AdminGateTests`,
+`AdminAppMiddlewareTests`, `RequireAdminAttributeTests`, and `AdminSurfaceTests`,
+which is the endpoint audit written down as an assertion so that an endpoint
+added later cannot join the open set by nobody noticing.
 
 **Test a wall with a browser, not `curl -I`.** `curl` with `Accept: */*` gets
 the 401 path and never exercises the redirect, the `Location` it carries, or
@@ -627,16 +767,16 @@ decision above.
   finding the operator — which a permanent grant means you rarely do. It is also
   the point at which a grant stops being a device and starts being a person.
 - **A permission model.** People shipped (see
-  [Whose device is this](#whose-device-is-this)) and are read by one module;
-  what is missing is the vocabulary for saying so generally. The near-term
-  shape is *contextual* rather than global — a person, a resource, and a verb,
-  which is what "share this note with Ada, read only" is — and the model that
-  answers that also answers most of what a `[RequireScope]` filter would, from
-  the other end. Global roles are the part that wants care: before a single
-  household-wide check is enforced there needs to be a lockout path, since the
-  member holding the bootstrap invite is the one who would need it.
-  `Person.IsAdmin` is already being carried and edited, so that work starts
-  against a populated column rather than an empty one.
+  [Whose device is this](#whose-device-is-this)), are read by one module, and
+  now carry one global role ([The admin flag](#the-admin-flag)). What is still
+  missing is the vocabulary for saying any of it generally. The near-term shape
+  is *contextual* rather than global — a person, a resource, and a verb, which
+  is what "share this note with Ada, read only" is — and the model that answers
+  that also answers most of what a `[RequireScope]` filter would, from the other
+  end. The admin flag does not get it started: it is the coarsest possible
+  answer, deliberately taken as far as one boolean goes and no further, and the
+  temptation it creates is to add a second boolean beside it. A second one is
+  the signal that this work is due, not that the shape was right.
 - **`logs.` and `status.` behind the same wall.** One annotation each, once
   OpenSearch Dashboards' and Uptime Kuma's own logins can be told to trust
   `X-Aerie-Label` as a proxy-authenticated user.

@@ -35,19 +35,31 @@ hold across all of them.
   [`types.ts`](../src/Aerie.Web/apps/dashboard/src/types.ts) are two halves of one
   contract; so are the dashboard's mock and test data sources, which must produce
   every field the C# side does or `make test-web` fails on the type error.
-- **One gate, not per-endpoint permissions.** Every endpoint below sits behind
-  the house wall ([`auth-architecture.md`](auth-architecture.md)): a request
-  carries a device grant or it is refused, and nothing here checks anything finer
-  than that. A refusal is a `302` to the sign-in shell for a document request and
-  a bare `401` for a `fetch` — which is a response shape every caller has to
-  handle, and for a while did not. Outside the wall are the allow-listed paths,
-  each there for a stated reason — the health probes, `/media/*`,
-  `/api/ui-logs`, `/api/vm-console-logs` (which carries its own shared-secret
-  header, strictly stronger than a cookie), `/api/kiosk/provisioning-info`, and
-  the sign-in endpoints themselves. The tailnet boundary is still the outer
-  layer: the domain has no public DNS
+- **One gate, and one flag.** Every endpoint below sits behind the house wall
+  ([`auth-architecture.md`](auth-architecture.md)): a request carries a device
+  grant or it is refused. A refusal is a `302` to the sign-in shell for a
+  document request and a bare `401` for a `fetch` — which is a response shape
+  every caller has to handle, and for a while did not. Outside the wall are the
+  allow-listed paths, each there for a stated reason — the health probes,
+  `/media/*`, `/api/ui-logs`, `/api/vm-console-logs` (which carries its own
+  shared-secret header, strictly stronger than a cookie),
+  `/api/kiosk/provisioning-info`, and the sign-in endpoints themselves. The
+  tailnet boundary is still the outer layer: the domain has no public DNS
   ([`reverse-proxy-architecture.md`](reverse-proxy-architecture.md),
   [`tailscale-vpn-architecture.md`](tailscale-vpn-architecture.md)).
+- **Some endpoints want an administrator.** Marked **Admin** in the tables
+  below, and the rule behind the marks is worth knowing before adding one:
+  *shaping* the house is guarded — creating a zone, importing a device, wiring a
+  panel, editing a person, minting a session — while *operating* it is not.
+  Turning a light on, nudging a thermostat, running a routine and playing music
+  stay open, because the dashboard runs on a hallway tablet nobody signs in to.
+  Reads stay open too, with two exceptions that are inventories of credentials
+  rather than facts about the house: the session lists and the connection
+  settings. Refusals are `403` with `{"error": "not_admin" | "no_person" |
+  "no_grant"}`, and the whole thing is dormant until an operator sets
+  `ADMIN_MODE=enforced`
+  ([the admin flag](auth-architecture.md#the-admin-flag)). The audit is pinned
+  by `AdminSurfaceTests`, so this list and the code cannot drift.
 - **Secret-valued settings are redacted on read**, wall or no wall.
 - **Three replicas.** Nothing may sit in process memory that a second replica
   needs; the OAuth state table is what this rule looks like in practice.
@@ -66,10 +78,10 @@ sub-resources under it exist for reuse, debugging, and other screens.
 |---|---|---|
 | `GET /api/dashboard` | `DashboardData` | **Primary.** Composes zones + outside + routines + cameras + panels + the calendar agenda + outdoor hazards. Query: `historyHours` (9), `forecastHours` (7), `bucketMinutes` (30). |
 | `GET /api/zones` · `GET /api/zones/{id}` | `ZoneDto` | Zone CRUD for the admin app. |
-| `POST /api/zones` · `PUT /api/zones/{id}` · `DELETE /api/zones/{id}` | `ZoneDto` | |
+| `POST /api/zones` · `PUT /api/zones/{id}` · `DELETE /api/zones/{id}` | `ZoneDto` | **Admin.** |
 | `GET /api/zones/climate` · `GET /api/zones/{id}/climate` | `ZoneClimate` | Current snapshot, history, forecast. Same window query params as `/api/dashboard`. `currentAsOf` dates `currentTempF` — null both when there is no reading and when the value fell back to a history bucket, since a bucket boundary is not a moment anything was measured. Without it `currentTempF` is the newest sample anywhere in the nine-hour window, so a sensor that died at noon still reads confidently at 5pm. |
 | `GET /api/zones/{id}/readings` | `TempPoint[]` | Bucketed series. Query: `from`, `to`, `bucketMinutes`. |
-| `GET /api/zones/{id}/comfort` · `PUT …` | `ComfortRange` | The zone's comfort band. |
+| `GET /api/zones/{id}/comfort` · `PUT …` | `ComfortRange` | The zone's comfort band. The `PUT` is **admin**; the read is not. |
 | `GET /api/outside` | `OutsideClimate` | Outside temperature, humidity, sun. |
 | `GET /api/sun-events` | `SunEvents` | Computed locally (`SolarCalculator`), not read from HA. Query: `at`, `lat`, `lon` — all defaulting to now and the site's coordinates, which is what makes it testable against simulated dates. |
 
@@ -82,14 +94,14 @@ a channel are the ones that reach the house.
 | Method & route | Purpose |
 |---|---|
 | `GET /api/devices` · `GET /api/devices/{id}` | Devices with their channels. |
-| `POST /api/devices` · `PUT /api/devices/{id}` · `DELETE /api/devices/{id}` | Device CRUD. |
-| `POST /api/devices/{id}/channels` · `PUT …/{channelId}` · `DELETE …/{channelId}` | Channel sub-resource CRUD. |
-| `POST /api/devices/{id}/channels/{channelId}/power` · `/setpoint` · `/mode` | Actuation, through the command ledger. |
+| `POST /api/devices` · `PUT /api/devices/{id}` · `DELETE /api/devices/{id}` | **Admin.** Device CRUD. |
+| `POST /api/devices/{id}/channels` · `PUT …/{channelId}` · `DELETE …/{channelId}` | **Admin.** Channel sub-resource CRUD. |
+| `POST /api/devices/{id}/channels/{channelId}/power` · `/setpoint` · `/mode` | Actuation, through the command ledger. Open, and it stays open — this is what the hallway tablet does. |
 | `POST …/{channelId}/trigger-scene` · `/play-media` | Actuation for scene and media channels. |
-| `POST …/{channelId}/refresh-options` | Re-reads the channel's available options (HVAC modes, sources) from HA. |
-| `POST /api/devices/{id}/backfill` | Backfills channel history from HA. |
+| `POST …/{channelId}/refresh-options` | **Admin.** Re-reads the channel's available options (HVAC modes, sources) from HA. Maintenance on the model rather than use of the thing modeled. |
+| `POST /api/devices/{id}/backfill` | **Admin.** Backfills channel history from HA. |
 | `GET /api/devices/{id}/history` · `GET …/{channelId}/history` | Stored measurement history. |
-| `GET /api/discovery/unmapped` | HA devices not yet imported, with suggested grouping and channels. |
+| `GET /api/discovery/unmapped` | **Admin.** HA devices not yet imported, with suggested grouping and channels. |
 
 Every write to HA goes through `IClimateCommandService`, which ledgers it — so
 each of the actuation endpoints above is recorded action by action with a
@@ -105,7 +117,7 @@ each of the actuation endpoints above is recorded action by action with a
 | Method & route | Purpose |
 |---|---|
 | `GET /api/routines` · `GET /api/routines/{id}` | Routines with their actions. |
-| `POST /api/routines` · `PUT /api/routines/{id}` · `DELETE /api/routines/{id}` | CRUD. A routine's actions are embedded in the write request and replaced wholesale — the action list *is* the routine. |
+| `POST /api/routines` · `PUT /api/routines/{id}` · `DELETE /api/routines/{id}` | **Admin.** CRUD. A routine's actions are embedded in the write request and replaced wholesale — the action list *is* the routine. |
 | `POST /api/routines/{id}/trigger` | Runs the actions in `SortOrder`, stopping at the first that doesn't succeed. |
 | `POST /api/routines/{id}/turn-off` | The inverse for a toggle routine: `SetPower false` to every `SetPower` action's channel. |
 
@@ -120,7 +132,7 @@ role-to-channel binding rules are in
 | Method & route | Returns | Notes |
 |---|---|---|
 | `GET /api/panels` · `GET /api/panels/{id:guid}` | `PanelDto` | Panels with their items and each control's bindings. The admin's shape. |
-| `POST /api/panels` · `PUT /api/panels/{id:guid}` · `DELETE /api/panels/{id:guid}` | `PanelDto` / 204 | CRUD. Items are embedded and replaced wholesale, exactly as a routine's actions are — the item list *is* the panel, and `SortOrder` has to stay coherent across both item kinds, which it cannot if the halves arrive in separate requests. Create and update load every referenced channel, run `PanelBindingRules.Validate` per item, and answer `400` with the reason before saving: an invalid panel never reaches the database. "Is this routine id real?" is asked separately, because the rules class is pure and that question needs the database — without it a bad routine id would be a `500` for what is plainly a bad request. |
+| `POST /api/panels` · `PUT /api/panels/{id:guid}` · `DELETE /api/panels/{id:guid}` | `PanelDto` / 204 | **Admin.** CRUD. Items are embedded and replaced wholesale, exactly as a routine's actions are — the item list *is* the panel, and `SortOrder` has to stay coherent across both item kinds, which it cannot if the halves arrive in separate requests. Create and update load every referenced channel, run `PanelBindingRules.Validate` per item, and answer `400` with the reason before saving: an invalid panel never reaches the database. "Is this routine id real?" is asked separately, because the rules class is pure and that question needs the database — without it a bad routine id would be a `500` for what is plainly a bad request. |
 | `GET /api/panels/{id:guid}/state` | `PanelStateDto` | Live per-item state, polled ~5s while the overlay is open. One `ChannelLatestValues.GetLatestAsync` call for the union of the opened panel's bound channels and its routine items' `SetPower` channels — nothing outside the panel is read. `minF`/`maxF`/`stepF` come back resolved against `PanelDefaults` rather than passed through, so the client's clamp and the server's work from the same numbers. |
 | `POST /api/panels/{id:guid}/items/{itemId:guid}/power` | `PanelItemStateDto` | `{ on: bool }` — absolute, not a toggle, because the wall's copy of the state can be a poll stale. A `Switch` dispatches `SetPower`; a `Thermostat` dispatches `SetPower` when a `Power` role is bound and otherwise `SetHvacMode` to its `OnMode` / `"off"`. |
 | `POST /api/panels/{id:guid}/items/{itemId:guid}/setpoint` | `PanelItemStateDto` | `{ valueF: decimal }`. Clamped into `MinF`/`MaxF`, snapped to the nearest `StepF` **measured from `MinF`** so every reachable value is one the ⊖/⊕ buttons can also land on, then clamped again — a range the step doesn't divide evenly can snap its own top upward and out. Dispatches `SetTemperature`. |
@@ -154,9 +166,9 @@ happen, and live video. Design and reasoning in
 |---|---|---|
 | `GET /api/motion-events/stream` | `text/event-stream` | One frame per motion transition, `{"deviceId":…,"isActive":…}`. Absolute state, not a toggle — a repeat is permitted and clients must treat it as a no-op. On connect it replays whatever is already in motion, then heartbeats every 20s under `event: heartbeat` (which `EventSource` ignores by default). Per replica: each `api` pod holds its own Home Assistant subscription. |
 | `GET /api/devices/{id:guid}/camera/stream` | WebSocket | A byte-transparent relay to go2rtc: a short JSON control exchange, then fragmented MP4 forever. **`400`** without an upgrade, **`404`** no enabled camera with a `CameraFeed` channel, **`409`** the camera has no address configured yet, **`502`** go2rtc refused or is unreachable. Registers the stream with go2rtc on the way past, so a restarted go2rtc self-heals on the next viewer. |
-| `GET /api/devices/{id:guid}/camera-connection` | `CameraConnectionDto` | How to reach the camera. Answers for any device, configured or not — an unconfigured camera returns the defaults with no host, which is what the form needs to render itself. Never carries the password; `hasPassword` is the flag that keeps an empty box unambiguous. |
-| `PUT /api/devices/{id:guid}/camera-connection` | `CameraConnectionDto` | Upsert. A **null** password leaves the stored one alone, an empty string clears it — a save that only changed the host must not silently drop the credential. Blank host means "use what Home Assistant reported", not the empty string. |
-| `DELETE /api/devices/{id:guid}/camera-connection` | 204 | Forgets the connection, password included. |
+| `GET /api/devices/{id:guid}/camera-connection` | `CameraConnectionDto` | **Admin** — a host, port, path and username is a route straight to the camera around Aerie. Watching the feed is a different question and stays open. How to reach the camera. Answers for any device, configured or not — an unconfigured camera returns the defaults with no host, which is what the form needs to render itself. Never carries the password; `hasPassword` is the flag that keeps an empty box unambiguous. |
+| `PUT /api/devices/{id:guid}/camera-connection` | `CameraConnectionDto` | **Admin.** Upsert. A **null** password leaves the stored one alone, an empty string clears it — a save that only changed the host must not silently drop the credential. Blank host means "use what Home Assistant reported", not the empty string. |
+| `DELETE /api/devices/{id:guid}/camera-connection` | 204 | **Admin.** Forgets the connection, password included. |
 
 `GET /api/dashboard` carries the cameras too, as `CameraSummary(Id, Name,
 IsConfigured)` — the kiosk's button row is rendered off the snapshot it already
@@ -192,13 +204,13 @@ a 302 to `/apps/admin/calendars?connected=<email>` or `?error=<code>`.
 
 | Method & route | Returns | Notes |
 |---|---|---|
-| `GET /api/calendar/oauth/start` | 302 to Google | 400 with an actionable message when `GoogleClientId`/`GoogleClientSecret` are unset. Records PKCE state in `OAuthStates` — a table, because the callback can land on a different replica. |
-| `GET /api/calendar/oauth/callback` | 302 to the admin app | Query: `code`, `state`, `error`. Single-use state; upserts the account by (`Provider`, `AccountEmail`) and runs calendar discovery before redirecting. |
+| `GET /api/calendar/oauth/start` | 302 to Google | **Admin** — the one guarded endpoint a browser *navigates* to, so a refusal renders as a bare JSON body; the only link to it is on a page the same flag withholds. 400 with an actionable message when `GoogleClientId`/`GoogleClientSecret` are unset. Records PKCE state in `OAuthStates` — a table, because the callback can land on a different replica. |
+| `GET /api/calendar/oauth/callback` | 302 to the admin app | **Not** admin-guarded, deliberately: nobody arrives here by choosing to, and the single-use state row is a stronger claim than a session. Query: `code`, `state`, `error`. Single-use state; upserts the account by (`Provider`, `AccountEmail`) and runs calendar discovery before redirecting. |
 | `GET /api/calendar/accounts` | `CalendarAccountDto[]` | Connected accounts, each with its calendars, `NeedsReauth`, `LastSyncedAt`, `LastSyncError`. **Never carries token material** — no field on the DTO can. |
-| `POST /api/calendar/accounts/{id}/refresh-calendars` | `CalendarDiscoveryDto` | Re-runs discovery. 502 when the provider could not be listed; the same message lands on the account's `LastSyncError`. |
-| `PUT /api/calendar/calendars/{id}` | `CalendarDto` | `{ included, colorOverride, sortOrder }` — the admin-owned half. `colorOverride` must be a hex color; discovery never writes these three fields. |
-| `DELETE /api/calendar/accounts/{id}` | 204 | Best-effort revoke with Google, then delete. Calendars and cached events cascade. A revoke failure is logged, not fatal. |
-| `POST /api/calendar/sync` | `CalendarSyncDto` | Runs the event sync now instead of at the `SyncCalendarEvents` job's next firing, for the minute after a calendar is included. Always 200 — the service is fail-soft, and per-account reasons come back on the account rows. |
+| `POST /api/calendar/accounts/{id}/refresh-calendars` | `CalendarDiscoveryDto` | **Admin.** Re-runs discovery. 502 when the provider could not be listed; the same message lands on the account's `LastSyncError`. |
+| `PUT /api/calendar/calendars/{id}` | `CalendarDto` | **Admin.** `{ included, colorOverride, sortOrder }` — the admin-owned half. `colorOverride` must be a hex color; discovery never writes these three fields. |
+| `DELETE /api/calendar/accounts/{id}` | 204 | **Admin.** Best-effort revoke with Google, then delete. Calendars and cached events cascade. A revoke failure is logged, not fatal. |
+| `POST /api/calendar/sync` | `CalendarSyncDto` | **Admin.** Runs the event sync now instead of at the `SyncCalendarEvents` job's next firing, for the minute after a calendar is included. Always 200 — the service is fail-soft, and per-account reasons come back on the account rows. |
 
 ## Outdoor hazards
 
@@ -290,8 +302,8 @@ than going black.
 |---|---|---|
 | `GET /api/photos/status` | `PhotosStatusDto` | Whether a host and key are set **and whether Immich currently accepts them for what Photos does**, since a credential that is merely present tells an operator nothing. Probes `GET /api/server/about` (cheap, reports a version) and falls through to `GET /api/albums` on a 401 — a key scoped to exactly what this module needs is *refused* at the first and works at the second, and a red light over a working system is the worst kind of wrong answer. Never echoes the key. |
 | `GET /api/photos/albums` | `PhotoAlbumDto[]` | Every album Aerie knows about, in the operator's arrangement. `hasCover` rather than a cover URL: the client builds one against the route below. |
-| `POST /api/photos/albums/refresh` | `PhotoAlbumSyncDto` | Re-lists albums from Immich. Immich owns name, description, cover and count; Aerie owns `included` and `sortOrder`, and a refresh never touches those. A failed fetch deletes **nothing** — the empty list an unreachable server returns must not be read as "there are no albums". `400` when unconfigured, `502` when Immich refused. |
-| `PUT /api/photos/albums/{id:guid}` | `PhotoAlbumDto` | The admin-owned half. A null `sortOrder` leaves the arrangement alone, which is what a checkbox means. Drops the cached library so the wall sees the change on its next poll. |
+| `POST /api/photos/albums/refresh` | `PhotoAlbumSyncDto` | **Admin.** Re-lists albums from Immich. Immich owns name, description, cover and count; Aerie owns `included` and `sortOrder`, and a refresh never touches those. A failed fetch deletes **nothing** — the empty list an unreachable server returns must not be read as "there are no albums". `400` when unconfigured, `502` when Immich refused. |
+| `PUT /api/photos/albums/{id:guid}` | `PhotoAlbumDto` | **Admin.** The admin-owned half. A null `sortOrder` leaves the arrangement alone, which is what a checkbox means. Drops the cached library so the wall sees the change on its next poll. |
 | `GET /api/photos/albums/{id:guid}/cover` | image bytes | The album's own thumbnail, proxied. Reachable because the album is one Aerie knows about — a different question from the one below. |
 | `GET /api/photos/carousel?count=` | `PhotoCarouselDto` | A shuffled sample of the included albums' photos, shuffled **server-side per request** so two tablets in two rooms are not on the same photo. Capped at 200. Carries the library's error alongside the photos when it is stale, so the wall keeps drawing and the kiosk still logs why. |
 | `GET /api/photos/assets/{assetId}/image?size=` | image bytes | One rendition, proxied — `preview` (~1440px, the carousel) or `thumbnail`. **Serves an asset only if an included album holds it.** Without that allow-list this route is a hole through to every photo in the house for anything that reaches the origin. Originals are unreachable by construction: the client knows two rendition names and refuses the rest before making a request. `private, max-age=86400, immutable`, since an asset id names one photo forever. |
@@ -352,8 +364,8 @@ never is.
 
 | Method & route | Returns | Notes |
 |---|---|---|
-| `GET /api/settings` · `GET /api/settings/{key}` | `SiteSettingDto[]` | Secret-valued keys (`HomeAssistantToken`, `KioskWifiPassword`, `GoogleClientSecret`, `AnthropicApiKey`, `ImmichApiKey`) come back redacted. |
-| `PUT /api/settings/{key}` · `DELETE /api/settings/{key}` | `SiteSettingDto` | Secret-valued keys are obfuscated on write (`SecretObfuscator`). |
+| `GET /api/settings` · `GET /api/settings/{key}` | `SiteSettingDto[]` | **Admin** — this controller is guarded whole, reads included, because the connection settings for everything the house talks to are reconnaissance rather than a fact about the house. Secret-valued keys (`HomeAssistantToken`, `KioskWifiPassword`, `GoogleClientSecret`, `AnthropicApiKey`, `ImmichApiKey`) come back redacted. |
+| `PUT /api/settings/{key}` · `DELETE /api/settings/{key}` | `SiteSettingDto` | **Admin.** Secret-valued keys are obfuscated on write (`SecretObfuscator`). |
 
 ## Auth
 
@@ -366,30 +378,32 @@ Design and reasoning in [`auth-architecture.md`](auth-architecture.md).
 | `POST /api/auth/redeem` | `AuthGrantDto` | Turns an invite code into a grant and sets the cookie. Rate-limited per client IP (per-process, so three replicas is three times the budget — the Warning log per refusal is the real detector). **Not gated by `Auth:Enabled`**, and cannot be: there would be no way to enroll the first device. |
 | `GET /api/auth/me` | `AuthGrantDto` | Who this device is. Answers the same way with the wall down, which is why it resolves the grant itself rather than relying on the middleware. |
 | `POST /api/auth/sign-out` | 204 | Deletes the grant and expires the cookie. |
-| `GET /api/auth/grants` | `AuthGrantDto[]` | The admin app's Sessions list, newest first. Never carries token material. |
-| `DELETE /api/auth/grants/{id:guid}` | 204 | Revocation is a row delete. Refuses to revoke the caller's own grant, so nobody revokes their way out of the room. |
-| `POST /api/auth/invites` | `AuthInviteDto` | Mints an invite. The plaintext code exists exactly once, in this response — only its hash is stored. Optionally carries a `personId`, which the redemption puts on the grant it creates. |
-| `PUT /api/auth/grants/{id:guid}/person` | 204 | Claims a device for a person, or unclaims it with a null `personId`. The **only** write path for that link — the People page reads it and does not set it. Nothing in the gate reads the column. |
+| `GET /api/auth/grants` | `AuthGrantDto[]` | **Admin** — one of the two guarded reads in the app, because it is the inventory of every credential in the household. The admin app's Sessions list, newest first. Never carries token material. |
+| `DELETE /api/auth/grants/{id:guid}` | 204 | **Admin.** Revocation is a row delete. Refuses to revoke the caller's own grant, so nobody revokes their way out of the room. |
+| `POST /api/auth/invites` | `AuthInviteDto` | **Admin** — which is why an install that enforces the flag with nobody flagged can no longer enrol anybody; see the lockout recovery. Mints an invite. The plaintext code exists exactly once, in this response — only its hash is stored. Optionally carries a `personId`, which the redemption puts on the grant it creates. |
+| `PUT /api/auth/grants/{id:guid}/person` | 204 | **Admin.** Claims a device for a person, or unclaims it with a null `personId`. The **only** write path for that link — the People page reads it and does not set it. Admin-guarded. The wall does not read the column, but `AdminGate` does: a grant with no person is never an administrator. |
 
 ## People
 
 The household's members. A person is not an account — nothing signs in as one —
 but a person *is* an authorization input: [Quill](#quill) scopes its rows to
-one, and sharing is where that goes. What does not exist yet is a permission
-model, so nothing reads `IsAdmin` and no endpoint on this page answers
-differently for one person than for another. Design in
-[`auth-architecture.md`](auth-architecture.md#whose-device-is-this).
+one, and sharing is where that goes. `IsAdmin` is the one global role, and
+**every write on this page is guarded by it** — including the `PUT` that sets
+it, or any enrolled device could promote itself. The reads stay open: the family
+shell renders these names and faces. Enforcement is off until an operator sets
+`ADMIN_MODE=enforced`; refusals are `403`. Design in
+[`auth-architecture.md`](auth-architecture.md#the-admin-flag).
 
 | Method & route | Returns | Notes |
 |---|---|---|
 | `GET /api/people` | `PersonDto[]` | By name. Carries `sessionCount` and `photoUpdatedAt` rather than the photo itself — a list response that inlined avatars would be the size of the avatars. |
 | `GET /api/people/{id:guid}` | `PersonDto` | |
-| `POST /api/people` · `PUT /api/people/{id:guid}` | `PersonDto` | The name is normalized server-side (`Common/PersonName.cs`): NFC, whitespace collapsed, control and bidi characters stripped, zero-width joiner kept, at most 60 **grapheme clusters**. Not escaped — EF parameterizes the write and React escapes the render, and a pre-escaped name grows ampersands every time someone opens the edit form. A refusal is a 400 whose body is the sentence to show the person at the form. |
-| `DELETE /api/people/{id:guid}` | 204 | Takes the photo with it (cascade) and **not** the sessions (`SetNull`). Deleting a person must never revoke a credential. |
-| `GET /api/people/{id:guid}/sessions` | `PersonSessionDto[]` | That person's enrolled devices, newest first. Read-only; 404 rather than an empty list for someone who does not exist, because "she has never held a tablet" and "this page is stale" are different answers. |
+| `POST /api/people` · `PUT /api/people/{id:guid}` | `PersonDto` | **Admin** — and this is the write that most needs it: `isAdmin` is set here, so an open `PUT` would let any enrolled device promote itself. The name is normalized server-side (`Common/PersonName.cs`): NFC, whitespace collapsed, control and bidi characters stripped, zero-width joiner kept, at most 60 **grapheme clusters**. Not escaped — EF parameterizes the write and React escapes the render, and a pre-escaped name grows ampersands every time someone opens the edit form. A refusal is a 400 whose body is the sentence to show the person at the form. |
+| `DELETE /api/people/{id:guid}` | 204 | **Admin.** Takes the photo with it (cascade) and **not** the sessions (`SetNull`). Deleting a person must never revoke a credential. |
+| `GET /api/people/{id:guid}/sessions` | `PersonSessionDto[]` | **Admin**, like the unsliced list. That person's enrolled devices, newest first. Read-only; 404 rather than an empty list for someone who does not exist, because "she has never held a tablet" and "this page is stale" are different answers. |
 | `GET /api/people/{id:guid}/photo` | image bytes | Served with the type sniffed at upload, `X-Content-Type-Options: nosniff`, and an ETag from the upload time. The URL is deliberately stable across uploads, so freshness comes from the validator and from the `?v=` the client appends. |
-| `PUT /api/people/{id:guid}/photo` | `PersonDto` | The body is the image, not a multipart form — there is one file and no fields beside it. The request's `Content-Type` is **ignored**; the type comes from the magic bytes (PNG, JPEG, GIF, WebP; SVG is refused because it is a document that can carry script). Capped at 2 MB by `[RequestSizeLimit]`, which Kestrel enforces during the read rather than after it. |
-| `DELETE /api/people/{id:guid}/photo` | 204 | |
+| `PUT /api/people/{id:guid}/photo` | `PersonDto` | **Admin.** The body is the image, not a multipart form — there is one file and no fields beside it. The request's `Content-Type` is **ignored**; the type comes from the magic bytes (PNG, JPEG, GIF, WebP; SVG is refused because it is a document that can carry script). Capped at 2 MB by `[RequestSizeLimit]`, which Kestrel enforces during the read rather than after it. |
+| `DELETE /api/people/{id:guid}/photo` | 204 | **Admin.** |
 
 ## Kiosk, apps, and logs
 
@@ -409,5 +423,5 @@ or retire it — the dashboard reads none of it.
 | Method & route | Purpose |
 |---|---|
 | `GET /api/homeassistant` | Stored environment readings. |
-| `POST /api/homeassistant` | Pulls the last two hours of `climate.*` and `sensor.h5110` history from HA. |
+| `POST /api/homeassistant` | **Admin.** Pulls the last two hours of `climate.*` and `sensor.h5110` history from HA. |
 | `GET /api/homeassistant/currentStates` | Live HA states for those two prefixes. |

@@ -148,9 +148,10 @@ express that generally, so a module doing it today owns the shape of its own
 answer and should copy Quill's: the person is a clause in the query rather than
 a check after the load, "who may read this" is one expression in one place, and
 every refusal is the same blank `404`. The two things that stay out of a module
-folder are a household-wide role (`IsAdmin` is read by nothing, and wants a
-lockout path designed first) and any endpoint whose *behaviour* changes with who
-is asking.
+folder are a household-wide role (`IsAdmin` is read in exactly one place, and it
+is the wall's, guarding the operator's own tools — a family app reaching for it
+is answering a question about the house rather than about its own rows) and any
+endpoint whose *behaviour* changes with who is asking.
 
 The tailnet boundary has not gone away either. It is now the outer of two, and
 the wall is what covers the devices on the house LAN that were never on the
@@ -309,9 +310,11 @@ Named so they're decisions rather than oversights.
   [Quill](quill.md) reads one, so what remains is the vocabulary rather than the
   principal. The nearer half is contextual — a person, a resource, a verb, which
   is what "share this note with Ada, read only" is, and it has a feature waiting
-  on it. The further half is global roles: `Person.IsAdmin` is carried and
-  unenforced, and wants a lockout path designed before a single check is
-  written.
+  on it. The further half is global roles, and one of those now exists:
+  `Person.IsAdmin` guards the admin app and the operator verbs behind it
+  ([the admin flag](auth-architecture.md#the-admin-flag)). It is one boolean
+  taken as far as one boolean goes — a second one beside it is the signal that
+  the contextual model is due, not that the shape was right.
 - **Offline writes** — offline reads ship with the shell; write sync needs
   conflict resolution that no current use case justifies. Quill, which needs
   offline reads more than anything else here, mirrors every note to the device

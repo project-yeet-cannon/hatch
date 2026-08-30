@@ -18,8 +18,9 @@ namespace Aerie.Api.Ef;
 ///
 /// Being an authorization input is where this goes rather than an exception to
 /// it: sharing a note with a named person, read or write, is authorization
-/// keyed on this row and nothing else. What is missing is a permission model to
-/// express that generally, which is why IsAdmin below is still read by nothing.
+/// keyed on this row and nothing else. IsAdmin below is the first column read
+/// that way - one global role, guarding the operator's own tools. What is still
+/// missing is a permission model to express any of it generally.
 ///
 /// Deliberately two columns wide. Everything a person will eventually carry -
 /// a birthday, a colour, a pronoun, a phone - is additive against this, and
@@ -44,24 +45,29 @@ public class EfPerson
     public required string Name { get; set; }
 
     /// <summary>
-    /// Whether this person is an administrator. **Nothing enforces it.** Not
-    /// the wall, not a controller, not a filter - the column is written by the
-    /// admin app and read by the admin app, and that is the whole of it today.
+    /// Whether this person is an administrator - who is served the admin app,
+    /// and who may take the operator verbs behind it. The one global role in
+    /// Aerie, read in exactly one place
+    /// (<see cref="Aerie.Api.Services.Auth.AdminGate"/>) and inert until an
+    /// operator sets Auth:EnforceAdmin.
     ///
-    /// It is here early on purpose. The wall authenticates a device and every
-    /// enrolled device can currently do everything, which is the deliberate
-    /// gate-not-permissions call in docs/auth-architecture.md. When that
-    /// changes, the first question any design has to answer is "which of these
-    /// people is allowed", and a column that has been carried and edited for a
-    /// while has real answers in it - whereas a column added on the day
-    /// enforcement lands starts empty, which means the deploy that turns
-    /// enforcement on is also the deploy that locks everyone out.
+    /// The column was carried for a release before anything read it, and that
+    /// was the point: a column added on the day enforcement lands starts empty,
+    /// so the deploy that turns enforcement on is also the deploy that locks
+    /// everyone out. This one had real answers in it first.
     ///
-    /// So: a bool now, an input on the People page, and no branch anywhere.
-    /// Whatever this eventually becomes - roles, scopes, RBAC - inherits a
-    /// populated column rather than an empty one. Do not start reading it for
-    /// authorization without designing the lockout path first; there is exactly
-    /// one household member holding the bootstrap invite.
+    /// Two things about the enforcement are load-bearing and easy to undo by
+    /// accident. It is switched from *config*, never inferred from whether
+    /// anybody is flagged - otherwise a checkbox on the People page becomes the
+    /// thing that turns it on, and ticking it for the wrong person locks the
+    /// household out of the page they would fix it from. And the write path for
+    /// this column is itself guarded by it (PeopleController), or any enrolled
+    /// device could promote itself and the boundary would be a formality.
+    ///
+    /// What it is not: a permission model. "May this person operate the house"
+    /// is a question with two answers; "may Ada read this note" is not a
+    /// coarser version of it and will not be built by adding a second bool
+    /// next to this one. See docs/auth-architecture.md, "The admin flag".
     /// </summary>
     public bool IsAdmin { get; set; }
 

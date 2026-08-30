@@ -222,9 +222,11 @@ function PersonRow({
           <div className="flex gap-1" style={{ alignItems: 'center' }}>
             <span>{person.name}</span>
             {person.isAdmin && (
-              /* Says what it is. Nothing enforces this yet, and a badge that
-                 looked like a permission would be a lie the page tells. */
-              <span className="badge badge-muted" title="Not enforced yet — see the People section of docs/auth-architecture.md">
+              /* Muted rather than coloured on purpose. Whether this badge means
+                 anything depends on the install's ADMIN_MODE, which the client
+                 has no way to ask about - a badge that looked like a live
+                 permission would be a lie on the installs where it is not. */
+              <span className="badge badge-muted" title="Served this app, and the operator verbs behind it — where the install enforces it. See docs/auth-architecture.md, “The admin flag”.">
                 Admin
               </span>
             )}
@@ -374,8 +376,13 @@ function PersonModal({
         <span>Administrator</span>
       </label>
       <p className="text-muted mb-2">
-        Doesn’t grant anything yet — every enrolled device can already do everything. It’s recorded now so that
-        whatever eventually checks it starts with real answers instead of an empty column.
+        Who gets this app, and the settings, sessions and device wiring behind it. The family apps — lights,
+        thermostats, lists, notes, photos — are unaffected either way. Where the install doesn’t enforce it, every
+        enrolled device can already do everything and this is just a note; turning enforcement on is a deploy.
+      </p>
+      <p className="text-muted mb-2">
+        Tick it for yourself <em>and</em> set your device’s Person on the Sessions page before asking for enforcement.
+        Backwards locks everyone out of this page — including the button that hands out invites.
       </p>
 
       {error && <p className="text-danger">{error}</p>}

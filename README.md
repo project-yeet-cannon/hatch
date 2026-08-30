@@ -68,7 +68,7 @@ request.
 
 Whose device each one is can also be set from that page afterwards, from the
 **Person** column. People themselves are managed on the admin app's **People**
-page — a name, a photo, and an admin flag that nothing enforces yet. A person is
+page — a name, a photo, and an admin flag. A person is
 not an account: there is still nothing to sign in as. What it buys you is a
 human name on a session row and on every log line that device ships, which is
 what makes "who opened the dashboard at 6am" a question with an answer. Deleting
@@ -93,6 +93,38 @@ storage-bin QR label scanned by a phone that isn't enrolled now lands on
 sign-in** rather than on the bin. Redeeming a code carries the phone through to
 the bin it scanned, so it is one extra step rather than a dead end — but a guest
 holding a labeled bin can no longer scan it.
+
+### Making someone an administrator
+
+Off by default, and it stays off until you ask for it. Set the `ADMIN_MODE`
+repository variable to `enforced`, re-run Provision 4, and let Flux reconcile.
+Once it is on:
+
+- The **admin app 404s** on any device that is not linked to a person carrying
+  the admin flag. Not a "forbidden" page — a plain 404, indistinguishable from
+  an install built without it.
+- The **operator verbs behind it** answer `403`. Roughly forty of them: creating
+  and editing zones, devices, panels, routines, people and settings, minting and
+  revoking sessions. Everything the family actually uses is untouched — turning
+  lights on, nudging a thermostat, running a routine, the shopping lists, the
+  notes, the storage bins, the dashboard.
+
+**Do it in this order**, because the switch does not do it for you:
+
+1. On the **People** page, tick **admin** for at least one person.
+2. On the **Sessions** page, make sure that person is set as the **Person** on
+   a device they actually hold.
+3. *Then* set `ADMIN_MODE=enforced`.
+
+Backwards, and the household is locked out of the admin app — including the
+button that mints invites, so no new device can be enrolled either. It is
+recoverable, but only by setting `ADMIN_MODE` back to `none` and reconciling.
+
+The values are `none` and `enforced`, and deliberately not `off`/`on`, for the
+same YAML-boolean reason given below for `AUTH_MODE`. It also does nothing at
+all while `AUTH_MODE=none`: with no wall there is no identity on a request to
+read, so enforcement stays dormant. `Test-AppTier.ps1` fails that combination
+loudly rather than letting it look like it worked.
 
 ### If nobody can get in
 
@@ -126,8 +158,13 @@ order of preference:
   — no amount of quoting survives the `kustomize build` in between, so the
   vocabulary avoids the collision instead.
 
-  A tablet that lost its cookie is a physical visit either way; `AUTH_MODE=off`
+  A tablet that lost its cookie is a physical visit either way; `AUTH_MODE=none`
   gets the house back, not the tablet's enrollment.
+
+- **The admin flag alone, off.** If everyone can reach the house but nobody can
+  reach the admin app, this is the smaller version of the same problem: set
+  `ADMIN_MODE` back to `none`, re-run Provision 4, reconcile. Every device stays
+  enrolled and the wall stays up. Reach for this before turning the wall off.
 
 ## Connecting a family calendar
 

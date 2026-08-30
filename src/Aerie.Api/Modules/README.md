@@ -102,11 +102,13 @@ wire.
     belonging to a real person.
   - Ask who is calling through `ICallerIdentity` and nothing else.
 
-  Two things are still nobody's to invent in a module folder. **Nothing reads
-  `IsAdmin`** — a household-wide role needs the lockout path in
-  `docs/auth-architecture.md` designed first. And no endpoint changes *what a
-  verb does* based on who is asking; that is the permission model arriving, and
-  it should arrive on purpose rather than as one module's `if`.
+  Two things are still nobody's to invent in a module folder. **`IsAdmin` is
+  read in one place and it is not here** — `Services/Auth/AdminGate.cs`, guarding
+  the operator's own tools, and a module reaching for a household-wide role is
+  a module answering a question about the house rather than about its own rows.
+  And no endpoint changes *what a verb does* based on who is asking; that is the
+  permission model arriving, and it should arrive on purpose rather than as one
+  module's `if`.
 - **Nothing operator-specific in module code** — domains, hostnames, and paths
   come from config, per [`docs/ethos.md`](../../../docs/ethos.md). The install's
   own public URL is already solved: [`AppsOptions`](AppsOptions.cs)
