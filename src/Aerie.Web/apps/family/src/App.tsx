@@ -1,18 +1,25 @@
 import { Suspense } from 'react';
 import { Link, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import './App.css';
-import { modules } from './modules/registry';
+import { visibleModules } from './modules/registry';
 import { HomePage } from './HomePage';
 import { useOnline } from './lib/useOnline';
+import { useSession } from './lib/session';
+import type { FamilyModule } from './modules/registry';
 
 /** The module whose routes are currently mounted, or null on the home screen. */
-function useActiveModule() {
+function useActiveModule(modules: FamilyModule[]) {
   const segment = useLocation().pathname.split('/')[1];
   return modules.find((m) => m.id === segment) ?? null;
 }
 
 export function App() {
-  const active = useActiveModule();
+  // Which apps exist at all is a function of who is holding the device: a
+  // module can require an owner, and one that does is absent rather than
+  // refused for a device nobody has claimed (modules/registry.ts).
+  const { session, loading: sessionLoading } = useSession();
+  const modules = visibleModules(session);
+  const active = useActiveModule(modules);
   const online = useOnline();
 
   return (
@@ -38,13 +45,15 @@ export function App() {
       <main className="shell-main">
         <Suspense fallback={<div className="shell-pending">Loading…</div>}>
           <Routes>
-            <Route path="/" element={<HomePage />} />
+            <Route path="/" element={<HomePage modules={modules} />} />
             {modules.map((module) => (
               <Route key={module.id} path={`${module.id}/*`} element={<module.Component />} />
             ))}
             {/* A stale bookmark or a QR for a module that no longer exists
-                lands somewhere explicable instead of on a blank screen. */}
-            <Route path="*" element={<NotFound />} />
+                lands somewhere explicable instead of on a blank screen - as
+                does a deep link into a module this session cannot see, which
+                is the same answer on purpose. */}
+            <Route path="*" element={sessionLoading ? <div className="shell-pending">Loading…</div> : <NotFound />} />
           </Routes>
         </Suspense>
       </main>

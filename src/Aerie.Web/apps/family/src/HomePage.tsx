@@ -1,8 +1,14 @@
 import { Link } from 'react-router-dom';
-import { modules } from './modules/registry';
+import type { FamilyModule } from './modules/registry';
 
-/** The app picker. Same shape as the Aerie landing page, one card per module. */
-export function HomePage() {
+/**
+ * The app picker. Same shape as the Aerie landing page, one card per module.
+ *
+ * The list arrives as a prop rather than being read from the registry here: it
+ * depends on the session, and two screens deciding for themselves which modules
+ * exist is two chances to disagree about it.
+ */
+export function HomePage({ modules }: { modules: FamilyModule[] }) {
   return (
     <>
       <div className="home-intro">
