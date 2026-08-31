@@ -126,8 +126,10 @@ would 404 on it, and caching unhashed dev modules would be actively harmful.
 
 ## Icons
 
-`public/icon.svg` is the source for every raster in `public/`. Regenerate with
-ImageMagick after editing it:
+`public/icon.svg` is the source for every raster in `public/` except
+`favicon.png`, which is a copy of the Aerie nest mark at the repo root
+(`aerie-logo.png`) and is what `index.html` points `rel="icon"` at.
+Regenerate the rest with ImageMagick after editing the SVG:
 
 ```bash
 cd public
