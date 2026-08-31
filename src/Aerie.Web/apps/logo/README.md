@@ -5,6 +5,12 @@ wordmark: a single generative outline built from a handful of numeric parameters
 tail, plumpness, wing), rendered as an SVG hero mark, a wordmark lockup, a legibility ladder, and a family of
 named variants.
 
+The page is live, not a static sheet. A parameters panel drives every mark on it: sliders grouped into Head,
+Body, and Weight; four ink swatches; an editable wordmark; perch and show-family toggles; Reset; and a Download
+SVG button that serializes the current mark. The outline itself is evaluated as a signed-distance field
+(smooth-min union of body ellipse, neck cone, head, beak, and tail), traced with marching squares, resampled,
+and smoothed into a single closed Bezier loop — so every parameter change re-solves the whole silhouette.
+
 ## Development
 
 Unlike `apps/dashboard` and `apps/admin`, this isn't a Vite/React project — it's a self-contained static page.
