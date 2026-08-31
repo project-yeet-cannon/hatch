@@ -44,6 +44,11 @@ private const val SUN_EVENTS_URL = DASHBOARD_URL + "api/sun-events"
  * a WebExtension port is a large mechanism for one bit of information, and this
  * answers the same question with an HttpURLConnection and no coupling to the
  * bundle - which is the half most likely to be the thing that is broken.
+ *
+ * The cost of that independence is that this connection holds no cookie, so the
+ * path has to be on AuthGate's allow-list beside /api/sun-events, which the
+ * shell calls the same way. It was not, for three days in August 2026, and the
+ * probe read its own 401 as "the origin is unwell" over a healthy dashboard.
  */
 private const val HEALTH_URL = DASHBOARD_URL + "api/app-version/dashboard"
 private const val HEALTH_TIMEOUT_MS = 8_000
@@ -249,7 +254,7 @@ class MainActivity : AppCompatActivity() {
             uri: String?,
             error: WebRequestError,
         ): GeckoResult<String> {
-            scheduleRetry(LoadFailures.fromErrorCategory(error.category), detail = "code ${'$'}{error.code}")
+            scheduleRetry(LoadFailures.fromErrorCategory(error.category), detail = "code ${error.code}")
             // null means "use Gecko's own error page", which on GeckoView is
             // blank. That is fine now and was not before: errorView is on top of
             // the GeckoView and covers whatever it does or doesn't draw.
@@ -297,8 +302,12 @@ class MainActivity : AppCompatActivity() {
     /**
      * One request against a small same-origin endpoint, off the main thread. A
      * 2xx is what actually clears the error screen and resets the backoff; a
-     * 4xx/5xx or a throw means the document that just "loaded" is an error page,
-     * and the shell says so instead of hiding the evidence.
+     * 5xx, a 404 or a throw means the document that just "loaded" is an error
+     * page, and the shell says so instead of hiding the evidence.
+     *
+     * The exception is a 401/403, which is the one status that says nothing
+     * about the page - see the branch below. This endpoint must stay on
+     * AuthGate's allow-list for the probe to answer at all.
      */
     private fun probeOriginHealth() {
         Thread {
@@ -321,7 +330,34 @@ class MainActivity : AppCompatActivity() {
                         currentRetryDelayMs = RETRY_DELAY_MS_INITIAL
                         errorView.hide()
                     }
-                    status != null -> scheduleRetry(LoadFailures.fromHttpStatus(status), detail = "HTTP ${'$'}status")
+                    // A refusal is not a verdict on the page. This probe holds
+                    // no credential by construction - HttpURLConnection shares
+                    // no cookie jar with the GeckoView - so a 401 says the wall
+                    // refused *the probe*, never that the dashboard is unwell.
+                    // The page holds the tablet's grant and answers its own
+                    // refusal by navigating to the sign-in shell (signIn.ts);
+                    // an error screen here would cover that shell with a
+                    // sentence about the server and retry over it forever.
+                    //
+                    // So fall back to the verdict Gecko already gave: it
+                    // reported this load a success, and a 401 is proof the
+                    // origin is well enough to have run the gate at all - the
+                    // proxy error page this probe exists to catch would have
+                    // answered 502 here too, not 401.
+                    //
+                    // Not hypothetical. /api/app-version was off AuthGate's
+                    // allow-list from 2026-08-28 to 08-31 and every tablet in
+                    // the house sat on "Aerie is reachable but isn't answering
+                    // yet" over a dashboard that was rendering fine underneath.
+                    status == 401 || status == 403 -> {
+                        KioskLogger.warn(
+                            "Health probe refused; trusting the page load",
+                            mapOf("status" to status, "url" to HEALTH_URL),
+                        )
+                        currentRetryDelayMs = RETRY_DELAY_MS_INITIAL
+                        errorView.hide()
+                    }
+                    status != null -> scheduleRetry(LoadFailures.fromHttpStatus(status), detail = "HTTP $status")
                     else -> scheduleRetry(KioskFailure.Network, detail = outcome.exceptionOrNull()?.javaClass?.simpleName)
                 }
             }

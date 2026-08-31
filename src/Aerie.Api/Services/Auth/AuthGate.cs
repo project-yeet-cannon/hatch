@@ -139,6 +139,22 @@ public class AuthGate(
         // calculator far more than it is a location.
         "/api/sun-events",
 
+        // And the other call that same shell makes over the same cookie-less
+        // HttpURLConnection: the origin health probe that decides whether the
+        // page it just loaded is the dashboard or the proxy's error page
+        // (MainActivity.probeOriginHealth). Gating it is not a degraded probe,
+        // it is a bricked wall display - the shell reads the 401 as "Aerie is
+        // reachable but isn't answering", covers a dashboard that is rendering
+        // perfectly well underneath, and retries that forever. The tablet's own
+        // grant cannot help: it lives in the GeckoView's cookie jar, which is
+        // the whole reason the row above exists.
+        //
+        // The prefix, not just /dashboard: every app under wwwroot/apps answers
+        // here, the answer is a list of the bundle's content-hashed asset
+        // filenames, and that is strictly less than /api/aerie-revision
+        // already hands out.
+        "/api/app-version",
+
         // The sign-in shell and the two endpoints it calls. Gating these is an
         // infinite redirect loop. Its short alias /auth is exempt too, just
         // below - exactly rather than by prefix.

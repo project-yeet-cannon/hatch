@@ -24,9 +24,16 @@ public class AuthGateTests
     [InlineData("/media")]
     [InlineData("/media/Beatles/Revolver/01.flac")]
     [InlineData("/api/ui-logs")]
+    [InlineData("/api/aerie-revision")]
     [InlineData("/api/vm-console-logs")]
     [InlineData("/api/kiosk/provisioning-info")]
     [InlineData("/api/sun-events")]
+    // The kiosk shell's origin health probe, over an HttpURLConnection that
+    // shares no cookie jar with the GeckoView. Gating it does not degrade the
+    // probe, it covers a working dashboard with the shell's error screen and
+    // retries forever - which is what it did between 2026-08-28 and 08-31.
+    [InlineData("/api/app-version")]
+    [InlineData("/api/app-version/dashboard")]
     [InlineData("/apps/auth/")]
     [InlineData("/apps/auth/r/K3M9P2QT")]
     [InlineData("/apps/auth/assets/index-BGJobmXl.js")]
@@ -59,6 +66,7 @@ public class AuthGateTests
     [InlineData("/api/kiosk/provisioning-info-secret")]
     [InlineData("/api/kiosk/logs")]
     [InlineData("/api/auth/verifyer")]
+    [InlineData("/api/app-versions")]
     [InlineData("/api/auth/grants")]
     [InlineData("/apps/authoring/")]
     // The alias is exempt exactly, so nothing a later phase mounts under it
