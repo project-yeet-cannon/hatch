@@ -88,13 +88,11 @@ function NowLine({ now, timeZone }: { now: Date; timeZone: string }) {
 }
 
 /**
- * One event row - time gutter plus tinted block. Exported for the stage's
- * agenda face (components/Stage.tsx), which renders the same object the full
- * agenda does so the two can't drift; the now-line stays private to this
- * section, deliberately - the glance face carries "right now" with the
- * in-progress ring alone.
+ * One event row - time gutter plus tinted block. Private again: it was
+ * exported for the stage's agenda face, which rendered a capped copy of this
+ * column beside the photos, and the wall has one agenda now.
  */
-export function EventBlock({
+function EventBlock({
   event,
   timeZone,
   now,

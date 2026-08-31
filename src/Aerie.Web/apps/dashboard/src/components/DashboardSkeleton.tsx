@@ -40,11 +40,14 @@ function ClimateCardSkeleton() {
   );
 }
 
-// The stage's box with nothing to show yet - the same fixed shape, so the
-// column doesn't jump when the first photo or agenda row lands.
-function StageSkeleton() {
+// The photo frame's box with nothing in it yet - `.hf-photo` on a div rather
+// than its button, for the shape and the chrome without the affordance. The
+// agenda between the two gets no placeholder: its height is however many
+// events today has, and a guessed one would be the layout jump it exists to
+// prevent.
+function PhotoSkeleton() {
   return (
-    <div className="hf-stage">
+    <div className="hf-photo" style={{ cursor: 'default' }}>
       <span className="hf-skel" style={{ position: 'absolute', inset: 0, borderRadius: 0 }} />
     </div>
   );
@@ -62,7 +65,7 @@ export function DashboardSkeleton() {
       <div className="hf-zones">
         <ClimateCardSkeleton />
       </div>
-      <StageSkeleton />
+      <PhotoSkeleton />
     </>
   );
 }

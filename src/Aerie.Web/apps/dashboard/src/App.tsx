@@ -12,7 +12,7 @@ import { RoutinesSection } from './components/RoutinesSection';
 import { CamerasSection } from './components/CamerasSection';
 import { PanelsSection } from './components/PanelsSection';
 import { CalendarSection } from './components/CalendarSection';
-import { Stage } from './components/Stage';
+import { PhotoCarousel } from './components/PhotoCarousel';
 import { AlertBanner } from './components/AlertBanner';
 import { DashboardSkeleton } from './components/DashboardSkeleton';
 import { GatherTile } from './components/GatherTile';
@@ -224,14 +224,15 @@ export function App() {
   // and no swipe hint - a fresh deployment with nothing configured is a
   // one-page wall, which is the truth. Gather counts on its own because it
   // rides its own data path and can have lists while the snapshot is down.
+  // The agenda is deliberately not in this list any more: it lives on page one
+  // now, so a house whose only content is a calendar is a one-page wall.
   const hasPageTwo =
     gatherLists.length > 0 ||
     (data !== null &&
       (data.routines.length > 0 ||
         data.cameras.length > 0 ||
         data.panels.length > 0 ||
-        (zonesPartition?.rest.length ?? 0) > 0 ||
-        calendarHasContent));
+        (zonesPartition?.rest.length ?? 0) > 0));
   const pageTwoRef = useRef<HTMLDivElement | null>(null);
   const scrollToPageTwo = useCallback(() => {
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -254,8 +255,9 @@ export function App() {
           all when the wall is healthy, which is nearly always. */}
       <HealthDot level={healthLevel} count={healthEntries.length} onOpen={() => setHealthOpen(true)} />
       <div className="hfdev">
-        {/* Page one: the wall at rest, sized to the viewport so a calm day
-            never scrolls. Page two is one deliberate swipe below - the
+        {/* Page one: the wall at rest, as one column - climate, agenda,
+            photos - which on a day with events runs past the fold rather than
+            hiding one of the three behind a gesture. Page two is below - the
             document itself is the pager, through the scroll-snap rules on
             html/.hf-p1/.hf-p2 in theme.css, so the lifecycle's scroll
             presence signal and the idle reset's scrollTo(0,0) keep working
@@ -284,8 +286,8 @@ export function App() {
               {/* The top of the column, above everything: a hazard is the one
                   thing here that changes what you do on the way out the door.
                   It renders nothing when there is nothing active, which is
-                  most days - and on a hazard day it pushes the stage toward
-                  the fold, which is the right trade. */}
+                  most days - and on a hazard day it pushes the rest of the
+                  column down, which is the right trade. */}
               <AlertBanner alerts={data.alerts} timeZone={data.timezone} />
               {/* Keyed on resetToken so an idle reset remounts the card and
                   lands its selection back on Outside - the same reset that
@@ -298,20 +300,24 @@ export function App() {
                   nowOnServerClock={nowOnServerClock ?? data.generatedAt}
                 />
               </div>
-              {/* Directly under the climate card: the first thing that is
-                  there to be looked at rather than read. Photos at rest,
-                  today's agenda one swipe away; renders nothing at all when
-                  neither is configured, so a fresh house has no hole where a
-                  stage would be. resetToken lands it back on photos without a
-                  remount - see the note in Stage.tsx. */}
-              <Stage
-                photos={photos}
-                photoSource={photoSource}
-                calendar={data.calendar}
-                timeZone={data.timezone}
-                now={now}
-                resetToken={resetToken}
-              />
+              {/* Then the agenda, in full. It used to be the second face of
+                  a stage, one horizontal swipe behind the photos - a wall you
+                  walk past should not have to be asked what is on today. It is
+                  the same CalendarSection page two used to carry, moved rather
+                  than copied, so there is exactly one agenda on the wall. The
+                  renders-nothing rule survives the move: no events anywhere in
+                  the window, no block. */}
+              {calendarHasContent && (
+                <div className="hf-agenda">
+                  <CalendarSection calendar={data.calendar} timeZone={data.timezone} now={now} />
+                </div>
+              )}
+              {/* Last in the column, and the only thing here that is looked at
+                  rather than read. Its own data path (usePhotoCarousel), and it
+                  returns null until the deck has a photo that loads - a house
+                  with no Immich album ends its page at the agenda rather than
+                  showing an empty frame. */}
+              <PhotoCarousel photos={photos} source={photoSource} timeZone={data.timezone} />
             </>
           ) : error ? (
             <div className="hf-load-error" role="alert">
@@ -331,8 +337,9 @@ export function App() {
         {hasPageTwo && (
           <div className="hf-p2" ref={pageTwoRef}>
             {/* Tap-density descends: things you trigger, then things you
-                watch, then things you adjust, then lists, then the rooms not
-                pinned to page one, and pure reading last. */}
+                watch, then things you adjust, then lists, and the rooms not
+                pinned to page one last. Pure reading - the agenda - used to
+                close this page and now opens the wall instead. */}
             {data !== null && data.routines.length > 0 && (
               <section className="hf-sec">
                 <SectionHead label="Routines" />
@@ -376,13 +383,6 @@ export function App() {
                   ))}
                 </div>
               </section>
-            )}
-            {/* No SectionHead of its own: the agenda introduces itself with
-                its day labels - Today, then the dates - which are this idiom's
-                original home, and an "Agenda" label directly above a "Today"
-                label is a stutter. */}
-            {data !== null && calendarHasContent && (
-              <CalendarSection calendar={data.calendar} timeZone={data.timezone} now={now} />
             )}
           </div>
         )}

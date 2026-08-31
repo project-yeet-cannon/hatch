@@ -1,13 +1,55 @@
 # Dashboard redesign — two pages, one design language
 
 **Status:** Phases 0–5 done — the wall builds and tests green as two pages
-with the climate card and the stage; what remains is Phase 6, the owner's
-hardware pass, plus the owner-eyeball items noted inside Phases 1/3/4. The
+with the climate card; what remains is Phase 6, the owner's hardware pass,
+plus the owner-eyeball items noted inside Phases 1/3/4. **The stage this plan
+designed has since been retired — see [Amendment: the column replaces the
+stage](#amendment-the-column-replaces-the-stage).** The
 follow-up section (the API's half of the contract) stays open by design.
 **This plan is design-only on the data side**: everything new renders from the
 mock first, and the API work it needs is specified at the end under
 [Follow-up: the data contract to fulfill](#follow-up-the-data-contract-to-fulfill)
 — deliberately not part of this plan's execution.
+
+## Amendment: the column replaces the stage
+
+*Owner change request, after living with it.* The stage lost the argument the
+decision table made for it: the agenda was behind a horizontal swipe, and a
+wall you walk past should not have to be asked what is on today. Photos and
+the agenda no longer share a region — page one is a plain vertical column,
+**climate card · agenda · photo frame**, and the shared column got wider at
+the same time.
+
+What changed, against everything below:
+
+- **`components/Stage.tsx` is gone**, with `lib/stageFaces.ts` and
+  `lib/agendaGlance.ts` and their tests. There is no track, no faces, no dots,
+  no `.hf-stage*` rule. The existence matrix survives as the two components'
+  own renders-nothing rules, composed by the column: `calendarHasContent`
+  gates the agenda, `PhotoCarousel` returns null on an empty deck.
+- **The agenda is the full `CalendarSection`, moved, not copied.** It ran
+  capped at four rows because the face was a fixed-height box that could not
+  scroll; the column scrolls, so the cap had no reason left to exist. Page two
+  no longer carries an Agenda section — the wall has exactly one agenda, and
+  it is above the fold. `.hf-agenda` gives it the card chrome its two
+  neighbours already had; `EventBlock` is private to `CalendarSection` again.
+- **The photo frame is a plain `.hf-photo` again**, at the column's full
+  width, with the card chrome it ceded to the stage handed back.
+- **The column is as wide as the wall.** `clamp(480px, 75vw, 960px)` with
+  20px of padding resolved to 600px on the 800px walls — 200px of bare
+  background down the sides for a device whose entire job is to show content.
+  It is `max-width: 1280px` (a bound no wall ever meets — it is there for a
+  desktop browser) with a 10px gutter, so the walls run 780px of content
+  instead of 560.
+- **The fold budget below is history.** Three blocks stacked at the full
+  width do not fit 1280px on a day with events, and that is the trade the
+  change request makes deliberately: page one scrolls into page two rather
+  than hiding the agenda behind a gesture. Page one keeps `min-height:
+  100dvh` and page two keeps its snap point, so the pager, the idle reset's
+  `scrollTo(0, 0)` and the lifecycle's scroll-presence signal are untouched.
+
+Everything else in this plan — the token pass, the climate card, the section
+header idiom, page two's remaining sections — stands as written.
 
 ## The ask
 
@@ -35,7 +77,7 @@ Four decisions made with the owner up front:
 | Question | Decision |
 |---|---|
 | Forecast + AQI aren't in the snapshot today | **Design against the mock.** Extend the client contract and mock sources now; the API work is a spec'd follow-up, not a phase |
-| Photos and today's agenda both want the fold | **A shared stage.** One large region; photos are the resting face, a horizontal swipe flips to today's agenda |
+| Photos and today's agenda both want the fold | **A shared stage.** One large region; photos are the resting face, a horizontal swipe flips to today's agenda — *superseded, see the amendment below* |
 | Which 2–3 zones lead | **The admin picks.** A per-zone "lead" flag; unpinned zones still render, just not above the fold |
 | Where routines/cameras/panels/Gather live | **A second page, one swipe up.** Page one is the wall at rest; page two is the wall you walk up to |
 
@@ -212,7 +254,8 @@ below come from FA.
 ### Page one
 
 Order: health dot (fixed, unchanged) · header · alerts · **climate card** ·
-**the stage** · swipe hint.
+**the stage** · swipe hint. *(The stage is retired — the shipped order is
+climate card · agenda · photo frame; see the amendment.)*
 
 **Header** — structurally unchanged (date block left, clock right); the clock
 takes the Clock register's clamp. It is already the loudest thing on the page
@@ -281,7 +324,9 @@ miniaturized — swatch, name, temperature — so the continuity is legible.
 - `OutsideCard` and page-one `ZoneCard` usage retire; `TempChart`,
   `zonePresentation`, `staleness` are reused as-is.
 
-**The stage** — one region, photo-frame proportions, two faces.
+**The stage** — one region, photo-frame proportions, two faces. *Retired;
+kept here as the record of what was built and why it was replaced — see
+[the amendment](#amendment-the-column-replaces-the-stage).*
 
 ```text
 .hf-stage        aspect-ratio 3/2 · radius --r · hairline border · --card
@@ -355,16 +400,15 @@ the snap point; a hazard day is allowed to push the stage down.
 
 Order, every section under an `.hf-sec-head`, each rendering nothing when
 empty: **Routines** · **Cameras** · **Panels** · **Lists** (Gather) · **More
-rooms** (unpinned ZoneCards) · **Agenda** (the full existing CalendarSection,
-today + tomorrow, now-line and all). Tap-density descends; pure reading comes
-last. The tile grids keep their shared-geometry CSS; the only change they take
+rooms** (unpinned ZoneCards) · ~~**Agenda**~~ *(the agenda moved to page one
+— see the amendment)*. Tap-density descends; pure reading came last. The tile grids keep their shared-geometry CSS; the only change they take
 is the token sweep (gap 18, Name-sm) and their new headers. Gather keeps its
 own data path and stays outside the snapshot ternary, exactly as in App.tsx
 today. Page two's top gets 18px breathing room below the snap edge.
 
 The skeleton ([DashboardSkeleton](../../src/Aerie.Web/apps/dashboard/src/components/DashboardSkeleton.tsx))
 is redrawn to mirror page one only: header is real, then a climate-card block
-and a stage block. Page two needs no skeleton — it is below the fold by
+and a photo-frame block (a stage block, before the amendment). Page two needs no skeleton — it is below the fold by
 definition.
 
 ### Ledgers
