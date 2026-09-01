@@ -28,6 +28,13 @@
  * The values come from the environment (Dockerfile.api passes build args
  * through; publish.yml computes them) rather than from git, so a local
  * `npm run build` needs no repository and honestly reports `dev`.
+ *
+ * **This file is ESM by its extension, not by its package.** It sits next to
+ * the workspace root's package.json, which deliberately carries no `"type"`.
+ * `.mts` (and the `.mjs` specifier the apps import it by) is always an ES
+ * module regardless of the nearest package.json, so adding `"type": "module"`
+ * up there would fix nothing and would change how every non-workspace `.js`
+ * file under src/Aerie.Web is parsed.
  */
 
 /** What a local build reports. Deliberately not a git call - see the header. */

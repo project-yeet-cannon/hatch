@@ -20,7 +20,7 @@ build:
 run:
 	bash -c 'export NVM_DIR="$$HOME/.nvm"; [ -s "$$NVM_DIR/nvm.sh" ] && \. "$$NVM_DIR/nvm.sh"; \
 	trap "kill 0" EXIT; \
-	(cd ./src/Aerie.Web/apps/dashboard && nvm use && npm run dev) & \
+	(cd ./src/Aerie.Web && nvm use && npm run dev -w apps/dashboard) & \
 	dotnet run --project ./src/Aerie.Api/Aerie.Api.csproj'
 
 test: test-api test-web
@@ -28,12 +28,16 @@ test: test-api test-web
 test-api:
 	dotnet test ./src/Aerie.Api.Tests/Aerie.Api.Tests.csproj
 
+# One `npm ci` at the workspace root, then each app in turn. The apps are still
+# named one at a time rather than run with `--workspaces` so that the "==>" line
+# says which one is building when something fails.
 test-web:
 	bash -c 'export NVM_DIR="$$HOME/.nvm"; [ -s "$$NVM_DIR/nvm.sh" ] && \. "$$NVM_DIR/nvm.sh"; \
 	set -e; \
+	cd ./src/Aerie.Web && nvm use && npm ci; \
 	for app in admin auth dashboard modeler docs family; do \
 		echo "==> $$app"; \
-		(cd ./src/Aerie.Web/apps/$$app && nvm use && npm ci && npm run lint && npm run test --if-present && npm run build); \
+		npm run lint -w apps/$$app && npm run test --if-present -w apps/$$app && npm run build -w apps/$$app; \
 	done'
 
 # Which DbContext the ef-* targets act on. Defaults to the core schema; a module

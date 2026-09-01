@@ -1,6 +1,6 @@
 # Design system MVP — one vocabulary for admin and home
 
-**Status:** Not started. Phases 0–5 are engineering and ship in order; **Phase 6
+**Status:** Phase 0 done. Phases 0–5 are engineering and ship in order; **Phase 6
 is a manual design pass with outside help** and is the gate everything after it
 waits on. Phase 7 implements what Phase 6 decides — including the admin
 navigation, which is deliberately *not* decided in this document.
@@ -208,21 +208,21 @@ before, from one lockfile. This is the phase that makes a shared package
 possible at all, and it is deliberately alone so that if a build breaks, the
 cause is unambiguous.
 
-- [ ] Add `src/Aerie.Web/package.json` with
+- [x] Add `src/Aerie.Web/package.json` with
       `"workspaces": ["apps/*", "packages/*"]` and the `engines.node` floor.
       (`vite-plugin-aerie-revision.mts` becomes a sibling of this file; `.mts`
       and `.mjs` are ESM by extension regardless of `"type"`, so its resolution
       is unaffected — worth a comment in the file so nobody adds `"type"` to
       fix a problem that does not exist.)
-- [ ] Delete the six per-app `package-lock.json`; generate one hoisted root
+- [x] Delete the six per-app `package-lock.json`; generate one hoisted root
       lockfile. Verify no app silently lost or gained a transitive version.
-- [ ] **MSBuild** ([Aerie.Api.csproj](../../src/Aerie.Api/Aerie.Api.csproj)):
+- [x] **MSBuild** ([Aerie.Api.csproj](../../src/Aerie.Api/Aerie.Api.csproj)):
       one `NpmInstall` target at `../Aerie.Web` guarded on the root
       `node_modules`, which every `Build<App>` target depends on; each
       `Build<App>` becomes `npm run build -w apps/<app>` with
       `WorkingDirectory="../Aerie.Web"`. The `Inputs`/`Outputs` incremental
       globs stay per-app and gain `../Aerie.Web/packages/**` in Phase 1.
-- [ ] **Docker** ([Dockerfile.api](../../src/Aerie.Api/Dockerfile.api)):
+- [x] **Docker** ([Dockerfile.api](../../src/Aerie.Api/Dockerfile.api)):
       collapse the six `<app>-build` stages into one `web-build` stage — a
       single root `npm ci`, then every app's build, then one
       `COPY --from=web-build`. **This is a real cache regression to accept
@@ -232,23 +232,23 @@ cause is unambiguous.
       install cost six times to buy nothing. One stage pays it once. Keep the
       existing `ARG`-after-install ordering so a new commit still restamps
       `index.html` without re-resolving the tree.
-- [ ] **CI** ([ci.yml](../../.github/workflows/ci.yml)): `cache-dependency-path`
+- [x] **CI** ([ci.yml](../../.github/workflows/ci.yml)): `cache-dependency-path`
       → the root lockfile; `npm ci` at the workspace root; lint/test/build via
       `-w apps/${{ matrix.app }}`. Keep the matrix — it costs a redundant
       install per job but buys per-app failure isolation in the PR checks, which
       is worth more than the minutes.
-- [ ] **Makefile** `test-web`: one root `npm ci`, then loop the apps with `-w`.
-- [ ] Check [.gitignore](../../.gitignore) for a `node_modules` rule that
+- [x] **Makefile** `test-web`: one root `npm ci`, then loop the apps with `-w`.
+- [x] Check [.gitignore](../../.gitignore) for a `node_modules` rule that
       assumed the per-app layout, and [.gitattributes](../../.gitattributes) for
       a lockfile rule naming the old paths. (Note the known trap: this repo's
       `Backup*/` rule plus macOS case-insensitivity silently un-adds
       directories — run `git check-ignore` on anything new before trusting
       `git status`.)
-- [ ] **Gate:** `make test-web` green · `make build` green · `docker build -f
+- [x] **Gate:** `make test-web` green · `make build` green · `docker build -f
       src/Aerie.Api/Dockerfile.api .` green · the contents of
       `src/Aerie.Api/wwwroot/apps/` diff clean against a pre-conversion build,
       modulo content hashes.
-- [ ] **Commit:** "Web: six islands become one workspace"
+- [x] **Commit:** "Web: six islands become one workspace"
 
 ### Phase 1 — The token pass and day/night
 

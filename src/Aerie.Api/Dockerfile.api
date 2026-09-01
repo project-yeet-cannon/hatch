@@ -1,10 +1,16 @@
-# Build the SPAs (Aerie.Web/apps/*) separately - the .NET SDK image
-# has no Node runtime, and their outputs are committed to wwwroot/apps/* as static
-# web assets of Aerie.Api.
+# Build the SPAs (Aerie.Web/apps/*) separately - the .NET SDK image has no Node
+# runtime, and their outputs are committed to wwwroot/apps/* as static web
+# assets of Aerie.Api.
+#
+# One stage, not one per app. Aerie.Web is an npm workspace with a single
+# hoisted lockfile, so per-app stages could no longer cache independently
+# anyway: any app's dependency change rewrites the one lockfile and busts every
+# stage's `npm ci`. Six stages would pay the install cost six times to buy
+# nothing; this pays it once.
 #
 # AERIE_REVISION/AERIE_SEQUENCE are the git identity of this build (see
-# docs/plans/version.md). Each SPA stage takes them because
-# ../Aerie.Web/vite-plugin-aerie-revision.mts stamps them into that app's
+# docs/plans/version.md). This stage takes them because
+# ../Aerie.Web/vite-plugin-aerie-revision.mts stamps them into each app's
 # index.html; the SDK stage takes them because the API reads its own out of the
 # assembly. Declared per stage rather than once at the top: a build arg is
 # scoped to the stage that declares it, and a global ARG before the first FROM
@@ -12,72 +18,26 @@
 #
 # The ARG lines sit after `npm ci` on purpose. A build arg only invalidates the
 # layers that reference it, so a new commit rebuilds index.html without
-# re-resolving any app's dependency tree.
-FROM node:22-alpine AS dashboard-build
+# re-resolving the dependency tree.
+FROM node:22-alpine AS web-build
 WORKDIR /repo
-COPY src/Aerie.Web/apps/dashboard/package.json src/Aerie.Web/apps/dashboard/package-lock.json src/Aerie.Web/apps/dashboard/
-RUN npm --prefix src/Aerie.Web/apps/dashboard ci
-COPY src/Aerie.Web/vite-plugin-aerie-revision.mts src/Aerie.Web/
-COPY src/Aerie.Web/apps/dashboard src/Aerie.Web/apps/dashboard
-ARG AERIE_REVISION
-ARG AERIE_SEQUENCE
-ENV AERIE_REVISION=$AERIE_REVISION AERIE_SEQUENCE=$AERIE_SEQUENCE
-RUN npm --prefix src/Aerie.Web/apps/dashboard run build
 
-FROM node:22-alpine AS admin-build
-WORKDIR /repo
-COPY src/Aerie.Web/apps/admin/package.json src/Aerie.Web/apps/admin/package-lock.json src/Aerie.Web/apps/admin/
-RUN npm --prefix src/Aerie.Web/apps/admin ci
-COPY src/Aerie.Web/vite-plugin-aerie-revision.mts src/Aerie.Web/
-COPY src/Aerie.Web/apps/admin src/Aerie.Web/apps/admin
-ARG AERIE_REVISION
-ARG AERIE_SEQUENCE
-ENV AERIE_REVISION=$AERIE_REVISION AERIE_SEQUENCE=$AERIE_SEQUENCE
-RUN npm --prefix src/Aerie.Web/apps/admin run build
+# Every workspace's package.json is an input to `npm ci`, so they are copied
+# ahead of the sources: an edit to any app's *code* then reuses this layer.
+COPY src/Aerie.Web/package.json src/Aerie.Web/package-lock.json src/Aerie.Web/
+COPY src/Aerie.Web/apps/admin/package.json src/Aerie.Web/apps/admin/
+COPY src/Aerie.Web/apps/auth/package.json src/Aerie.Web/apps/auth/
+COPY src/Aerie.Web/apps/dashboard/package.json src/Aerie.Web/apps/dashboard/
+COPY src/Aerie.Web/apps/docs/package.json src/Aerie.Web/apps/docs/
+COPY src/Aerie.Web/apps/family/package.json src/Aerie.Web/apps/family/
+COPY src/Aerie.Web/apps/modeler/package.json src/Aerie.Web/apps/modeler/
+RUN npm --prefix src/Aerie.Web ci
 
-FROM node:22-alpine AS modeler-build
-WORKDIR /repo
-COPY src/Aerie.Web/apps/modeler/package.json src/Aerie.Web/apps/modeler/package-lock.json src/Aerie.Web/apps/modeler/
-RUN npm --prefix src/Aerie.Web/apps/modeler ci
-COPY src/Aerie.Web/vite-plugin-aerie-revision.mts src/Aerie.Web/
-COPY src/Aerie.Web/apps/modeler src/Aerie.Web/apps/modeler
+COPY src/Aerie.Web src/Aerie.Web
 ARG AERIE_REVISION
 ARG AERIE_SEQUENCE
 ENV AERIE_REVISION=$AERIE_REVISION AERIE_SEQUENCE=$AERIE_SEQUENCE
-RUN npm --prefix src/Aerie.Web/apps/modeler run build
-
-FROM node:22-alpine AS docs-build
-WORKDIR /repo
-COPY src/Aerie.Web/apps/docs/package.json src/Aerie.Web/apps/docs/package-lock.json src/Aerie.Web/apps/docs/
-RUN npm --prefix src/Aerie.Web/apps/docs ci
-COPY src/Aerie.Web/vite-plugin-aerie-revision.mts src/Aerie.Web/
-COPY src/Aerie.Web/apps/docs src/Aerie.Web/apps/docs
-ARG AERIE_REVISION
-ARG AERIE_SEQUENCE
-ENV AERIE_REVISION=$AERIE_REVISION AERIE_SEQUENCE=$AERIE_SEQUENCE
-RUN npm --prefix src/Aerie.Web/apps/docs run build
-
-FROM node:22-alpine AS family-build
-WORKDIR /repo
-COPY src/Aerie.Web/apps/family/package.json src/Aerie.Web/apps/family/package-lock.json src/Aerie.Web/apps/family/
-RUN npm --prefix src/Aerie.Web/apps/family ci
-COPY src/Aerie.Web/vite-plugin-aerie-revision.mts src/Aerie.Web/
-COPY src/Aerie.Web/apps/family src/Aerie.Web/apps/family
-ARG AERIE_REVISION
-ARG AERIE_SEQUENCE
-ENV AERIE_REVISION=$AERIE_REVISION AERIE_SEQUENCE=$AERIE_SEQUENCE
-RUN npm --prefix src/Aerie.Web/apps/family run build
-
-FROM node:22-alpine AS auth-build
-WORKDIR /repo
-COPY src/Aerie.Web/apps/auth/package.json src/Aerie.Web/apps/auth/package-lock.json src/Aerie.Web/apps/auth/
-RUN npm --prefix src/Aerie.Web/apps/auth ci
-COPY src/Aerie.Web/vite-plugin-aerie-revision.mts src/Aerie.Web/
-COPY src/Aerie.Web/apps/auth src/Aerie.Web/apps/auth
-ARG AERIE_REVISION
-ARG AERIE_SEQUENCE
-ENV AERIE_REVISION=$AERIE_REVISION AERIE_SEQUENCE=$AERIE_SEQUENCE
-RUN npm --prefix src/Aerie.Web/apps/auth run build
+RUN npm --prefix src/Aerie.Web run build --workspaces --if-present
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build-env
 WORKDIR /App
@@ -85,12 +45,7 @@ WORKDIR /App
 # Copy everything (build context is the repo root - see compose.yaml / the
 # release workflow - so Aerie.Api can reach its sibling Aerie.Web project)
 COPY . ./
-COPY --from=dashboard-build /repo/src/Aerie.Api/wwwroot/apps/dashboard ./src/Aerie.Api/wwwroot/apps/dashboard
-COPY --from=admin-build /repo/src/Aerie.Api/wwwroot/apps/admin ./src/Aerie.Api/wwwroot/apps/admin
-COPY --from=modeler-build /repo/src/Aerie.Api/wwwroot/apps/modeler ./src/Aerie.Api/wwwroot/apps/modeler
-COPY --from=docs-build /repo/src/Aerie.Api/wwwroot/apps/docs ./src/Aerie.Api/wwwroot/apps/docs
-COPY --from=family-build /repo/src/Aerie.Api/wwwroot/apps/family ./src/Aerie.Api/wwwroot/apps/family
-COPY --from=auth-build /repo/src/Aerie.Api/wwwroot/apps/auth ./src/Aerie.Api/wwwroot/apps/auth
+COPY --from=web-build /repo/src/Aerie.Api/wwwroot/apps ./src/Aerie.Api/wwwroot/apps
 
 # Restore as distinct layers
 RUN dotnet restore src/Aerie.Api/Aerie.Api.csproj

@@ -10,6 +10,10 @@ Browser for the architecture docs in the repo's top-level `docs/` folder. Lists 
 
 ### Setup
 
+Aerie.Web is a single npm workspace with one lockfile at `src/Aerie.Web`, so the
+install is the workspace's rather than this app's — run it once, from anywhere
+in the tree, and every app is installed:
+
 ```bash
 npm install
 ```

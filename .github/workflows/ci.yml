@@ -38,25 +38,29 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version-file: src/Aerie.Web/apps/${{ matrix.app }}/.nvmrc
+          node-version-file: src/Aerie.Web/.nvmrc
           cache: npm
-          cache-dependency-path: src/Aerie.Web/apps/${{ matrix.app }}/package-lock.json
+          cache-dependency-path: src/Aerie.Web/package-lock.json
 
+      # Aerie.Web is one npm workspace, so the install is the whole workspace's
+      # and every job pays for it. That redundancy is bought deliberately: the
+      # matrix is what makes a PR check say *which* app broke, and a job per app
+      # is worth more than the minutes a single job would save.
       - name: Install dependencies
-        working-directory: src/Aerie.Web/apps/${{ matrix.app }}
+        working-directory: src/Aerie.Web
         run: npm ci
 
       - name: Lint
-        working-directory: src/Aerie.Web/apps/${{ matrix.app }}
-        run: npm run lint
+        working-directory: src/Aerie.Web
+        run: npm run lint -w apps/${{ matrix.app }}
 
       - name: Test
-        working-directory: src/Aerie.Web/apps/${{ matrix.app }}
-        run: npm run test --if-present
+        working-directory: src/Aerie.Web
+        run: npm run test --if-present -w apps/${{ matrix.app }}
 
       - name: Build
-        working-directory: src/Aerie.Web/apps/${{ matrix.app }}
-        run: npm run build
+        working-directory: src/Aerie.Web
+        run: npm run build -w apps/${{ matrix.app }}
 
   deploy-manifests:
     # From the cluster plan Phase 3b.3 onward, everything under deploy/ reaches the
