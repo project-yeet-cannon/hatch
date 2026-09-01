@@ -1,0 +1,266 @@
+/* @aerie/ui — the vocabulary.
+   ---------------------------------------------------------------------------
+   Every color, radius, type step and spacing value in an Aerie web app comes
+   from this file. A literal written anywhere else is a bug: it is a value a
+   designer cannot find and cannot change, and it is a value that has no answer
+   for the other theme.
+
+   Layout:
+     1. The font
+     2. Radius     — four steps plus a pill
+     3. Type       — named registers, not sizes
+     4. Spacing    — one base, one ladder
+     5. Color      — light on bare :root, dark in BOTH guards
+     6. Motion and elevation
+
+   The dark palette is authored, not derived. It is stated twice on purpose -
+   once under prefers-color-scheme for the OS default, once under
+   [data-theme="dark"] for the manual override - so the toggle wins in both
+   directions. No token may have its ONLY definition inside a media query. */
+
+/* ---------------------------------------------------------------------------
+   1. The font
+
+   Manrope, self-hosted, rather than a <link> to fonts.googleapis.com. That
+   link was a render-blocking subresource on a third-party host: with the WAN
+   down and the LAN fine - a modem reboot, an ISP outage - the browser held
+   first paint on an admin page that needs nothing from the internet.
+
+   The variable face covers 200-800 in one ~25KB latin subset, so the five
+   static weights the old link asked for cost one request instead of five.
+   fontsource ships it with `font-display: swap` and per-subset
+   `unicode-range`, which makes the failure mode a fallback face rather than a
+   blank frame.
+
+   Imported from the token file rather than from an app entry point so that an
+   app cannot adopt the tokens and forget the face they were drawn for. */
+@import '@fontsource-variable/manrope';
+
+:root {
+  /* 'Manrope' second so a machine with the static family installed locally
+     still uses it if the bundled variable face fails to decode. */
+  --ui: 'Manrope Variable', 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* -------------------------------------------------------------------------
+     2. Radius — four steps, stated once and used everywhere.
+
+     --r      a card or any card-sized surface
+     --r-ctl  anything a pointer presses: buttons, inputs, tappable rows
+     --r-in   a content block nested inside a card
+     --r-chip the smallest chips and marks
+
+     Badges are fully-round pills (--r-pill) rather than a fifth step, and a
+     circle is `50%` rather than a token - it is a shape, not a scale step.
+     Any other radius stated as a number is a bug.
+
+     The values are admin's existing 8/6/4/2, carried across unchanged. The
+     four-step *shape* is the dashboard's; the numbers are Phase 6's to move. */
+  --r: 8px;
+  --r-ctl: 6px;
+  --r-in: 4px;
+  --r-chip: 2px;
+  --r-pill: 999px;
+
+  /* -------------------------------------------------------------------------
+     3. Type — named registers.
+
+     Admin is a data-dense CRUD app read at desk distance. The dashboard's
+     arm's-length register is deliberately NOT copied across; these are admin's
+     own existing sizes, given names. Phase 6 owns the values.
+
+     Register   Size  Where
+     display    32    The app title, the invite code
+     title      28    h1
+     heading    22    h2
+     subhead    18    h3
+     section    16    h4
+     body       14    The base size: h5, buttons, inputs, table cells
+     meta       15    Set slightly above body where it must read inside a
+                      fixed ornament - avatar initials
+     label      12    h6, field labels, badges, table headers
+     micro      11    Chart axes, legends, tooltips
+
+     A size outside this table is a bug. The one licensed exception is a glyph
+     scaled to fit a fixed box, which is an ornament rather than text. */
+  --t-display: 32px;
+  --t-title: 28px;
+  --t-heading: 22px;
+  --t-subhead: 18px;
+  --t-section: 16px;
+  --t-meta: 15px;
+  --t-body: 14px;
+  --t-label: 12px;
+  --t-micro: 11px;
+
+  --lh-tight: 1.3;
+  --lh-body: 1.5;
+
+  /* -------------------------------------------------------------------------
+     4. Spacing — base 4, ladder 4/8/12/16/20/24/32/40.
+
+     The two half-steps exist because compact rows genuinely sit between the
+     rungs: a table cell at 8px vertical is cramped and at 12px the list stops
+     being scannable. They are named rather than hidden as literals so Phase 6
+     can see them and decide whether to keep them.
+
+     Below the base, hairlines and 1-3px optical nudges are free.
+
+     The ladder is for space *between* things. The fixed dimensions of an
+     ornament - a 40px avatar, a 64x48 album cover - stay literal at their use
+     site: they are sized to their content, and a designer retuning this ladder
+     must not resize them by accident. */
+  --sp-1: 4px;
+  --sp-1-5: 6px;
+  --sp-2: 8px;
+  --sp-2-5: 10px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+
+  /* The reading measure. Every page's content column is capped here. */
+  --measure: 1200px;
+
+  /* -------------------------------------------------------------------------
+     5. Color — light.
+
+     --bg / --card / --ink / --muted / --line and the three accents are admin's
+     existing vocabulary, carried forward unchanged. --line-strong and
+     --on-accent are new, and are the two values admin previously wrote as
+     literals (#d0d0d0, `white`) with no dark answer. */
+  --bg: #f5f5f5;
+  --card: #ffffff;
+  --ink: #1a1a1a;
+  --muted: #666666;
+  --line: #e0e0e0;
+  /* A line that has to carry weight: a pressed secondary button, a divider
+     that must read against --card rather than against --bg. */
+  --line-strong: #d0d0d0;
+
+  --primary: #0066cc;
+  --primary-bg: rgba(0, 102, 204, 0.08);
+  --primary-ink: #0052a3;
+  --danger: #d32f2f;
+  --danger-bg: rgba(211, 47, 47, 0.08);
+  --danger-ink: #b71c1c;
+  --success: #388e3c;
+  --success-bg: rgba(56, 142, 60, 0.08);
+  --success-ink: #1b5e20;
+
+  /* Ink laid ON an accent fill - a primary button's label, the app header.
+     It flips with the theme rather than being `white` forever: the dark
+     accents are light blues and corals, and white on them is a ~2.2:1 label
+     nobody can read. --on-accent-wash is the same ink at hover strength. */
+  --on-accent: #ffffff;
+  --on-accent-wash: rgba(255, 255, 255, 0.15);
+
+  /* The letterbox behind a video or an image whose aspect is not the frame's.
+     Black in both themes - it is the absence of picture, not a surface. */
+  --letterbox: #000000;
+
+  /* Categorical series (state-timeline chart) - fixed order, validated for CVD
+     safety. Carried across exactly; this ramp is not a value to improvise on. */
+  --series-1: #2a78d6;
+  --series-2: #008300;
+  --series-3: #e87ba4;
+  --series-4: #eda100;
+  --series-5: #1baf7a;
+  --series-6: #eb6834;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+
+  /* -------------------------------------------------------------------------
+     6. Motion and elevation. Calm: nothing moves unless a person moved it. */
+  --transition: 200ms ease;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  --overlay: rgba(0, 0, 0, 0.5);
+
+  /* Tells the UA to draw scrollbars, form controls and the canvas light. The
+     guards below flip it, which is what keeps a native <select> popup from
+     arriving white in a dark app. */
+  color-scheme: light;
+}
+
+/* ---------------------------------------------------------------------------
+   Dark. Authored, not a lightness flip.
+
+   Stated twice, identically: the media block is the OS default and steps aside
+   for an explicit light choice; the attribute block is the manual override and
+   wins regardless of the OS. ThemeProvider writes the attribute; `auto`
+   removes it. Keep the two blocks in sync - they are the same palette. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #1a1a1a;
+    --card: #2d2d2d;
+    --ink: #f5f5f5;
+    --muted: #999999;
+    --line: #404040;
+    --line-strong: #4d4d4d;
+
+    --primary: #66b3ff;
+    --primary-bg: rgba(102, 179, 255, 0.12);
+    --primary-ink: #99ccff;
+    --danger: #ff6b6b;
+    --danger-bg: rgba(255, 107, 107, 0.12);
+    --danger-ink: #ff9999;
+    --success: #66bb6a;
+    --success-bg: rgba(102, 187, 106, 0.12);
+    --success-ink: #99e699;
+
+    --on-accent: #1a1a1a;
+    --on-accent-wash: rgba(0, 0, 0, 0.18);
+
+    --shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    --overlay: rgba(0, 0, 0, 0.65);
+
+    --series-1: #3987e5;
+    --series-2: #008300;
+    --series-3: #d55181;
+    --series-4: #c98500;
+    --series-5: #199e70;
+    --series-6: #d95926;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #1a1a1a;
+  --card: #2d2d2d;
+  --ink: #f5f5f5;
+  --muted: #999999;
+  --line: #404040;
+  --line-strong: #4d4d4d;
+
+  --primary: #66b3ff;
+  --primary-bg: rgba(102, 179, 255, 0.12);
+  --primary-ink: #99ccff;
+  --danger: #ff6b6b;
+  --danger-bg: rgba(255, 107, 107, 0.12);
+  --danger-ink: #ff9999;
+  --success: #66bb6a;
+  --success-bg: rgba(102, 187, 106, 0.12);
+  --success-ink: #99e699;
+
+  --on-accent: #1a1a1a;
+  --on-accent-wash: rgba(0, 0, 0, 0.18);
+
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --overlay: rgba(0, 0, 0, 0.65);
+
+  --series-1: #3987e5;
+  --series-2: #008300;
+  --series-3: #d55181;
+  --series-4: #c98500;
+  --series-5: #199e70;
+  --series-6: #d95926;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+
+  color-scheme: dark;
+}

@@ -105,14 +105,14 @@ export function CameraConnectionForm({ deviceId }: { deviceId: string }) {
             onChange={(e) => setHost(e.target.value)}
           />
           {connection?.discoveredHost && (
-            <span className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>
+            <span className="text-muted" style={{ fontSize: 'var(--t-label)', marginTop: 'var(--sp-1)' }}>
               {host.trim() === ""
                 ? `Using ${connection.discoveredHost}, from Home Assistant — it follows the camera if its address changes.`
                 : `Overriding Home Assistant, which reports ${connection.discoveredHost}. Clear this box to go back to that.`}
             </span>
           )}
           {!connection?.discoveredHost && (
-            <span className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>
+            <span className="text-muted" style={{ fontSize: 'var(--t-label)', marginTop: 'var(--sp-1)' }}>
               Home Assistant did not report an address for this device, so it has
               to be set here.
             </span>
@@ -157,7 +157,7 @@ export function CameraConnectionForm({ deviceId }: { deviceId: string }) {
             onChange={(e) => setPassword(e.target.value)}
           />
           {password !== null && password === "" && connection?.hasPassword && (
-            <span className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>
+            <span className="text-muted" style={{ fontSize: 'var(--t-label)', marginTop: 'var(--sp-1)' }}>
               Saving now clears the stored password.
             </span>
           )}
@@ -173,7 +173,7 @@ export function CameraConnectionForm({ deviceId }: { deviceId: string }) {
       </div>
 
       {connection?.effectiveHost && (
-        <p className="text-muted mt-2" style={{ fontSize: 12 }}>
+        <p className="text-muted mt-2" style={{ fontSize: 'var(--t-label)' }}>
           Stream source: rtsp://
           {connection.username ? `${connection.username}:••••@` : ""}
           {connection.effectiveHost}:{connection.port}

@@ -1,6 +1,6 @@
 # Design system MVP — one vocabulary for admin and home
 
-**Status:** Phase 0 done. Phases 0–5 are engineering and ship in order; **Phase 6
+**Status:** Phases 0–1 done. Phases 0–5 are engineering and ship in order; **Phase 6
 is a manual design pass with outside help** and is the gate everything after it
 waits on. Phase 7 implements what Phase 6 decides — including the admin
 navigation, which is deliberately *not* decided in this document.
@@ -201,7 +201,7 @@ clusters, glassmorphism. Those are Phase 1 and Phase 6 material respectively.
 
 ## Phases
 
-### Phase 0 — The workspace conversion
+### [x] Phase 0 — The workspace conversion
 
 **Ships:** nothing visual. Every app builds, tests and deploys exactly as
 before, from one lockfile. This is the phase that makes a shared package
@@ -250,15 +250,15 @@ cause is unambiguous.
       modulo content hashes.
 - [x] **Commit:** "Web: six islands become one workspace"
 
-### Phase 1 — The token pass and day/night
+### [x] Phase 1 — The token pass and day/night
 
 **Ships:** admin goes dark at night, and every color/size in it comes from one
 file. Composition is untouched — reviewable as a diff of numbers.
 
-- [ ] Create `src/Aerie.Web/packages/ui` — `@aerie/ui`, private, React as a peer
+- [x] Create `src/Aerie.Web/packages/ui` — `@aerie/ui`, private, React as a peer
       dependency, `@fontsource-variable/manrope` as a real one. No build step:
       it ships `.tsx` and `.css` source and the consuming app's Vite bundles it.
-- [ ] `tokens.css` — the light palette on bare `:root`, extending admin's
+- [x] `tokens.css` — the light palette on bare `:root`, extending admin's
       existing vocabulary with the scales it lacks:
       - **Radius**, four steps, the dashboard's shape: card / control / inset /
         chip, plus fully-round pills for badges. A radius stated as a number is
@@ -271,32 +271,51 @@ file. Composition is untouched — reviewable as a diff of numbers.
         `--primary`/`--danger`/`--success` forward unchanged, and carry
         `--series-1`…`--series-8` forward *exactly*: that ramp is
         CVD-validated and is not a Phase 1 value to improvise on.
-- [ ] Dark palette in **both** guards, so the toggle wins in both directions:
+- [x] Dark palette in **both** guards, so the toggle wins in both directions:
       `@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) }`
       and `:root[data-theme="dark"]`. Seed from admin's existing dark block.
       No token may have its only definition inside a media query.
-- [ ] `useTheme()` + a tiny `<ThemeProvider>`: resolves `auto | light | dark`,
+- [x] `useTheme()` + a tiny `<ThemeProvider>`: resolves `auto | light | dark`,
       writes `data-theme` on `<html>`, persists the choice in `localStorage`,
       and reacts to the OS preference changing while the tab is open. The
       *control* for it arrives in Phase 3 with the top bar; this phase ships the
       mechanism, so admin follows the OS immediately.
-- [ ] Self-host the font: `@fontsource-variable/manrope` imported from
+- [x] Self-host the font: `@fontsource-variable/manrope` imported from
       `tokens.css`, and **delete the Google Fonts `<link>` from
       `apps/admin/index.html`**. Add a `--ui` font token.
-- [ ] Point admin's `theme.css` at `@aerie/ui/tokens.css` and delete every
+- [x] Point admin's `theme.css` at `@aerie/ui/tokens.css` and delete every
       declaration it now duplicates. Migrate the literals left in
       [App.css](../../src/Aerie.Web/apps/admin/src/App.css) onto tokens.
-- [ ] Add `../Aerie.Web/packages/**` to admin's MSBuild `Inputs` glob, or a
+- [x] Add `../Aerie.Web/packages/**` to admin's MSBuild `Inputs` glob, or a
       library edit will not retrigger an incremental app build. **Every app that
       adopts the library needs this line** — it is the one piece of Phase 0's
       plumbing that does not generalize for free.
-- [ ] **Gate:** admin lints and builds · side-by-side screenshots show no
+- [x] Two plumbing surprises the later phases will meet again:
+      - [.gitignore](../../.gitignore)'s NuGet `**/[Pp]ackages/*` rule is a
+        path glob, not a NuGet-aware one, and silently swallowed
+        `src/Aerie.Web/packages/` - `git add` reported nothing and
+        `git status` stayed clean. Negated explicitly, below the rule and above
+        the `node_modules/` one so that ordering still holds.
+      - [Dockerfile.api](../../src/Aerie.Api/Dockerfile.api)'s `web-build`
+        stage copies each workspace's `package.json` ahead of `npm ci`;
+        `packages/ui/package.json` is now one of them, because `npm ci` reads
+        the lockfile's `link:` entry and fails outright if the target manifest
+        is not on disk. **Phase 2 and Phase 5 each add a line here too.**
+- [x] **Gate:** admin lints and builds · side-by-side screenshots show no
       intended visual change in light · dark mode is legible everywhere,
       including the chart tooltip, the modal overlay and every badge · the
       network tab shows no request to `fonts.googleapis.com`.
-- [ ] **Commit:** "UI: one vocabulary, and a night for it"
+      *Result:* `make test-web`, `make build` and the Docker build are green;
+      resolving both sides' tokens and diffing rule-by-rule leaves admin's
+      light CSS byte-identical except the body's font stack gaining
+      `'Manrope Variable'`, which is the one change the phase intends; the
+      built bundle carries the five Manrope subsets and no reference to
+      `fonts.googleapis.com`. Touching `packages/ui/src/tokens.css` retriggers
+      an incremental `BuildAdmin` and an untouched tree still rebuilds nothing,
+      so the new `Inputs` glob is doing its job in both directions.
+- [x] **Commit:** "UI: one vocabulary, and a night for it"
 
-### Phase 2 — The design gallery app
+### [] Phase 2 — The design gallery app
 
 **Ships:** `apps/design`, browsable, with a Tokens section. Small in surface and
 disproportionately valuable: **this is the artifact Phase 6 is handed.** It
@@ -325,7 +344,7 @@ developed inside it rather than inside a page of admin.
       both themes correct, CI matrix green on the new entry.
 - [ ] **Commit:** "Design: a room to see the parts in"
 
-### Phase 3 — The shared top bar
+### [] Phase 3 — The shared top bar
 
 **Ships:** the ask's four top-bar demands, in a component built for reuse from
 the first line. Admin adopts it; the gallery adopts it; home adopts it in
@@ -348,7 +367,7 @@ Phase 5.
       keyboard reachable, labelled, both themes.
 - [ ] **Commit:** "UI: one bar, every app"
 
-### Phase 4 — The primitives
+### [] Phase 4 — The primitives
 
 **Ships:** the nine components from the inventory above, each with a gallery
 page showing its states and contexts, and admin migrated onto them. Do this in
@@ -376,7 +395,7 @@ in admin.
       themes.
 - [ ] **Commit(s):** "UI: the primitives move house" (× 2–3 by group)
 
-### Phase 5 — Home becomes an app
+### [] Phase 5 — Home becomes an app
 
 **Ships:** the app picker on the shared library. After this, the two apps in the
 ask share a look and feel for real, and the plan's engineering half is done.
@@ -486,7 +505,7 @@ The open questions, collected. This list is the brief.
 
 ---
 
-### Phase 7 — Implement the design
+### [] Phase 7 — Implement the design
 
 Scope is defined by Phase 6's output, so the checklist below is the shape rather
 than the content.
@@ -504,7 +523,7 @@ than the content.
       laptop and on a phone.
 - [ ] **Commit(s):** by area, not one.
 
-### Phase 8 — Dissipate
+### [] Phase 8 — Dissipate
 
 Per [the plans lifecycle](README.md#the-lifecycle), step 3 — the one that is
 easy to skip and expensive to skip.

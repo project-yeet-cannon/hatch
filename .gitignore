@@ -222,6 +222,12 @@ PublishScripts/
 **/[Pp]ackages/*
 # except build/, which is used as an MSBuild target.
 !**/[Pp]ackages/build/
+# ...and except the npm workspace packages, which are source. This NuGet rule
+# is a path glob, not a NuGet-aware one, so it swallowed src/Aerie.Web/packages/
+# silently - `git add` reported nothing and `git status` stayed clean. Anything
+# new under a directory called "packages" wants a `git check-ignore` first.
+!src/Aerie.Web/packages/
+!src/Aerie.Web/packages/**
 # Uncomment if necessary however generally it will be regenerated when needed
 #!**/[Pp]ackages/repositories.config
 # NuGet v3's project.json files produces more ignorable files

@@ -127,7 +127,7 @@ export function ChannelChart({ metric, points, states, fromMs, toMs, onRangeSele
     return (
       <div>
         <p className="text-muted mb-1">{metric}</p>
-        <p className="text-muted" style={{ fontSize: 12 }}>
+        <p className="text-muted" style={{ fontSize: 'var(--t-label)' }}>
           No data in this range.
         </p>
       </div>

@@ -49,7 +49,7 @@ export function CameraLiveViewModal({
         // rather than a preference.
         <video ref={videoRef} className="camera-live-video" autoPlay muted playsInline />
       )}
-      <p className="text-muted mt-2" style={{ fontSize: 12 }}>
+      <p className="text-muted mt-2" style={{ fontSize: 'var(--t-label)' }}>
         Live sub-stream, relayed through Aerie. Closing this releases the
         camera's connection.
       </p>

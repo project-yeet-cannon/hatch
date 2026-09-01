@@ -74,7 +74,12 @@
   </Target>
 
   <ItemGroup>
-    <AdminSource Include="../Aerie.Web/apps/admin/src/**/*.*;../Aerie.Web/apps/admin/index.html;../Aerie.Web/apps/admin/package.json;../Aerie.Web/apps/admin/vite.config.ts" />
+    <!-- admin consumes @aerie/ui, so the shared package is one of its inputs:
+         without this line a token edit would not retrigger an incremental
+         admin build. Every app that adopts the library needs the same line.
+         Spelled as packages/*/src rather than packages/** so a stray
+         node_modules under a package can never widen the glob. -->
+    <AdminSource Include="../Aerie.Web/apps/admin/src/**/*.*;../Aerie.Web/apps/admin/index.html;../Aerie.Web/apps/admin/package.json;../Aerie.Web/apps/admin/vite.config.ts;../Aerie.Web/packages/*/src/**/*.*;../Aerie.Web/packages/*/package.json" />
   </ItemGroup>
 
   <Target Name="BuildAdmin" BeforeTargets="Build" DependsOnTargets="NpmInstall" Condition="'$(SkipAdminBuild)' != 'true'" Inputs="@(AdminSource)" Outputs="wwwroot/apps/admin/index.html">

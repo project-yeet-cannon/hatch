@@ -102,7 +102,7 @@ export function HistoryModal({ open, onClose, deviceId, channelId, title }: Hist
         </button>
       </div>
 
-      <p className="text-muted mb-2" style={{ fontSize: 12 }}>
+      <p className="text-muted mb-2" style={{ fontSize: 'var(--t-label)' }}>
         Drag on a chart to zoom into a time range. {range.from.toLocaleString()} – {range.to.toLocaleString()}
       </p>
 
