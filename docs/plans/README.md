@@ -37,6 +37,7 @@ full of active work, which is how a plan directory stops being read.
 | [`version.md`](version.md) | `aerie-revision` — binding every component, log line and device to the commit that built it |
 | [`dashboard-redesign.md`](dashboard-redesign.md) | The kiosk dashboard's design pass: one token system, a climate card, a photo/agenda stage, and a two-page wall |
 | [`2026-09-01-verification.md`](2026-09-01-verification.md) | Two dated checks left behind by the node-storage work. Run on or after that date, then delete |
+| [`design-system-mvp.md`](design-system-mvp.md) | A shared component library for admin and home: one token vocabulary, day/night, a gallery app, and a gated manual design pass |
 
 ## Conventions
 
