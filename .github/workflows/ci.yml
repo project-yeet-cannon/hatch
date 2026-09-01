@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        app: [admin, auth, dashboard, modeler, docs, family]
+        app: [admin, auth, dashboard, design, modeler, docs, family]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7

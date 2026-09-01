@@ -28,6 +28,7 @@ COPY src/Aerie.Web/package.json src/Aerie.Web/package-lock.json src/Aerie.Web/
 COPY src/Aerie.Web/apps/admin/package.json src/Aerie.Web/apps/admin/
 COPY src/Aerie.Web/apps/auth/package.json src/Aerie.Web/apps/auth/
 COPY src/Aerie.Web/apps/dashboard/package.json src/Aerie.Web/apps/dashboard/
+COPY src/Aerie.Web/apps/design/package.json src/Aerie.Web/apps/design/
 COPY src/Aerie.Web/apps/docs/package.json src/Aerie.Web/apps/docs/
 COPY src/Aerie.Web/apps/family/package.json src/Aerie.Web/apps/family/
 COPY src/Aerie.Web/apps/modeler/package.json src/Aerie.Web/apps/modeler/
@@ -65,7 +66,7 @@ RUN dotnet restore src/Aerie.Api/Aerie.Api.csproj
 # is a use that has to trust it (see Services/AerieRevision.cs).
 ARG AERIE_REVISION
 ARG AERIE_SEQUENCE
-RUN dotnet publish src/Aerie.Api/Aerie.Api.csproj -c Release -o out -p:SkipDashboardBuild=true -p:SkipAdminBuild=true -p:SkipModelerBuild=true -p:SkipDocsBuild=true -p:SkipFamilyBuild=true -p:SkipAuthBuild=true -p:SourceRevisionId=$AERIE_REVISION -p:AerieSequence=$AERIE_SEQUENCE
+RUN dotnet publish src/Aerie.Api/Aerie.Api.csproj -c Release -o out -p:SkipDashboardBuild=true -p:SkipAdminBuild=true -p:SkipDesignBuild=true -p:SkipModelerBuild=true -p:SkipDocsBuild=true -p:SkipFamilyBuild=true -p:SkipAuthBuild=true -p:SourceRevisionId=$AERIE_REVISION -p:AerieSequence=$AERIE_SEQUENCE
 
 # Build runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:10.0

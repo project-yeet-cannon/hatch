@@ -1,0 +1,590 @@
+/* The gallery's own chrome and the frames its specimens sit in.
+
+   Every color, radius, type step and spacing value here comes from
+   @aerie/ui/tokens.css. The literals that remain are the two kinds the token
+   file licenses: hairlines and small optical nudges, and the fixed dimensions
+   of an ornament - a swatch chip, a demo box - which are sized to what they
+   have to show and must not move when Phase 6 retunes the spacing ladder.
+   Those are named at the top rather than scattered, so they can be seen. */
+
+.design-app {
+  /* The rail is a layout dimension, not a rung on the spacing ladder: it is
+     set by the longest section name plus air, and retuning --sp-* must not
+     resize it. Named here so it is one edit rather than four. */
+  --rail: 232px;
+  /* The fixed sizes of the specimen ornaments, for the same reason. */
+  --chip: 56px;
+  --box: 72px;
+
+  display: grid;
+  grid-template-columns: var(--rail) minmax(0, 1fr);
+  height: 100%;
+}
+
+/* ---------------------------------------------------------------------------
+   The rail */
+
+.design-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  padding: var(--sp-5) var(--sp-4);
+  border-right: 1px solid var(--line);
+  background: var(--card);
+  overflow-y: auto;
+}
+
+.design-rail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.design-rail-title {
+  font-size: var(--t-section);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+}
+
+.design-rail-sub {
+  font-size: var(--t-label);
+  color: var(--muted);
+}
+
+.design-rail-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.design-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.design-nav-group-name {
+  margin-bottom: var(--sp-1);
+  padding-inline: var(--sp-2);
+  font-size: var(--t-label);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.design-nav-link {
+  padding: var(--sp-1-5) var(--sp-2);
+  border-radius: var(--r-ctl);
+  color: var(--ink);
+  font-size: var(--t-body);
+  text-decoration: none;
+  transition: background var(--transition), color var(--transition);
+}
+
+.design-nav-link:hover {
+  background: var(--bg);
+}
+
+.design-nav-link.active {
+  background: var(--primary-bg);
+  color: var(--primary-ink);
+  font-weight: 600;
+}
+
+.design-nav-link:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Pushed to the bottom of the rail and pinned there, so the theme switch is in
+   the same place on a short page and a long one. */
+.design-rail-foot {
+  margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  padding-top: var(--sp-4);
+  background: var(--card);
+}
+
+/* ---------------------------------------------------------------------------
+   The content column */
+
+.design-content {
+  overflow-y: auto;
+  padding: var(--sp-8) var(--sp-6);
+}
+
+.gallery-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  max-width: var(--measure);
+  margin: 0 auto;
+}
+
+.gallery-page-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.gallery-blurb {
+  color: var(--muted);
+  max-width: 68ch;
+}
+
+.gallery-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.gallery-note {
+  color: var(--muted);
+  font-size: var(--t-label);
+  max-width: 68ch;
+}
+
+.token-name {
+  font-family: var(--mono);
+  font-size: var(--t-label);
+  color: var(--ink);
+}
+
+.token-value {
+  font-family: var(--mono);
+  font-size: var(--t-micro);
+  color: var(--muted);
+}
+
+.swatch-use {
+  font-size: var(--t-label);
+  color: var(--muted);
+}
+
+/* A plain button for the gallery's own controls. Deliberately minimal: the
+   real <Button> arrives in Phase 4, and a lookalike here would be a second
+   definition of a thing this app exists to show only one of. */
+.gallery-button {
+  padding: var(--sp-1-5) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  background: var(--card);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--t-label);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.gallery-button:hover {
+  border-color: var(--line-strong);
+  background: var(--bg);
+}
+
+.gallery-button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   Color and series swatches */
+
+.swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--sp-4);
+}
+
+.swatch {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+
+/* The chip's own frame is --card so a translucent wash reads against the
+   surface it is actually used on, with a hairline so a fill equal to --card
+   still has an edge. */
+.swatch-chip {
+  flex: none;
+  width: var(--chip);
+  height: var(--chip);
+  border: 1px solid var(--line);
+  border-radius: var(--r-in);
+  background: var(--card);
+  overflow: hidden;
+}
+
+.swatch-fill {
+  width: 100%;
+  height: 100%;
+}
+
+.swatch-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.accent-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+
+.accent-block {
+  padding: var(--sp-2) var(--sp-5);
+  border-radius: var(--r-ctl);
+  font-size: var(--t-body);
+  font-weight: 500;
+}
+
+/* ---------------------------------------------------------------------------
+   Type specimens */
+
+.specimen-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.specimen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.specimen:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.specimen-line {
+  line-height: var(--lh-tight);
+}
+
+.specimen-face {
+  font-size: var(--t-heading);
+}
+
+.specimen-paragraph {
+  max-width: 68ch;
+}
+
+.specimen-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* ---------------------------------------------------------------------------
+   Spacing */
+
+.ladder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.ladder-rung {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+/* Height is fixed and width is the token: the bar is a ruler, and a ruler that
+   changes in both directions cannot be compared down the column. */
+.ladder-bar {
+  flex: none;
+  height: 20px;
+  border-radius: var(--r-chip);
+  background: var(--primary);
+}
+
+.density-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--sp-4);
+}
+
+.density-sample {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.density-list {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--card);
+  overflow: hidden;
+}
+
+.density-item {
+  padding-inline: var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.density-item:last-child {
+  border-bottom: none;
+}
+
+.measure-demo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.measure-track {
+  overflow: hidden;
+}
+
+.measure-bar {
+  width: var(--measure);
+  max-width: 100%;
+  height: 20px;
+  border-radius: var(--r-chip);
+  background: var(--primary-bg);
+  border: 1px solid var(--primary);
+}
+
+/* ---------------------------------------------------------------------------
+   Radius */
+
+.radius-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-6);
+}
+
+.radius-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-width: 200px;
+}
+
+.radius-box {
+  width: var(--box);
+  height: var(--box);
+  border: 1px solid var(--line-strong);
+  background: var(--primary-bg);
+}
+
+.radius-pill {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--success);
+  background: var(--success-bg);
+  color: var(--success-ink);
+  font-size: var(--t-label);
+  font-weight: 600;
+}
+
+.radius-nest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+.radius-nest-control {
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--primary);
+  color: var(--on-accent);
+  font-size: var(--t-body);
+  font-weight: 500;
+}
+
+.radius-nest-inset {
+  flex: 1;
+  min-width: 160px;
+  padding: var(--sp-3);
+  background: var(--bg);
+  color: var(--muted);
+  font-size: var(--t-label);
+}
+
+/* ---------------------------------------------------------------------------
+   Elevation and motion */
+
+.elevation-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-5);
+}
+
+.elevation-card {
+  padding: var(--sp-4) var(--sp-6);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+/* The stage is a page in miniature, so the scrim has something to sit over. */
+.scrim-stage {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg);
+  min-height: 180px;
+}
+
+.scrim-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-5);
+}
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+  background: var(--overlay);
+}
+
+.scrim-panel {
+  padding: var(--sp-4) var(--sp-6);
+  border-radius: var(--r);
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.motion-block {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 140px;
+  height: var(--box);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--card);
+  color: var(--muted);
+  font-size: var(--t-label);
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+
+.motion-block:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-accent);
+}
+
+/* ---------------------------------------------------------------------------
+   Series */
+
+/* Edge to edge with no gaps: the bands touch in a state timeline, which is the
+   adjacency the ramp was validated for. */
+.series-timeline {
+  display: flex;
+  height: 64px;
+  border-radius: var(--r-in);
+  overflow: hidden;
+}
+
+.series-band {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* White regardless of theme: it labels the band's own fill, and those eight
+   fills do not change enough between themes to want two answers. */
+.series-band-label {
+  color: #ffffff;
+  font-size: var(--t-micro);
+  font-weight: 600;
+}
+
+.series-lines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.series-line-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.series-line-swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+/* Two pixels, the width a chart actually strokes at. */
+.series-line-rule {
+  flex: none;
+  width: 160px;
+  height: 2px;
+  border-radius: var(--r-pill);
+}
+
+/* ---------------------------------------------------------------------------
+   The crash note. Deliberately plain - it renders when the tree that would
+   have styled anything is gone. */
+
+.design-crash-note {
+  padding: var(--sp-5);
+  color: var(--danger);
+  font-family: var(--ui);
+}
+
+/* ---------------------------------------------------------------------------
+   Narrow windows. The rail becomes a band above the content rather than
+   disappearing: this is a workbench browsed on a laptop, and hiding the nav
+   behind a control would put one more thing between a designer and the page. */
+
+@media (max-width: 720px) {
+  .design-app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .design-rail {
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    overflow-y: visible;
+  }
+
+  .design-nav-group {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .design-nav-group-name {
+    flex-basis: 100%;
+  }
+
+  .design-rail-foot {
+    position: static;
+    padding-top: 0;
+  }
+
+  .design-content {
+    padding: var(--sp-5) var(--sp-4);
+  }
+}

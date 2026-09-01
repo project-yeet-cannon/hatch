@@ -103,6 +103,20 @@
   </Target>
 
   <!--
+    The design gallery. Like admin it consumes @aerie/ui, so the shared package
+    is one of its inputs - and more so than admin's: this app exists to show the
+    library, and a token edit that did not retrigger its build would leave the
+    gallery describing a palette the apps no longer use.
+  -->
+  <ItemGroup>
+    <DesignSource Include="../Aerie.Web/apps/design/src/**/*.*;../Aerie.Web/apps/design/public/**/*.*;../Aerie.Web/apps/design/index.html;../Aerie.Web/apps/design/package.json;../Aerie.Web/apps/design/vite.config.ts;../Aerie.Web/packages/*/src/**/*.*;../Aerie.Web/packages/*/package.json" />
+  </ItemGroup>
+
+  <Target Name="BuildDesign" BeforeTargets="Build" DependsOnTargets="NpmInstall" Condition="'$(SkipDesignBuild)' != 'true'" Inputs="@(DesignSource)" Outputs="wwwroot/apps/design/index.html">
+    <Exec Command="npm run build -w apps/design" WorkingDirectory="../Aerie.Web" />
+  </Target>
+
+  <!--
     The family shell PWA. Unlike the apps above, its public/ folder is a build
     input worth tracking: the manifest and icons are what make "Add to Home
     Screen" work, and editing one without touching src/ must still rebuild.

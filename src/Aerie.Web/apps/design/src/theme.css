@@ -1,0 +1,51 @@
+/* The gallery's base layer. It states the same document-level rules admin
+   states - box model, body, headings - drawn from the same tokens, so a
+   specimen shown here reads the way it will read in an app.
+
+   It deliberately does NOT carry admin's component rules (.card, .btn-*,
+   .field). Those become real components in @aerie/ui in Phase 4 and the
+   gallery will show them by rendering them, not by re-declaring their CSS -
+   a gallery whose copy of a component's styles can drift from the component
+   is a gallery that lies. */
+@import '@aerie/ui/tokens.css';
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--ui);
+  font-size: var(--t-body);
+  line-height: var(--lh-body);
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+  font-weight: 600;
+  line-height: var(--lh-tight);
+}
+
+h1 { font-size: var(--t-title); }
+h2 { font-size: var(--t-heading); }
+h3 { font-size: var(--t-subhead); }
+h4 { font-size: var(--t-section); }
+h5 { font-size: var(--t-body); }
+h6 { font-size: var(--t-label); }
+
+p {
+  margin: 0;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: var(--t-label);
+}

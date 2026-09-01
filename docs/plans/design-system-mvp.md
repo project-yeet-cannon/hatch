@@ -1,6 +1,6 @@
 # Design system MVP — one vocabulary for admin and home
 
-**Status:** Phases 0–1 done. Phases 0–5 are engineering and ship in order; **Phase 6
+**Status:** Phases 0–2 done. Phases 0–5 are engineering and ship in order; **Phase 6
 is a manual design pass with outside help** and is the gate everything after it
 waits on. Phase 7 implements what Phase 6 decides — including the admin
 navigation, which is deliberately *not* decided in this document.
@@ -315,34 +315,75 @@ file. Composition is untouched — reviewable as a diff of numbers.
       so the new `Inputs` glob is doing its job in both directions.
 - [x] **Commit:** "UI: one vocabulary, and a night for it"
 
-### [] Phase 2 — The design gallery app
+### [x] Phase 2 — The design gallery app
 
 **Ships:** `apps/design`, browsable, with a Tokens section. Small in surface and
 disproportionately valuable: **this is the artifact Phase 6 is handed.** It
 exists before the components so that every component built in Phase 4 is
 developed inside it rather than inside a page of admin.
 
-- [ ] Scaffold `src/Aerie.Web/apps/design` matching the house pattern:
+- [x] Scaffold `src/Aerie.Web/apps/design` matching the house pattern:
       `base: '/apps/design/'`, `outDir` into `wwwroot/apps/design`, the
       `aerieRevision` plugin, `.oxlintrc.json`, `.nvmrc`.
-- [ ] Primary nav down the left listing sections; a section per token group and
-      later per component.
-- [ ] A persistent **theme switch in the gallery chrome** — every page viewable
+      (No per-app `.nvmrc`: Phase 0 hoisted that to the workspace root and no
+      app has carried one since, so adding one back would be the odd file out.)
+- [x] Primary nav down the left listing sections; a section per token group and
+      later per component. The nav, the routes and the deep links all derive
+      from one list in [`sections.ts`](../../src/Aerie.Web/apps/design/src/sections.ts),
+      so Phase 3 and Phase 4 add a page with one entry.
+- [x] A persistent **theme switch in the gallery chrome** — every page viewable
       in light and dark without leaving it. This is the single most useful thing
       the gallery does for Phase 6.
-- [ ] Token pages: the color ramp with the token name and resolved value on each
+      Built as `<ThemeSwitch>` **in `@aerie/ui`**, not in the gallery: Phase 3
+      needs exactly this control in the top bar, so building it in the app would
+      have been work done twice. It is real radio inputs in a `<fieldset>`, so
+      the group's keyboard and screen-reader contract is the browser's rather
+      than hand-rolled ARIA.
+- [x] Token pages: the color ramp with the token name and resolved value on each
       swatch, the type register as specimens, the spacing ladder, the radius
       steps, elevation, and the `--series-*` categorical ramp.
-- [ ] Plumbing, all six places (this is the tax on a new app, and Phase 5 pays
+      Every value is **read back out of the cascade** with `getComputedStyle`
+      rather than restated in the page — a swatch that restates its own hex is a
+      swatch that can disagree with the token it claims to show, which is the
+      one thing this app must not do. Each page also shows the context the token
+      is chosen against rather than only the token: the accent colors under
+      their `--on-accent` label, the two half-steps as three copies of the same
+      list, the series ramp edge-to-edge as a timeline *and* at 2px as strokes.
+- [x] Plumbing, all six places (this is the tax on a new app, and Phase 5 pays
       it again):
       `Build<App>` target + `Skip` property in the csproj · the `web-build`
       stage in the Dockerfile + its `-p:SkipDesignBuild=true` · `MapFallbackToFile`
       and an `AddRedirect` in [Program.cs](../../src/Aerie.Api/Program.cs) ·
       the `ci.yml` matrix · the Makefile `test-web` list · a tile on the app
       picker.
-- [ ] **Gate:** reachable at `/apps/design`, deep links survive a hard refresh,
+      Phase 1's warning held: the Dockerfile's `web-build` stage needed a
+      seventh `COPY` of a workspace `package.json` before `npm ci`. **Phase 5
+      adds the eighth.**
+- [x] **Gate:** reachable at `/apps/design`, deep links survive a hard refresh,
       both themes correct, CI matrix green on the new entry.
-- [ ] **Commit:** "Design: a room to see the parts in"
+      *Result:* `make test-web` green across all seven apps · `make build` green
+      · `docker build -f src/Aerie.Api/Dockerfile.api .` green with the gallery
+      in the image. Run from that image against a throwaway database,
+      `/apps/design` 302s to the trailing slash, `/apps/design/type` and
+      `/apps/design/series` both return the shell with a 200 (so a hard refresh
+      on a deep link survives), the hashed assets and the favicon resolve, and
+      the picker's new tile points at a live URL. Touching
+      `packages/ui/src/tokens.css` retriggers an incremental `BuildDesign` and
+      an untouched tree still rebuilds nothing, so the new `Inputs` glob works
+      in both directions.
+- [x] **Commit:** "Design: a room to see the parts in"
+
+Two deliberate departures from the house pattern, both recorded in
+[the app's README](../../src/Aerie.Web/apps/design/README.md):
+
+- **No `clientLogger.ts`.** The gallery makes no API calls; it is a static
+  bundle a designer browses with devtools open. The revision plugin's own header
+  already calls the six copies of that module a problem, and a seventh would add
+  to the duplication Phase 4 is chartered to reduce while buying nothing. Render
+  errors go to the console through the app's `ErrorBoundary`.
+- **The gallery states no component CSS.** It shows a component by rendering it.
+  A gallery holding its own copy of a component's styles is a gallery that can
+  drift from the component, which would make it worse than useless in Phase 6.
 
 ### [] Phase 3 — The shared top bar
 

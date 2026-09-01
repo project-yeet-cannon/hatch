@@ -547,6 +547,10 @@ if (Directory.Exists(Path.Combine(appsPath, "docs")))
 {
     app.MapFallbackToFile("/apps/docs/{*path:nonfile}", "apps/docs/index.html");
 }
+if (Directory.Exists(Path.Combine(appsPath, "design")))
+{
+    app.MapFallbackToFile("/apps/design/{*path:nonfile}", "apps/design/index.html");
+}
 // The family shell needs this for more than refresh survival: a printed QR
 // label encodes /apps/family/storage/c/{code} directly, so a cold scan from
 // the stock camera app is *always* a deep link into a route that only exists
@@ -572,6 +576,7 @@ opt.AddRedirect("^apps/admin$", "apps/admin/");
 opt.AddRedirect("^apps/logo$", "apps/logo/");
 opt.AddRedirect("^apps/modeler$", "apps/modeler/");
 opt.AddRedirect("^apps/docs$", "apps/docs/");
+opt.AddRedirect("^apps/design$", "apps/design/");
 opt.AddRedirect("^apps/family$", "apps/family/");
 opt.AddRedirect("^apps/auth$", "apps/auth/");
 // Short enough to read out over the phone to someone holding a new tablet -

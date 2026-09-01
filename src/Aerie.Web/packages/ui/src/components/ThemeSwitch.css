@@ -1,0 +1,78 @@
+/* Styles travel with the component: this file is imported by ThemeSwitch.tsx,
+   not by the consuming app's stylesheet, so an app cannot render the component
+   and forget to dress it. @aerie/ui ships source and the app's Vite bundles it,
+   which is what makes that import work at all.
+
+   Every value here comes from tokens.css. The two literals are optical: a 1px
+   hairline, and the 2px focus-ring offset. */
+
+.aerie-theme-switch {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0;
+  /* A <fieldset> arrives with a border, padding and min-inline-size the layout
+     did not ask for. */
+  margin: 0;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  background: var(--bg);
+  min-inline-size: 0;
+}
+
+/* Visually hidden, not display:none - the group still needs a name announced.
+   Clip rather than a zero-size box so it is never read as an empty label. */
+.aerie-theme-switch__legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.aerie-theme-switch__option {
+  display: inline-flex;
+}
+
+/* The input keeps its focus and keyboard behaviour and gives up only its
+   painting; the <span> next to it is what the operator sees and clicks. */
+.aerie-theme-switch__option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  margin: 0;
+  pointer-events: none;
+}
+
+.aerie-theme-switch__option span {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--sp-1) var(--sp-2-5);
+  border-radius: var(--r-in);
+  font-size: var(--t-label);
+  font-weight: 500;
+  line-height: var(--lh-tight);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.aerie-theme-switch__option input:checked + span {
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.aerie-theme-switch__option input:not(:checked) + span:hover {
+  color: var(--ink);
+}
+
+.aerie-theme-switch__option input:focus-visible + span {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
