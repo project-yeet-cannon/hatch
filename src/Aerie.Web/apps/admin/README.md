@@ -62,8 +62,8 @@ npm run lint
 
 ## Architecture
 
-A standalone Vite/React SPA (same conventions as `apps/dashboard`: no shared component library, plain `fetch` for API calls, no state management library). Routing is `react-router-dom` (`BrowserRouter` with `basename="/apps/admin"`), which is otherwise unused elsewhere in this repo. `src/api/client.ts` holds one small `fetchJson` helper plus typed functions per resource; `src/types.ts` hand-mirrors the API's DTOs (`Aerie.Api/Models/DeviceMapping/Dtos.cs`).
+A Vite/React SPA. Plain `fetch` for API calls and no state management library, as in `apps/dashboard` — but no longer standalone: it is a workspace in `src/Aerie.Web` and consumes the shared library `@aerie/ui`, which supplies the design tokens, the theme, and the top bar every Aerie app wears. Routing is `react-router-dom` (`BrowserRouter` with `basename="/apps/admin"`). `src/api/client.ts` holds one small `fetchJson` helper plus typed functions per resource; `src/types.ts` hand-mirrors the API's DTOs (`Aerie.Api/Models/DeviceMapping/Dtos.cs`).
 
 ## Styling
 
-The app uses CSS variables for theming (`theme.css`) and supports both light and dark modes via `prefers-color-scheme`. Shared layout/table/badge classes live in `App.css`.
+Every color, type step, radius and spacing value comes from `@aerie/ui`'s tokens, imported by `theme.css`; a literal written in this app is a bug. Day/night is the OS preference by default and the theme control in the top bar overrides it. `App.css` holds admin's own chrome — the nav strip and the page idioms that become shared components in a later phase. The bar itself is `<TopBar>` from `@aerie/ui`; admin states nothing about how it looks.

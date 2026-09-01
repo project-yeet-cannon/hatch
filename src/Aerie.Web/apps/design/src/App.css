@@ -16,9 +16,20 @@
   --chip: 56px;
   --box: 72px;
 
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Everything under the bar. The bar spans the full width rather than sitting
+   inside the content column, because it is the app's bar and not the page's -
+   which is the same reason admin's nav strip sits under it rather than beside
+   it. */
+.design-body {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: var(--rail) minmax(0, 1fr);
-  height: 100%;
 }
 
 /* ---------------------------------------------------------------------------
@@ -32,23 +43,6 @@
   border-right: 1px solid var(--line);
   background: var(--card);
   overflow-y: auto;
-}
-
-.design-rail-head {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.design-rail-title {
-  font-size: var(--t-section);
-  font-weight: 600;
-  line-height: var(--lh-tight);
-}
-
-.design-rail-sub {
-  font-size: var(--t-label);
-  color: var(--muted);
 }
 
 .design-rail-groups {
@@ -95,16 +89,6 @@
 .design-nav-link:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
-}
-
-/* Pushed to the bottom of the rail and pinned there, so the theme switch is in
-   the same place on a short page and a long one. */
-.design-rail-foot {
-  margin-top: auto;
-  position: sticky;
-  bottom: 0;
-  padding-top: var(--sp-4);
-  background: var(--card);
 }
 
 /* ---------------------------------------------------------------------------
@@ -186,6 +170,77 @@
 .gallery-button:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   Specimen stages
+
+   A frame for a component that is normally the full width of an app: the bar
+   needs an edge to be flush against, and a page under it to be the chrome of.
+   The stage is the gallery's own furniture - it states nothing about the
+   component inside it. */
+
+.stage {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg);
+  /* The bar's shadow and the stage's corners both stop at the frame. */
+  overflow: hidden;
+}
+
+/* Narrow enough to force the bar's own narrow behaviour without resizing the
+   window, and a fixed dimension for that reason - not a spacing rung. */
+.stage--narrow {
+  max-width: 420px;
+}
+
+.stage-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-5);
+}
+
+/* Stand-in slot content. Deliberately plain, like .gallery-button: the real
+   <Badge> lands in Phase 4, and a lookalike here would be a second definition
+   of a thing this app exists to show only one of. */
+.stage-chip {
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--on-accent-wash);
+  border-radius: var(--r-pill);
+  font-size: var(--t-micro);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* The accent fill these two controls are drawn for, so their hover, focus and
+   ink can be judged against the ground they actually sit on. Flat --primary
+   rather than a copy of the bar's gradient: a second copy of the bar's paint
+   is a thing that can drift from the bar. */
+.switcher-ground {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r);
+  background: var(--primary);
+  color: var(--on-accent);
+}
+
+.switcher-ground .swatch-use {
+  color: var(--on-accent);
+}
+
+.tone-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+}
+
+.tone-sample {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
 }
 
 /* ---------------------------------------------------------------------------
@@ -559,7 +614,7 @@
    behind a control would put one more thing between a designer and the page. */
 
 @media (max-width: 720px) {
-  .design-app {
+  .design-body {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
   }
@@ -577,11 +632,6 @@
 
   .design-nav-group-name {
     flex-basis: 100%;
-  }
-
-  .design-rail-foot {
-    position: static;
-    padding-top: 0;
   }
 
   .design-content {

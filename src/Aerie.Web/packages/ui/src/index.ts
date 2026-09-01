@@ -8,13 +8,18 @@
 
    The cost of that, knowingly: a CSS import is a side effect, so a barrel
    export puts every component's styles in every consuming app's bundle even
-   where the component is tree-shaken out of the JavaScript. Admin carries
-   ThemeSwitch's rules today without rendering it. That is a kilobyte, it goes
-   away in Phase 3 when admin's top bar renders the switch, and admin is slated
-   to use all nine Phase 4 primitives - so per-component entry points would buy
-   nothing and cost every import site an extra specifier. Revisit if a consumer
-   ever wants a genuinely small slice of the library. */
+   where the component is tree-shaken out of the JavaScript. Both consumers now
+   render the whole library - the top bar brought the theme switch and the app
+   switcher with it - and admin is slated to use all nine Phase 4 primitives,
+   so per-component entry points would buy nothing and cost every import site
+   an extra specifier. Revisit if a consumer ever wants a genuinely small slice
+   of the library. */
 export { ThemeProvider } from './theme/ThemeProvider';
 export { useTheme } from './theme/useTheme';
 export type { ThemeChoice, ResolvedTheme, ThemeContextValue } from './theme/themeContext';
 export { ThemeSwitch } from './components/ThemeSwitch';
+export type { ThemeSwitchTone } from './components/ThemeSwitch';
+export { TopBar } from './components/TopBar';
+export type { TopBarProps } from './components/TopBar';
+export { AppSwitcher } from './components/AppSwitcher';
+export type { AppSwitcherProps } from './components/AppSwitcher';

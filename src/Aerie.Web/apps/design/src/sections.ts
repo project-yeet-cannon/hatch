@@ -5,6 +5,7 @@ import { SpacingPage } from './pages/SpacingPage';
 import { RadiusPage } from './pages/RadiusPage';
 import { ElevationPage } from './pages/ElevationPage';
 import { SeriesPage } from './pages/SeriesPage';
+import { TopBarPage } from './pages/TopBarPage';
 
 export interface Section {
   /** The nav heading this section files under. Groups render in the order
@@ -24,9 +25,9 @@ export interface Section {
  * its page lands in pages/, and one entry here puts it in the nav, on a route
  * and behind a deep link. Nothing else in the app enumerates the sections.
  *
- * There is no "Components" group yet because there are no components to show,
- * and an empty group in the nav would be a promise the app cannot keep -
- * renders-nothing discipline applies to the gallery's own chrome first.
+ * Groups appear when they have something in them: "Components" arrived with
+ * the first component, rather than sitting empty in the nav as a promise the
+ * app could not keep.
  */
 export const SECTIONS: Section[] = [
   { group: 'Foundations', slug: 'color', title: 'Color', Page: ColorPage },
@@ -35,6 +36,7 @@ export const SECTIONS: Section[] = [
   { group: 'Foundations', slug: 'radius', title: 'Radius', Page: RadiusPage },
   { group: 'Foundations', slug: 'elevation', title: 'Elevation & motion', Page: ElevationPage },
   { group: 'Foundations', slug: 'series', title: 'Series', Page: SeriesPage },
+  { group: 'Components', slug: 'top-bar', title: 'Top bar', Page: TopBarPage },
 ];
 
 /** The first section, and so where `/` and any unknown route land. */

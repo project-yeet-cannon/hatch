@@ -1,6 +1,6 @@
 # Design system MVP — one vocabulary for admin and home
 
-**Status:** Phases 0–2 done. Phases 0–5 are engineering and ship in order; **Phase 6
+**Status:** Phases 0–3 done. Phases 0–5 are engineering and ship in order; **Phase 6
 is a manual design pass with outside help** and is the gate everything after it
 waits on. Phase 7 implements what Phase 6 decides — including the admin
 navigation, which is deliberately *not* decided in this document.
@@ -385,28 +385,84 @@ Two deliberate departures from the house pattern, both recorded in
   A gallery holding its own copy of a component's styles is a gallery that can
   drift from the component, which would make it worse than useless in Phase 6.
 
-### [] Phase 3 — The shared top bar
+### [x] Phase 3 — The shared top bar
 
 **Ships:** the ask's four top-bar demands, in a component built for reuse from
 the first line. Admin adopts it; the gallery adopts it; home adopts it in
 Phase 5.
 
-- [ ] `<TopBar>` in `@aerie/ui`: **much shorter** than today's 32px-padded
+- [x] `<TopBar>` in `@aerie/ui`: **much shorter** than today's 32px-padded
       gradient block, app name only — **the "System configuration and data
       management" subtitle is deleted, not shrunk.**
-- [ ] An `<AppSwitcher>` as the leading element, replacing the `▦` text glyph.
+      The gradient, the ink on it and the `--measure` inner column are admin's
+      own values carried across; the height is what changed. The app name drops
+      from `--t-display` to `--t-section` because at 32px the name alone is two
+      thirds of the new bar, and keeps the header's 800 weight.
+- [x] An `<AppSwitcher>` as the leading element, replacing the `▦` text glyph.
       "Improve the iconicity" is a design judgement, so Phase 3 ships a real
       SVG mark with an accessible label and a hit target that reads as a
       control rather than a decoration — and **the mark itself is on Phase 6's
       list**. Same slot, same behaviour, better artwork later.
-- [ ] The theme control from Phase 1 lands here, trailing.
-- [ ] Slots for app-supplied leading/trailing content, so a consuming app adds
+      The mark is the four-pane grid every platform uses for "all apps", drawn
+      in `currentColor` so it needs no answer of its own for dark. It sits
+      **alone in `AppsMark.tsx`** so Phase 6 replaces artwork in one file
+      without touching the hit target, the hover state or the focus ring.
+      A 36px target (from 40px, down with the bar), an `<a>` so middle-click
+      and copy-link-address still work, and `aria-label="All apps"` where the
+      glyph carried nothing an assistive technology could read.
+- [x] The theme control from Phase 1 lands here, trailing.
+      It needed a second ground: `<ThemeSwitch>` gained a `tone`, `surface` (a
+      page or a card, Phase 2's appearance, unchanged) and `accent` (a filled
+      bar). On the accent tone **every label stays at full `--on-accent` and
+      the filled pill alone carries the state** — dimming the inactive two was
+      the obvious separation and it puts 12px type at about 3.5:1 on the
+      primary fill, under the 4.5:1 floor. Focus rings on the bar are drawn in
+      `--on-accent` for the same reason: a `--primary` ring on the `--primary`
+      fill is an invisible one.
+- [x] Slots for app-supplied leading/trailing content, so a consuming app adds
       to the bar without forking it.
-- [ ] Admin renders it; its bespoke header CSS is deleted. The gallery renders
+      `leading` renders after the app name, `trailing` before the theme
+      control, which is always last so it is in the same place in every app.
+      Under pressure the name is what gives way — it ellipses while the
+      trailing group holds its size, because a target that shrinks to make room
+      for a title is the wrong thing to shrink.
+- [x] Admin renders it; its bespoke header CSS is deleted. The gallery renders
       it. A gallery page shows it in several contexts.
-- [ ] **Gate:** both apps build · the bar is materially shorter, measured ·
+      The gallery's rail lost both its head and its foot to the bar: the app
+      name was being stated twice and the theme switch now lives where every
+      app keeps it. The new **Components** group in
+      [`sections.ts`](../../src/Aerie.Web/apps/design/src/sections.ts) is the
+      first entry in the group Phase 4 fills.
+- [x] **Gate:** both apps build · the bar is materially shorter, measured ·
       keyboard reachable, labelled, both themes.
-- [ ] **Commit:** "UI: one bar, every app"
+      *Result:* `make test-web` green across all seven apps · `make build`
+      green. **Measured from the resolved CSS, 130.6px → 48px, 63% shorter:**
+      the old header was 32px of padding twice around a 66.6px text block
+      (a 32px title at `--lh-tight`, 4px, a 14px subtitle at `--lh-body`); the
+      bar is a 48px `min-height` set by the 36px control inside it, and its
+      only other occupant — the theme switch — stands 29.6px. No plumbing
+      moved: the `packages/*/src/**` glob Phases 1 and 2 added already covers a
+      new component file, and no new app or workspace package landed, so the
+      Dockerfile, the CI matrix and the Makefile are untouched.
+      Keyboard and labelling are verified by construction rather than by
+      driving a browser: the switcher is an anchor with an `aria-label` and a
+      visible `:focus-visible` ring, and the theme control is still the native
+      `<fieldset>`/radio group Phase 2 built, so the browser supplies the whole
+      arrow-key contract. Both themes are token-only — there is no literal
+      color in any of the three new files. **The look in both themes is the
+      owner's to confirm on screen.**
+- [x] **Commit:** "UI: one bar, every app"
+
+One thing this phase deliberately leaves broken-shaped, for Phase 4:
+
+- **Admin has no `<h1>` now.** The app name in the bar is a wordmark, not a
+  page heading, so it renders as a `<span>` and the `<header>` element carries
+  identity as the banner landmark — otherwise the gallery, whose pages each own
+  an `<h1>`, would have two. Admin's pages have always titled themselves with
+  `<h2>` under the header's `<h1>`, so the top of admin's outline is now `h2`.
+  Lifting those twelve headings is a visible type change (`--t-heading` →
+  `--t-title`), which is exactly what this phase may not do on its own; it
+  belongs with `<PageHeader>` in Phase 4, and is listed there.
 
 ### [] Phase 4 — The primitives
 
@@ -419,6 +475,11 @@ in admin.
       commit: `Button` · `Card` · `Field` · `Table` · `Badge` · `Modal` ·
       `PageHeader` · `Grid` · `Text`, plus `EmptyState` (new: commitment 3 needs
       a deliberate component to point at).
+- [ ] **`<PageHeader>` owns the page's `<h1>`.** Phase 3 moved the app name out
+      of the heading outline and into the banner landmark, which leaves admin's
+      pages titling themselves with `<h2>` and no `h1` above them. The lift is
+      a visible type step, so it lands here with the component that makes it
+      one edit rather than twelve.
 - [ ] Every gallery page shows **states, not just the happy one**: disabled,
       loading, error, long content, empty, and each variant in both themes.
       "See each component in various contexts and interact with it" is the ask;
@@ -510,7 +571,11 @@ The open questions, collected. This list is the brief.
    only clears the ground for it. This mark ends up in the corner of every app
    in the stack; it is the highest-leverage single piece of artwork in the plan.
    The existing [aerie-logo.png](../../aerie-logo.png) and the
-   [logo app](../../src/Aerie.Web/apps/logo/) are prior art.
+   [logo app](../../src/Aerie.Web/apps/logo/) are prior art. What ships today
+   is a four-pane grid in
+   [AppsMark.tsx](../../src/Aerie.Web/packages/ui/src/components/AppsMark.tsx),
+   which is that file and nothing else — replacing the artwork touches no hit
+   target, hover state or focus ring.
 4. **How much dashboard philosophy translates.** The owner likes the wall's
    design idea. Some of it is portable — the stated radius scale, the named type
    register, calm, renders-nothing, the refusal of generic AI-dashboard ruts

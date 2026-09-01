@@ -15,8 +15,15 @@ happy path is visible.
   categorical series ramp. Each page reads the values the browser actually
   resolved rather than restating them, so a swatch can never disagree with the
   token it claims to show.
-- **A theme switch in the rail**, always in the same place, so any page is one
-  click from being read in the other theme.
+- **Components** — each one in its states and contexts, rendered rather than
+  described. The top bar is the first.
+- **A theme switch in the bar**, always in the same place — the same place
+  every other Aerie app keeps it — so any page is one click from being read in
+  the other theme.
+
+The gallery wears the bar it documents. That is deliberate: the one context a
+top bar is never shown in on a specimen page is a real app, and this is the app
+that can show both at once.
 
 Components join the nav as they land in `@aerie/ui`. Adding one is a single
 entry in [`src/sections.ts`](src/sections.ts) — nothing else in the app

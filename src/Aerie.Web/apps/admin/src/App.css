@@ -1,69 +1,16 @@
 /* Admin's chrome and its page-level idioms. Values come from @aerie/ui's
    tokens (imported by theme.css); a literal here is a bug.
 
-   The header block below is on borrowed time - Phase 3 replaces it with the
-   shared <TopBar>. It is tokenised anyway rather than left alone, because a
-   header that reads `color: white` over a light-blue dark-mode gradient is
-   exactly the kind of unreadable the token pass exists to find. */
+   The header block that used to open this file is gone: the bar is <TopBar>
+   in @aerie/ui now, and admin states nothing about how it looks. What is left
+   is admin's own - the nav strip under the bar, the content column, and the
+   page idioms Phase 4 turns into components. */
 
 .admin-app {
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
-}
-
-.admin-header {
-  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-ink) 100%);
-  color: var(--on-accent);
-  padding: var(--sp-8) var(--sp-5);
-  box-shadow: var(--shadow);
-}
-
-.admin-header-content {
-  max-width: var(--measure);
-  margin: 0 auto;
-  display: flex;
-  align-items: center;
-  gap: var(--sp-4);
-}
-
-.admin-back-link {
-  flex: none;
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  /* Off the type register on purpose: this is a glyph scaled to fill a fixed
-     40px hit target, not text. Phase 3 replaces it with an SVG mark. */
-  font-size: 20px;
-  color: var(--on-accent);
-  text-decoration: none;
-  border-radius: var(--r);
-  transition: background-color var(--transition), opacity var(--transition);
-  opacity: 0.8;
-}
-
-.admin-back-link:hover {
-  background-color: var(--on-accent-wash);
-  opacity: 1;
-}
-
-.admin-header-text {
-  flex: 1;
-}
-
-.admin-header h1 {
-  margin: 0;
-  font-size: var(--t-display);
-  font-weight: 800;
-}
-
-.admin-header p {
-  margin: var(--sp-1) 0 0 0;
-  font-size: var(--t-body);
-  opacity: 0.9;
 }
 
 .admin-nav {

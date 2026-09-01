@@ -3,6 +3,11 @@ import { useTheme } from '../theme/useTheme';
 import type { ThemeChoice } from '../theme/themeContext';
 import './ThemeSwitch.css';
 
+/** The ground the switch is sitting on. `surface` is a page or a card;
+    `accent` is a filled bar, where the ink has to come from --on-accent or it
+    is a grey pill on a blue field. */
+export type ThemeSwitchTone = 'surface' | 'accent';
+
 const CHOICES: { value: ThemeChoice; label: string }[] = [
   { value: 'auto', label: 'Auto' },
   { value: 'light', label: 'Light' },
@@ -23,12 +28,20 @@ const CHOICES: { value: ThemeChoice; label: string }[] = [
  * page (the gallery shows components in several contexts) stay independent
  * groups instead of silently stealing each other's checked state.
  */
-export function ThemeSwitch({ className }: { className?: string }) {
+export function ThemeSwitch({
+  tone = 'surface',
+  className,
+}: {
+  tone?: ThemeSwitchTone;
+  className?: string;
+}) {
   const { choice, setChoice } = useTheme();
   const name = useId();
+  const classes = ['aerie-theme-switch', `aerie-theme-switch--${tone}`];
+  if (className) classes.push(className);
 
   return (
-    <fieldset className={className ? `aerie-theme-switch ${className}` : 'aerie-theme-switch'}>
+    <fieldset className={classes.join(' ')}>
       <legend className="aerie-theme-switch__legend">Theme</legend>
       {CHOICES.map((option) => (
         <label key={option.value} className="aerie-theme-switch__option">

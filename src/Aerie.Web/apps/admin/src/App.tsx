@@ -1,4 +1,5 @@
 import { Navigate, NavLink, Route, Routes } from 'react-router-dom';
+import { TopBar } from '@aerie/ui';
 import './App.css';
 import { ZonesPage } from './pages/ZonesPage';
 import { RoutinesPage } from './pages/RoutinesPage';
@@ -18,15 +19,7 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) => `admin-nav-link${i
 export function App() {
   return (
     <div className="admin-app">
-      <header className="admin-header">
-        <div className="admin-header-content">
-          <a href="/" className="admin-back-link" title="Back to app picker">▦</a>
-          <div className="admin-header-text">
-            <h1>Aerie Admin</h1>
-            <p>System configuration and data management</p>
-          </div>
-        </div>
-      </header>
+      <TopBar appName="Aerie Admin" />
 
       <nav className="admin-nav">
         <div className="admin-nav-content">

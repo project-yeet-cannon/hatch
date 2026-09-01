@@ -1,0 +1,55 @@
+/* The bar's own rules. Values come from tokens.css; the one literal is the
+   bar's height, which is a fixed layout dimension rather than a rung on the
+   spacing ladder - it is set by the control inside it (a 36px hit target plus
+   6px of air) and retuning --sp-* must not resize it. It is named here rather
+   than written into three rules.
+
+   The gradient, the ink on it and the max-width are admin's existing header
+   values, carried across unchanged. What changed is the height. */
+
+.aerie-topbar {
+  --topbar-h: 48px;
+
+  flex: none;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-ink) 100%);
+  color: var(--on-accent);
+  box-shadow: var(--shadow);
+}
+
+.aerie-topbar__inner {
+  max-width: var(--measure);
+  min-height: var(--topbar-h);
+  margin: 0 auto;
+  padding-inline: var(--sp-5);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+
+.aerie-topbar__side {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  /* Without this a long app name or a wide slot refuses to shrink and pushes
+     the theme switch off the end instead of ellipsing. */
+  min-width: 0;
+}
+
+/* The trailing group keeps its own size: the controls in it are targets, and a
+   target that shrinks to make room for a title is the wrong thing to shrink. */
+.aerie-topbar__side--end {
+  flex: none;
+  justify-content: flex-end;
+}
+
+.aerie-topbar__name {
+  /* Down from --t-display: at 32px the name alone is two thirds of the bar's
+     new height. The weight is the header's own 800, carried across. */
+  font-size: var(--t-section);
+  font-weight: 800;
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
