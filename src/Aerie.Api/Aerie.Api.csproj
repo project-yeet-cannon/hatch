@@ -147,9 +147,23 @@
     <Exec Command="npm run build -w apps/auth" WorkingDirectory="../Aerie.Web" />
   </Target>
 
-  <!-- Apps landing page (../Aerie.Web/index.html) - just a static file, no build step needed. -->
-  <Target Name="CopyAppsIndex" BeforeTargets="Build" Inputs="../Aerie.Web/index.html" Outputs="wwwroot/apps/index.html">
-    <Copy SourceFiles="../Aerie.Web/index.html" DestinationFolder="wwwroot/apps" />
+  <!--
+    The app picker. It was a static file copied straight into wwwroot/apps by a
+    CopyAppsIndex target until it became an app of its own - which is what let
+    it drop its hand-rolled font hedge and pick up @aerie/ui, so the shared
+    package is one of its inputs like admin's and the gallery's.
+
+    It builds to wwwroot/apps/home like every other app. /apps/ redirects here
+    (Program.cs); building into wwwroot/apps itself to keep that URL would need
+    emptyOutDir: false, one absent-minded edit away from wiping every sibling
+    app's bundle.
+  -->
+  <ItemGroup>
+    <HomeSource Include="../Aerie.Web/apps/home/src/**/*.*;../Aerie.Web/apps/home/public/**/*.*;../Aerie.Web/apps/home/index.html;../Aerie.Web/apps/home/package.json;../Aerie.Web/apps/home/vite.config.ts;../Aerie.Web/packages/*/src/**/*.*;../Aerie.Web/packages/*/package.json" />
+  </ItemGroup>
+
+  <Target Name="BuildHome" BeforeTargets="Build" DependsOnTargets="NpmInstall" Condition="'$(SkipHomeBuild)' != 'true'" Inputs="@(HomeSource)" Outputs="wwwroot/apps/home/index.html">
+    <Exec Command="npm run build -w apps/home" WorkingDirectory="../Aerie.Web" />
   </Target>
 
   <!--

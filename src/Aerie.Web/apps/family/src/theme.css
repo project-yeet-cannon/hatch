@@ -2,9 +2,11 @@
   Same token vocabulary as apps/admin and apps/dashboard (--bg, --card, --ink,
   --muted, --line, --primary, --danger, --success, --shadow, --transition), so
   anything lifted from those apps drops in unchanged. The values come from the
-  apps landing page (src/Aerie.Web/index.html) instead - sky and slate rather
-  than admin's neutral grey, because this is the family-facing side of the
-  product, not the control panel.
+  app picker's own palette instead - sky and slate rather than admin's neutral
+  grey, because this is the family-facing side of the product, not the control
+  panel. That palette was the static picker's, and went with it when the picker
+  became an app on @aerie/ui (docs/plans/design-system-mvp.md, Phase 5); these
+  values are now this app's own until the design pass reconciles them.
 
   A module under src/modules/ styles itself out of these and nothing else. That
   is the whole mechanism keeping ten apps looking like one product: there is no

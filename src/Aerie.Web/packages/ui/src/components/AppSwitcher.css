@@ -36,3 +36,11 @@
   outline-offset: 2px;
   opacity: 1;
 }
+
+/* The home state: the picker's own bar. Same box in the same place, at the
+   resting opacity the link never reaches on its own - it is a mark, not a
+   target, so it neither dims to invite a hover nor brightens on one. */
+.aerie-app-switcher--current {
+  opacity: 1;
+  cursor: default;
+}

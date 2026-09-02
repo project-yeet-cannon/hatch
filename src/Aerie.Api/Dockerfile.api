@@ -31,6 +31,7 @@ COPY src/Aerie.Web/apps/dashboard/package.json src/Aerie.Web/apps/dashboard/
 COPY src/Aerie.Web/apps/design/package.json src/Aerie.Web/apps/design/
 COPY src/Aerie.Web/apps/docs/package.json src/Aerie.Web/apps/docs/
 COPY src/Aerie.Web/apps/family/package.json src/Aerie.Web/apps/family/
+COPY src/Aerie.Web/apps/home/package.json src/Aerie.Web/apps/home/
 COPY src/Aerie.Web/apps/modeler/package.json src/Aerie.Web/apps/modeler/
 # The shared packages are workspaces too: `npm ci` reads the lockfile, finds a
 # link: entry for each, and fails outright if that package.json is not on disk.
@@ -67,7 +68,7 @@ RUN dotnet restore src/Aerie.Api/Aerie.Api.csproj
 # is a use that has to trust it (see Services/AerieRevision.cs).
 ARG AERIE_REVISION
 ARG AERIE_SEQUENCE
-RUN dotnet publish src/Aerie.Api/Aerie.Api.csproj -c Release -o out -p:SkipDashboardBuild=true -p:SkipAdminBuild=true -p:SkipDesignBuild=true -p:SkipModelerBuild=true -p:SkipDocsBuild=true -p:SkipFamilyBuild=true -p:SkipAuthBuild=true -p:SourceRevisionId=$AERIE_REVISION -p:AerieSequence=$AERIE_SEQUENCE
+RUN dotnet publish src/Aerie.Api/Aerie.Api.csproj -c Release -o out -p:SkipDashboardBuild=true -p:SkipAdminBuild=true -p:SkipDesignBuild=true -p:SkipHomeBuild=true -p:SkipModelerBuild=true -p:SkipDocsBuild=true -p:SkipFamilyBuild=true -p:SkipAuthBuild=true -p:SourceRevisionId=$AERIE_REVISION -p:AerieSequence=$AERIE_SEQUENCE
 
 # Build runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:10.0

@@ -9,6 +9,9 @@ export interface TopBarProps {
   appName: string;
   /** Passed through to the <AppSwitcher>. */
   homeHref?: string;
+  /** Set by the app picker itself, where the switcher slot is the home state
+      rather than a link to the page you are already on. */
+  atHome?: boolean;
   /** App-supplied content, after the app name. An environment badge, a
       breadcrumb, a search box - whatever the app needs the bar to carry. */
   leading?: ReactNode;
@@ -18,9 +21,9 @@ export interface TopBarProps {
 }
 
 /**
- * The bar every Aerie app wears. Admin and the gallery render it today; auth,
- * docs, modeler, family and home are why it is in @aerie/ui rather than in
- * either of them.
+ * The bar every Aerie app wears. Admin, the gallery and the app picker render
+ * it today; auth, docs, modeler and family are why it is in @aerie/ui rather
+ * than in any one of them.
  *
  * Three things it deliberately is not:
  *
@@ -38,12 +41,12 @@ export interface TopBarProps {
  * requirement, not a nicety - useTheme throws without one, which is the loud
  * failure a silently-light toggle is not.
  */
-export function TopBar({ appName, homeHref, leading, trailing, className }: TopBarProps) {
+export function TopBar({ appName, homeHref, atHome, leading, trailing, className }: TopBarProps) {
   return (
     <header className={className ? `aerie-topbar ${className}` : 'aerie-topbar'}>
       <div className="aerie-topbar__inner">
         <div className="aerie-topbar__side">
-          <AppSwitcher href={homeHref} />
+          <AppSwitcher href={homeHref} current={atHome} />
           <span className="aerie-topbar__name">{appName}</span>
           {leading}
         </div>

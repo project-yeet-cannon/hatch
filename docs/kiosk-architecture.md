@@ -120,7 +120,7 @@ The device clock gets its own check ([`clockSkew.ts`](../src/Aerie.Web/apps/dash
 
 ### Nothing here waits on the internet
 
-Manrope is self-hosted through `@fontsource-variable/manrope`, imported from [`theme.css`](../src/Aerie.Web/apps/dashboard/src/theme.css) rather than an entry point so a future entry point cannot forget it. The `<link>` to `fonts.googleapis.com` it replaced was a render-blocking subresource on a third-party host: with the WAN down and the LAN fine — a modem reboot, an ISP outage — the browser held first paint on the wall until that socket gave up. Nothing else in the house needs the internet to draw its first frame. The portal page at [`src/Aerie.Web/index.html`](../src/Aerie.Web/index.html) has no build step to bundle a face into, so it hedges with `media="print"` plus an `onload` promotion instead.
+Manrope is self-hosted through `@fontsource-variable/manrope`, imported from [`theme.css`](../src/Aerie.Web/apps/dashboard/src/theme.css) rather than an entry point so a future entry point cannot forget it. The `<link>` to `fonts.googleapis.com` it replaced was a render-blocking subresource on a third-party host: with the WAN down and the LAN fine — a modem reboot, an ISP outage — the browser held first paint on the wall until that socket gave up. Nothing else in the house needs the internet to draw its first frame. The app picker hedged the same request with `media="print"` plus an `onload` promotion for as long as it was a static file with no build step to bundle a face into; it is [an app](../src/Aerie.Web/apps/home) now, and takes the face from `@aerie/ui/tokens.css` like the rest of the house.
 
 ### Producing each failure on purpose
 

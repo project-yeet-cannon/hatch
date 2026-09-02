@@ -1,0 +1,31 @@
+/* The picker's base layer.
+
+   The box model, the body, the heading scale and the native controls come from
+   @aerie/ui/base.css, and every value from @aerie/ui/tokens.css - which is
+   also where the face comes from. That is the whole point of this app
+   existing: the page it replaced was a single static file with no build step,
+   so it could not bundle a font and hedged instead, loading Manrope from
+   fonts.googleapis.com as a `media="print"` link promoted on load. A
+   render-blocking subresource on a third-party host means a WAN outage - LAN
+   fine, house fine - holds first paint on the page every tablet in the house
+   opens first. The hedge is gone with the file that needed it; the face is in
+   the bundle.
+
+   It states no component rules of its own. The card, the badge and the text
+   tones on this page are the components in @aerie/ui, rendered rather than
+   restated. What is in App.css is the picker's own furniture: a tile, a tier
+   heading, and the column they sit in. */
+@import '@aerie/ui/tokens.css';
+@import '@aerie/ui/base.css';
+
+/* One of the two rules base.css deliberately leaves to the app. This page lays
+   its own text out with gaps, so a paragraph arriving with 14px of browser
+   margin would double every one of them. Admin makes the opposite call, which
+   is why neither is in base.css.
+
+   The other - `html, body, #root { height: 100% }` - is not here: the picker is
+   a document that scrolls, not a shell with its own scrolling region, so a
+   full-height root would buy it nothing. */
+p {
+  margin: 0;
+}

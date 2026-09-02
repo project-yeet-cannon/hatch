@@ -44,6 +44,19 @@ export function TopBarPage() {
       </GallerySection>
 
       <GallerySection
+        title="On the picker itself"
+        note="The app picker wears the same bar, with the switcher in its home state: the mark stays in the corner every other app keeps it in, and stops being a link to the page you are already on. At rest at full opacity, with no hover and no focus ring - it is a mark, not a target - and hidden from assistive technology, because announcing &ldquo;all apps&rdquo; on the page that is all apps tells a screen-reader user nothing."
+      >
+        <div className="stage">
+          <TopBar appName="Aerie" atHome />
+          <div className="stage-page">
+            <h3>Apps</h3>
+            <p className="gallery-note">Home citadel.</p>
+          </div>
+        </div>
+      </GallerySection>
+
+      <GallerySection
         title="A narrow window, and a long name"
         note="The name gives way first: it ellipses, while the app switcher and the theme control keep their size. A target that shrank to make room for a title would be the wrong thing to shrink."
       >
@@ -59,6 +72,8 @@ export function TopBarPage() {
         <div className="switcher-ground">
           <AppSwitcher />
           <AppSwitcher label="All apps (custom label)" />
+          <AppSwitcher current />
+          <span className="swatch-use">current — the picker&rsquo;s own bar</span>
         </div>
       </GallerySection>
 

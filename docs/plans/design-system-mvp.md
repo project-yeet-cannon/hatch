@@ -1,7 +1,8 @@
 # Design system MVP — one vocabulary for admin and home
 
-**Status:** Phases 0–4 done. Phases 0–5 are engineering and ship in order; **Phase 6
-is a manual design pass with outside help** and is the gate everything after it
+**Status:** Phases 0–5 done — the plan's engineering half is complete, and the two
+apps in the ask share a vocabulary, a bar and a set of primitives. **Phase 6 is a
+manual design pass with outside help** and is the gate everything after it
 waits on. Phase 7 implements what Phase 6 decides — including the admin
 navigation, which is deliberately *not* decided in this document.
 
@@ -606,31 +607,88 @@ be discovered:
   the native `<dialog>` element's top-layer behaviour and a tested library is a
   bigger decision than the primitives phase gets to make.
 
-### [] Phase 5 — Home becomes an app
+### [x] Phase 5 — Home becomes an app
 
 **Ships:** the app picker on the shared library. After this, the two apps in the
 ask share a look and feel for real, and the plan's engineering half is done.
 
-- [ ] Scaffold `apps/home` as a Vite React app consuming `@aerie/ui`, replacing
+- [x] Scaffold `apps/home` as a Vite React app consuming `@aerie/ui`, replacing
       the static `src/Aerie.Web/index.html` and its `CopyAppsIndex` target.
-- [ ] **The output-path decision:** build to `wwwroot/apps/home/` with
+      The tiles are data now —
+      [`src/apps.ts`](../../src/Aerie.Web/apps/home/src/apps.ts) is the catalog
+      and nothing else in the app enumerates the services — and the page's two
+      pieces of behaviour moved out of the `<script>` at the bottom of the old
+      file into
+      [`siblingOrigin`](../../src/Aerie.Web/apps/home/src/lib/siblingOrigin.ts)
+      (six unit tests: the only logic here worth asserting) and
+      [`useWithheldApps`](../../src/Aerie.Web/apps/home/src/lib/useWithheldApps.ts).
+- [x] **The output-path decision:** build to `wwwroot/apps/home/` with
       `base: '/apps/home/'`, like every other app, and redirect `^$` and
       `^apps/?$` to `/apps/home/`. The alternative — building to `wwwroot/apps/`
       itself to preserve `/apps/` as the picker's URL — requires
       `emptyOutDir: false`, because `emptyOutDir: true` on that directory would
       **wipe every sibling app's bundle**. Taking the redirect is cheaper than
       living next to that trap.
-- [ ] Delete the `media="print"` font hedge: the app bundles its face now, which
+      *Taken as written.* `<AppSwitcher>`'s `href` already defaulted to `/`
+      rather than a literal `/apps/`, so every bar in the house followed the
+      move with no edit — which is what that default was for.
+- [x] Delete the `media="print"` font hedge: the app bundles its face now, which
       is what that comment said it wanted.
-- [ ] Adopt `<TopBar>` — on home the app-switcher slot is the home state rather
+      Verified rather than assumed: the built bundle contains no reference to
+      `googleapis` or `gstatic` at all.
+- [x] Adopt `<TopBar>` — on home the app-switcher slot is the home state rather
       than a link away.
-- [ ] The plumbing tax again, all six places, plus removing `CopyAppsIndex`.
+      `<TopBar atHome>` → `<AppSwitcher current>`: the mark keeps its corner and
+      stops being a link to the page you are already on. In that state it is a
+      `<span>`, hidden from assistive technology — the alternative announces
+      "all apps, current page" on the page that *is* all apps. It has its own
+      specimen on the gallery's top-bar page, as does the whole bar in its home
+      state.
+- [x] The plumbing tax again, all six places, plus removing `CopyAppsIndex`.
       Note the two globs Phase 4 touched: the new app's `Inputs` needs
       `packages/*/src/**` from the first line if it consumes `@aerie/ui`, and
       the Dockerfile's workspace `COPY` list is now nine entries long.
-- [ ] **Gate:** `/` and `/apps/` land on the picker · every tile still resolves ·
+      *Paid, and both notes held.* One departure, recorded in
+      [the app's README](../../src/Aerie.Web/apps/home/README.md): **no
+      `MapFallbackToFile`.** The picker is one page with no client-side router,
+      and a fallback would answer every mistyped path under `/apps/home/` with
+      the picker and a 200 instead of the 404 it deserves.
+- [x] **Gate:** `/` and `/apps/` land on the picker · every tile still resolves ·
       both themes · offline-after-first-load still draws.
-- [ ] **Commit:** "Home: the picker becomes an app"
+      *Result:* `make test-web` green across all eight apps and the package —
+      the picker's six tests among them — and `make build` green, with the new
+      `Inputs` glob verified in both directions (an untouched tree skips
+      `BuildHome`; touching `packages/ui/src/tokens.css` retriggers it).
+      `docker build -f src/Aerie.Api/Dockerfile.api .` green, which is the check
+      the ninth workspace `COPY` exists for. Run from that image against a
+      throwaway database: `/`, `/apps` and `/apps/` all 302 to `/apps/home/`,
+      which returns the shell with a 200; every same-origin tile —
+      `/apps/dashboard/`, `/apps/family/`, `/apps/admin/`, `/apps/docs/`,
+      `/swagger`, `/apps/modeler/`, `/apps/design/`, `/apps/logo/` — resolves;
+      the favicon resolves; and `/apps/home/nope` 404s, which is the departure
+      above working.
+      **Both themes and the offline draw are the owner's to confirm on screen**,
+      per the split that governs this repo. Every value on the page is a token,
+      so a theme is correct here exactly when the palette is.
+- [x] **Commit:** "Home: the picker becomes an app"
+
+Three things this phase decided that the plan did not, all of them visible:
+
+- **The picker's own palette is gone.** The static page carried its own — sky
+  and slate, 22px radii, its one accent a green — and adopting `@aerie/ui` means
+  adopting admin's. That is the phase working as intended (the values are Phase
+  6's), but it is the largest visual change in the plan so far and it is worth
+  saying out loud rather than filing under "migrated". The old palette survives
+  in one place, `apps/family/src/theme.css`, which lifted it verbatim and is now
+  its own; reconciling the two is Phase 6's.
+- **The tier labels are `--muted`, not the old green.** That green was the old
+  file's only accent. In this vocabulary the equivalent is `--success`, which
+  means "this is healthy" — and a tier name is not a status.
+- **A tile's accessible name is the app's name.** The old page wrapped one
+  anchor around the icon, the name, the description and the chevron, so every
+  tile announced itself as "🏠 Kiosk Dashboard Live zone temps & outside weather
+  ›". The link is the name now and its `::after` stretches over the card, so the
+  hit target is unchanged and the sentence is not.
 
 ---
 
@@ -710,9 +768,12 @@ The open questions, collected. This list is the brief.
 8. **Contrast floors in both themes.** The dashboard's circadian system holds
    contrast floors by construction. This system will hold them by having been
    checked — so they need stating as numbers Phase 7 can assert against.
-9. **Icons.** Admin and dashboard use FontAwesome; home uses text glyphs. One
+9. **Icons.** Admin and dashboard use FontAwesome; the picker uses emoji, one
+   per app, carried across from the static page Phase 5 replaced. One
    vocabulary, and a decision on whether FontAwesome stays (it is a dependency
-   in every consuming app) or the system ships its own set.
+   in every consuming app) or the system ships its own set. Twelve app icons is
+   the picker's whole identity, so this question is more visible there than
+   anywhere else.
 10. **Portability.** Every example, mock and demo string in the gallery obeys
     [ethos.md](../ethos.md) — no real names, no real places, no
     `landis.family`. Aerie ships to other operators; the design system is not

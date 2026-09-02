@@ -569,8 +569,14 @@ if (Directory.Exists(Path.Combine(appsPath, "auth")))
 }
 
 var opt = new RewriteOptions();
-opt.AddRedirect("^$", "apps/");
-opt.AddRedirect("^apps$", "apps/");
+// The picker is an app now (src/Aerie.Web/apps/home), so it lives at
+// /apps/home/ like every other one rather than being an index.html sitting in
+// wwwroot/apps. Both of its old addresses still land on it: `/` is what the
+// house is bookmarked as, and `/apps/` is what the app-switcher in every
+// app's top bar has always pointed at.
+opt.AddRedirect("^$", "apps/home/");
+opt.AddRedirect("^apps/?$", "apps/home/");
+opt.AddRedirect("^apps/home$", "apps/home/");
 opt.AddRedirect("^apps/dashboard$", "apps/dashboard/");
 opt.AddRedirect("^apps/admin$", "apps/admin/");
 opt.AddRedirect("^apps/logo$", "apps/logo/");
