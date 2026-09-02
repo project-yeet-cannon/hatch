@@ -2,9 +2,14 @@
    tokens (imported by theme.css); a literal here is a bug.
 
    The header block that used to open this file is gone: the bar is <TopBar>
-   in @aerie/ui now, and admin states nothing about how it looks. What is left
-   is admin's own - the nav strip under the bar, the content column, and the
-   page idioms Phase 4 turns into components. */
+   in @aerie/ui now. So are the page idioms that used to follow it - the page
+   header, the table, the field, the badge - which are <PageHeader>, <Table>,
+   <Field> and <Badge> in the same package. Admin states nothing about how any
+   of them looks.
+
+   What is left is admin's own: the nav strip under the bar, the content
+   column, and the handful of things only this app draws - a camera frame, an
+   invite code, an album cover, a person's avatar. */
 
 .admin-app {
   width: 100%;
@@ -63,76 +68,6 @@
   line-height: 1.4;
   color: var(--muted);
   padding: var(--sp-6) var(--sp-5);
-}
-
-.admin-page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: var(--sp-4);
-}
-
-/* Table */
-.admin-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.admin-table th,
-.admin-table td {
-  text-align: left;
-  padding: var(--sp-2-5) var(--sp-3);
-  border-bottom: 1px solid var(--line);
-  vertical-align: middle;
-}
-
-.admin-table th {
-  font-size: var(--t-label);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  font-weight: 600;
-}
-
-.admin-table tbody tr:last-child td {
-  border-bottom: none;
-}
-
-/* Form field label */
-.field-label {
-  display: block;
-  font-size: var(--t-label);
-  font-weight: 600;
-  color: var(--muted);
-  margin-bottom: var(--sp-1);
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-}
-
-.field input,
-.field select {
-  width: 100%;
-}
-
-.badge {
-  display: inline-block;
-  padding: 2px var(--sp-2);
-  border-radius: var(--r-pill);
-  font-size: var(--t-label);
-  font-weight: 600;
-}
-
-.badge-success {
-  background: var(--success-bg);
-  color: var(--success-ink);
-}
-
-.badge-muted {
-  background: var(--line);
-  color: var(--muted);
 }
 
 /* Channel search combobox */

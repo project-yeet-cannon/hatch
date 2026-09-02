@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Badge, Button, Card, EmptyState, Field, Grid, PageHeader, Text } from '@aerie/ui';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import type { Device, DeviceChannel, DeviceChannelMetric, Routine, RoutineActionKind, RoutineWriteRequest } from '../types';
 import { createRoutine, deleteRoutine, getDevices, getRoutines, triggerRoutine, turnOffRoutine, updateRoutine } from '../api/client';
@@ -234,53 +235,52 @@ export function RoutinesPage() {
 
   return (
     <div>
-      <div className="admin-page-header">
-        <h2>Routines</h2>
-        {!creating && (
-          <button className="btn-primary" onClick={startCreate}>
+      <PageHeader
+        title="Routines"
+        actions={!creating && (
+          <Button variant="primary" onClick={startCreate}>
             Add routine
-          </button>
+          </Button>
         )}
-      </div>
+      />
 
-      {error && <p className="text-danger mb-2">{error}</p>}
-      {loading && <p className="text-muted">Loading…</p>}
+      {error && <Text tone="danger" className="mb-2">{error}</Text>}
+      {loading && <Text tone="muted">Loading…</Text>}
 
       {creating && (
-        <div className="card mb-2">
+        <Card className="mb-2">
           <h3 className="mb-2">New routine</h3>
           <RoutineForm form={createForm} onChange={setCreateForm} channelOptions={channelOptions} />
           <div className="flex gap-1 mt-2">
-            <button className="btn-primary" disabled={saving || !createForm.name.trim()} onClick={submitCreate}>
+            <Button variant="primary" disabled={saving || !createForm.name.trim()} onClick={submitCreate}>
               Save
-            </button>
-            <button className="btn-secondary" onClick={() => setCreating(false)}>
+            </Button>
+            <Button onClick={() => setCreating(false)}>
               Cancel
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       )}
 
-      {!loading && sortedRoutines.length === 0 && !creating && <p className="text-muted">No routines yet.</p>}
+      {!loading && sortedRoutines.length === 0 && !creating && <EmptyState message="No routines yet." />}
 
       {sortedRoutines.map((routine, index) => (
-        <div className="card mb-2" key={routine.id}>
+        <Card className="mb-2" key={routine.id}>
           {editingId === routine.id && editForm ? (
             <>
               <RoutineForm form={editForm} onChange={setEditForm} channelOptions={channelOptions} />
               <div className="flex gap-1 mt-2">
-                <button className="btn-primary" disabled={saving} onClick={() => submitEdit(routine.id)}>
+                <Button variant="primary" disabled={saving} onClick={() => submitEdit(routine.id)}>
                   Save
-                </button>
-                <button
-                  className="btn-secondary"
+                </Button>
+                <Button
                   onClick={() => {
                     setEditingId(null);
                     setEditForm(null);
                   }}
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
             </>
           ) : (
@@ -289,44 +289,44 @@ export function RoutinesPage() {
                 <div className="flex gap-1" style={{ alignItems: 'center' }}>
                   <FontAwesomeIcon icon={iconFor(routine.icon)} color={routine.color ?? undefined} />
                   <h3>{routine.name}</h3>
-                  <span className={`badge ${routine.included ? 'badge-success' : 'badge-muted'}`}>
+                  <Badge tone={routine.included ? 'success' : 'muted'}>
                     {routine.included ? 'On kiosk' : 'Hidden'}
-                  </span>
-                  {routine.isToggle && <span className="badge badge-muted">Toggle</span>}
+                  </Badge>
+                  {routine.isToggle && <Badge>Toggle</Badge>}
                 </div>
-                {routine.description && <p className="text-muted">{routine.description}</p>}
-                <p className="text-muted">
+                {routine.description && <Text tone="muted">{routine.description}</Text>}
+                <Text tone="muted">
                   {routine.actions.length} action{routine.actions.length === 1 ? '' : 's'}
-                </p>
+                </Text>
                 {triggerStatus?.id === routine.id && (
                   <p className={triggerStatus.isError ? 'text-danger' : 'text-success'}>{triggerStatus.message}</p>
                 )}
               </div>
               <div className="flex gap-1">
-                <button className="btn-secondary" disabled={index === 0} onClick={() => move(routine, -1)}>
+                <Button disabled={index === 0} onClick={() => move(routine, -1)}>
                   ↑
-                </button>
-                <button className="btn-secondary" disabled={index === sortedRoutines.length - 1} onClick={() => move(routine, 1)}>
+                </Button>
+                <Button disabled={index === sortedRoutines.length - 1} onClick={() => move(routine, 1)}>
                   ↓
-                </button>
-                <button className="btn-secondary" disabled={triggeringId === routine.id} onClick={() => handleTrigger(routine)}>
+                </Button>
+                <Button disabled={triggeringId === routine.id} onClick={() => handleTrigger(routine)}>
                   {triggeringId === routine.id ? 'Working…' : routine.isToggle ? 'Turn on' : 'Trigger now'}
-                </button>
+                </Button>
                 {routine.isToggle && (
-                  <button className="btn-secondary" disabled={triggeringId === routine.id} onClick={() => handleTurnOff(routine)}>
+                  <Button disabled={triggeringId === routine.id} onClick={() => handleTurnOff(routine)}>
                     {triggeringId === routine.id ? 'Working…' : 'Turn off'}
-                  </button>
+                  </Button>
                 )}
-                <button className="btn-secondary" onClick={() => startEdit(routine)}>
+                <Button onClick={() => startEdit(routine)}>
                   Edit
-                </button>
-                <button className="btn-danger" onClick={() => handleDelete(routine)}>
+                </Button>
+                <Button variant="danger" onClick={() => handleDelete(routine)}>
                   Delete
-                </button>
+                </Button>
               </div>
             </div>
           )}
-        </div>
+        </Card>
       ))}
     </div>
   );
@@ -372,51 +372,44 @@ function RoutineForm({
 
   return (
     <div>
-      <div className="grid cols-3">
-        <div className="field">
-          <label className="field-label">Name</label>
+      <Grid cols={3}>
+        <Field label="Name">
           <input type="text" value={form.name} onChange={(e) => onChange({ ...form, name: e.target.value })} />
-        </div>
-        <div className="field">
-          <label className="field-label">Description (optional)</label>
+        </Field>
+        <Field label="Description (optional)">
           <input type="text" value={form.description} onChange={(e) => onChange({ ...form, description: e.target.value })} />
-        </div>
-        <div className="field">
-          <label className="field-label">Sort order</label>
+        </Field>
+        <Field label="Sort order">
           <input type="number" value={form.sortOrder} onChange={(e) => onChange({ ...form, sortOrder: e.target.value })} />
-        </div>
-        <div className="field">
-          <label className="field-label">Included</label>
+        </Field>
+        <Field label="Included" as="div">
           <label className="flex gap-1" style={{ alignItems: 'center' }}>
             <input type="checkbox" checked={form.included} onChange={(e) => onChange({ ...form, included: e.target.checked })} />
             Show on kiosk
           </label>
-        </div>
-        <div className="field">
-          <label className="field-label">Behavior</label>
+        </Field>
+        <Field label="Behavior" as="div">
           <label className="flex gap-1" style={{ alignItems: 'center' }}>
             <input type="checkbox" checked={form.isToggle} onChange={(e) => setIsToggle(e.target.checked)} />
             Toggle (on/off switch)
           </label>
-        </div>
-        <div className="field">
-          <label className="field-label">Icon</label>
+        </Field>
+        <Field label="Icon">
           <IconPicker value={form.icon} onChange={(icon) => onChange({ ...form, icon })} />
-        </div>
-        <div className="field">
-          <label className="field-label">Color</label>
+        </Field>
+        <Field label="Color">
           <input type="color" value={form.color} onChange={(e) => onChange({ ...form, color: e.target.value })} />
-        </div>
-      </div>
+        </Field>
+      </Grid>
 
       <h4 className="mt-2 mb-1">Actions</h4>
       {form.isToggle && (
-        <p className="text-muted mb-1">
+        <Text tone="muted" className="mb-1">
           Toggle routines only support power (on/off) actions. The kiosk button shows active while every channel below is on; tapping it
           again turns them all off.
-        </p>
+        </Text>
       )}
-      {form.actions.length === 0 && <p className="text-muted">No actions yet — add at least one below.</p>}
+      {form.actions.length === 0 && <EmptyState message="No actions yet — add at least one below." />}
       {form.actions.map((row, index) => {
         const option = channelOptions.find((o) => o.channelId === row.channelId) ?? null;
         return (
@@ -430,21 +423,21 @@ function RoutineForm({
               }}
             />
             {option && <ActionValueInput option={option} value={row.value} onChange={(value) => updateAction(index, { ...row, value })} />}
-            <button className="btn-secondary" disabled={index === 0} onClick={() => moveAction(index, -1)}>
+            <Button disabled={index === 0} onClick={() => moveAction(index, -1)}>
               ↑
-            </button>
-            <button className="btn-secondary" disabled={index === form.actions.length - 1} onClick={() => moveAction(index, 1)}>
+            </Button>
+            <Button disabled={index === form.actions.length - 1} onClick={() => moveAction(index, 1)}>
               ↓
-            </button>
-            <button className="btn-danger" onClick={() => removeAction(index)}>
+            </Button>
+            <Button variant="danger" onClick={() => removeAction(index)}>
               Remove
-            </button>
+            </Button>
           </div>
         );
       })}
-      <button className="btn-secondary mt-1" onClick={() => onChange({ ...form, actions: [...form.actions, { channelId: '', value: '' }] })}>
+      <Button className="mt-1" onClick={() => onChange({ ...form, actions: [...form.actions, { channelId: '', value: '' }] })}>
         Add action
-      </button>
+      </Button>
     </div>
   );
 }
@@ -480,7 +473,7 @@ function ActionValueInput({ option, value, onChange }: { option: ChannelOption; 
         <input type="text" placeholder="mode" style={{ width: '6rem' }} value={value} onChange={(e) => onChange(e.target.value)} />
       );
     case 'TriggerScene':
-      return <span className="text-muted">Activates scene</span>;
+      return <Text as="span" tone="muted">Activates scene</Text>;
     case 'PlayMedia':
       // Stored as typed - the API resolves it against MediaLibraryBaseUrl at
       // trigger time, so a routine survives the base URL changing.

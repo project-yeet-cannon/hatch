@@ -1,3 +1,4 @@
+import { Button, Field, Grid, Text } from '@aerie/ui';
 import { useEffect, useState } from "react";
 import { getCameraConnection, saveCameraConnection } from "../api/client";
 import type { CameraConnection } from "../types";
@@ -81,7 +82,13 @@ export function CameraConnectionForm({ deviceId }: { deviceId: string }) {
     }
   }
 
-  if (loading) return <p className="text-muted">Loading camera connection…</p>;
+  if (loading) return <Text tone="muted">Loading camera connection…</Text>;
+
+  const hostHint = connection?.discoveredHost
+    ? host.trim() === ""
+      ? `Using ${connection.discoveredHost}, from Home Assistant — it follows the camera if its address changes.`
+      : `Overriding Home Assistant, which reports ${connection.discoveredHost}. Clear this box to go back to that.`
+    : "Home Assistant did not report an address for this device, so it has to be set here.";
 
   const passwordPlaceholder = connection?.hasPassword
     ? "•••••••• (unchanged)"
@@ -90,65 +97,52 @@ export function CameraConnectionForm({ deviceId }: { deviceId: string }) {
   return (
     <div className="mt-2">
       <h4 className="mb-1">Camera connection</h4>
-      <p className="text-muted mb-2">
+      <Text tone="muted" className="mb-2">
         Where this camera's video comes from. Aerie hands these to the stream
         server when someone opens the feed — they are not stored in the cluster.
-      </p>
+      </Text>
 
-      <div className="grid cols-3">
-        <div className="field">
-          <label className="field-label">Host</label>
+      <Grid cols={3}>
+        <Field label="Host" hint={hostHint}>
           <input
             type="text"
             value={host}
             placeholder={connection?.discoveredHost ?? "e.g. 10.0.0.9"}
             onChange={(e) => setHost(e.target.value)}
           />
-          {connection?.discoveredHost && (
-            <span className="text-muted" style={{ fontSize: 'var(--t-label)', marginTop: 'var(--sp-1)' }}>
-              {host.trim() === ""
-                ? `Using ${connection.discoveredHost}, from Home Assistant — it follows the camera if its address changes.`
-                : `Overriding Home Assistant, which reports ${connection.discoveredHost}. Clear this box to go back to that.`}
-            </span>
-          )}
-          {!connection?.discoveredHost && (
-            <span className="text-muted" style={{ fontSize: 'var(--t-label)', marginTop: 'var(--sp-1)' }}>
-              Home Assistant did not report an address for this device, so it has
-              to be set here.
-            </span>
-          )}
-        </div>
+        </Field>
 
-        <div className="field">
-          <label className="field-label">RTSP port</label>
+        <Field label="RTSP port">
           <input
             type="number"
             value={port}
             onChange={(e) => setPort(e.target.value)}
           />
-        </div>
+        </Field>
 
-        <div className="field">
-          <label className="field-label">Stream path</label>
+        <Field label="Stream path">
           <input
             type="text"
             value={streamPath}
             onChange={(e) => setStreamPath(e.target.value)}
           />
-        </div>
+        </Field>
 
-        <div className="field">
-          <label className="field-label">Username</label>
+        <Field label="Username">
           <input
             type="text"
             value={username}
             autoComplete="off"
             onChange={(e) => setUsername(e.target.value)}
           />
-        </div>
+        </Field>
 
-        <div className="field">
-          <label className="field-label">Password</label>
+        <Field
+          label="Password"
+          hint={
+            password === '' && connection?.hasPassword ? 'Saving now clears the stored password.' : undefined
+          }
+        >
           <input
             type="password"
             value={password ?? ""}
@@ -156,30 +150,25 @@ export function CameraConnectionForm({ deviceId }: { deviceId: string }) {
             autoComplete="new-password"
             onChange={(e) => setPassword(e.target.value)}
           />
-          {password !== null && password === "" && connection?.hasPassword && (
-            <span className="text-muted" style={{ fontSize: 'var(--t-label)', marginTop: 'var(--sp-1)' }}>
-              Saving now clears the stored password.
-            </span>
-          )}
-        </div>
-      </div>
+        </Field>
+      </Grid>
 
       <div className="flex gap-1 mt-2" style={{ alignItems: "center" }}>
-        <button className="btn-primary" onClick={save} disabled={saving}>
+        <Button variant="primary" onClick={save} disabled={saving}>
           {saving ? "Saving…" : "Save connection"}
-        </button>
-        {saved && <span className="text-success">Saved.</span>}
-        {error && <span className="text-danger">{error}</span>}
+        </Button>
+        {saved && <Text as="span" tone="success">Saved.</Text>}
+        {error && <Text as="span" tone="danger">{error}</Text>}
       </div>
 
       {connection?.effectiveHost && (
-        <p className="text-muted mt-2" style={{ fontSize: 'var(--t-label)' }}>
+        <Text tone="muted" className="mt-2" style={{ fontSize: 'var(--t-label)' }}>
           Stream source: rtsp://
           {connection.username ? `${connection.username}:••••@` : ""}
           {connection.effectiveHost}:{connection.port}
           {connection.streamPath.startsWith("/") ? "" : "/"}
           {connection.streamPath}
-        </p>
+        </Text>
       )}
     </div>
   );

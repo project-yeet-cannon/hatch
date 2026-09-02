@@ -1,3 +1,12 @@
+/* Two linear scales and a polyline formatter - the whole of what admin's
+   channel chart and the dashboard's temperature chart need from a charting
+   library, which is why neither pulls one in.
+
+   Shared rather than copied. Both apps had a scale.ts; admin's had grown
+   invertLinear for its drag-to-select range and the dashboard's had
+   toPolylinePoints, so each was missing a function the other had written. This
+   file is the union, which is what the drift was hiding. */
+
 export interface ChartPoint {
   x: number;
   y: number;

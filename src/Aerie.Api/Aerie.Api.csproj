@@ -66,7 +66,11 @@
   </Target>
 
   <ItemGroup>
-    <DashboardSource Include="../Aerie.Web/apps/dashboard/src/**/*.*;../Aerie.Web/apps/dashboard/index.html;../Aerie.Web/apps/dashboard/package.json;../Aerie.Web/apps/dashboard/vite.config.ts" />
+    <!-- The dashboard consumes @aerie/lib (the chart scales and the camera
+         stream protocol it shares with admin), so packages/ is one of its
+         inputs too. It does not consume @aerie/ui: the wall's palette is the
+         circadian engine, which is deliberately not the design system. -->
+    <DashboardSource Include="../Aerie.Web/apps/dashboard/src/**/*.*;../Aerie.Web/apps/dashboard/index.html;../Aerie.Web/apps/dashboard/package.json;../Aerie.Web/apps/dashboard/vite.config.ts;../Aerie.Web/packages/*/src/**/*.*;../Aerie.Web/packages/*/package.json" />
   </ItemGroup>
 
   <Target Name="BuildDashboard" BeforeTargets="Build" DependsOnTargets="NpmInstall" Condition="'$(SkipDashboardBuild)' != 'true'" Inputs="@(DashboardSource)" Outputs="wwwroot/apps/dashboard/index.html">
@@ -74,9 +78,10 @@
   </Target>
 
   <ItemGroup>
-    <!-- admin consumes @aerie/ui, so the shared package is one of its inputs:
-         without this line a token edit would not retrigger an incremental
-         admin build. Every app that adopts the library needs the same line.
+    <!-- admin consumes @aerie/ui and @aerie/lib, so the shared packages are
+         among its inputs: without this line a token edit would not retrigger an
+         incremental admin build. Every app that adopts either needs the same
+         line.
          Spelled as packages/*/src rather than packages/** so a stray
          node_modules under a package can never widen the glob. -->
     <AdminSource Include="../Aerie.Web/apps/admin/src/**/*.*;../Aerie.Web/apps/admin/index.html;../Aerie.Web/apps/admin/package.json;../Aerie.Web/apps/admin/vite.config.ts;../Aerie.Web/packages/*/src/**/*.*;../Aerie.Web/packages/*/package.json" />

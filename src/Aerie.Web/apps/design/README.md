@@ -16,7 +16,13 @@ happy path is visible.
   resolved rather than restating them, so a swatch can never disagree with the
   token it claims to show.
 - **Components** — each one in its states and contexts, rendered rather than
-  described. The top bar is the first.
+  described: the top bar, the page header, and the nine primitives admin is
+  built out of. Every page shows the states that are not the happy one —
+  disabled, loading, error, empty, long content — because those are the ones
+  a designer never sees by clicking through a working app.
+  The specimens are live. The buttons press, the fields take typing, the
+  modals take over the page and give focus back. A specimen that mocks its own
+  behaviour is a specimen that can be wrong about it.
 - **A theme switch in the bar**, always in the same place — the same place
   every other Aerie app keeps it — so any page is one click from being read in
   the other theme.
@@ -39,7 +45,8 @@ enumerates the pages.
   it, never by restating its styles. A gallery whose copy of a component's CSS
   can drift from the component is a gallery that lies. The only styles in
   [`src/App.css`](src/App.css) are the gallery's own chrome and the frames its
-  specimens sit in.
+  specimens sit in — and the two stand-ins it once held for a button and a
+  badge are gone, replaced by the real ones the moment those landed.
 
 ## Development
 
@@ -64,7 +71,9 @@ npm run dev -w apps/design
 ```
 
 `@aerie/ui` is a workspace link, so editing a token or a component in
-`packages/ui` hot-reloads here with no publish step.
+`packages/ui` hot-reloads here with no publish step. That is the loop the
+gallery is for: change a value, see it in both themes across every component
+that uses it, without a build.
 
 ### Build
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Badge, Button, Card, EmptyState, Field, Grid, PageHeader, Text } from '@aerie/ui';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import type {
   ChannelDirection,
@@ -353,60 +354,59 @@ export function PanelsPage() {
 
   return (
     <div>
-      <div className="admin-page-header">
-        <h2>Panels</h2>
-        {!creating && (
-          <button className="btn-primary" onClick={startCreate}>
+      <PageHeader
+        title="Panels"
+        actions={!creating && (
+          <Button variant="primary" onClick={startCreate}>
             Add panel
-          </button>
+          </Button>
         )}
-      </div>
+      />
 
-      <p className="text-muted mb-2">
+      <Text tone="muted" className="mb-2">
         A panel is a kiosk tile that opens a sub-screen holding several things to touch — existing routines, and controls bound straight to a
         device's channels.
-      </p>
+      </Text>
 
-      {error && <p className="text-danger mb-2">{error}</p>}
-      {loading && <p className="text-muted">Loading…</p>}
+      {error && <Text tone="danger" className="mb-2">{error}</Text>}
+      {loading && <Text tone="muted">Loading…</Text>}
 
       {creating && (
-        <div className="card mb-2">
+        <Card className="mb-2">
           <h3 className="mb-2">New panel</h3>
           <PanelForm form={createForm} onChange={setCreateForm} routines={routines} options={options} />
-          {createError && <p className="text-danger mt-1">{createError}</p>}
+          {createError && <Text tone="danger" className="mt-1">{createError}</Text>}
           <div className="flex gap-1 mt-2">
-            <button className="btn-primary" disabled={saving || createError !== null} onClick={submitCreate}>
+            <Button variant="primary" disabled={saving || createError !== null} onClick={submitCreate}>
               Save
-            </button>
-            <button className="btn-secondary" onClick={() => setCreating(false)}>
+            </Button>
+            <Button onClick={() => setCreating(false)}>
               Cancel
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       )}
 
-      {!loading && sortedPanels.length === 0 && !creating && <p className="text-muted">No panels yet.</p>}
+      {!loading && sortedPanels.length === 0 && !creating && <EmptyState message="No panels yet." />}
 
       {sortedPanels.map((panel, index) => (
-        <div className="card mb-2" key={panel.id}>
+        <Card className="mb-2" key={panel.id}>
           {editingId === panel.id && editForm ? (
             <>
               <PanelForm form={editForm} onChange={setEditForm} routines={routines} options={options} />
-              {editError && <p className="text-danger mt-1">{editError}</p>}
+              {editError && <Text tone="danger" className="mt-1">{editError}</Text>}
               <div className="flex gap-1 mt-2">
-                <button className="btn-primary" disabled={saving || editError !== null} onClick={() => submitEdit(panel.id)}>
+                <Button variant="primary" disabled={saving || editError !== null} onClick={() => submitEdit(panel.id)}>
                   Save
-                </button>
-                <button
-                  className="btn-secondary"
+                </Button>
+                <Button
                   onClick={() => {
                     setEditingId(null);
                     setEditForm(null);
                   }}
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
             </>
           ) : (
@@ -415,36 +415,35 @@ export function PanelsPage() {
                 <div className="flex gap-1" style={{ alignItems: 'center' }}>
                   <FontAwesomeIcon icon={iconFor(panel.icon)} color={panel.color ?? undefined} />
                   <h3>{panel.name}</h3>
-                  <span className={`badge ${panel.included ? 'badge-success' : 'badge-muted'}`}>
+                  <Badge tone={panel.included ? 'success' : 'muted'}>
                     {panel.included ? 'On kiosk' : 'Hidden'}
-                  </span>
+                  </Badge>
                 </div>
-                {panel.description && <p className="text-muted">{panel.description}</p>}
-                <p className="text-muted">{itemSummary(panel, routines)}</p>
+                {panel.description && <Text tone="muted">{panel.description}</Text>}
+                <Text tone="muted">{itemSummary(panel, routines)}</Text>
               </div>
               <div className="flex gap-1">
-                <button className="btn-secondary" disabled={index === 0} onClick={() => move(panel, -1)}>
+                <Button disabled={index === 0} onClick={() => move(panel, -1)}>
                   ↑
-                </button>
-                <button className="btn-secondary" disabled={index === sortedPanels.length - 1} onClick={() => move(panel, 1)}>
+                </Button>
+                <Button disabled={index === sortedPanels.length - 1} onClick={() => move(panel, 1)}>
                   ↓
-                </button>
-                <button
-                  className="btn-secondary"
+                </Button>
+                <Button
                   onClick={() => {
                     setEditingId(panel.id);
                     setEditForm(toFormState(panel));
                   }}
                 >
                   Edit
-                </button>
-                <button className="btn-danger" onClick={() => handleDelete(panel)}>
+                </Button>
+                <Button variant="danger" onClick={() => handleDelete(panel)}>
                   Delete
-                </button>
+                </Button>
               </div>
             </div>
           )}
-        </div>
+        </Card>
       ))}
     </div>
   );
@@ -492,38 +491,32 @@ function PanelForm({
 
   return (
     <div>
-      <div className="grid cols-3">
-        <div className="field">
-          <label className="field-label">Name</label>
+      <Grid cols={3}>
+        <Field label="Name">
           <input type="text" value={form.name} onChange={(e) => onChange({ ...form, name: e.target.value })} />
-        </div>
-        <div className="field">
-          <label className="field-label">Description (optional)</label>
+        </Field>
+        <Field label="Description (optional)">
           <input type="text" value={form.description} onChange={(e) => onChange({ ...form, description: e.target.value })} />
-        </div>
-        <div className="field">
-          <label className="field-label">Sort order</label>
+        </Field>
+        <Field label="Sort order">
           <input type="number" value={form.sortOrder} onChange={(e) => onChange({ ...form, sortOrder: e.target.value })} />
-        </div>
-        <div className="field">
-          <label className="field-label">Included</label>
+        </Field>
+        <Field label="Included" as="div">
           <label className="flex gap-1" style={{ alignItems: 'center' }}>
             <input type="checkbox" checked={form.included} onChange={(e) => onChange({ ...form, included: e.target.checked })} />
             Show on kiosk
           </label>
-        </div>
-        <div className="field">
-          <label className="field-label">Icon</label>
+        </Field>
+        <Field label="Icon">
           <IconPicker value={form.icon} onChange={(icon) => onChange({ ...form, icon })} />
-        </div>
-        <div className="field">
-          <label className="field-label">Color</label>
+        </Field>
+        <Field label="Color">
           <input type="color" value={form.color} onChange={(e) => onChange({ ...form, color: e.target.value })} />
-        </div>
-      </div>
+        </Field>
+      </Grid>
 
       <h4 className="mt-2 mb-1">Items</h4>
-      {form.items.length === 0 && <p className="text-muted">Nothing on this panel yet — add a routine or a control below.</p>}
+      {form.items.length === 0 && <EmptyState message="Nothing on this panel yet — add a routine or a control below." />}
 
       {form.items.map((row, index) => (
         <ItemEditor
@@ -540,12 +533,12 @@ function PanelForm({
       ))}
 
       <div className="flex gap-1 mt-1">
-        <button className="btn-secondary" onClick={() => onChange({ ...form, items: [...form.items, emptyItem('Routine')] })}>
+        <Button onClick={() => onChange({ ...form, items: [...form.items, emptyItem('Routine')] })}>
           Add routine
-        </button>
-        <button className="btn-secondary" onClick={() => onChange({ ...form, items: [...form.items, emptyItem('Control')] })}>
+        </Button>
+        <Button onClick={() => onChange({ ...form, items: [...form.items, emptyItem('Control')] })}>
           Add control
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -584,25 +577,24 @@ function ItemEditor({
   }
 
   return (
-    <div className="card mb-1">
+    <Card className="mb-1">
       <div className="flex between mb-1" style={{ alignItems: 'center' }}>
-        <span className="badge badge-muted">{row.kind === 'Routine' ? 'Routine' : `${row.controlKind} control`}</span>
+        <Badge>{row.kind === 'Routine' ? 'Routine' : `${row.controlKind} control`}</Badge>
         <div className="flex gap-1">
-          <button className="btn-secondary" disabled={index === 0} onClick={() => onMove(-1)}>
+          <Button disabled={index === 0} onClick={() => onMove(-1)}>
             ↑
-          </button>
-          <button className="btn-secondary" disabled={index === total - 1} onClick={() => onMove(1)}>
+          </Button>
+          <Button disabled={index === total - 1} onClick={() => onMove(1)}>
             ↓
-          </button>
-          <button className="btn-danger" onClick={onRemove}>
+          </Button>
+          <Button variant="danger" onClick={onRemove}>
             Remove
-          </button>
+          </Button>
         </div>
       </div>
 
       {row.kind === 'Routine' ? (
-        <div className="field">
-          <label className="field-label">Routine</label>
+        <Field label="Routine">
           <select value={row.routineId} onChange={(e) => onChange({ ...row, routineId: e.target.value })}>
             <option value="">Select a routine…</option>
             {[...routines]
@@ -613,14 +605,14 @@ function ItemEditor({
                 </option>
               ))}
           </select>
-          <p className="text-muted">The routine's own name, icon and color are used on the panel.</p>
-        </div>
+          <Text tone="muted">The routine's own name, icon and color are used on the panel.</Text>
+        </Field>
       ) : (
         <ControlEditor row={row} options={options} onChange={onChange} onSetControlKind={setControlKind} onBind={bind} />
       )}
 
-      {error && <p className="text-danger mt-1">{error}</p>}
-    </div>
+      {error && <Text tone="danger" className="mt-1">{error}</Text>}
+    </Card>
   );
 }
 
@@ -646,9 +638,8 @@ function ControlEditor({
 
   return (
     <>
-      <div className="grid cols-3">
-        <div className="field">
-          <label className="field-label">Kind</label>
+      <Grid cols={3}>
+        <Field label="Kind">
           <select value={row.controlKind} onChange={(e) => onSetControlKind(e.target.value as ControlKind)}>
             {CONTROL_KINDS.map((kind) => (
               <option key={kind} value={kind}>
@@ -656,34 +647,28 @@ function ControlEditor({
               </option>
             ))}
           </select>
-        </div>
-        <div className="field">
-          <label className="field-label">Label</label>
+        </Field>
+        <Field label="Label">
           <input
             type="text"
             placeholder="Air conditioner"
             value={row.label}
             onChange={(e) => onChange({ ...row, label: e.target.value })}
           />
-        </div>
-        <div className="field">
-          <label className="field-label">Icon</label>
+        </Field>
+        <Field label="Icon">
           <IconPicker value={row.icon} onChange={(icon) => onChange({ ...row, icon })} />
-        </div>
-        <div className="field">
-          <label className="field-label">Color</label>
+        </Field>
+        <Field label="Color">
           <input type="color" value={row.color} onChange={(e) => onChange({ ...row, color: e.target.value })} />
-        </div>
-      </div>
+        </Field>
+      </Grid>
 
       <h5 className="mt-1 mb-1">Channels</h5>
       {ROLES_FOR[row.controlKind].map((spec) => {
         const roleOptions = optionsForRole(options, spec.role);
         return (
-          <div className="field" key={spec.role}>
-            <label className="field-label">
-              {spec.role} {spec.required ? '' : '(optional)'}
-            </label>
+          <Field label={`${spec.role}${spec.required ? '' : ' (optional)'}`} key={spec.role}>
             <div className="flex gap-1" style={{ alignItems: 'center' }}>
               <ChannelSelect
                 value={row.bindings[spec.role] ?? ''}
@@ -692,23 +677,22 @@ function ControlEditor({
                 onSelect={(channelId) => onBind(spec.role, channelId)}
               />
               {(row.bindings[spec.role] ?? '') !== '' && (
-                <button className="btn-secondary" onClick={() => onBind(spec.role, '')}>
+                <Button onClick={() => onBind(spec.role, '')}>
                   Clear
-                </button>
+                </Button>
               )}
             </div>
-            <p className="text-muted">
+            <Text tone="muted">
               {ROLE_HELP[spec.role]}
               {roleOptions.length === 0 && ` No ${ROLE_METRIC[spec.role]} channel is mapped yet.`}
-            </p>
-          </div>
+            </Text>
+          </Field>
         );
       })}
 
       {isThermostat && (
-        <div className="grid cols-3 mt-1">
-          <div className="field">
-            <label className="field-label">On mode</label>
+        <Grid cols={3} className="mt-1">
+          <Field label="On mode">
             {modeOptions && modeOptions.length > 0 ? (
               <select value={row.onMode} onChange={(e) => onChange({ ...row, onMode: e.target.value })}>
                 <option value="">Select a mode…</option>
@@ -726,39 +710,36 @@ function ControlEditor({
                 onChange={(e) => onChange({ ...row, onMode: e.target.value })}
               />
             )}
-            <p className="text-muted">
+            <Text tone="muted">
               Which HVAC mode means "on" for this device — "cool" for an air conditioner, "heat" for a radiator. Required once a Mode
               channel is bound.
-            </p>
-          </div>
-          <div className="field">
-            <label className="field-label">Min °F</label>
+            </Text>
+          </Field>
+          <Field label="Min °F">
             <input
               type="number"
               placeholder={String(PANEL_DEFAULTS.minF)}
               value={row.minF}
               onChange={(e) => onChange({ ...row, minF: e.target.value })}
             />
-          </div>
-          <div className="field">
-            <label className="field-label">Max °F</label>
+          </Field>
+          <Field label="Max °F">
             <input
               type="number"
               placeholder={String(PANEL_DEFAULTS.maxF)}
               value={row.maxF}
               onChange={(e) => onChange({ ...row, maxF: e.target.value })}
             />
-          </div>
-          <div className="field">
-            <label className="field-label">Step °F</label>
+          </Field>
+          <Field label="Step °F">
             <input
               type="number"
               placeholder={String(PANEL_DEFAULTS.stepF)}
               value={row.stepF}
               onChange={(e) => onChange({ ...row, stepF: e.target.value })}
             />
-          </div>
-        </div>
+          </Field>
+        </Grid>
       )}
     </>
   );

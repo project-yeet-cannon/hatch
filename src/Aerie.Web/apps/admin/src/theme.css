@@ -1,60 +1,21 @@
-/* Admin's stylesheet. The vocabulary lives in @aerie/ui - this file states
-   only the rules that use it. A color, radius, type step or spacing value
-   written here as a literal is a bug: it belongs in tokens.css or nowhere.
+/* Admin's stylesheet.
 
-   (The component *rules* below - .card, .btn-*, .field - are next to move;
-   they become real components in @aerie/ui in Phase 4. Until then they stay
-   here, drawn from the shared tokens.) */
+   The vocabulary is @aerie/ui/tokens.css and the document layer - box model,
+   body, headings, native form controls - is @aerie/ui/base.css. The component
+   rules that used to sit in this file (.card, .btn-*, .field, .badge, .grid,
+   .admin-table) are gone: they are real components in @aerie/ui now, and admin
+   renders them rather than restating their CSS.
+
+   What is left is admin's own: the things only this app draws. A color,
+   radius, type step or spacing value written here as a literal is a bug. */
 @import '@aerie/ui/tokens.css';
+@import '@aerie/ui/base.css';
 
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  padding: 0;
-  background: var(--bg);
-  color: var(--ink);
-  font-family: var(--ui);
-  font-size: var(--t-body);
-  line-height: var(--lh-body);
-}
-
+/* Admin's shell is a full-height flex column - a bar, a nav strip, and one
+   scrolling content column. base.css leaves that to the app. */
 html, body, #root {
   width: 100%;
   height: 100%;
-}
-
-/* Modal */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--overlay);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--sp-4);
-  z-index: 100;
-}
-
-.modal-panel {
-  width: 100%;
-  max-width: 720px;
-  max-height: calc(100vh - var(--sp-8));
-  overflow-y: auto;
-}
-
-.modal-close {
-  background: transparent;
-  padding: var(--sp-1) var(--sp-2);
-  font-size: var(--t-subhead);
-  line-height: 1;
-  color: var(--muted);
-}
-
-.modal-close:hover {
-  color: var(--ink);
 }
 
 /* Camera live view. 16/9 rather than a height: the panel is a fixed width, and
@@ -139,124 +100,7 @@ html, body, #root {
   display: inline-block;
 }
 
-/* Headings */
-h1, h2, h3, h4, h5, h6 {
-  margin: 0;
-  font-weight: 600;
-  line-height: var(--lh-tight);
-}
-
-h1 { font-size: var(--t-title); }
-h2 { font-size: var(--t-heading); }
-h3 { font-size: var(--t-subhead); }
-h4 { font-size: var(--t-section); }
-h5 { font-size: var(--t-body); }
-h6 { font-size: var(--t-label); }
-
-/* Buttons */
-button, input[type="button"], input[type="submit"] {
-  padding: var(--sp-2) var(--sp-4);
-  border: none;
-  border-radius: var(--r-ctl);
-  font-family: inherit;
-  font-size: var(--t-body);
-  font-weight: 500;
-  cursor: pointer;
-  transition: all var(--transition);
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-primary {
-  background: var(--primary);
-  color: var(--on-accent);
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: var(--primary-ink);
-}
-
-.btn-danger {
-  background: var(--danger);
-  color: var(--on-accent);
-}
-
-.btn-danger:hover:not(:disabled) {
-  background: var(--danger-ink);
-}
-
-.btn-secondary {
-  background: var(--line);
-  color: var(--ink);
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: var(--line-strong);
-}
-
-/* Inputs */
-input[type="text"],
-input[type="email"],
-input[type="number"],
-input[type="password"],
-input[type="datetime-local"],
-select,
-textarea {
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--line);
-  border-radius: var(--r-in);
-  font-family: inherit;
-  font-size: var(--t-body);
-  color: var(--ink);
-  background: var(--card);
-  transition: border-color var(--transition), box-shadow var(--transition);
-}
-
-input:focus,
-select:focus,
-textarea:focus {
-  outline: none;
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px var(--primary-bg);
-}
-
-/* Cards */
-.card {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  padding: var(--sp-4);
-  box-shadow: var(--shadow);
-}
-
-/* Layout */
-.container {
-  max-width: var(--measure);
-  margin: 0 auto;
-  padding: var(--sp-5);
-}
-
-.grid {
-  display: grid;
-  gap: var(--sp-4);
-}
-
-.grid.cols-2 {
-  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-}
-
-.grid.cols-3 {
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-}
-
 /* Utilities */
-.text-muted {
-  color: var(--muted);
-}
-
 .icon-link {
   display: inline-flex;
   align-items: center;
@@ -281,14 +125,6 @@ textarea:focus {
 .icon-button:hover:not(:disabled) {
   background: none;
   color: var(--primary);
-}
-
-.text-danger {
-  color: var(--danger);
-}
-
-.text-success {
-  color: var(--success);
 }
 
 .mb-1 { margin-bottom: var(--sp-2); }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
+import { Button, EmptyState, Modal, Text } from '@aerie/ui';
 import type { ChannelHistory, DeviceHistory } from '../types';
 import { getChannelHistory, getDeviceHistory } from '../api/client';
-import { Modal } from './Modal';
 import { ChannelChart } from './ChannelChart';
 
 const HISTORY_PRESETS: { label: string; hours: number }[] = [
@@ -93,21 +93,21 @@ export function HistoryModal({ open, onClose, deviceId, channelId, title }: Hist
     <Modal open={open} onClose={onClose} title={title}>
       <div className="flex gap-1 mb-2" style={{ flexWrap: 'wrap' }}>
         {HISTORY_PRESETS.map((preset) => (
-          <button key={preset.label} className="btn-secondary" onClick={() => setRange(presetRange(preset.hours))}>
+          <Button key={preset.label} onClick={() => setRange(presetRange(preset.hours))}>
             {preset.label}
-          </button>
+          </Button>
         ))}
-        <button className="btn-secondary" onClick={() => setRange(presetRange(DEFAULT_PRESET_HOURS))}>
+        <Button onClick={() => setRange(presetRange(DEFAULT_PRESET_HOURS))}>
           Reset zoom
-        </button>
+        </Button>
       </div>
 
-      <p className="text-muted mb-2" style={{ fontSize: 'var(--t-label)' }}>
+      <Text tone="muted" className="mb-2" style={{ fontSize: 'var(--t-label)' }}>
         Drag on a chart to zoom into a time range. {range.from.toLocaleString()} – {range.to.toLocaleString()}
-      </p>
+      </Text>
 
-      {error && <p className="text-danger mb-2">{error}</p>}
-      {loading && data === null && <p className="text-muted">Loading…</p>}
+      {error && <Text tone="danger" className="mb-2">{error}</Text>}
+      {loading && data === null && <Text tone="muted">Loading…</Text>}
 
       <div style={{ opacity: loading && data !== null ? 0.5 : 1, transition: 'opacity 150ms ease' }}>
         {channels.map((channel) => (
@@ -122,7 +122,7 @@ export function HistoryModal({ open, onClose, deviceId, channelId, title }: Hist
             />
           </div>
         ))}
-        {!loading && channels.length === 0 && <p className="text-muted">No channels to show.</p>}
+        {!loading && channels.length === 0 && <EmptyState message="No channels to show." />}
       </div>
     </Modal>
   );

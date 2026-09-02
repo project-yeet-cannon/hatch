@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Button, Card, Field, PageHeader, Text } from '@aerie/ui';
 import QRCode from 'qrcode';
 import { getKioskProvisioningInfo } from '../api/client';
 import type { ProvisioningInfo } from '../types';
@@ -65,41 +66,40 @@ export function ProvisioningPage() {
 
   return (
     <div>
-      <div className="admin-page-header">
-        <h2>Provisioning</h2>
-        <button className="btn-secondary" onClick={load}>
-          Refresh
-        </button>
-      </div>
+      <PageHeader
+        title="Provisioning"
+        actions={<Button onClick={load}>Refresh</Button>}
+      />
 
-      {error && <p className="text-danger mb-2">{error}</p>}
-      {loading && <p className="text-muted">Loading…</p>}
+      {error && <Text tone="danger" className="mb-2">{error}</Text>}
+      {loading && <Text tone="muted">Loading…</Text>}
 
       {!loading && info && !hasWifi && (
-        <div className="card">
+        <Card>
           <p>
             No kiosk Wi-Fi network is configured yet. Set <strong>Kiosk Wi-Fi SSID</strong> (and password/security
             type, if needed) on the Settings page before generating a provisioning QR code.
           </p>
-        </div>
+        </Card>
       )}
 
       {!loading && info && hasWifi && (
-        <div className="card">
-          <p className="field-label">Encoding</p>
-          <p className="text-muted mb-2">
-            SSID <strong>{info.wifiSsid}</strong> ({info.wifiSecurityType || 'open'}) · APK from{' '}
-            <strong>{info.apkDownloadUrl}</strong> · time zone <strong>{info.timeZone || '—'}</strong>
-          </p>
+        <Card>
+          <Field as="div" label="Encoding" className="mb-2">
+            <Text tone="muted">
+              SSID <strong>{info.wifiSsid}</strong> ({info.wifiSecurityType || 'open'}) · APK from{' '}
+              <strong>{info.apkDownloadUrl}</strong> · time zone <strong>{info.timeZone || '—'}</strong>
+            </Text>
+          </Field>
 
           <canvas ref={canvasRef} />
 
           <div className="mt-2">
-            <button className="btn-secondary" onClick={copyJson}>
+            <Button onClick={copyJson}>
               {copied ? 'Copied!' : 'Copy JSON'}
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       )}
     </div>
   );

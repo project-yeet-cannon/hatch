@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { Badge, Button, Card, PageHeader, Table, Text } from '@aerie/ui';
 import {
   deleteCalendarAccount,
   getCalendarAccounts,
@@ -160,43 +161,43 @@ export function CalendarsPage() {
 
   return (
     <div>
-      <div className="admin-page-header">
-        <h2>Calendars</h2>
-        <div className="flex gap-1" style={{ alignItems: 'center' }}>
-          {oauthConfigured ? (
-            // A plain anchor, not a fetch and not a router Link: this leaves the
-            // SPA for Google entirely.
-            <a className="btn-primary" href={CONNECT_PATH}>
-              Connect a Google account
-            </a>
-          ) : (
-            <Link className="btn-secondary" to="/settings">
-              Set Google credentials first
-            </Link>
-          )}
-          <button className="btn-secondary" onClick={syncEvents} disabled={syncing}>
-            {syncing ? 'Syncing…' : 'Sync events now'}
-          </button>
-          <button className="btn-secondary" onClick={load}>
-            Refresh
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Calendars"
+        actions={
+          <>
+            {oauthConfigured ? (
+              // A plain anchor, not a fetch and not a router Link: this leaves the
+              // SPA for Google entirely.
+              <Button as="a" variant="primary" href={CONNECT_PATH}>
+                Connect a Google account
+              </Button>
+            ) : (
+              <Button as={Link} to="/settings">
+                Set Google credentials first
+              </Button>
+            )}
+            <Button onClick={syncEvents} disabled={syncing}>
+              {syncing ? 'Syncing…' : 'Sync events now'}
+            </Button>
+            <Button onClick={load}>Refresh</Button>
+          </>
+        }
+      />
 
-      {outcome?.kind === 'connected' && <p className="text-success mb-2">Connected {outcome.email}.</p>}
-      {outcome?.kind === 'error' && <p className="text-danger mb-2">Couldn’t connect that account: {outcome.message}</p>}
+      {outcome?.kind === 'connected' && <Text tone="success" className="mb-2">Connected {outcome.email}.</Text>}
+      {outcome?.kind === 'error' && <Text tone="danger" className="mb-2">Couldn’t connect that account: {outcome.message}</Text>}
 
-      {error && <p className="text-danger mb-2">{error}</p>}
-      {notice && <p className="text-muted mb-2">{notice}</p>}
-      {loading && <p className="text-muted">Loading…</p>}
+      {error && <Text tone="danger" className="mb-2">{error}</Text>}
+      {notice && <Text tone="muted" className="mb-2">{notice}</Text>}
+      {loading && <Text tone="muted">Loading…</Text>}
 
       {!loading && accounts.length === 0 && (
-        <div className="card mb-2">
+        <Card className="mb-2">
           <p>
             No accounts are connected. <strong>Connect a Google account</strong> sends you to Google’s consent screen
             and brings back the list of calendars it can see — every one of them off until you say otherwise.
           </p>
-        </div>
+        </Card>
       )}
 
       {!loading &&
@@ -244,45 +245,45 @@ function AccountCard({
   const included = account.calendars.filter((c) => c.included).length;
 
   return (
-    <div className="card mb-2">
+    <Card className="mb-2">
       <div className="flex between" style={{ alignItems: 'flex-start' }}>
         <div>
           <div className="flex gap-1" style={{ alignItems: 'center' }}>
             <strong>{account.accountEmail}</strong>
-            {account.displayName && <span className="text-muted">{account.displayName}</span>}
-            {account.needsReauth && <span className="badge badge-muted">Needs reconnecting</span>}
+            {account.displayName && <Text as="span" tone="muted">{account.displayName}</Text>}
+            {account.needsReauth && <Badge>Needs reconnecting</Badge>}
           </div>
-          <p className="text-muted mt-1 mb-1">
+          <Text tone="muted" className="mt-1 mb-1">
             Connected {formatAge(account.connectedAt)} · Last synced{' '}
             {account.lastSyncedAt ? formatAge(account.lastSyncedAt) : 'never'} · {included} of{' '}
             {account.calendars.length} included
-          </p>
+          </Text>
         </div>
         <div className="flex gap-1">
-          <button className="btn-secondary" disabled={refreshing} onClick={() => run(onRefresh, setRefreshing)}>
+          <Button disabled={refreshing} onClick={() => run(onRefresh, setRefreshing)}>
             {refreshing ? 'Refreshing…' : 'Refresh calendars'}
-          </button>
-          <button className="btn-danger" disabled={removing} onClick={() => run(onRemove, setRemoving)}>
+          </Button>
+          <Button variant="danger" disabled={removing} onClick={() => run(onRemove, setRemoving)}>
             {removing ? 'Removing…' : 'Remove'}
-          </button>
+          </Button>
         </div>
       </div>
 
       {account.needsReauth && (
-        <p className="text-danger mb-2">
+        <Text tone="danger" className="mb-2">
           Google no longer accepts this account’s authorization, so its calendars have stopped updating.{' '}
           <a href={CONNECT_PATH}>Reconnect it</a> — the calendars below keep their settings.
-        </p>
+        </Text>
       )}
 
-      {account.lastSyncError && <p className="text-danger mb-2">Last sync failed: {account.lastSyncError}</p>}
+      {account.lastSyncError && <Text tone="danger" className="mb-2">Last sync failed: {account.lastSyncError}</Text>}
 
       {account.calendars.length === 0 ? (
-        <p className="text-muted">
+        <Text tone="muted">
           No calendars discovered for this account yet. <strong>Refresh calendars</strong> asks Google again.
-        </p>
+        </Text>
       ) : (
-        <table className="admin-table">
+        <Table>
           <thead>
             <tr>
               <th style={{ width: '1%' }}>Show</th>
@@ -296,9 +297,9 @@ function AccountCard({
               <CalendarRow key={calendar.id} calendar={calendar} onSave={onSaveCalendar} />
             ))}
           </tbody>
-        </table>
+        </Table>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -337,10 +338,10 @@ function CalendarRow({
             }}
           />
           <span title={calendar.providerCalendarId}>{calendar.name}</span>
-          {calendar.isPrimary && <span className="badge badge-muted">Primary</span>}
+          {calendar.isPrimary && <Badge>Primary</Badge>}
         </div>
       </td>
-      <td className="text-muted">{calendar.timeZone ?? '—'}</td>
+      <Text as="td" tone="muted">{calendar.timeZone ?? '—'}</Text>
       <td>
         <div className="flex gap-1" style={{ alignItems: 'center' }}>
           <input
@@ -355,8 +356,7 @@ function CalendarRow({
             }}
           />
           {calendar.colorOverride !== null && (
-            <button
-              className="btn-secondary"
+            <Button
               title="Go back to the color Google reports for this calendar"
               onClick={async () => {
                 setDraftColor(null);
@@ -364,7 +364,7 @@ function CalendarRow({
               }}
             >
               Reset
-            </button>
+            </Button>
           )}
         </div>
       </td>
@@ -384,12 +384,12 @@ function SetupNote() {
   const redirectUri = `${window.location.origin}/api/calendar/oauth/callback`;
 
   return (
-    <div className="card">
+    <Card>
       <details>
         <summary>
           <strong>Setting up the Google connection</strong>
         </summary>
-        <ol className="text-muted mt-2">
+        <Text as="ol" tone="muted" className="mt-2">
           <li>
             In a Google Cloud project of your own, enable the <strong>Google Calendar API</strong> and create an{' '}
             <strong>OAuth client ID</strong> of type “Web application”.
@@ -408,9 +408,9 @@ function SetupNote() {
             the stored authorization after <strong>7 days</strong> and the calendar goes stale every week. Leaving it
             unverified is fine at household scale — Google allows that with a warning screen, up to 100 users.
           </li>
-        </ol>
+        </Text>
       </details>
-    </div>
+    </Card>
   );
 }
 

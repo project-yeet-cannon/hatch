@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Card, Text } from '@aerie/ui';
 import type { DeviceChannelMetric } from '../types';
 
 /**
@@ -125,8 +126,8 @@ export function ChannelSelect({
         style={{ width: '100%' }}
       />
       {open && (
-        <div className="card channel-select-dropdown">
-          {results.length === 0 && <p className="text-muted channel-select-empty">No matching channels.</p>}
+        <Card className="channel-select-dropdown">
+          {results.length === 0 && <Text tone="muted" className="channel-select-empty">No matching channels.</Text>}
           {results.map((option, index) => (
             <div
               key={option.channelId}
@@ -141,7 +142,7 @@ export function ChannelSelect({
               <HighlightedLabel text={channelLabel(option)} query={query} />
             </div>
           ))}
-        </div>
+        </Card>
       )}
     </div>
   );

@@ -1,0 +1,19 @@
+/* Admin's .card, unchanged: a surface, a hairline, the card radius, one rung
+   of padding and the single elevation step. */
+
+.aerie-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: var(--sp-4);
+  box-shadow: var(--shadow);
+}
+
+/* A card whose content runs to its own edges — a table that should rule the
+   full width, a list of rows. The card keeps its frame and gives up its
+   padding, and `overflow: hidden` is what makes the content stop at the
+   corners instead of squaring them off. */
+.aerie-card--flush {
+  padding: 0;
+  overflow: hidden;
+}

@@ -32,10 +32,11 @@ COPY src/Aerie.Web/apps/design/package.json src/Aerie.Web/apps/design/
 COPY src/Aerie.Web/apps/docs/package.json src/Aerie.Web/apps/docs/
 COPY src/Aerie.Web/apps/family/package.json src/Aerie.Web/apps/family/
 COPY src/Aerie.Web/apps/modeler/package.json src/Aerie.Web/apps/modeler/
-# The shared library is a workspace too: `npm ci` reads the lockfile, finds a
-# link: entry for packages/ui, and fails outright if that package.json is not
-# on disk. It has no build script, so `--workspaces --if-present` below skips
-# it and the consuming apps bundle its source.
+# The shared packages are workspaces too: `npm ci` reads the lockfile, finds a
+# link: entry for each, and fails outright if that package.json is not on disk.
+# Neither has a build script, so `--workspaces --if-present` below skips them
+# and the consuming apps bundle their source.
+COPY src/Aerie.Web/packages/lib/package.json src/Aerie.Web/packages/lib/
 COPY src/Aerie.Web/packages/ui/package.json src/Aerie.Web/packages/ui/
 RUN npm --prefix src/Aerie.Web ci
 

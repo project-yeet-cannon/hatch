@@ -1,4 +1,4 @@
-import { AppSwitcher, ThemeSwitch, TopBar } from '@aerie/ui';
+import { AppSwitcher, Badge, Button, ThemeSwitch, TopBar } from '@aerie/ui';
 import { GalleryPage, GallerySection } from '../components/Gallery';
 
 /* Every bar on this page is the real component, wired to the real theme: click
@@ -37,12 +37,8 @@ export function TopBarPage() {
         <div className="stage">
           <TopBar
             appName="Aerie Docs"
-            leading={<span className="stage-chip">Staging</span>}
-            trailing={
-              <button type="button" className="gallery-button">
-                Sign out
-              </button>
-            }
+            leading={<Badge tone="primary">Staging</Badge>}
+            trailing={<Button>Sign out</Button>}
           />
         </div>
       </GallerySection>

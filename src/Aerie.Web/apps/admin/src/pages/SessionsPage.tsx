@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { Badge, Button, Card, Modal, PageHeader, Table, Text } from '@aerie/ui';
 import QRCode from 'qrcode';
-import { Modal } from '../components/Modal';
 import { createInvite, deleteGrant, getAppsConfig, getGrants, getPeople, linkGrantPerson, signOutDevice } from '../api/client';
 import { formatAge } from '../lib/format';
 import type { AuthGrant, AuthInvite, Person } from '../types';
@@ -135,49 +135,49 @@ export function SessionsPage() {
 
   return (
     <div>
-      <div className="admin-page-header">
-        <h2>Sessions</h2>
-        <div className="flex gap-1" style={{ alignItems: 'center' }}>
-          <input
-            type="text"
-            placeholder="Device name (optional)"
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-          />
-          {/* Whose device this is about to be. Set here and the link is already
-              in place when the row appears, rather than being a second step
-              somebody has to remember after the tablet is in a stranger's
-              hands. */}
-          <PersonSelect
-            people={people}
-            value={invitePersonId || null}
-            unclaimedLabel="Nobody in particular"
-            onChange={(personId) => setInvitePersonId(personId ?? '')}
-          />
-          <button className="btn-primary" disabled={generating} onClick={generate}>
-            {generating ? 'Generating…' : 'Generate invite'}
-          </button>
-          <button className="btn-secondary" onClick={load}>
-            Refresh
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Sessions"
+        actions={
+          <>
+            <input
+              type="text"
+              placeholder="Device name (optional)"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+            />
+            {/* Whose device this is about to be. Set here and the link is already
+                in place when the row appears, rather than being a second step
+                somebody has to remember after the tablet is in a stranger's
+                hands. */}
+            <PersonSelect
+              people={people}
+              value={invitePersonId || null}
+              unclaimedLabel="Nobody in particular"
+              onChange={(personId) => setInvitePersonId(personId ?? '')}
+            />
+            <Button variant="primary" disabled={generating} onClick={generate}>
+              {generating ? 'Generating…' : 'Generate invite'}
+            </Button>
+            <Button onClick={load}>Refresh</Button>
+          </>
+        }
+      />
 
-      {error && <p className="text-danger mb-2">{error}</p>}
-      {loading && <p className="text-muted">Loading…</p>}
+      {error && <Text tone="danger" className="mb-2">{error}</Text>}
+      {loading && <Text tone="muted">Loading…</Text>}
 
       {!loading && grants.length === 0 && (
-        <div className="card">
+        <Card>
           <p>
             No devices are enrolled. <strong>Generate invite</strong> makes a code that turns one browser into a
             session — good for fifteen minutes, and good exactly once.
           </p>
-        </div>
+        </Card>
       )}
 
       {!loading && grants.length > 0 && (
-        <div className="card">
-          <table className="admin-table">
+        <Card>
+          <Table>
             <thead>
               <tr>
                 <th>Device</th>
@@ -197,7 +197,7 @@ export function SessionsPage() {
                       {/* The user agent is the name's provenance, not the name -
                           it earns a tooltip and nothing more. */}
                       <span title={grant.userAgent ?? undefined}>{grant.label}</span>
-                      {grant.isCurrent && <span className="badge badge-success">This device</span>}
+                      {grant.isCurrent && <Badge tone="success">This device</Badge>}
                     </div>
                   </td>
                   <td>
@@ -214,20 +214,20 @@ export function SessionsPage() {
                   <td>{grant.lastSeenIp ?? '—'}</td>
                   <td>
                     {grant.isCurrent ? (
-                      <button className="btn-secondary" onClick={signOutThisDevice}>
+                      <Button onClick={signOutThisDevice}>
                         Sign out
-                      </button>
+                      </Button>
                     ) : (
-                      <button className="btn-danger" onClick={() => revoke(grant)}>
+                      <Button variant="danger" onClick={() => revoke(grant)}>
                         Revoke
-                      </button>
+                      </Button>
                     )}
                   </td>
                 </tr>
               ))}
             </tbody>
-          </table>
-        </div>
+          </Table>
+        </Card>
       )}
 
       <InviteModal invite={invite} publicBaseUrl={publicBaseUrl} onClose={() => setInvite(null)} />
@@ -332,10 +332,10 @@ function InviteModal({
     <Modal open={invite !== null} onClose={onClose} title="Enrol a device">
       {invite && (
         <div className="invite">
-          <p className="text-muted">
+          <Text tone="muted">
             Scan this, or read the code out. Either one signs a device in{invite.label ? ` as “${invite.label}”` : ''}{' '}
             and keeps it signed in until you revoke it here.
-          </p>
+          </Text>
 
           <div className="invite-qr" aria-hidden={expired}>
             <canvas ref={canvasRef} style={expired ? { opacity: 0.25 } : undefined} />
@@ -347,24 +347,24 @@ function InviteModal({
             {expired ? 'This code has expired — generate another.' : `Expires in ${formatCountdown(remaining)}`}
           </p>
 
-          {qrError && <p className="text-danger">Couldn’t draw the code: {qrError}</p>}
+          {qrError && <Text tone="danger">Couldn’t draw the code: {qrError}</Text>}
 
-          <p className="text-muted invite-url">{redeemUrl}</p>
+          <Text tone="muted" className="invite-url">{redeemUrl}</Text>
 
           {publicBaseUrl === null && (
-            <p className="text-muted">
+            <Text tone="muted">
               Set <code>Apps:PublicBaseUrl</code> so this points at the install’s canonical address instead of
               whichever one this tab is using — a phone on the Wi-Fi may not be able to reach this one.
-            </p>
+            </Text>
           )}
 
           <div className="flex gap-1 mt-2">
-            <button className="btn-secondary" disabled={expired} onClick={copyLink}>
+            <Button disabled={expired} onClick={copyLink}>
               {copied ? 'Copied!' : 'Copy link'}
-            </button>
-            <button className="btn-secondary" onClick={onClose}>
+            </Button>
+            <Button onClick={onClose}>
               Done
-            </button>
+            </Button>
           </div>
         </div>
       )}

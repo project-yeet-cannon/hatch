@@ -9,7 +9,8 @@
   "//": "No build step on purpose: this package ships .tsx and .css source and the consuming app's Vite bundles it. That keeps a token edit a one-file edit with no publish/compile round-trip, and it is why the exports below point straight at src/.",
   "exports": {
     ".": "./src/index.ts",
-    "./tokens.css": "./src/tokens.css"
+    "./tokens.css": "./src/tokens.css",
+    "./base.css": "./src/base.css"
   },
   "dependencies": {
     "@fontsource-variable/manrope": "^5.3.0"

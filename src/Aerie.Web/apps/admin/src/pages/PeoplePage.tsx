@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Modal } from '../components/Modal';
+import { Badge, Button, Card, Field, Modal, PageHeader, Table, Text } from '@aerie/ui';
 import {
   createPerson,
   deletePerson,
@@ -79,37 +79,37 @@ export function PeoplePage() {
 
   return (
     <div>
-      <div className="admin-page-header">
-        <h2>People</h2>
-        <div className="flex gap-1" style={{ alignItems: 'center' }}>
-          <button className="btn-primary" onClick={() => setEditing('new')}>
-            Add person
-          </button>
-          <button className="btn-secondary" onClick={load}>
-            Refresh
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="People"
+        actions={
+          <>
+            <Button variant="primary" onClick={() => setEditing('new')}>
+              Add person
+            </Button>
+            <Button onClick={load}>Refresh</Button>
+          </>
+        }
+      />
 
-      {error && <p className="text-danger mb-2">{error}</p>}
-      {loading && <p className="text-muted">Loading…</p>}
+      {error && <Text tone="danger" className="mb-2">{error}</Text>}
+      {loading && <Text tone="muted">Loading…</Text>}
 
       {!loading && people.length === 0 && (
-        <div className="card">
+        <Card>
           <p>
             Nobody here yet. <strong>Add person</strong> creates someone the household knows about — a name, and a
             photo if you want one.
           </p>
-          <p className="text-muted">
+          <Text tone="muted">
             A person isn’t an account. There’s nothing to sign in as; it’s the human a device and a log line can point
             at, which is what makes “who opened the dashboard at 6am” a question with an answer.
-          </p>
-        </div>
+          </Text>
+        </Card>
       )}
 
       {!loading && people.length > 0 && (
-        <div className="card">
-          <table className="admin-table">
+        <Card>
+          <Table>
             <thead>
               <tr>
                 <th />
@@ -132,8 +132,8 @@ export function PeoplePage() {
                 />
               ))}
             </tbody>
-          </table>
-        </div>
+          </Table>
+        </Card>
       )}
 
       <PersonModal
@@ -226,15 +226,15 @@ function PersonRow({
                  anything depends on the install's ADMIN_MODE, which the client
                  has no way to ask about - a badge that looked like a live
                  permission would be a lie on the installs where it is not. */
-              <span className="badge badge-muted" title="Served this app, and the operator verbs behind it — where the install enforces it. See docs/auth-architecture.md, “The admin flag”.">
+              <Badge title="Served this app, and the operator verbs behind it — where the install enforces it. See docs/auth-architecture.md, “The admin flag”.">
                 Admin
-              </span>
+              </Badge>
             )}
           </div>
         </td>
         <td>
           {person.sessionCount === 0 ? (
-            <span className="text-muted">None</span>
+            <Text as="span" tone="muted">None</Text>
           ) : (
             <button className="person-link" onClick={onToggle}>
               {person.sessionCount} {person.sessionCount === 1 ? 'device' : 'devices'}
@@ -244,16 +244,16 @@ function PersonRow({
         <td>
           <div className="flex gap-1" style={{ justifyContent: 'flex-end' }}>
             {person.hasPhoto && (
-              <button className="btn-secondary" disabled={busy} onClick={removePhoto}>
+              <Button disabled={busy} onClick={removePhoto}>
                 Remove photo
-              </button>
+              </Button>
             )}
-            <button className="btn-secondary" onClick={onEdit}>
+            <Button onClick={onEdit}>
               Edit
-            </button>
-            <button className="btn-danger" onClick={onDelete}>
+            </Button>
+            <Button variant="danger" onClick={onDelete}>
               Delete
-            </button>
+            </Button>
           </div>
         </td>
       </tr>
@@ -275,21 +275,21 @@ function SessionsRow({ person, onError }: { person: Person; onError: (error: str
       <td />
       <td colSpan={3}>
         {sessions === null ? (
-          <p className="text-muted">Loading…</p>
+          <Text tone="muted">Loading…</Text>
         ) : (
           <ul className="person-sessions">
             {sessions.map((session) => (
               <li key={session.id}>
                 {session.label}{' '}
-                <span className="text-muted">
+                <Text as="span" tone="muted">
                   · {session.kind === 'Device' ? 'tablet' : 'browser'} · last seen{' '}
                   {session.lastSeenAt ? formatAge(session.lastSeenAt) : 'never'}
-                </span>
+                </Text>
               </li>
             ))}
           </ul>
         )}
-        <p className="text-muted">Devices are claimed and revoked on the Sessions page.</p>
+        <Text tone="muted">Devices are claimed and revoked on the Sessions page.</Text>
       </td>
     </tr>
   );
@@ -351,12 +351,12 @@ function PersonModal({
 
   return (
     <Modal open={person !== null} onClose={onClose} title={person === 'new' ? 'Add person' : 'Edit person'}>
-      <div className="field mb-2">
-        <label className="field-label" htmlFor="person-name">
-          Name
-        </label>
+      <Field
+        label="Name"
+        className="mb-2"
+        hint="Anything you like, emoji included — up to 60 characters. This is a home, not a directory."
+      >
         <input
-          id="person-name"
           type="text"
           value={name}
           autoFocus
@@ -366,34 +366,31 @@ function PersonModal({
             if (e.key === 'Enter') save();
           }}
         />
-        <p className="text-muted">
-          Anything you like, emoji included — up to 60 characters. This is a home, not a directory.
-        </p>
-      </div>
+      </Field>
 
       <label className="flex gap-1 mb-2" style={{ alignItems: 'center' }}>
         <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
         <span>Administrator</span>
       </label>
-      <p className="text-muted mb-2">
+      <Text tone="muted" className="mb-2">
         Who gets this app, and the settings, sessions and device wiring behind it. The family apps — lights,
         thermostats, lists, notes, photos — are unaffected either way. Where the install doesn’t enforce it, every
         enrolled device can already do everything and this is just a note; turning enforcement on is a deploy.
-      </p>
-      <p className="text-muted mb-2">
+      </Text>
+      <Text tone="muted" className="mb-2">
         Tick it for yourself <em>and</em> set your device’s Person on the Sessions page before asking for enforcement.
         Backwards locks everyone out of this page — including the button that hands out invites.
-      </p>
+      </Text>
 
-      {error && <p className="text-danger">{error}</p>}
+      {error && <Text tone="danger">{error}</Text>}
 
       <div className="flex gap-1 mt-2">
-        <button className="btn-primary" disabled={saving || name.trim() === ''} onClick={save}>
+        <Button variant="primary" disabled={saving || name.trim() === ''} onClick={save}>
           {saving ? 'Saving…' : 'Save'}
-        </button>
-        <button className="btn-secondary" onClick={onClose}>
+        </Button>
+        <Button onClick={onClose}>
           Cancel
-        </button>
+        </Button>
       </div>
     </Modal>
   );

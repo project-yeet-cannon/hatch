@@ -1,6 +1,6 @@
 # Design system MVP — one vocabulary for admin and home
 
-**Status:** Phases 0–3 done. Phases 0–5 are engineering and ship in order; **Phase 6
+**Status:** Phases 0–4 done. Phases 0–5 are engineering and ship in order; **Phase 6
 is a manual design pass with outside help** and is the gate everything after it
 waits on. Phase 7 implements what Phase 6 decides — including the admin
 navigation, which is deliberately *not* decided in this document.
@@ -357,8 +357,9 @@ developed inside it rather than inside a page of admin.
       the `ci.yml` matrix · the Makefile `test-web` list · a tile on the app
       picker.
       Phase 1's warning held: the Dockerfile's `web-build` stage needed a
-      seventh `COPY` of a workspace `package.json` before `npm ci`. **Phase 5
-      adds the eighth.**
+      seventh `COPY` of a workspace `package.json` before `npm ci`. **Phase 4
+      added the eighth** — `packages/lib`, not an app — and Phase 5's app makes
+      nine.
 - [x] **Gate:** reachable at `/apps/design`, deep links survive a hard refresh,
       both themes correct, CI matrix green on the new entry.
       *Result:* `make test-web` green across all seven apps · `make build` green
@@ -464,38 +465,146 @@ One thing this phase deliberately leaves broken-shaped, for Phase 4:
   `--t-title`), which is exactly what this phase may not do on its own; it
   belongs with `<PageHeader>` in Phase 4, and is listed there.
 
-### [] Phase 4 — The primitives
+### [x] Phase 4 — The primitives
 
 **Ships:** the nine components from the inventory above, each with a gallery
 page showing its states and contexts, and admin migrated onto them. Do this in
 two or three commits by group rather than one — the migration touches every page
 in admin.
 
-- [ ] Build in `@aerie/ui`, each landing with its gallery page in the same
+- [x] Build in `@aerie/ui`, each landing with its gallery page in the same
       commit: `Button` · `Card` · `Field` · `Table` · `Badge` · `Modal` ·
       `PageHeader` · `Grid` · `Text`, plus `EmptyState` (new: commitment 3 needs
       a deliberate component to point at).
-- [ ] **`<PageHeader>` owns the page's `<h1>`.** Phase 3 moved the app name out
+      Each carries admin's own values across unchanged. Where a component
+      needed an answer admin had never written down, it is named and left plain
+      rather than designed: `<Button loading>` looks exactly like `disabled`,
+      and `<EmptyState>` renders admin's muted sentence and nothing else.
+- [x] **`@aerie/ui/base.css`** — a second entry point beside `tokens.css`,
+      holding the document layer both apps were stating twice: the box model,
+      the body, the heading scale and the native form controls.
+      It is not a convenience. `<Field>` renders a label around a control the
+      *app* supplies — a raw `<input>`, `<select>`, `<textarea>` — so if the
+      rules that make those look like Aerie's had stayed in admin's stylesheet,
+      a `<Field>` specimen in the gallery would render a naked browser input.
+      A gallery showing a component that looks different from how it looks in
+      the app is worse than no gallery.
+      Two rules are deliberately **not** in it, and each app states its own:
+      `p { margin: 0 }` (admin's pages are laid out against the browser's
+      paragraph margins; zeroing it here would move text on every page) and
+      `html, body, #root { height: 100% }` (a full-height flex shell is an app
+      decision, not a property of the vocabulary).
+- [x] **`<PageHeader>` owns the page's `<h1>`.** Phase 3 moved the app name out
       of the heading outline and into the banner landmark, which leaves admin's
       pages titling themselves with `<h2>` and no `h1` above them. The lift is
       a visible type step, so it lands here with the component that makes it
       one edit rather than twelve.
-- [ ] Every gallery page shows **states, not just the happy one**: disabled,
+      It carries a `level` prop, because a page has one `h1` and the Revisions
+      page opens three sections under it — same shape, correct outline, rather
+      than a second component that would have to be kept looking like this one.
+- [x] Every gallery page shows **states, not just the happy one**: disabled,
       loading, error, long content, empty, and each variant in both themes.
       "See each component in various contexts and interact with it" is the ask;
       a static swatch grid does not satisfy it.
-- [ ] Migrate admin page by page. Each page's migration is mechanical — the
+      The specimens are live: the buttons press, the loading row runs a real
+      two-second save, the field's error appears when the value is genuinely
+      out of range, and the modals take over the page and hand focus back.
+      The gallery's two stand-ins — `.gallery-button` and `.stage-chip`, both
+      written in Phase 2 with a note saying they existed only until the real
+      thing landed — are deleted; the top-bar page now renders `<Button>` and
+      `<Badge>`.
+- [x] Migrate admin page by page. Each page's migration is mechanical — the
       components are extracted from admin's own CSS — and produces no visual
       change.
-- [ ] Resolve the drifted duplicates while in the neighbourhood: `lib/scale.ts`
+      **Three places where it was not, all corrections rather than design.**
+      They are listed rather than absorbed, because commitment 1 says a visual
+      change needs a reason on the page:
+      1. **The `<h2>` → `<h1>` lift**, 22px → 28px on twelve pages. Planned
+         above; the reason the phase owns `<PageHeader>` at all.
+      2. **Two anchors that were asking to be buttons.** Calendars rendered
+         `<a className="btn-primary">` and `<Link className="btn-secondary">`,
+         and got only half the paint — `.btn-*` set a fill and an ink, while
+         the padding, radius and weight came from the `button` element rule,
+         which does not match an `<a>`. They were a coloured underlined link
+         with no box. `<Button as>` renders them as the buttons the markup
+         always meant, so the two remaining `btn-*` strings are gone.
+      3. **Revisions' four page headers stack instead of splaying.** Their
+         descriptions were `<p>` elements inside a `space-between` flex row, so
+         each sentence sat *beside* its heading, pushed to the right edge. They
+         are `description` now: under the title, muted, the house idiom.
+      Two things the migration gained for free, neither of them visual:
+      **fields are labelled** — admin's `<label className="field-label">` was
+      associated with nothing, so clicking it did nothing and a screen reader
+      read every input as unlabelled, and `<Field>`'s label wraps its control —
+      and **the modal is a dialog**: `role="dialog"`, `aria-modal`,
+      `aria-labelledby`, focus moved into it on open and returned to the opener
+      on close. Before, a keyboard user who closed it tabbed the page behind
+      the scrim. It is still not a full focus trap; that wants `<dialog>`'s
+      top-layer behaviour or a tested library, and is Phase 7's to choose.
+- [x] Resolve the drifted duplicates while in the neighbourhood: `lib/scale.ts`
       and `lib/cameraStream.ts` reconcile into `packages/` shared by admin and
       dashboard, or the divergence gets documented as deliberate. This is the
       concrete debt that motivated the workspace; leaving it is leaving the
       reason.
-- [ ] **Gate:** admin lints and builds · no `card`/`btn-*`/`field` literal
+      *Reconciled,* into a new **`@aerie/lib`** — framework-free, per-module
+      entry points, no barrel. The drift was hiding a hole in each copy:
+      admin's `scale.ts` had grown `invertLinear` for its drag-to-select range
+      and the dashboard's had `toPolylinePoints`, so each app was missing a
+      function the other had written; the shared file is the union.
+      `cameraStream.ts` was a verbatim copy whose header said so, and whose
+      tests lived only in the dashboard — both apps now import the copy the 23
+      tests actually cover.
+      It is a package rather than a folder in `@aerie/ui` because nothing in it
+      imports React and none of it is design: a camera's WebSocket protocol has
+      no business in the design system.
+      **The plumbing tax, for a package rather than an app:** the Dockerfile's
+      `web-build` stage needed an eighth workspace `package.json` COPY before
+      `npm ci` (Phase 2 predicted the eighth would be Phase 5's app; this one
+      arrived first), the dashboard's `Inputs` glob in the csproj had to gain
+      `packages/*/src/**` — it consumes a shared package now, and without that
+      line a library edit would not retrigger its incremental build — and CI
+      gained a **`web-packages`** job rather than a matrix leg, since the
+      package has no build and every app leg would re-run its tests for
+      nothing. The Makefile's `test-web` runs it once, before the app loop.
+- [x] **Gate:** admin lints and builds · no `card`/`btn-*`/`field` literal
       class strings left in admin's pages · every gallery page correct in both
       themes.
-- [ ] **Commit(s):** "UI: the primitives move house" (× 2–3 by group)
+      *Result:* `make test-web` green across all seven apps and the new
+      package's 23 tests · `make build` green ·
+      `docker build -f src/Aerie.Api/Dockerfile.api .` green, which is the
+      check that mattered most here because the new workspace is exactly what
+      `npm ci` fails on when a COPY is missing. Run from that image against a
+      throwaway database, `/apps/design` 302s to the trailing slash,
+      `/apps/design/button`, `/field` and `/empty-state` all return the shell
+      with a 200 (so a hard refresh on a new deep link survives),
+      `/apps/admin/zones` likewise, and both apps' hashed assets resolve.
+      **The class-string gate is met:** `card`, `btn-primary`, `btn-secondary`,
+      `btn-danger`, `field`, `field-label`, `badge`, `admin-table`,
+      `admin-page-header`, `text-muted`, `text-danger`, `text-success`, `grid`,
+      `cols-2`, `cols-3` and the three `modal-*` strings return nothing from a
+      grep of `apps/admin/src`. Admin's `theme.css` lost 188 lines and its
+      `App.css` 81; the net across the phase is 891 lines added, 1204 removed.
+      Admin's remaining CSS is the handful of things only admin draws — a
+      camera frame, an invite code, an album cover, a person's avatar — plus
+      its nav strip and its margin utilities.
+      **Both themes are token-only:** there is no literal color in any of the
+      ten new component stylesheets, so a theme is correct here exactly when
+      the palette is. **The look in both themes is the owner's to confirm on
+      screen.**
+- [x] **Commit(s):** "UI: the primitives move house" (× 2–3 by group)
+
+Two things this phase leaves for later, both written down rather than left to
+be discovered:
+
+- **The heading outline skips `h2` inside a card.** Admin's cards title
+  themselves with `<h3>`, which sat correctly under the old page-level `<h2>`
+  and now sits under an `<h1>`. Lifting them is a second visible type step
+  (`--t-subhead` → `--t-heading`), which is exactly what Phase 4 may not do on
+  its own. It belongs with whatever Phase 7 decides about the type register.
+- **`<Modal>` is not a focus trap.** Focus starts inside and returns to the
+  opener; Tab can still leave for the page behind the scrim. Choosing between
+  the native `<dialog>` element's top-layer behaviour and a tested library is a
+  bigger decision than the primitives phase gets to make.
 
 ### [] Phase 5 — Home becomes an app
 
@@ -516,6 +625,9 @@ ask share a look and feel for real, and the plan's engineering half is done.
 - [ ] Adopt `<TopBar>` — on home the app-switcher slot is the home state rather
       than a link away.
 - [ ] The plumbing tax again, all six places, plus removing `CopyAppsIndex`.
+      Note the two globs Phase 4 touched: the new app's `Inputs` needs
+      `packages/*/src/**` from the first line if it consumes `@aerie/ui`, and
+      the Dockerfile's workspace `COPY` list is now nine entries long.
 - [ ] **Gate:** `/` and `/apps/` land on the picker · every tile still resolves ·
       both themes · offline-after-first-load still draws.
 - [ ] **Commit:** "Home: the picker becomes an app"

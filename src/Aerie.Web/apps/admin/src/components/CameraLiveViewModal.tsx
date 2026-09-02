@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
+import { Modal, Text } from '@aerie/ui';
 import { getCameraConnection } from '../api/client';
 import { clientLogger } from '../lib/clientLogger';
 import { useCameraStream } from '../lib/useCameraStream';
-import { Modal } from './Modal';
 
 /**
  * One camera's live feed, in the admin app, from the device that serves it.
@@ -36,23 +36,23 @@ export function CameraLiveViewModal({
   return (
     <Modal open title={`${deviceName} · live`} onClose={onClose}>
       {unconfigured ? (
-        <p className="text-muted">
+        <Text tone="muted">
           This camera has no address yet, so there is nothing to stream. Set its
           host under <strong>Channels → Camera connection</strong>, then reopen
           this.
-        </p>
+        </Text>
       ) : error ? (
-        <p className="text-danger">{error}</p>
+        <Text tone="danger">{error}</Text>
       ) : (
         // autoPlay/muted/playsInline together are what let a video start
         // without a click; see useCameraStream for why muted is load-bearing
         // rather than a preference.
         <video ref={videoRef} className="camera-live-video" autoPlay muted playsInline />
       )}
-      <p className="text-muted mt-2" style={{ fontSize: 'var(--t-label)' }}>
+      <Text tone="muted" className="mt-2" style={{ fontSize: 'var(--t-label)' }}>
         Live sub-stream, relayed through Aerie. Closing this releases the
         camera's connection.
-      </p>
+      </Text>
     </Modal>
   );
 }

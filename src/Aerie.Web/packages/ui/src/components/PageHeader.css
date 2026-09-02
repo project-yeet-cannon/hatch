@@ -1,0 +1,40 @@
+/* Admin's .admin-page-header, unchanged: the title and its actions on one
+   line, pushed apart, with one rung of air under the pair.
+
+   `align-items: center` is what keeps a 28px title and a 34px button on the
+   same optical line. When a description is present the pair aligns to the top
+   instead, because centring a two-line block against a one-line button hangs
+   the button in the middle of the paragraph. */
+
+.aerie-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-4);
+}
+
+.aerie-page-header--described {
+  align-items: flex-start;
+}
+
+.aerie-page-header__titles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.aerie-page-header__description {
+  color: var(--muted);
+  max-width: 68ch;
+}
+
+/* The actions keep their size: a target that shrinks to make room for a title
+   is the wrong thing to shrink — the same rule the top bar states. */
+.aerie-page-header__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}

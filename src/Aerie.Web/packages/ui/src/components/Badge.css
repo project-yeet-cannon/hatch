@@ -1,0 +1,36 @@
+/* Admin's .badge, unchanged. A fully-round pill rather than a step on the
+   radius scale: a badge is a token of state, not a small card.
+
+   The 2px vertical padding is admin's own and stays a literal — it is below
+   the spacing base, where the token file licenses optical nudges. */
+
+.aerie-badge {
+  display: inline-block;
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-pill);
+  font-size: var(--t-label);
+  font-weight: 600;
+}
+
+.aerie-badge--muted {
+  background: var(--line);
+  color: var(--muted);
+}
+
+.aerie-badge--success {
+  background: var(--success-bg);
+  color: var(--success-ink);
+}
+
+/* The two admin wrote as a bare `badge` with no modifier — an unstyled pill
+   inheriting whatever ink it sat in — now have somewhere to go. Same wash/ink
+   pairing as success, in the other two accents. */
+.aerie-badge--danger {
+  background: var(--danger-bg);
+  color: var(--danger-ink);
+}
+
+.aerie-badge--primary {
+  background: var(--primary-bg);
+  color: var(--primary-ink);
+}

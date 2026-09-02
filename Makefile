@@ -35,6 +35,8 @@ test-web:
 	bash -c 'export NVM_DIR="$$HOME/.nvm"; [ -s "$$NVM_DIR/nvm.sh" ] && \. "$$NVM_DIR/nvm.sh"; \
 	set -e; \
 	cd ./src/Aerie.Web && nvm use && npm ci; \
+	echo "==> @aerie/lib"; \
+	npm run test --if-present -w packages/lib; \
 	for app in admin auth dashboard design modeler docs family; do \
 		echo "==> $$app"; \
 		npm run lint -w apps/$$app && npm run test --if-present -w apps/$$app && npm run build -w apps/$$app; \

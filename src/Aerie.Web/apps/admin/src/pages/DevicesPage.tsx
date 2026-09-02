@@ -1,3 +1,4 @@
+import { Badge, Button, Card, EmptyState, Field, Grid, PageHeader, Table, Text } from '@aerie/ui';
 import { useEffect, useState } from "react";
 import type {
   ChannelDirection,
@@ -558,23 +559,22 @@ export function DevicesPage() {
 
   return (
     <div>
-      <div className="admin-page-header">
-        <h2>Devices</h2>
-        {!creatingDevice && (
-          <button
-            className="btn-primary"
+      <PageHeader
+        title="Devices"
+        actions={!creatingDevice && (
+          <Button variant="primary"
             onClick={() => setCreatingDevice(true)}
           >
             Add device
-          </button>
+          </Button>
         )}
-      </div>
+      />
 
-      {error && <p className="text-danger mb-2">{error}</p>}
-      {loading && <p className="text-muted">Loading…</p>}
+      {error && <Text tone="danger" className="mb-2">{error}</Text>}
+      {loading && <Text tone="muted">Loading…</Text>}
 
       {creatingDevice && (
-        <div className="card mb-2">
+        <Card className="mb-2">
           <h3 className="mb-2">New device</h3>
           <DeviceForm
             form={createDeviceForm}
@@ -582,29 +582,27 @@ export function DevicesPage() {
             zones={zones}
           />
           <div className="flex gap-1 mt-2">
-            <button
-              className="btn-primary"
+            <Button variant="primary"
               disabled={!createDeviceForm.name.trim()}
               onClick={submitCreateDevice}
             >
               Save
-            </button>
-            <button
-              className="btn-secondary"
+            </Button>
+            <Button
               onClick={() => setCreatingDevice(false)}
             >
               Cancel
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       )}
 
       {!loading && devices.length === 0 && !creatingDevice && (
-        <p className="text-muted">No devices yet.</p>
+        <EmptyState message="No devices yet." />
       )}
 
       {devices.map((device) => (
-        <div className="card mb-2" key={device.id}>
+        <Card className="mb-2" key={device.id}>
           {editingDeviceId === device.id && editDeviceForm ? (
             <>
               <DeviceForm
@@ -613,21 +611,19 @@ export function DevicesPage() {
                 zones={zones}
               />
               <div className="flex gap-1 mt-2">
-                <button
-                  className="btn-primary"
+                <Button variant="primary"
                   onClick={() => submitEditDevice(device.id)}
                 >
                   Save
-                </button>
-                <button
-                  className="btn-secondary"
+                </Button>
+                <Button
                   onClick={() => {
                     setEditingDeviceId(null);
                     setEditDeviceForm(null);
                   }}
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
             </>
           ) : (
@@ -635,13 +631,11 @@ export function DevicesPage() {
               <div>
                 <div className="flex gap-1" style={{ alignItems: "center" }}>
                   <h3>{device.name}</h3>
-                  <span
-                    className={`badge ${device.enabled ? "badge-success" : "badge-muted"}`}
-                  >
+                  <Badge tone={device.enabled ? "success" : "muted"}>
                     {device.enabled ? "Enabled" : "Disabled"}
-                  </span>
+                  </Badge>
                 </div>
-                <p className="text-muted">
+                <Text tone="muted">
                   {device.haDeviceId && (
                     <>
                       {" · HA Device ID "}
@@ -676,15 +670,15 @@ export function DevicesPage() {
                       </a>
                     </>
                   )}
-                </p>
-                <p className="text-muted">
+                </Text>
+                <Text tone="muted">
                   {[device.kind, zoneName(device.zoneId)].filter(Boolean).join(" · ")}
-                </p>
+                </Text>
                 {device.channels.length > 0 && (
                   <div className="mt-1">
                     {device.channels.map((channel) => (
-                      <p
-                        className="text-muted flex gap-1"
+                      <Text tone="muted"
+                        className="flex gap-1"
                         key={channel.id}
                         style={{ margin: 0, alignItems: "center" }}
                       >
@@ -692,12 +686,11 @@ export function DevicesPage() {
                           {channel.metric}: {formatLastValue(channel)}
                         </span>
                         {isPowerChannel(channel) && (
-                          <button
-                            className="btn-secondary"
+                          <Button
                             onClick={() => handleTogglePower(device.id, channel)}
                           >
                             Turn {isPowerOn(channel) ? "off" : "on"}
-                          </button>
+                          </Button>
                         )}
                         {isModeChannel(channel) && (
                           <ModeControl
@@ -715,12 +708,11 @@ export function DevicesPage() {
                           />
                         )}
                         {isSceneChannel(channel) && (
-                          <button
-                            className="btn-secondary"
+                          <Button
                             onClick={() => handleTriggerScene(device.id, channel)}
                           >
                             Activate: {sceneLabel(channel)}
-                          </button>
+                          </Button>
                         )}
                         {isMediaPlaybackChannel(channel) && (
                           <MediaControl
@@ -729,30 +721,27 @@ export function DevicesPage() {
                             onPlayMedia={handlePlayMedia}
                           />
                         )}
-                      </p>
+                      </Text>
                     ))}
                   </div>
                 )}
               </div>
               <div className="flex gap-1">
-                <button
-                  className="btn-secondary"
+                <Button
                   onClick={() => toggleEnabled(device)}
                 >
                   {device.enabled ? "Disable" : "Enable"}
-                </button>
-                <button
-                  className="btn-secondary"
+                </Button>
+                <Button
                   onClick={() => startEditDevice(device)}
                 >
                   Edit
-                </button>
-                <button
-                  className="btn-danger"
+                </Button>
+                <Button variant="danger"
                   onClick={() => handleDeleteDevice(device)}
                 >
                   Delete
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -762,15 +751,13 @@ export function DevicesPage() {
                 CameraController serves enabled devices only, so offering this
                 on a disabled camera would be a button that always fails. */}
             {device.kind === "Camera" && device.enabled && (
-              <button
-                className="btn-secondary"
+              <Button
                 onClick={() => setLiveViewDeviceId(device.id)}
               >
                 Live view
-              </button>
+              </Button>
             )}
-            <button
-              className="btn-secondary"
+            <Button
               onClick={() =>
                 setExpandedId(expandedId === device.id ? null : device.id)
               }
@@ -778,9 +765,8 @@ export function DevicesPage() {
               {expandedId === device.id
                 ? "Hide channels"
                 : `Channels (${device.channels.length})`}
-            </button>
-            <button
-              className="btn-secondary"
+            </Button>
+            <Button
               onClick={() =>
                 backfillingFor === device.id
                   ? setBackfillingFor(null)
@@ -790,37 +776,34 @@ export function DevicesPage() {
               {backfillingFor === device.id
                 ? "Hide backfill"
                 : "Backfill history"}
-            </button>
-            <button
-              className="btn-secondary"
+            </Button>
+            <Button
               onClick={() => setHistoryDeviceId(device.id)}
             >
               History
-            </button>
+            </Button>
           </div>
 
           {backfillingFor === device.id && (
-            <div className="card mt-2">
-              <p className="text-muted mb-2">
+            <Card className="mt-2">
+              <Text tone="muted" className="mb-2">
                 Pull historical channel samples from Home Assistant into Aerie
                 for this device.
-              </p>
+              </Text>
               <div className="flex gap-1 mb-2">
                 {BACKFILL_PRESETS.map((preset) => (
-                  <button
+                  <Button
                     key={preset.days}
-                    className="btn-secondary"
                     onClick={() =>
                       setBackfillForm(backfillPresetForm(preset.days))
                     }
                   >
                     {preset.label}
-                  </button>
+                  </Button>
                 ))}
               </div>
-              <div className="grid cols-3">
-                <div className="field">
-                  <label className="field-label">From</label>
+              <Grid cols={3}>
+                <Field label="From">
                   <input
                     type="datetime-local"
                     value={backfillForm.from}
@@ -828,9 +811,8 @@ export function DevicesPage() {
                       setBackfillForm({ ...backfillForm, from: e.target.value })
                     }
                   />
-                </div>
-                <div className="field">
-                  <label className="field-label">To</label>
+                </Field>
+                <Field label="To">
                   <input
                     type="datetime-local"
                     value={backfillForm.to}
@@ -838,22 +820,20 @@ export function DevicesPage() {
                       setBackfillForm({ ...backfillForm, to: e.target.value })
                     }
                   />
-                </div>
-              </div>
+                </Field>
+              </Grid>
               <div className="flex gap-1 mt-2">
-                <button
-                  className="btn-primary"
+                <Button variant="primary"
                   disabled={!backfillForm.from || !backfillForm.to}
                   onClick={() => submitBackfill(device.id)}
                 >
                   Start backfill
-                </button>
-                <button
-                  className="btn-secondary"
+                </Button>
+                <Button
                   onClick={() => setBackfillingFor(null)}
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
               {backfillStatus && backfillStatus.deviceId === device.id && (
                 <p
@@ -862,7 +842,7 @@ export function DevicesPage() {
                   {backfillStatus.message}
                 </p>
               )}
-            </div>
+            </Card>
           )}
 
           {expandedId === device.id && (
@@ -875,10 +855,10 @@ export function DevicesPage() {
                 <CameraConnectionForm deviceId={device.id} />
               )}
               {device.channels.length === 0 && (
-                <p className="text-muted">No channels.</p>
+                <EmptyState message="No channels." />
               )}
               {device.channels.length > 0 && (
-                <table className="admin-table">
+                <Table>
                   <thead>
                     <tr>
                       <th>Metric</th>
@@ -901,21 +881,19 @@ export function DevicesPage() {
                               onChange={setEditChannelForm}
                             />
                             <div className="flex gap-1 mt-2">
-                              <button
-                                className="btn-primary"
+                              <Button variant="primary"
                                 onClick={submitEditChannel}
                               >
                                 Save
-                              </button>
-                              <button
-                                className="btn-secondary"
+                              </Button>
+                              <Button
                                 onClick={() => {
                                   setEditingChannel(null);
                                   setEditChannelForm(null);
                                 }}
                               >
                                 Cancel
-                              </button>
+                              </Button>
                             </div>
                           </td>
                         </tr>
@@ -929,14 +907,13 @@ export function DevicesPage() {
                           <td>
                             <div className="flex gap-1">
                               {isPowerChannel(channel) && (
-                                <button
-                                  className="btn-secondary"
+                                <Button
                                   onClick={() =>
                                     handleTogglePower(device.id, channel)
                                   }
                                 >
                                   Turn {isPowerOn(channel) ? "off" : "on"}
-                                </button>
+                                </Button>
                               )}
                               {isModeChannel(channel) && (
                                 <ModeControl
@@ -954,14 +931,13 @@ export function DevicesPage() {
                                 />
                               )}
                               {isSceneChannel(channel) && (
-                                <button
-                                  className="btn-secondary"
+                                <Button
                                   onClick={() =>
                                     handleTriggerScene(device.id, channel)
                                   }
                                 >
                                   Activate: {sceneLabel(channel)}
-                                </button>
+                                </Button>
                               )}
                               {isMediaPlaybackChannel(channel) && (
                                 <MediaControl
@@ -970,8 +946,7 @@ export function DevicesPage() {
                                   onPlayMedia={handlePlayMedia}
                                 />
                               )}
-                              <button
-                                className="btn-secondary"
+                              <Button
                                 onClick={() =>
                                   setHistoryChannel({
                                     deviceId: device.id,
@@ -980,30 +955,28 @@ export function DevicesPage() {
                                 }
                               >
                                 History
-                              </button>
-                              <button
-                                className="btn-secondary"
+                              </Button>
+                              <Button
                                 onClick={() =>
                                   startEditChannel(device.id, channel)
                                 }
                               >
                                 Edit
-                              </button>
-                              <button
-                                className="btn-danger"
+                              </Button>
+                              <Button variant="danger"
                                 onClick={() =>
                                   handleDeleteChannel(device.id, channel)
                                 }
                               >
                                 Delete
-                              </button>
+                              </Button>
                             </div>
                           </td>
                         </tr>
                       ),
                     )}
                   </tbody>
-                </table>
+                </Table>
               )}
 
               {addingChannelFor === device.id ? (
@@ -1013,31 +986,29 @@ export function DevicesPage() {
                     onChange={setNewChannelForm}
                   />
                   <div className="flex gap-1 mt-2">
-                    <button
-                      className="btn-primary"
+                    <Button variant="primary"
                       disabled={!newChannelForm.haEntityId.trim()}
                       onClick={() => submitAddChannel(device.id)}
                     >
                       Add channel
-                    </button>
-                    <button
-                      className="btn-secondary"
+                    </Button>
+                    <Button
                       onClick={() => setAddingChannelFor(null)}
                     >
                       Cancel
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ) : (
-                <button
-                  className="btn-secondary mt-2"
+                <Button
+                  className="mt-2"
                   onClick={() => {
                     setAddingChannelFor(device.id);
                     setNewChannelForm(emptyChannelForm());
                   }}
                 >
                   Add channel
-                </button>
+                </Button>
               )}
             </div>
           )}
@@ -1066,7 +1037,7 @@ export function DevicesPage() {
               onClose={() => setHistoryChannel(null)}
             />
           )}
-        </div>
+        </Card>
       ))}
     </div>
   );
@@ -1082,17 +1053,15 @@ function DeviceForm({
   zones: Zone[];
 }) {
   return (
-    <div className="grid cols-3">
-      <div className="field">
-        <label className="field-label">Name</label>
+    <Grid cols={3}>
+      <Field label="Name">
         <input
           type="text"
           value={form.name}
           onChange={(e) => onChange({ ...form, name: e.target.value })}
         />
-      </div>
-      <div className="field">
-        <label className="field-label">Kind</label>
+      </Field>
+      <Field label="Kind">
         <select
           value={form.kind}
           onChange={(e) =>
@@ -1107,9 +1076,8 @@ function DeviceForm({
           <option value="Speaker">Speaker</option>
           <option value="Camera">Camera</option>
         </select>
-      </div>
-      <div className="field">
-        <label className="field-label">Zone</label>
+      </Field>
+      <Field label="Zone">
         <select
           value={form.zoneId}
           onChange={(e) => onChange({ ...form, zoneId: e.target.value })}
@@ -1121,17 +1089,15 @@ function DeviceForm({
             </option>
           ))}
         </select>
-      </div>
-      <div className="field">
-        <label className="field-label">HA device id</label>
+      </Field>
+      <Field label="HA device id">
         <input
           type="text"
           value={form.haDeviceId}
           onChange={(e) => onChange({ ...form, haDeviceId: e.target.value })}
         />
-      </div>
-      <div className="field">
-        <label className="field-label">Enabled</label>
+      </Field>
+      <Field label="Enabled" as="div">
         <label className="flex gap-1" style={{ alignItems: "center" }}>
           <input
             type="checkbox"
@@ -1140,8 +1106,8 @@ function DeviceForm({
           />
           Active
         </label>
-      </div>
-    </div>
+      </Field>
+    </Grid>
   );
 }
 
@@ -1153,9 +1119,8 @@ function ChannelForm({
   onChange: (form: ChannelFormState) => void;
 }) {
   return (
-    <div className="grid cols-3">
-      <div className="field">
-        <label className="field-label">Metric</label>
+    <Grid cols={3}>
+      <Field label="Metric">
         <select
           value={form.metric}
           onChange={(e) =>
@@ -1168,25 +1133,22 @@ function ChannelForm({
             </option>
           ))}
         </select>
-      </div>
-      <div className="field">
-        <label className="field-label">HA entity id</label>
+      </Field>
+      <Field label="HA entity id">
         <input
           type="text"
           value={form.haEntityId}
           onChange={(e) => onChange({ ...form, haEntityId: e.target.value })}
         />
-      </div>
-      <div className="field">
-        <label className="field-label">HA attribute (optional)</label>
+      </Field>
+      <Field label="HA attribute (optional)">
         <input
           type="text"
           value={form.haAttribute}
           onChange={(e) => onChange({ ...form, haAttribute: e.target.value })}
         />
-      </div>
-      <div className="field">
-        <label className="field-label">Direction</label>
+      </Field>
+      <Field label="Direction">
         <select
           value={form.direction}
           onChange={(e) =>
@@ -1199,8 +1161,8 @@ function ChannelForm({
             </option>
           ))}
         </select>
-      </div>
-    </div>
+      </Field>
+    </Grid>
   );
 }
 
@@ -1245,19 +1207,17 @@ function ModeControl({
         style={{ width: "6rem" }}
         onChange={(e) => setDraft(e.target.value)}
       />
-      <button
-        className="btn-secondary"
+      <Button
         disabled={!draft.trim()}
         onClick={() => onSetMode(deviceId, channel, draft.trim())}
       >
         Set
-      </button>
-      <button
-        className="btn-secondary"
+      </Button>
+      <Button
         onClick={() => onRefreshOptions(deviceId, channel)}
       >
         Refresh options
-      </button>
+      </Button>
     </span>
   );
 }
@@ -1284,13 +1244,12 @@ function MediaControl({
         style={{ width: "22rem" }}
         onChange={(e) => setDraft(e.target.value)}
       />
-      <button
-        className="btn-secondary"
+      <Button
         disabled={!draft.trim()}
         onClick={() => onPlayMedia(deviceId, channel, draft.trim())}
       >
         Play
-      </button>
+      </Button>
     </span>
   );
 }
@@ -1319,13 +1278,12 @@ function SetpointControl({
         style={{ width: "5rem" }}
         onChange={(e) => setDraft(e.target.value)}
       />
-      <button
-        className="btn-secondary"
+      <Button
         disabled={!valid}
         onClick={() => onSetSetpoint(deviceId, channel, parsed)}
       >
         Set
-      </button>
+      </Button>
     </span>
   );
 }

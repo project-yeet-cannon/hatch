@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from '@aerie/ui';
 import { GalleryPage, GallerySection, TokenName, TokenValue } from '../components/Gallery';
 import { useTokenValues } from '../lib/useTokenValues';
 
@@ -43,9 +44,9 @@ export function ElevationPage() {
           ) : null}
         </div>
         <div className="specimen-meta">
-          <button type="button" className="gallery-button" onClick={() => setScrimUp((up) => !up)}>
+          <Button onClick={() => setScrimUp((up) => !up)}>
             {scrimUp ? 'Lower the scrim' : 'Raise the scrim'}
-          </button>
+          </Button>
           <TokenName name="--overlay" />
           <TokenValue value={values['--overlay']} />
         </div>

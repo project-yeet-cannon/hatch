@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Badge, Button, Card, EmptyState, Field, Grid, PageHeader, Table, Text } from '@aerie/ui';
 import type { Zone, ZoneKind, ZoneWriteRequest } from '../types';
 import { createZone, deleteZone, getZones, updateZone } from '../api/client';
 
@@ -142,40 +143,40 @@ export function ZonesPage() {
 
   return (
     <div>
-      <div className="admin-page-header">
-        <h2>Zones</h2>
-        {!creating && (
-          <button className="btn-primary" onClick={startCreate}>
+      <PageHeader
+        title="Zones"
+        actions={!creating && (
+          <Button variant="primary" onClick={startCreate}>
             Add zone
-          </button>
+          </Button>
         )}
-      </div>
+      />
 
-      {error && <p className="text-danger mb-2">{error}</p>}
-      {loading && <p className="text-muted">Loading…</p>}
+      {error && <Text tone="danger" className="mb-2">{error}</Text>}
+      {loading && <Text tone="muted">Loading…</Text>}
 
       {creating && (
-        <div className="card mb-2">
+        <Card className="mb-2">
           <h3 className="mb-2">New zone</h3>
           <ZoneForm form={createForm} onChange={setCreateForm} />
           <div className="flex gap-1 mt-2">
-            <button className="btn-primary" disabled={saving || !createForm.name.trim()} onClick={submitCreate}>
+            <Button variant="primary" disabled={saving || !createForm.name.trim()} onClick={submitCreate}>
               Save
-            </button>
-            <button className="btn-secondary" onClick={() => setCreating(false)}>
+            </Button>
+            <Button onClick={() => setCreating(false)}>
               Cancel
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       )}
 
       {!loading && sortedZones.length === 0 && !creating && (
-        <p className="text-muted">No zones yet.</p>
+        <EmptyState message="No zones yet." />
       )}
 
       {sortedZones.length > 0 && (
-        <div className="card">
-          <table className="admin-table">
+        <Card>
+          <Table>
             <thead>
               <tr>
                 <th>Name</th>
@@ -193,18 +194,17 @@ export function ZonesPage() {
                     <td colSpan={6}>
                       <ZoneForm form={editForm} onChange={setEditForm} />
                       <div className="flex gap-1 mt-2">
-                        <button className="btn-primary" disabled={saving} onClick={() => submitEdit(zone.id)}>
+                        <Button variant="primary" disabled={saving} onClick={() => submitEdit(zone.id)}>
                           Save
-                        </button>
-                        <button
-                          className="btn-secondary"
+                        </Button>
+                        <Button
                           onClick={() => {
                             setEditingId(null);
                             setEditForm(null);
                           }}
                         >
                           Cancel
-                        </button>
+                        </Button>
                       </div>
                     </td>
                   </tr>
@@ -217,39 +217,38 @@ export function ZonesPage() {
                     </td>
                     <td>
                       <div className="flex gap-1" style={{ alignItems: 'center' }}>
-                        <button className="btn-secondary" disabled={index === 0} onClick={() => move(zone, -1)}>
+                        <Button disabled={index === 0} onClick={() => move(zone, -1)}>
                           ↑
-                        </button>
-                        <button
-                          className="btn-secondary"
+                        </Button>
+                        <Button
                           disabled={index === sortedZones.length - 1}
                           onClick={() => move(zone, 1)}
                         >
                           ↓
-                        </button>
+                        </Button>
                       </div>
                     </td>
                     <td>
-                      <span className={`badge ${zone.included ? 'badge-success' : 'badge-muted'}`}>
+                      <Badge tone={zone.included ? 'success' : 'muted'}>
                         {zone.included ? 'Yes' : 'No'}
-                      </span>
+                      </Badge>
                     </td>
                     <td>
                       <div className="flex gap-1">
-                        <button className="btn-secondary" onClick={() => startEdit(zone)}>
+                        <Button onClick={() => startEdit(zone)}>
                           Edit
-                        </button>
-                        <button className="btn-danger" onClick={() => handleDelete(zone)}>
+                        </Button>
+                        <Button variant="danger" onClick={() => handleDelete(zone)}>
                           Delete
-                        </button>
+                        </Button>
                       </div>
                     </td>
                   </tr>
                 ),
               )}
             </tbody>
-          </table>
-        </div>
+          </Table>
+        </Card>
       )}
     </div>
   );
@@ -257,44 +256,38 @@ export function ZonesPage() {
 
 function ZoneForm({ form, onChange }: { form: ZoneFormState; onChange: (form: ZoneFormState) => void }) {
   return (
-    <div className="grid cols-3">
-      <div className="field">
-        <label className="field-label">Name</label>
+    <Grid cols={3}>
+      <Field label="Name">
         <input type="text" value={form.name} onChange={(e) => onChange({ ...form, name: e.target.value })} />
-      </div>
-      <div className="field">
-        <label className="field-label">Kind</label>
+      </Field>
+      <Field label="Kind">
         <select value={form.kind} onChange={(e) => onChange({ ...form, kind: e.target.value as ZoneKind })}>
           <option value="Interior">Interior</option>
           <option value="Outside">Outside</option>
         </select>
-      </div>
-      <div className="field">
-        <label className="field-label">Sort order</label>
+      </Field>
+      <Field label="Sort order">
         <input
           type="number"
           value={form.sortOrder}
           onChange={(e) => onChange({ ...form, sortOrder: e.target.value })}
         />
-      </div>
-      <div className="field">
-        <label className="field-label">Comfort low (°F)</label>
+      </Field>
+      <Field label="Comfort low (°F)">
         <input
           type="number"
           value={form.comfortLowF}
           onChange={(e) => onChange({ ...form, comfortLowF: e.target.value })}
         />
-      </div>
-      <div className="field">
-        <label className="field-label">Comfort high (°F)</label>
+      </Field>
+      <Field label="Comfort high (°F)">
         <input
           type="number"
           value={form.comfortHighF}
           onChange={(e) => onChange({ ...form, comfortHighF: e.target.value })}
         />
-      </div>
-      <div className="field">
-        <label className="field-label">Included</label>
+      </Field>
+      <Field label="Included" as="div">
         <label className="flex gap-1" style={{ alignItems: 'center' }}>
           <input
             type="checkbox"
@@ -303,7 +296,7 @@ function ZoneForm({ form, onChange }: { form: ZoneFormState; onChange: (form: Zo
           />
           Show on dashboard
         </label>
-      </div>
-    </div>
+      </Field>
+    </Grid>
   );
 }

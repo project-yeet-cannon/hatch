@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Button, Card, EmptyState, Field, Grid, PageHeader, Table, Text } from '@aerie/ui';
 import type { DeviceKind, UnmappedHaDevice } from '../types';
 import { addChannel, createDevice, getUnmappedDevices } from '../api/client';
 
@@ -76,37 +77,33 @@ export function DiscoveryPage() {
 
   return (
     <div>
-      <div className="admin-page-header">
-        <h2>Discovery</h2>
-        <button className="btn-secondary" onClick={load}>
-          Refresh
-        </button>
-      </div>
+      <PageHeader
+        title="Discovery"
+        actions={<Button onClick={load}>Refresh</Button>}
+      />
 
-      {error && <p className="text-danger mb-2">{error}</p>}
-      {importedMessage && <p className="text-success mb-2">{importedMessage}</p>}
-      {loading && <p className="text-muted">Loading…</p>}
+      {error && <Text tone="danger" className="mb-2">{error}</Text>}
+      {importedMessage && <Text tone="success" className="mb-2">{importedMessage}</Text>}
+      {loading && <Text tone="muted">Loading…</Text>}
 
       {!loading && unmapped.length === 0 && (
-        <p className="text-muted">No unmapped Home Assistant devices found.</p>
+        <EmptyState message="No unmapped Home Assistant devices found." />
       )}
 
       {unmapped.map((device) => {
         const draft = drafts[device.haDeviceId] ?? { name: device.suggestedName, kind: device.suggestedKind ?? '' };
         return (
-          <div className="card mb-2" key={device.haDeviceId}>
-            <p className="text-muted mb-1">HA device: {device.haDeviceId}</p>
-            <div className="grid cols-2 mb-2">
-              <div className="field">
-                <label className="field-label">Name</label>
+          <Card className="mb-2" key={device.haDeviceId}>
+            <Text tone="muted" className="mb-1">HA device: {device.haDeviceId}</Text>
+            <Grid cols={2} className="mb-2">
+              <Field label="Name">
                 <input
                   type="text"
                   value={draft.name}
                   onChange={(e) => updateDraft(device.haDeviceId, { name: e.target.value })}
                 />
-              </div>
-              <div className="field">
-                <label className="field-label">Kind</label>
+              </Field>
+              <Field label="Kind">
                 <select
                   value={draft.kind}
                   onChange={(e) => updateDraft(device.haDeviceId, { kind: e.target.value as DeviceKind | "" })}
@@ -119,42 +116,43 @@ export function DiscoveryPage() {
                   <option value="Speaker">Speaker</option>
                   <option value="Camera">Camera</option>
                 </select>
-              </div>
-            </div>
+              </Field>
+            </Grid>
 
-            <p className="field-label">HA entities</p>
-            <p className="text-muted mb-2">{device.entityIds.join(', ')}</p>
+            <Field as="div" label="HA entities" className="mb-2">
+              <Text tone="muted">{device.entityIds.join(', ')}</Text>
+            </Field>
 
-            <p className="field-label">Suggested channels</p>
-            <table className="admin-table mb-2">
-              <thead>
-                <tr>
-                  <th>Metric</th>
-                  <th>HA entity</th>
-                  <th>Attribute</th>
-                  <th>Direction</th>
-                </tr>
-              </thead>
-              <tbody>
-                {device.suggestedChannels.map((channel, i) => (
-                  <tr key={i}>
-                    <td>{channel.metric}</td>
-                    <td>{channel.haEntityId}</td>
-                    <td>{channel.haAttribute ?? '—'}</td>
-                    <td>{channel.direction}</td>
+            <Field as="div" label="Suggested channels" className="mb-2">
+              <Table>
+                <thead>
+                  <tr>
+                    <th>Metric</th>
+                    <th>HA entity</th>
+                    <th>Attribute</th>
+                    <th>Direction</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {device.suggestedChannels.map((channel, i) => (
+                    <tr key={i}>
+                      <td>{channel.metric}</td>
+                      <td>{channel.haEntityId}</td>
+                      <td>{channel.haAttribute ?? '—'}</td>
+                      <td>{channel.direction}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </Field>
 
-            <button
-              className="btn-primary"
+            <Button variant="primary"
               disabled={!draft.name.trim() || importingId === device.haDeviceId}
               onClick={() => importDevice(device)}
             >
               {importingId === device.haDeviceId ? 'Importing…' : 'Import as Device'}
-            </button>
-          </div>
+            </Button>
+          </Card>
         );
       })}
     </div>

@@ -1,51 +1,27 @@
-/* The gallery's base layer. It states the same document-level rules admin
-   states - box model, body, headings - drawn from the same tokens, so a
-   specimen shown here reads the way it will read in an app.
+/* The gallery's base layer.
 
-   It deliberately does NOT carry admin's component rules (.card, .btn-*,
-   .field). Those become real components in @aerie/ui in Phase 4 and the
-   gallery will show them by rendering them, not by re-declaring their CSS -
-   a gallery whose copy of a component's styles can drift from the component
-   is a gallery that lies. */
+   The box model, the body, the heading scale and the native form controls all
+   come from @aerie/ui/base.css - the same file admin imports, so a control
+   shown on a specimen page is the control an app renders rather than a copy of
+   it that can drift.
+
+   It states no component rules of its own (.card, .btn-*, .field). Those are
+   real components in @aerie/ui now, and the gallery shows them by rendering
+   them: a gallery holding its own copy of a component's styles is a gallery
+   that can be wrong about the component it exists to document. */
 @import '@aerie/ui/tokens.css';
+@import '@aerie/ui/base.css';
 
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  padding: 0;
-  background: var(--bg);
-  color: var(--ink);
-  font-family: var(--ui);
-  font-size: var(--t-body);
-  line-height: var(--lh-body);
-}
-
+/* The two rules base.css deliberately leaves to the app. The full-height root
+   is this app's shell - a bar over a rail beside a scrolling column - and the
+   flow margin is a decision: the gallery lays its own text out with gaps, so a
+   paragraph arriving with 14px of browser margin would double every one of
+   them. Admin makes the opposite call, which is why neither is in base.css. */
 html, body, #root {
   width: 100%;
   height: 100%;
 }
 
-h1, h2, h3, h4, h5, h6 {
-  margin: 0;
-  font-weight: 600;
-  line-height: var(--lh-tight);
-}
-
-h1 { font-size: var(--t-title); }
-h2 { font-size: var(--t-heading); }
-h3 { font-size: var(--t-subhead); }
-h4 { font-size: var(--t-section); }
-h5 { font-size: var(--t-body); }
-h6 { font-size: var(--t-label); }
-
 p {
   margin: 0;
-}
-
-code {
-  font-family: var(--mono);
-  font-size: var(--t-label);
 }

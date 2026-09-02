@@ -1,0 +1,39 @@
+/* Admin's .admin-table, unchanged: full width, collapsed borders, a hairline
+   under every row but the last, and headers in the label register — uppercase,
+   tracked out, --muted.
+
+   The 10px vertical cell padding is --sp-2-5, one of the two half-steps the
+   token file keeps for exactly this: at --sp-2 a row is cramped and at --sp-3
+   the list stops being scannable. */
+
+.aerie-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.aerie-table th,
+.aerie-table td {
+  text-align: left;
+  padding: var(--sp-2-5) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.aerie-table th {
+  font-size: var(--t-label);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.aerie-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* A table is the one thing on an admin page that genuinely cannot reflow: its
+   columns mean something in relation to each other. So it scrolls sideways
+   inside its own box rather than squeezing a date column to four characters. */
+.aerie-table-scroll {
+  overflow-x: auto;
+}

@@ -1,0 +1,47 @@
+/* Admin's .field / .field-label, unchanged: a stacked label over a control,
+   the label at the label register in --muted.
+
+   Two nested flex columns rather than one, because the <label> has to end
+   before the hint and the error begin — see Field.tsx. Visually it is the same
+   column it always was.
+
+   The child combinator rather than a descendant selector, so a <Field> holding
+   a small composite — a combobox with its own inner input, an icon picker —
+   does not have those inner controls stretched to full width by a rule meant
+   for the field's own one. */
+
+.aerie-field,
+.aerie-field__control {
+  display: flex;
+  flex-direction: column;
+}
+
+.aerie-field__label {
+  display: block;
+  font-size: var(--t-label);
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: var(--sp-1);
+}
+
+.aerie-field__control > input,
+.aerie-field__control > select,
+.aerie-field__control > textarea {
+  width: 100%;
+}
+
+/* The line under a control. It sits at the label register: it is about the
+   control, not part of the page's prose. */
+.aerie-field__hint,
+.aerie-field__error {
+  margin-top: var(--sp-1);
+  font-size: var(--t-label);
+}
+
+.aerie-field__hint {
+  color: var(--muted);
+}
+
+.aerie-field__error {
+  color: var(--danger);
+}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Button, Card, EmptyState, Field, Grid, PageHeader, Text } from '@aerie/ui';
 import { getAlerts, getSettings, putSetting } from '../api/client';
 import type { HazardAlert } from '../types';
 
@@ -174,19 +175,16 @@ export function SettingsPage() {
 
   return (
     <div>
-      <div className="admin-page-header">
-        <h2>Settings</h2>
-      </div>
+      <PageHeader title="Settings" />
 
-      {error && <p className="text-danger mb-2">{error}</p>}
-      {loading && <p className="text-muted">Loading…</p>}
+      {error && <Text tone="danger" className="mb-2">{error}</Text>}
+      {loading && <Text tone="muted">Loading…</Text>}
 
       {!loading && (
-        <div className="card">
-          <div className="grid cols-2">
+        <Card>
+          <Grid cols={2}>
             {FIELDS.map((field) => (
-              <div className="field" key={field.key}>
-                <label className="field-label">{field.label}</label>
+              <Field label={field.label} key={field.key}>
                 <div className="flex gap-1">
                   <input
                     type={field.type}
@@ -197,50 +195,49 @@ export function SettingsPage() {
                       setSavedKey((prev) => (prev === field.key ? null : prev));
                     }}
                   />
-                  <button
-                    className="btn-secondary"
+                  <Button
                     disabled={savingKey === field.key || (field.type === 'password' && !values[field.key])}
                     onClick={() => save(field.key)}
                   >
                     {savingKey === field.key ? 'Saving…' : savedKey === field.key ? 'Saved' : 'Save'}
-                  </button>
+                  </Button>
                 </div>
-                {field.help && <p className="text-muted mt-1">{field.help}</p>}
-              </div>
+                {field.help && <Text tone="muted" className="mt-1">{field.help}</Text>}
+              </Field>
             ))}
-          </div>
-        </div>
+          </Grid>
+        </Card>
       )}
 
       {/* Config verification, which is why it sits under the settings that
           produce it rather than on a page of its own: an operator who has just
           set their coordinates and provider can see whether anything came back.
           Empty is the normal answer on a calm, clean-air day. */}
-      <div className="card mt-2">
+      <Card className="mt-2">
         <div className="flex gap-1">
           <h3>Active alerts</h3>
-          <button className="btn-secondary" disabled={refreshingAlerts} onClick={loadAlerts}>
+          <Button disabled={refreshingAlerts} onClick={loadAlerts}>
             {refreshingAlerts ? 'Refreshing…' : 'Refresh'}
-          </button>
+          </Button>
         </div>
-        <p className="text-muted mt-1">
+        <Text tone="muted" className="mt-1">
           What the kiosk would show right now, from the cached hazard data. Nothing here on a calm day with clean air —
           that is a working configuration, not a broken one. The sync job runs every 15 minutes, so a setting changed
           just now takes that long to show up.
-        </p>
-        {alertsError && <p className="text-danger mb-2">{alertsError}</p>}
-        {alerts && alerts.length === 0 && <p className="text-muted">No active alerts.</p>}
+        </Text>
+        {alertsError && <Text tone="danger" className="mb-2">{alertsError}</Text>}
+        {alerts && alerts.length === 0 && <EmptyState message="No active alerts." />}
         {alerts && alerts.length > 0 && (
           <ul>
             {alerts.map((alert) => (
               <li key={alert.id}>
                 <strong>{alert.title}</strong> — {alert.severity} · {alert.kind === 'AirQuality' ? 'air quality' : 'weather'}
-                {alert.detail && <span className="text-muted"> · {alert.detail}</span>}
+                {alert.detail && <Text as="span" tone="muted"> · {alert.detail}</Text>}
               </li>
             ))}
           </ul>
         )}
-      </div>
+      </Card>
     </div>
   );
 }

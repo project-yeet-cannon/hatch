@@ -6,7 +6,7 @@ import {
   parseControlMessage,
   supportedCodecs,
   trimRange,
-} from './cameraStream';
+} from '@aerie/lib/cameraStream';
 
 /**
  * Plays one camera's live video into a &lt;video&gt; element

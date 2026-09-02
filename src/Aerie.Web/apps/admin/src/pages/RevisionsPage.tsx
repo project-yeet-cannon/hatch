@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ReactNode } from 'react';
+import { Badge, PageHeader, Table } from '@aerie/ui';
 import { getAerieRevision } from '../api/client';
 import type { AerieRevisionInfo, FluxSourceRevision, RevisionDrift } from '../types';
 
@@ -49,16 +49,14 @@ export function RevisionsPage() {
 
   return (
     <div>
-      <div className="admin-page-header">
-        <h2>Revisions</h2>
-        <p>
-          Which commit each part of the system is running. Refreshes every {POLL_INTERVAL_MS / 1000}s.
-        </p>
-      </div>
+      <PageHeader
+        title="Revisions"
+        description={`Which commit each part of the system is running. Refreshes every ${POLL_INTERVAL_MS / 1000}s.`}
+      />
 
       {error && <p className="admin-crash-note">Last refresh failed: {error}</p>}
 
-      <table className="admin-table">
+      <Table>
         <thead>
           <tr>
             <th>What</th>
@@ -72,16 +70,16 @@ export function RevisionsPage() {
             <td>API replica{info.builtAt ? ` · built ${new Date(info.builtAt).toLocaleString()}` : ''}</td>
             <td><Sha value={info.revision} /></td>
             <td>{info.sequence || '—'}</td>
-            <td>{info.revision === 'dev' ? <Badge kind="muted">dev build</Badge> : <Badge kind="success">serving</Badge>}</td>
+            <td>{info.revision === 'dev' ? <Badge tone="muted">dev build</Badge> : <Badge tone="success">serving</Badge>}</td>
           </tr>
           <tr>
             <td>This browser</td>
             <td><Sha value={info.client?.revision ?? null} /></td>
             <td>{info.client?.sequence || '—'}</td>
-            <td>{info.client ? <DriftBadge drift={info.client.drift} /> : <Badge kind="muted">not reported</Badge>}</td>
+            <td>{info.client ? <DriftBadge drift={info.client.drift} /> : <Badge tone="muted">not reported</Badge>}</td>
           </tr>
         </tbody>
-      </table>
+      </Table>
 
       <ClusterSection cluster={info.cluster} />
     </div>
@@ -93,33 +91,20 @@ function ClusterSection({ cluster }: { cluster: AerieRevisionInfo['cluster'] }) 
   // purpose - "you cannot see this" and "there is nothing there" are different
   // answers, and collapsing them would send someone hunting for a broken Flux.
   if (!cluster) {
-    return (
-      <>
-        <div className="admin-page-header">
-          <h2>Cluster</h2>
-          <p>Sign in to see what Flux has reconciled.</p>
-        </div>
-      </>
-    );
+    return <PageHeader title="Cluster" level={2} description="Sign in to see what Flux has reconciled." />;
   }
 
   if (cluster.unavailable) {
-    return (
-      <>
-        <div className="admin-page-header">
-          <h2>Cluster</h2>
-          <p>Flux could not be read: {cluster.unavailable}.</p>
-        </div>
-      </>
-    );
+    return <PageHeader title="Cluster" level={2} description={`Flux could not be read: ${cluster.unavailable}.`} />;
   }
 
   return (
     <>
-      <div className="admin-page-header">
-        <h2>Cluster</h2>
-        <p>What Flux has fetched, and what each Kustomization has actually applied from it.</p>
-      </div>
+      <PageHeader
+        title="Cluster"
+        level={2}
+        description="What Flux has fetched, and what each Kustomization has actually applied from it."
+      />
       {cluster.sources.map((source) => <SourceTable key={source.name} source={source} />)}
     </>
   );
@@ -132,7 +117,7 @@ function SourceTable({ source }: { source: FluxSourceRevision }) {
         {source.name}
         {source.branch ? ` · ${source.branch}` : ''} <Sha value={source.revision} />
       </h3>
-      <table className="admin-table">
+      <Table>
         <thead>
           <tr>
             <th>Kustomization</th>
@@ -155,15 +140,15 @@ function SourceTable({ source }: { source: FluxSourceRevision }) {
                 <td>{k.name}</td>
                 <td><Sha value={k.appliedRevision} /></td>
                 <td>
-                  {k.ready === false && <Badge kind="muted">not ready</Badge>}
-                  {k.ready !== false && converged && <Badge kind="success">converged</Badge>}
-                  {k.ready !== false && !converged && <Badge kind="muted">behind source</Badge>}
+                  {k.ready === false && <Badge tone="muted">not ready</Badge>}
+                  {k.ready !== false && converged && <Badge tone="success">converged</Badge>}
+                  {k.ready !== false && !converged && <Badge tone="muted">behind source</Badge>}
                 </td>
               </tr>
             );
           })}
         </tbody>
-      </table>
+      </Table>
     </div>
   );
 }
@@ -179,10 +164,6 @@ function Sha({ value }: { value: string | null }) {
   return <code title={value}>{value.slice(0, 7)}</code>;
 }
 
-function Badge({ kind, children }: { kind: 'muted' | 'success'; children: ReactNode }) {
-  return <span className={`badge badge-${kind}`}>{children}</span>;
-}
-
 function DriftBadge({ drift }: { drift: RevisionDrift }) {
   const label: Record<RevisionDrift, string> = {
     Current: 'up to date',
@@ -193,5 +174,5 @@ function DriftBadge({ drift }: { drift: RevisionDrift }) {
     Behind: 'reload to update',
     Unknown: 'not comparable',
   };
-  return <Badge kind={drift === 'Current' ? 'success' : 'muted'}>{label[drift]}</Badge>;
+  return <Badge tone={drift === 'Current' ? 'success' : 'muted'}>{label[drift]}</Badge>;
 }

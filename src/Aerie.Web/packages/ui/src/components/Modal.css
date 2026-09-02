@@ -1,0 +1,50 @@
+/* Admin's .modal-overlay / .modal-panel / .modal-close, unchanged.
+
+   The panel's 720px max-width is a fixed layout dimension rather than a rung
+   on the spacing ladder — it is a reading measure for a dialog, narrower than
+   the page's --measure on purpose — so it stays a literal here and Phase 6
+   moves it deliberately. */
+
+.aerie-modal__overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+  z-index: 100;
+}
+
+.aerie-modal__panel {
+  width: 100%;
+  max-width: 720px;
+  max-height: calc(100vh - var(--sp-8));
+  overflow-y: auto;
+}
+
+.aerie-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+
+.aerie-modal__close {
+  background: transparent;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--t-subhead);
+  line-height: 1;
+  color: var(--muted);
+}
+
+.aerie-modal__close:hover {
+  color: var(--ink);
+  background: transparent;
+}
+
+.aerie-modal__close:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}

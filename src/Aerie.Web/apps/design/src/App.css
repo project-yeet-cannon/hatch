@@ -147,29 +147,88 @@
   color: var(--muted);
 }
 
-/* A plain button for the gallery's own controls. Deliberately minimal: the
-   real <Button> arrives in Phase 4, and a lookalike here would be a second
-   definition of a thing this app exists to show only one of. */
-.gallery-button {
-  padding: var(--sp-1-5) var(--sp-3);
-  border: 1px solid var(--line);
-  border-radius: var(--r-ctl);
-  background: var(--card);
-  color: var(--ink);
-  font-family: inherit;
-  font-size: var(--t-label);
-  cursor: pointer;
-  transition: background var(--transition), border-color var(--transition);
+/* ---------------------------------------------------------------------------
+   Specimen arrangement
+
+   Two shapes cover almost every component page: a row of things side by side,
+   and a column of things above each other. They exist because a specimen page
+   has to put several instances of a component near each other, and that is
+   layout the gallery owns - the components themselves state no margins, which
+   is exactly what makes them usable anywhere.
+
+   Both use the same gaps as the rest of the app rather than inventing a
+   "specimen gap": what a designer judges spacing against has to be the ladder,
+   not a value only this app uses. */
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
 }
 
-.gallery-button:hover {
-  border-color: var(--line-strong);
+/* The gap between two buttons that belong to the same row of a table - tighter
+   than the gap between unrelated controls, and admin's own value. */
+.row--tight {
+  gap: var(--sp-2);
+}
+
+/* A row of actions under the block it acts on. */
+.row--top {
+  margin-top: var(--sp-4);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.measure-cap {
+  max-width: 68ch;
+}
+
+/* Two specimens side by side for a before/after. Collapses to one column
+   rather than shrinking both past the point either can be read. */
+.compare {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--sp-4);
+}
+
+.compare-half {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* The page ground, so a --card surface can be judged against the --bg it
+   actually sits on rather than against the gallery's own column. */
+.ground-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--sp-4);
+}
+
+.ground {
+  padding: var(--sp-5);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
   background: var(--bg);
 }
 
-.gallery-button:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
+/* A checkbox with its own text, for the <Field as="div"> specimen. This is the
+   app's markup rather than a component because it is exactly what a page
+   writes at that call site. */
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* A closing note inside a modal specimen, set away from the actions above it. */
+.modal-note {
+  margin-top: var(--sp-4);
 }
 
 /* ---------------------------------------------------------------------------
@@ -199,18 +258,6 @@
   flex-direction: column;
   gap: var(--sp-2);
   padding: var(--sp-5);
-}
-
-/* Stand-in slot content. Deliberately plain, like .gallery-button: the real
-   <Badge> lands in Phase 4, and a lookalike here would be a second definition
-   of a thing this app exists to show only one of. */
-.stage-chip {
-  padding: 2px var(--sp-2);
-  border: 1px solid var(--on-accent-wash);
-  border-radius: var(--r-pill);
-  font-size: var(--t-micro);
-  font-weight: 600;
-  white-space: nowrap;
 }
 
 /* The accent fill these two controls are drawn for, so their hover, focus and

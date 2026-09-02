@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Button, Card, EmptyState, Field, Grid, PageHeader, Table, Text } from '@aerie/ui';
 import {
   getPhotoAlbums,
   getPhotoCarousel,
@@ -93,47 +94,47 @@ export function PhotosPage() {
 
   return (
     <div>
-      <div className="admin-page-header">
-        <h2>Photos</h2>
-        <div className="flex gap-1" style={{ alignItems: 'center' }}>
-          <button className="btn-secondary" disabled={refreshing || !status?.isConfigured} onClick={refresh}>
-            {refreshing ? 'Refreshing…' : 'Refresh albums'}
-          </button>
-          <button className="btn-secondary" onClick={load}>
-            Reload
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Photos"
+        actions={
+          <>
+            <Button disabled={refreshing || !status?.isConfigured} onClick={refresh}>
+              {refreshing ? 'Refreshing…' : 'Refresh albums'}
+            </Button>
+            <Button onClick={load}>Reload</Button>
+          </>
+        }
+      />
 
-      {error && <p className="text-danger mb-2">{error}</p>}
-      {notice && <p className="text-muted mb-2">{notice}</p>}
+      {error && <Text tone="danger" className="mb-2">{error}</Text>}
+      {notice && <Text tone="muted" className="mb-2">{notice}</Text>}
 
       <ConnectionCard status={status} onSaved={load} />
 
-      {loading && <p className="text-muted">Loading…</p>}
+      {loading && <Text tone="muted">Loading…</Text>}
 
       {!loading && status?.isConfigured && (
-        <div className="card mb-2">
+        <Card className="mb-2">
           <div className="flex between" style={{ alignItems: 'flex-start' }}>
             <div>
               <h3>Albums</h3>
-              <p className="text-muted mt-1 mb-1">
+              <Text tone="muted" className="mt-1 mb-1">
                 {albums.length === 0
                   ? 'None discovered yet.'
                   : `${includedCount} of ${albums.length} on the kiosk carousel.`}{' '}
                 Everything is off until you tick it — connecting a library must not put every photo in it on a kitchen
                 wall.
-              </p>
+              </Text>
             </div>
           </div>
 
           {albums.length === 0 ? (
-            <p className="text-muted">
+            <Text tone="muted">
               <strong>Refresh albums</strong> asks Immich what it has. An album made over there shows up here after
               that, not before.
-            </p>
+            </Text>
           ) : (
-            <table className="admin-table">
+            <Table>
               <thead>
                 <tr>
                   <th style={{ width: '1%' }}>Show</th>
@@ -167,15 +168,15 @@ export function PhotosPage() {
                     </td>
                     <td>
                       <strong>{album.name}</strong>
-                      {album.description && <p className="text-muted mt-1 mb-1">{album.description}</p>}
+                      {album.description && <Text tone="muted" className="mt-1 mb-1">{album.description}</Text>}
                     </td>
                     <td>{album.assetCount.toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           )}
-        </div>
+        </Card>
       )}
 
       {!loading && status?.isConfigured && <PreviewCard preview={preview} />}
@@ -232,94 +233,86 @@ function ConnectionCard({ status, onSaved }: { status: PhotosStatus | null; onSa
   }
 
   return (
-    <div className="card mb-2">
+    <Card className="mb-2">
       <h3>Immich connection</h3>
-      <p className="text-muted mt-1 mb-2">
+      <Text tone="muted" className="mt-1 mb-2">
         Aerie talks to Immich; the tablets never do. Every photo on the wall is fetched by the API and passed through,
         so the key below stays on the server and no kiosk needs a second sign-in.
-      </p>
+      </Text>
 
-      <div className="grid cols-2">
-        <div className="field">
-          <label className="field-label" htmlFor="immich-host">
-            Immich host
-          </label>
+      <Grid cols={2}>
+        <Field label="Immich host" as="div">
           <div className="flex gap-1">
             <input
-              id="immich-host"
               type="text"
               value={host}
               placeholder="https://photos.example.com"
               onChange={(e) => setHost(e.target.value)}
             />
-            <button className="btn-secondary" disabled={saving === 'ImmichBaseUrl'} onClick={() => save('ImmichBaseUrl', host)}>
+            <Button disabled={saving === 'ImmichBaseUrl'} onClick={() => save('ImmichBaseUrl', host)}>
               {saving === 'ImmichBaseUrl' ? 'Saving…' : 'Save'}
-            </button>
+            </Button>
           </div>
-          <p className="text-muted mt-1">
+          <Text tone="muted" className="mt-1">
             Scheme and host, no trailing <code>/api</code>. It has to be reachable from the API pods, not from your
             laptop — on this install that is the LAN or the tailnet.
-          </p>
-        </div>
+          </Text>
+        </Field>
 
-        <div className="field">
-          <label className="field-label" htmlFor="immich-key">
-            Immich API key
-          </label>
+        <Field label="Immich API key" as="div">
           <div className="flex gap-1">
             <input
-              id="immich-key"
               type="password"
               value={apiKey}
               placeholder={keyIsSet ? 'Key is set — enter a new value to change it' : undefined}
               onChange={(e) => setApiKey(e.target.value)}
             />
-            <button className="btn-secondary" disabled={saving === 'ImmichApiKey' || !apiKey} onClick={() => save('ImmichApiKey', apiKey)}>
+            <Button disabled={saving === 'ImmichApiKey' || !apiKey} onClick={() => save('ImmichApiKey', apiKey)}>
               {saving === 'ImmichApiKey' ? 'Saving…' : 'Save'}
-            </button>
+            </Button>
           </div>
-          <p className="text-muted mt-1">
+          <Text tone="muted" className="mt-1">
             From Immich: <strong>Account settings → API Keys → New API Key</strong>. Tick <code>album.read</code>,{' '}
             <code>asset.read</code> and <code>asset.view</code> — that is everything Aerie does here, and nothing on
             that list lets it write. Optionally <code>server.about</code>, which only adds the version to the line
             below. Stored obfuscated and never sent back to a browser; leave blank to keep the current one.
-          </p>
-        </div>
-      </div>
+          </Text>
+        </Field>
+      </Grid>
 
-      {saveError && <p className="text-danger mt-1">{saveError}</p>}
+      {saveError && <Text tone="danger" className="mt-1">{saveError}</Text>}
 
       <p className="mt-2 mb-1">
         <ConnectionState status={status} />
       </p>
-    </div>
+    </Card>
   );
 }
 
 /** One sentence about whether this works, in the terms an operator can act on. */
 function ConnectionState({ status }: { status: PhotosStatus | null }) {
-  if (status === null) return <span className="text-muted">Checking…</span>;
+  if (status === null) return <Text as="span" tone="muted">Checking…</Text>;
 
   if (!status.isConfigured) {
     return (
-      <span className="text-muted">
+      <Text as="span" tone="muted">
         {status.baseUrl ? 'Host set, no API key yet.' : 'No host set yet.'} Photos stays off the kiosk until both are
         in.
-      </span>
+      </Text>
     );
   }
 
   if (status.reachable) {
     return (
-      <span className="text-success">
+      <Text as="span" tone="success">
         Connected to {status.baseUrl}
         {status.version ? ` (Immich ${status.version})` : ''} · {status.albumCount} album
         {status.albumCount === 1 ? '' : 's'}, {status.includedAlbumCount} on the kiosk.
-      </span>
+      </Text>
     );
   }
 
-  return <span className="text-danger">{explain(status.error)}</span>;
+  return <Text as="span" tone="danger">{explain(status.error)}</Text>;
 }
 
 /** ImmichClient's error codes, in words. Anything unrecognized is shown as-is rather than swallowed. */
@@ -347,19 +340,19 @@ function PreviewCard({ preview }: { preview: PhotoCarousel | null }) {
   if (preview === null) return null;
 
   return (
-    <div className="card mb-2">
+    <Card className="mb-2">
       <h3>On the kiosk</h3>
       {preview.error && (
-        <p className="text-danger mt-1 mb-1">
+        <Text tone="danger" className="mt-1 mb-1">
           The library could not be fully refreshed ({explain(preview.error)}) — what is below may be out of date.
-        </p>
+        </Text>
       )}
-      <p className="text-muted mt-1 mb-2">
+      <Text tone="muted" className="mt-1 mb-2">
         {preview.totalPhotos.toLocaleString()} photo{preview.totalPhotos === 1 ? '' : 's'} in the selection. The
         carousel shuffles, so no two tablets are on the same one.
-      </p>
+      </Text>
       {preview.photos.length === 0 ? (
-        <p className="text-muted">Nothing to show yet — tick an album above.</p>
+        <EmptyState message="Nothing to show yet — tick an album above." />
       ) : (
         <div className="photo-strip">
           {preview.photos.map((photo) => (
@@ -374,15 +367,15 @@ function PreviewCard({ preview }: { preview: PhotoCarousel | null }) {
           ))}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
 function SetupNote() {
   return (
-    <div className="card">
+    <Card>
       <h3>Setting this up</h3>
-      <ol className="text-muted">
+      <Text as="ol" tone="muted">
         <li>
           In Immich, open Account settings → API Keys and make one. Grant it <code>album.read</code>,{' '}
           <code>asset.read</code> and <code>asset.view</code>; add <code>server.about</code> if you want the version
@@ -393,12 +386,12 @@ function SetupNote() {
           <strong>Refresh albums</strong>, then tick the albums the family would want on a kitchen wall. Every album is
           off until you say otherwise.
         </li>
-      </ol>
-      <p className="text-muted">
+      </Text>
+      <Text tone="muted">
         Aerie reads Immich and never writes to it. Removing an album here takes it off the wall and changes nothing in
         the library.
-      </p>
-    </div>
+      </Text>
+    </Card>
   );
 }
 

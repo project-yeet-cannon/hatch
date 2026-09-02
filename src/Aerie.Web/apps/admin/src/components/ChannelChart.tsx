@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
+import { Text } from '@aerie/ui';
 import type { ChannelHistoryPoint, ChannelStatePoint, DeviceChannelMetric } from '../types';
-import { invertLinear, scaleLinear } from '../lib/scale';
+import { invertLinear, scaleLinear } from '@aerie/lib/scale';
 
 const SERIES_COLORS = [
   'var(--series-1)',
@@ -126,10 +127,10 @@ export function ChannelChart({ metric, points, states, fromMs, toMs, onRangeSele
   if (points.length === 0 && states.length === 0) {
     return (
       <div>
-        <p className="text-muted mb-1">{metric}</p>
-        <p className="text-muted" style={{ fontSize: 'var(--t-label)' }}>
+        <Text tone="muted" className="mb-1">{metric}</Text>
+        <Text tone="muted" style={{ fontSize: 'var(--t-label)' }}>
           No data in this range.
-        </p>
+        </Text>
       </div>
     );
   }
@@ -138,7 +139,7 @@ export function ChannelChart({ metric, points, states, fromMs, toMs, onRangeSele
 
   return (
     <div>
-      <p className="text-muted mb-1">{metric}</p>
+      <Text tone="muted" className="mb-1">{metric}</Text>
       <svg
         ref={svgRef}
         className="chart-svg"

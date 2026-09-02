@@ -1,5 +1,5 @@
 import type { ComfortRange, ComfortStatus, TempPoint } from '../types';
-import { scaleLinear, toPolylinePoints } from '../lib/scale';
+import { scaleLinear, toPolylinePoints } from '@aerie/lib/scale';
 import { formatAxisHour } from '../lib/format';
 
 interface TempChartProps {

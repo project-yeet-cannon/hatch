@@ -1,0 +1,20 @@
+{
+  "name": "@aerie/lib",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "//": "No build step, for the same reason @aerie/ui has none: the package ships .ts source and the consuming app's Vite bundles it, so a change here is one edit with no publish round-trip. Framework-free on purpose - nothing in here imports React, which is what keeps it usable from a test, a worker, or an app that is not React.",
+  "exports": {
+    "./scale": "./src/scale.ts",
+    "./cameraStream": "./src/cameraStream.ts"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.10"
+  }
+}

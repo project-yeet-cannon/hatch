@@ -62,6 +62,32 @@ jobs:
         working-directory: src/Aerie.Web
         run: npm run build -w apps/${{ matrix.app }}
 
+  # The shared packages are not in the matrix above: they have no build, and
+  # every app job would run their tests again for nothing. @aerie/lib holds the
+  # logic two apps share, so a break here breaks both - which is exactly why it
+  # gets a check that names it rather than surfacing as a puzzling failure in
+  # whichever app's job happened to run first.
+  web-packages:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: src/Aerie.Web/.nvmrc
+          cache: npm
+          cache-dependency-path: src/Aerie.Web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: src/Aerie.Web
+        run: npm ci
+
+      - name: Test
+        working-directory: src/Aerie.Web
+        run: npm run test --if-present -w packages/lib
+
   deploy-manifests:
     # From the cluster plan Phase 3b.3 onward, everything under deploy/ reaches the
     # cluster by being committed - there is no apply step to fail in front of a

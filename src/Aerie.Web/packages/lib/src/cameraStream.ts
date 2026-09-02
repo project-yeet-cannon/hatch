@@ -1,8 +1,14 @@
 /**
- * The rules half of the camera feed (docs/camera-devices-architecture.md), separated
- * from CameraFeedModal so the parts with decisions in them can be tested
- * without a MediaSource, a WebSocket or a camera - the same split
+ * The rules half of the camera feed (docs/camera-devices-architecture.md),
+ * separated from the modal that plays it so the parts with decisions in them
+ * can be tested without a MediaSource, a WebSocket or a camera - the same split
  * MotionEventStream/MotionEventsController makes on the API side.
+ *
+ * Shared rather than copied. Admin and the dashboard both relay this protocol
+ * from the same endpoint, and until now each held its own copy of this file:
+ * same name, contents already drifted, and nothing in the build that would ever
+ * have said so. Both now import it from here, and the tests below it are the
+ * only tests it has ever had.
  *
  * What is being spoken here is go2rtc's stream protocol, relayed byte-for-byte
  * by Aerie.Api's CameraController: a short JSON control exchange, then binary

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Button, Card, Text } from '@aerie/ui';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { iconFor, searchIcons } from '../lib/icons';
 
@@ -30,17 +31,15 @@ export function IconPicker({ value, onChange }: { value: string; onChange: (name
 
   return (
     <div ref={containerRef} style={{ position: 'relative' }}>
-      <button
-        type="button"
-        className="btn-secondary"
+      <Button
         style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}
         onClick={() => setOpen((o) => !o)}
       >
-        {selected ? <FontAwesomeIcon icon={selected} /> : <span className="text-muted">—</span>}
+        {selected ? <FontAwesomeIcon icon={selected} /> : <Text as="span" tone="muted">—</Text>}
         <span>{selected ? selected.iconName : 'Choose icon…'}</span>
-      </button>
+      </Button>
       {open && (
-        <div className="card channel-select-dropdown">
+        <Card className="channel-select-dropdown">
           <input
             type="text"
             placeholder="Search icons…"
@@ -65,9 +64,9 @@ export function IconPicker({ value, onChange }: { value: string; onChange: (name
                 <FontAwesomeIcon icon={icon} />
               </button>
             ))}
-            {results.length === 0 && <p className="text-muted channel-select-empty">No matching icons.</p>}
+            {results.length === 0 && <Text tone="muted" className="channel-select-empty">No matching icons.</Text>}
           </div>
-        </div>
+        </Card>
       )}
     </div>
   );

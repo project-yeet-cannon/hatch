@@ -6,6 +6,16 @@ import { RadiusPage } from './pages/RadiusPage';
 import { ElevationPage } from './pages/ElevationPage';
 import { SeriesPage } from './pages/SeriesPage';
 import { TopBarPage } from './pages/TopBarPage';
+import { PageHeaderPage } from './pages/PageHeaderPage';
+import { CardPage } from './pages/CardPage';
+import { GridPage } from './pages/GridPage';
+import { TablePage } from './pages/TablePage';
+import { ModalPage } from './pages/ModalPage';
+import { FieldPage } from './pages/FieldPage';
+import { ButtonPage } from './pages/ButtonPage';
+import { BadgePage } from './pages/BadgePage';
+import { TextPage } from './pages/TextPage';
+import { EmptyStatePage } from './pages/EmptyStatePage';
 
 export interface Section {
   /** The nav heading this section files under. Groups render in the order
@@ -28,6 +38,11 @@ export interface Section {
  * Groups appear when they have something in them: "Components" arrived with
  * the first component, rather than sitting empty in the nav as a promise the
  * app could not keep.
+ *
+ * Within Components the order is the order a page is built — the chrome, then
+ * the frame, then what goes in it, then what it says — rather than
+ * alphabetical. A designer reading the nav top to bottom reads it in the order
+ * the decisions compound.
  */
 export const SECTIONS: Section[] = [
   { group: 'Foundations', slug: 'color', title: 'Color', Page: ColorPage },
@@ -37,6 +52,16 @@ export const SECTIONS: Section[] = [
   { group: 'Foundations', slug: 'elevation', title: 'Elevation & motion', Page: ElevationPage },
   { group: 'Foundations', slug: 'series', title: 'Series', Page: SeriesPage },
   { group: 'Components', slug: 'top-bar', title: 'Top bar', Page: TopBarPage },
+  { group: 'Components', slug: 'page-header', title: 'Page header', Page: PageHeaderPage },
+  { group: 'Components', slug: 'card', title: 'Card', Page: CardPage },
+  { group: 'Components', slug: 'grid', title: 'Grid', Page: GridPage },
+  { group: 'Components', slug: 'table', title: 'Table', Page: TablePage },
+  { group: 'Components', slug: 'modal', title: 'Modal', Page: ModalPage },
+  { group: 'Components', slug: 'field', title: 'Field', Page: FieldPage },
+  { group: 'Components', slug: 'button', title: 'Button', Page: ButtonPage },
+  { group: 'Components', slug: 'badge', title: 'Badge', Page: BadgePage },
+  { group: 'Components', slug: 'text', title: 'Text', Page: TextPage },
+  { group: 'Components', slug: 'empty-state', title: 'Empty state', Page: EmptyStatePage },
 ];
 
 /** The first section, and so where `/` and any unknown route land. */
