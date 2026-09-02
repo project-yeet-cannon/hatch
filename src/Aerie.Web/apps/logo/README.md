@@ -18,5 +18,16 @@ Unlike `apps/dashboard` and `apps/admin`, this isn't a Vite/React project — it
 `<x-dc>` template in `index.html`. There's no build step: edit `index.html` directly and open it in a browser,
 or serve the folder and visit `/apps/logo/`.
 
+## The top bar
+
+`index.html` carries three hand-added lines in its `<head>` that pull in the
+shared Aerie bar from `/apps/chrome/` (built by `apps/chrome`). They are the
+only part of the file that is not Claude Design's output, and a re-export
+overwrites the file wholesale — put them back when that happens.
+
+The bar is configured with `theme: 'light'`: this page is a fixed cream design
+with no dark answer, so the bar pins to light and renders no theme control.
+Everything below the bar is untouched.
+
 Do not hand-edit `support.js` — it's generated output (see its header comment) and should be replaced wholesale
 if the design is re-exported from Claude Design.

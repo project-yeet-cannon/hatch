@@ -1,98 +1,44 @@
-* {
-  box-sizing: border-box;
-}
+/* The modeler's base layer.
 
-:root {
-  --bg: #f5f5f5;
-  --card: #ffffff;
-  --ink: #1a1a1a;
-  --muted: #666666;
-  --line: #e0e0e0;
-  --primary: #0066cc;
-  --primary-bg: rgba(0, 102, 204, 0.08);
-  --primary-ink: #0052a3;
-  --danger: #d32f2f;
-  --danger-bg: rgba(211, 47, 47, 0.08);
-  --danger-ink: #b71c1c;
-  --success: #388e3c;
-  --success-bg: rgba(56, 142, 60, 0.08);
-  --success-ink: #1b5e20;
-  --warning: #b58900;
-  --warning-bg: rgba(181, 137, 0, 0.08);
-  --warning-ink: #7a5c00;
-  --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  --transition: 200ms ease;
-}
+   The vocabulary is @aerie/ui/tokens.css and the document layer - box model,
+   body, headings, native form controls, inputs - is @aerie/ui/base.css. This
+   file used to state its own copy of all of it: the same palette, the same dark
+   media query, its own heading ladder. Adopting the package deleted that copy.
 
-body {
-  margin: 0;
-  padding: 0;
-  background: var(--bg);
-  color: var(--ink);
-  font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-size: 14px;
-  line-height: 1.5;
-}
+   Two things went with it rather than moving here:
 
+   - `--warning`, `--warning-bg`, `--warning-ink`. Defined in both palettes and
+     referenced by nothing - the export and mesh warning panels are drawn with
+     --muted. A token nobody uses is a value that will be wrong the first time
+     somebody does use it, so it is gone rather than carried into the shared
+     vocabulary on the strength of a name.
+   - `.container` and the `.flex` utilities. Also unused: every layout in this
+     app is a named class in App.css.
+
+   What is left below is what only this app needs, and it is on notice: .card
+   and the two .btn-* classes restate components @aerie/ui already ships
+   (<Card>, <Button>). They stay for now because replacing them is a pass over
+   every panel in the app, which is not what putting the shared bar on it was.
+
+   A color, radius, type step or spacing value written here as a literal is a
+   bug. */
+@import '@aerie/ui/tokens.css';
+@import '@aerie/ui/base.css';
+
+/* The modeler's shell is a full-height flex column - the bar, a toolbar, and
+   one editor region that manages its own scrolling. base.css leaves that to
+   the app. */
 html, body, #root {
   width: 100%;
   height: 100%;
 }
 
-/* Dark mode support */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1a1a1a;
-    --card: #2d2d2d;
-    --ink: #f5f5f5;
-    --muted: #999999;
-    --line: #404040;
-    --primary: #66b3ff;
-    --primary-bg: rgba(102, 179, 255, 0.12);
-    --primary-ink: #99ccff;
-    --danger: #ff6b6b;
-    --danger-bg: rgba(255, 107, 107, 0.12);
-    --danger-ink: #ff9999;
-    --success: #66bb6a;
-    --success-bg: rgba(102, 187, 106, 0.12);
-    --success-ink: #99e699;
-    --warning: #e0b93d;
-    --warning-bg: rgba(224, 185, 61, 0.12);
-    --warning-ink: #f0d27a;
-  }
-}
-
-/* Headings */
-h1, h2, h3, h4, h5, h6 {
-  margin: 0;
-  font-weight: 600;
-  line-height: 1.3;
-}
-
-h1 { font-size: 24px; }
-h2 { font-size: 20px; }
-h3 { font-size: 16px; }
-
-/* Buttons */
-button {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 6px;
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all var(--transition);
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+/* ---------------------------------------------------------------------------
+   Local restatements of @aerie/ui components. See the note above. */
 
 .btn-primary {
   background: var(--primary);
-  color: white;
+  color: var(--on-accent);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -105,47 +51,17 @@ button:disabled {
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: #d0d0d0;
+  background: var(--line-strong);
 }
 
-/* Cards */
 .card {
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 16px;
+  border-radius: var(--r);
+  padding: var(--sp-4);
   box-shadow: var(--shadow);
 }
 
-/* Layout */
-.container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 20px;
-}
-
-/* Utilities */
 .text-muted {
   color: var(--muted);
 }
-
-.flex {
-  display: flex;
-}
-
-.flex.column {
-  flex-direction: column;
-}
-
-.flex.between {
-  justify-content: space-between;
-}
-
-.flex.center {
-  justify-content: center;
-  align-items: center;
-}
-
-.flex.gap-1 { gap: 8px; }
-.flex.gap-2 { gap: 16px; }
-.flex.gap-3 { gap: 24px; }

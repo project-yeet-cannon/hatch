@@ -5,6 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Aerie Logo</title>
 <script src="./support.js"></script>
+<!-- The Aerie top bar (Aerie.Web/apps/chrome). This page is a static export
+     and cannot import @aerie/ui, so the bar arrives as a built script and
+     stylesheet it references by URL.
+
+     theme: 'light' because this page is a fixed cream design with no answer
+     for dark. The bar pins the root to light so it matches its host and
+     renders no theme control - a toggle here would recolor 48px and leave the
+     page behind it. See packages/ui/src/standalone/topbar.ts.
+
+     These three lines are hand-added and are the one part of this file that is
+     not Claude Design's output. A re-export overwrites index.html wholesale -
+     put them back. -->
+<link rel="stylesheet" href="/apps/chrome/topbar.css">
+<script>window.aerieTopBar = { appName: 'Aerie Logo', theme: 'light' };</script>
+<script src="/apps/chrome/topbar.js"></script>
 </head>
 <body>
 <x-dc>

@@ -1,10 +1,12 @@
 import { createContext } from 'react';
+import type { ResolvedTheme, ThemeChoice } from './themeStore';
 
-/** What the operator chose. `auto` defers to the OS preference. */
-export type ThemeChoice = 'auto' | 'light' | 'dark';
-
-/** What that choice resolves to right now. `auto` collapses to one of these. */
-export type ResolvedTheme = 'light' | 'dark';
+/* The choice type, the storage key, the media query and the guard live in
+   themeStore.ts, which has no React in it so the standalone bar can share
+   them. They are re-exported here because this is where the app-facing theme
+   types have always been imported from. */
+export type { ThemeChoice, ResolvedTheme } from './themeStore';
+export { THEME_STORAGE_KEY, DARK_QUERY, isThemeChoice } from './themeStore';
 
 export interface ThemeContextValue {
   /** The stored choice, including `auto`. This is what a toggle renders. */
@@ -18,12 +20,3 @@ export interface ThemeContextValue {
    a provider is a wiring mistake, and useTheme says so rather than quietly
    rendering the light one. */
 export const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
-
-/** Where the choice is persisted. Namespaced - apps share an origin. */
-export const THEME_STORAGE_KEY = 'aerie.theme';
-
-export const DARK_QUERY = '(prefers-color-scheme: dark)';
-
-export function isThemeChoice(value: unknown): value is ThemeChoice {
-  return value === 'auto' || value === 'light' || value === 'dark';
-}

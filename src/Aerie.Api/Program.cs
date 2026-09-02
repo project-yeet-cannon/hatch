@@ -314,7 +314,12 @@ builder.Services.AddSwaggerGen(c =>
     {
         Title = "Aerie API",
         Version = "v1",
-        Description = "[Open apps →](/apps/)"
+        // No Description. It used to carry "[Open apps →](/apps/)" - a link
+        // hand-written into the API's own description because the Swagger page
+        // was a one-way trip out of the app picker. The bar at the top of that
+        // page is the real answer to that (see UseSwaggerUI below), and this
+        // was also a navigation link living in the published OpenAPI document,
+        // where a generated client would read it as what the API is.
     });
 });
 builder.Services.AddControllers()
@@ -592,7 +597,33 @@ opt.AddRedirect("^auth/?$", "apps/auth/");
 app.UseRewriter(opt);
 
 app.UseSwagger();
-app.UseSwaggerUI();
+
+////////
+/// Swagger UI wears the same bar as every other page in the house.
+///
+/// It is Swashbuckle's document, not one of the Vite apps, so it cannot render
+/// <TopBar> - it gets the standalone build of the same component instead
+/// (Aerie.Web/apps/chrome, served out of wwwroot/apps/chrome). Three
+/// injections, and the head content is the one that has to be a <script>:
+/// InjectJavascript writes a src and nothing else, so the bar's configuration
+/// cannot ride on the tag and arrives as a global the bundle reads instead.
+///
+/// swagger.css is what earns the theme control on that bar. It dresses
+/// Swagger's own surfaces from @aerie/ui's tokens, so Auto/Light/Dark moves
+/// the whole page rather than recoloring a 48px strip above a white one. It
+/// reads the tokens topbar.css defines, so the two ship together or not at all.
+app.UseSwaggerUI(c =>
+{
+    // The tab said "Swagger UI", which is the same orphaning the bar fixes -
+    // one of a dozen Aerie tabs, the only one not saying so.
+    c.DocumentTitle = "Aerie API";
+
+    c.InjectStylesheet("/apps/chrome/topbar.css");
+    c.InjectStylesheet("/apps/chrome/swagger.css");
+    c.InjectJavascript("/apps/chrome/topbar.js");
+    c.HeadContent = """<script>window.aerieTopBar = { appName: "Aerie API", theme: "switch" };</script>""";
+});
+
 app.MapSwagger();
 
 await app.RunAsync();

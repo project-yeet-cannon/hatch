@@ -1,30 +1,52 @@
+/* The shell. No padding of its own: the bar is full-bleed, edge to edge, like
+   every other bar in the house, so the app's own margins moved down one level
+   into .modeler-content. */
 .modeler-app {
   height: 100vh;
-  padding: 16px 24px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+}
+
+.modeler-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-6);
 }
 
 .modeler-loading {
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
 }
 
-.modeler-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  flex: 0 0 auto;
+/* ---------------------------------------------------------------------------
+   What this app puts in the shared bar.
+
+   Both sit on the bar's accent fill, so both take --on-accent - the token that
+   exists for ink on an accent and that flips with the theme, rather than the
+   `white` this app used to write. Neither is dimmed: at --t-label on the
+   primary fill, a lowered opacity lands under the 4.5:1 floor, which is the
+   same trap ThemeSwitch.css documents. */
+
+/* The open project. A divider rather than a gap, so it reads as belonging to
+   the app name rather than as a second name. */
+.modeler-project-name {
+  padding-left: var(--sp-3);
+  border-left: 1px solid var(--on-accent-wash);
+  font-size: var(--t-body);
+  color: var(--on-accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .modeler-save-status {
-  font-size: 12px;
-  color: var(--muted);
+  font-size: var(--t-label);
+  color: var(--on-accent);
   white-space: nowrap;
-  padding-top: 4px;
 }
 
 .modeler-toolbar {

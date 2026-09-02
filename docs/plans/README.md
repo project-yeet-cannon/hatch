@@ -38,6 +38,8 @@ full of active work, which is how a plan directory stops being read.
 | [`dashboard-redesign.md`](dashboard-redesign.md) | The kiosk dashboard's design pass: one token system, a climate card, a photo/agenda stage, and a two-page wall |
 | [`2026-09-01-verification.md`](2026-09-01-verification.md) | Two dated checks left behind by the node-storage work. Run on or after that date, then delete |
 | [`design-system-mvp.md`](design-system-mvp.md) | A shared component library for admin and home: one token vocabulary, day/night, a gallery app, and a gated manual design pass |
+| [`trading.md`](trading.md) | A trading strategy laboratory sideloaded onto the cluster: its own Python silo, a market-data lake, one engine on two clocks, and an honesty layer |
+| [`offsite-chrome.md`](offsite-chrome.md) | A way back to the app picker on `status.`, `metrics.` and `logs.` — what each vendor natively allows, and why the bar itself cannot go there |
 
 ## Conventions
 

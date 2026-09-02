@@ -37,7 +37,7 @@ test-web:
 	cd ./src/Aerie.Web && nvm use && npm ci; \
 	echo "==> @aerie/lib"; \
 	npm run test --if-present -w packages/lib; \
-	for app in admin auth dashboard design home modeler docs family; do \
+	for app in admin auth chrome dashboard design home modeler docs family; do \
 		echo "==> $$app"; \
 		npm run lint -w apps/$$app && npm run test --if-present -w apps/$$app && npm run build -w apps/$$app; \
 	done'

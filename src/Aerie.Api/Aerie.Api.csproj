@@ -92,7 +92,10 @@
   </Target>
 
   <ItemGroup>
-    <ModelerSource Include="../Aerie.Web/apps/modeler/src/**/*.*;../Aerie.Web/apps/modeler/index.html;../Aerie.Web/apps/modeler/package.json;../Aerie.Web/apps/modeler/vite.config.ts" />
+    <!-- Consumes @aerie/ui since it adopted the shared bar and tokens, so the
+         shared packages are among its inputs - without this line a token edit
+         would not retrigger an incremental modeler build. -->
+    <ModelerSource Include="../Aerie.Web/apps/modeler/src/**/*.*;../Aerie.Web/apps/modeler/index.html;../Aerie.Web/apps/modeler/package.json;../Aerie.Web/apps/modeler/vite.config.ts;../Aerie.Web/packages/*/src/**/*.*;../Aerie.Web/packages/*/package.json" />
   </ItemGroup>
 
   <Target Name="BuildModeler" BeforeTargets="Build" DependsOnTargets="NpmInstall" Condition="'$(SkipModelerBuild)' != 'true'" Inputs="@(ModelerSource)" Outputs="wwwroot/apps/modeler/index.html">
@@ -100,7 +103,9 @@
   </Target>
 
   <ItemGroup>
-    <DocsSource Include="../Aerie.Web/apps/docs/src/**/*.*;../Aerie.Web/apps/docs/index.html;../Aerie.Web/apps/docs/package.json;../Aerie.Web/apps/docs/vite.config.ts" />
+    <!-- Consumes @aerie/ui since it adopted the shared bar and tokens - see the
+         note on ModelerSource above. -->
+    <DocsSource Include="../Aerie.Web/apps/docs/src/**/*.*;../Aerie.Web/apps/docs/index.html;../Aerie.Web/apps/docs/package.json;../Aerie.Web/apps/docs/vite.config.ts;../Aerie.Web/packages/*/src/**/*.*;../Aerie.Web/packages/*/package.json" />
   </ItemGroup>
 
   <Target Name="BuildDocs" BeforeTargets="Build" DependsOnTargets="NpmInstall" Condition="'$(SkipDocsBuild)' != 'true'" Inputs="@(DocsSource)" Outputs="wwwroot/apps/docs/index.html">
@@ -167,8 +172,31 @@
   </Target>
 
   <!--
+    Shared page chrome (../Aerie.Web/apps/chrome). Not an app: it builds the
+    top bar as a plain topbar.js/topbar.css pair for the two pages that cannot
+    import @aerie/ui - Swagger UI, which is Swashbuckle's document (see the
+    UseSwaggerUI call in Program.cs), and the static logo export below.
+
+    Its output name is wwwroot/apps/chrome/topbar.js rather than an index.html,
+    which is why Outputs differs from every target above. packages/ is in its
+    inputs for the usual reason and then some: this build is almost entirely
+    @aerie/ui, so a token edit that did not retrigger it would leave the two
+    static pages wearing last week's bar.
+  -->
+  <ItemGroup>
+    <ChromeSource Include="../Aerie.Web/apps/chrome/src/**/*.*;../Aerie.Web/apps/chrome/public/**/*.*;../Aerie.Web/apps/chrome/package.json;../Aerie.Web/apps/chrome/vite.config.ts;../Aerie.Web/packages/*/src/**/*.*;../Aerie.Web/packages/*/package.json" />
+  </ItemGroup>
+
+  <Target Name="BuildChrome" BeforeTargets="Build" DependsOnTargets="NpmInstall" Condition="'$(SkipChromeBuild)' != 'true'" Inputs="@(ChromeSource)" Outputs="wwwroot/apps/chrome/topbar.js">
+    <Exec Command="npm run build -w apps/chrome" WorkingDirectory="../Aerie.Web" />
+  </Target>
+
+  <!--
     Logo app (../Aerie.Web/apps/logo) - a static Claude Design export
-    (index.html + generated support.js), no npm build step needed.
+    (index.html + generated support.js), no npm build step needed. Its
+    index.html references /apps/chrome/topbar.{js,css}, which BuildChrome above
+    produces; the two are independent targets because the copy does not consume
+    the bundle, the browser does.
   -->
   <ItemGroup>
     <LogoAppSource Include="../Aerie.Web/apps/logo/**/*.*" />

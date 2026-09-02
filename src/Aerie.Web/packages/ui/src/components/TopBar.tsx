@@ -40,6 +40,12 @@ export interface TopBarProps {
  * place in every app. That makes a <ThemeProvider> above this component a
  * requirement, not a nicety - useTheme throws without one, which is the loud
  * failure a silently-light toggle is not.
+ *
+ * **It has a sibling**: `@aerie/ui/standalone/topbar` renders the same bar with
+ * DOM calls for the two pages that are not React apps - Swagger UI and the
+ * logo export. It imports this file's stylesheet rather than restating it, so
+ * a change to TopBar.css reaches both; a change to the *markup* here has to be
+ * made there too. That file carries the rule, and the list of what differs.
  */
 export function TopBar({ appName, homeHref, atHome, leading, trailing, className }: TopBarProps) {
   return (

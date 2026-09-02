@@ -1,5 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { ThemeProvider } from '@aerie/ui';
 import './theme.css';
 import { App } from './App';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -13,7 +14,11 @@ clientLogger.info('modeler main.tsx module evaluated');
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      <App />
+      {/* <TopBar> renders the theme switch unconditionally and useTheme throws
+          without a provider, so the bar needs one above it. */}
+      <ThemeProvider>
+        <App />
+      </ThemeProvider>
     </ErrorBoundary>
   </StrictMode>,
 );

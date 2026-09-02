@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { TopBar } from '@aerie/ui';
 import './App.css';
 import { getDocs } from './api/client';
 import { DocList } from './components/DocList';
@@ -18,13 +19,13 @@ export function App() {
 
   return (
     <div className="docs-app">
-      <header className="docs-header">
-        <a href="/" className="docs-back-link" title="Back to app picker">▦</a>
-        <div className="docs-header-text">
-          <h1>Aerie Docs</h1>
-          <p>Architecture &amp; design notes</p>
-        </div>
-      </header>
+      {/* The shared bar. It replaces a 20px-padded block with a 22px <h1> and
+          an "Architecture & design notes" subtitle - about 90px of chrome above
+          a page whose whole job is to show a document. The subtitle is gone
+          with it: the bar says where you are, and the doc below says what it
+          is. The ▦ that used to sit here was a text glyph pretending to be a
+          control; the bar's app-switcher is the real one. */}
+      <TopBar appName="Aerie Docs" />
 
       <div className="docs-body">
         <nav className="docs-sidebar">
