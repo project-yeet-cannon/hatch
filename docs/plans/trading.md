@@ -291,21 +291,21 @@ this list, and it is why the list is as short as it is.
       written into this document, replacing the reported ones.
 - [ ] **Commit:** "Trading: a clock that started, and what Schwab actually says"
 
-#### [ ] Phase 0b — The part that does not wait
+#### [~] Phase 0b — The part that does not wait
 
 **Ships:** a Python package with nothing in it, a Makefile target, a CI lane of
 its own, and two named-but-unseeded secrets. Nothing here touches Schwab, so
 nothing here waits on Schwab.
 
-- [ ] Create `src/Aerie.Trading/` — `pyproject.toml` managed by **uv** (lockfile
+- [x] Create `src/Aerie.Trading/` — `pyproject.toml` managed by **uv** (lockfile
       committed), `ruff` for lint and format, `pyright` in **strict** mode,
       `pytest`. Python 3.12+.
-- [ ] Add a `trading-test` target to the [Makefile](../../Makefile) —
+- [x] Add a `trading-test` target to the [Makefile](../../Makefile) —
       `uv sync --frozen`, `ruff check`, `pyright`, `pytest` — and a CI lane in
       [ci.yml](../../.github/workflows/ci.yml). The lane is **separate** from
       the .NET and web lanes, not bolted into them; that separation is the
       extraction seam expressing itself in CI.
-- [ ] **Name the Schwab credentials before they exist** —
+- [x] **Name the Schwab credentials before they exist** —
       `trading/schwab-client-id` and `trading/schwab-client-secret` in
       [`parameters.json`](../../scripts/secrets/parameters.json), the one file
       both halves of the secret path read. `required: false` for now, so a seed

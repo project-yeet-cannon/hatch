@@ -514,3 +514,13 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+# The trading silo's Python toolchain (src/Aerie.Trading/, docs/plans/trading.md
+# Phase 0b). `__pycache__/` and `*.pyc` are already covered by the Visual Studio
+# block above; these are uv's and the linters' own working directories. uv.lock
+# is deliberately NOT here - it is committed, and `make trading-test` runs
+# `uv sync --frozen` against it so that a local run and a CI run resolve to the
+# same versions.
+.venv/
+.pytest_cache/
+.ruff_cache/

@@ -14,3 +14,13 @@ src/Aerie.Api/wwwroot/dashboard
 # copy via a mount/env, not a baked-in one)
 .env.json
 **/.env.json
+
+# Python tooling working directories (src/Aerie.Trading/, docs/plans/trading.md
+# Phase 0b). Same reasoning as **/node_modules above, and the same urgency: the
+# API build context is the repo root, and .venv holds the linters plus pyright's
+# bundled Node - a few hundred megabytes uploaded to the daemon on every build
+# of an image that has no Python in it.
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache

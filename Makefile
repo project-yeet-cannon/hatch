@@ -58,3 +58,31 @@ ef-database-update:
 # Opens a psql shell against the running `db` container's aerie database, for manual inspection.
 db-shell:
 	docker compose exec db psql -U user -d aerie
+
+# The trading silo (docs/plans/trading.md Phase 0b). Its own target rather than
+# a limb of `test`, for the same reason it gets its own CI lane: the silo is
+# meant to be liftable into its own repository, and a Python failure surfacing
+# as "make test is red" is the coupling starting. `make test` deliberately does
+# not depend on this.
+#
+# uv manages the interpreter as well as the packages, so this needs no Python
+# on the box - only uv itself. `--frozen` fails rather than re-resolving if
+# uv.lock has drifted from pyproject.toml, which is the whole point of
+# committing the lockfile: the same versions here and in CI.
+#
+# PYRIGHT_PYTHON_GLOBAL_NODE=off because pyright is a Node program wearing a
+# Python wrapper, and by default that wrapper runs whatever `node` is first on
+# PATH - at any version, including ones that cannot parse it. On this machine
+# that is a v12 at /usr/local/bin/node, shadowed in an interactive shell by
+# nvm and not shadowed here, and it fails as a JavaScript SyntaxError inside a
+# minified bundle rather than as anything resembling "wrong node". Off makes
+# nodeenv fetch pyright's own, so the type check is a function of uv.lock and
+# not of what the box happens to have.
+trading-test:
+	cd ./src/Aerie.Trading && \
+	export PYRIGHT_PYTHON_GLOBAL_NODE=off; \
+	uv sync --frozen && \
+	uv run ruff format --check . && \
+	uv run ruff check . && \
+	uv run pyright && \
+	uv run pytest

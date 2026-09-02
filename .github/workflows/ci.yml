@@ -88,6 +88,68 @@ jobs:
         working-directory: src/Aerie.Web
         run: npm run test --if-present -w packages/lib
 
+  # The trading silo (docs/plans/trading.md Phase 0b). A job of its own, not a
+  # step bolted into `api` or `web`: docs/plans/trading.md's extraction seam is
+  # that src/Aerie.Trading/ can leave for its own repository without a rewrite,
+  # and the first thing that would quietly make that untrue is a shared build
+  # step. Nothing here needs the .NET SDK or the npm workspace, and neither of
+  # those lanes needs Python.
+  #
+  # These are the same commands `make trading-test` runs, split into named
+  # steps for the same reason the web matrix exists: a PR check should say
+  # which of format, lint, types or tests broke without anyone opening a log.
+  trading:
+    runs-on: ubuntu-latest
+    env:
+      # pyright is a Node program in a Python wrapper and by default runs
+      # whichever `node` is first on PATH, at whatever version that is. Off
+      # makes nodeenv fetch its own, so the type check is a function of
+      # uv.lock rather than of the runner image's Node - which changes without
+      # this repository asking. Same setting the Makefile target carries, and
+      # the reason is written out there.
+      PYRIGHT_PYTHON_GLOBAL_NODE: "off"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Installs uv and nothing else - uv provisions the interpreter itself
+      # from .python-version, so there is no setup-python step and no second
+      # opinion about which Python this is.
+      #
+      # Pinned to an exact release, unlike the `@v7`-style majors every other
+      # action here uses, because astral-sh/setup-uv stopped publishing
+      # floating major tags after v7: `@v10` is a 404 and the failure is
+      # "Unable to resolve action", not a version warning. Bumping it is a
+      # deliberate edit, which for a third-party action is the better default
+      # anyway.
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: src/Aerie.Trading/uv.lock
+
+      # --frozen, so a pyproject.toml edited without re-running `uv lock` fails
+      # here rather than resolving to versions nobody committed.
+      - name: Install dependencies
+        working-directory: src/Aerie.Trading
+        run: uv sync --frozen
+
+      - name: Format
+        working-directory: src/Aerie.Trading
+        run: uv run ruff format --check .
+
+      - name: Lint
+        working-directory: src/Aerie.Trading
+        run: uv run ruff check .
+
+      - name: Type-check
+        working-directory: src/Aerie.Trading
+        run: uv run pyright
+
+      - name: Test
+        working-directory: src/Aerie.Trading
+        run: uv run pytest
+
   deploy-manifests:
     # From the cluster plan Phase 3b.3 onward, everything under deploy/ reaches the
     # cluster by being committed - there is no apply step to fail in front of a

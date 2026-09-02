@@ -1,0 +1,76 @@
+# The trading silo's whole toolchain, in one file (docs/plans/trading.md Phase 0b).
+#
+# This project is deliberately not part of src/Aerie.slnx, has no .csproj, and
+# is not referenced by one. The plan's extraction seam is that
+# src/Aerie.Trading/ plus deploy/cluster/apps/trading/ plus the SPA can leave
+# for their own repository without a rewrite, and a build file that reaches
+# across the line is the first thing that would make that untrue. Phase 1 adds
+# a CI check that asserts it rather than trusting it.
+
+[project]
+name = "aerie-trading"
+version = "0.1.0"
+description = "Aerie's trading silo - a strategy laboratory that rides Aerie as a platform."
+readme = "README.md"
+
+# 3.12 is the floor rather than the target: .python-version pins what uv
+# resolves and runs against, and this says what the package claims to support.
+# Nothing here needs 3.13, and naming a floor the CI lane does not itself
+# exercise would be a claim nothing checks.
+requires-python = ">=3.12"
+
+# Empty on purpose. Phase 0b ships a toolchain, not behavior - the first real
+# dependency arrives with Phase 1's FastAPI service.
+dependencies = []
+
+[dependency-groups]
+# uv installs these by default and `uv sync --no-dev` omits them, which is what
+# Phase 1's Dockerfile uses to keep the linters out of the runtime image.
+dev = [
+    "pyright>=1.1.400",
+    "pytest>=8.3",
+    "ruff>=0.9",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# A flat package rather than a src/ layout: this directory is already
+# src/Aerie.Trading/, and src/Aerie.Trading/src/aerie_trading/ buys nothing for
+# a second 'src' in the path. Named here because the distribution is
+# 'aerie-trading' and the import name is not a mechanical translation of it.
+packages = ["aerie_trading"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# Beyond ruff's default (E4/E7/E9/F): imports sorted (I), bugbear (B),
+# comprehensions (C4), pyupgrade (UP), and the pytest-style rules (PT). Chosen
+# for the ones that catch a bug rather than the ones that catch a preference -
+# formatting is `ruff format`'s job and is not argued about here.
+select = ["E", "F", "I", "B", "C4", "UP", "PT", "SIM", "RUF"]
+
+[tool.pyright]
+# Strict, per the plan: the owner does not write Python, and a type checker that
+# reads like C#'s compiler is the whole mitigation for that. Loosening this is a
+# decision to make in the open, not a line to quietly edit.
+typeCheckingMode = "strict"
+pythonVersion = "3.12"
+include = ["aerie_trading", "tests"]
+# Without this, pyright resolves imports against whatever interpreter it finds
+# on PATH instead of the environment `uv sync` just built - which reads as
+# hundreds of missing-import errors locally and as a green lane in CI, or the
+# reverse. The path is uv's default venv location for this project.
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Fail the run on an unregistered mark or an unraisable warning rather than
+# printing it. A test suite this small has no noise to hide a real one in yet,
+# and the moment it does is the moment this stops being addable cheaply.
+addopts = "-ra --strict-markers --strict-config"
