@@ -1,0 +1,118 @@
+# The trading plan (docs/plans/trading.md) - the `trading` layer, and the
+# platform contract that plan asks about answered in the only way this
+# repository has ever answered it: **the app ships a Flux kustomization.**
+#
+# Aerie's side of that contract is "hand me a kustomization and you get
+# Postgres-as-an-operator, backups, ingress behind the auth wall, log shipping,
+# metrics, and a deploy pipeline." This file is the trading silo's side of it,
+# and it is the same contract a stranger's sideloaded service would use - which
+# is what makes building it here an investment in the productization story
+# rather than a detour from it.
+#
+# ---------------------------------------------------------------------------
+# Why this is a top-level layer and not a directory inside ./apps
+#
+# docs/plans/trading.md's Phase 1 names the path `deploy/cluster/apps/trading/`.
+# It is written here instead, as a sibling of ./photos.yaml, and the reason is
+# the same argument that file makes about Immich - which the trading plan makes
+# too, one section earlier, about the silo:
+#
+#   - ./apps.yaml carries `wait: true` and holds the family's own site tier.
+#     A trading deploy that will not converge - a migration that fails, an
+#     image tag that does not exist - must not be able to hold the house's
+#     HelmRelease NotReady. Inside ./apps it would be exactly that.
+#   - The extraction seam. `src/Aerie.Trading/` plus this tree plus the SPA is
+#     what leaves for its own repository one day. A directory nested inside
+#     another layer's Kustomization is one that cannot be moved without editing
+#     the layer that contains it.
+#
+# Everything else about the path is as the plan describes it. The deviation is
+# recorded in that document rather than left to be discovered here.
+#
+# ---------------------------------------------------------------------------
+# Two Kustomizations, split the way ./data.yaml and ./photos.yaml split theirs
+#
+# trading-database is the data half: the CNPG Cluster, its WAL destination, the
+# database and the nightly base backup. trading is the application half: the
+# image automation, the deployment, its service, the auth middleware and the
+# ingress. The split exists because ordering *inside* one Kustomization's apply
+# pass is not something Flux offers - only `dependsOn` plus `wait` between two
+# of them - and the application half runs a database migration in an init
+# container before it serves anything. Applied in the same pass as the Cluster
+# it migrates, that init container spends its restarts failing to connect to a
+# primary that does not exist yet.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: trading-database
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  # 10m, matching photos-database and data-cluster: this brings up a Postgres
+  # primary from a cold local-path PVC and, on a first reconcile, pulls the
+  # operand image before it can start.
+  timeout: 10m
+  dependsOn:
+    - name: infra-config
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./deploy/cluster/trading/database
+  prune: true
+  # What makes the boundary the application half depends on real rather than
+  # decorative - without it this is Ready as soon as the Cluster object is
+  # *applied*, not once CNPG reports it healthy.
+  wait: true
+  postBuild:
+    substituteFrom:
+      # ${WAL_BUCKET}, for the ObjectStore. `optional` stays false: a missing
+      # ConfigMap should fail reconciliation loudly rather than substitute an
+      # empty string into a backup destination.
+      - kind: ConfigMap
+        name: aerie-cluster-config
+---
+# The application half.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: trading
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  # Longer than the database half's: this waits on an init container running
+  # Alembic against a database that may itself have just been created, and on
+  # a first pull of an image nothing on the node has seen.
+  timeout: 15m
+  dependsOn:
+    # The database, and site-config. Not apps, not data-schema - see this
+    # file's header. site-config is here for one value: ${TRADING_IMAGE_TAG}
+    # lives in the site repo's aerie-image-tags ConfigMap, which site-config is
+    # what applies. Reconciling before it exists would fail the substitution
+    # outright (kustomize-controller substitutes in strict mode), which reads
+    # as a broken manifest rather than as the ordering problem it is.
+    - name: trading-database
+    - name: site-config
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./deploy/cluster/trading/app
+  prune: true
+  # The phase gate as much as the ordering: a Deployment whose init container
+  # cannot migrate, or whose pod never goes Ready, should surface as this
+  # Kustomization staying NotReady rather than as a green reconciliation over
+  # something that never converged.
+  wait: true
+  postBuild:
+    substituteFrom:
+      # Both, and Flux merges tokens across every ConfigMap named here, so the
+      # manifests draw from either without caring which holds a given key:
+      # aerie-cluster-config for ${DOMAIN} and ${IMAGE_REGISTRY}, and
+      # aerie-image-tags (the site repo, via site-config above) for
+      # ${TRADING_IMAGE_TAG} - which is a fact about one installation's build,
+      # exactly the kind of thing docs/ethos.md keeps out of this repository.
+      - kind: ConfigMap
+        name: aerie-cluster-config
+      - kind: ConfigMap
+        name: aerie-image-tags

@@ -1,0 +1,57 @@
+# The trading plan (docs/plans/trading.md) Phase 1 - the wall
+# (docs/auth-architecture.md), in front of trading.${DOMAIN}.
+#
+# **Why a Middleware here and not the chart's.** charts/aerie renders
+# `aerie-auth` into the `aerie` namespace, and an Ingress annotation names a
+# middleware as `<namespace>-<name>@kubernetescrd`. Reaching across namespaces
+# that way needs Traefik's providers.kubernetesCRD.allowCrossNamespace, which
+# this installation does not set and should not have to - so the trading
+# namespace gets its own Middleware object instead. That costs nothing that
+# matters: a forwardAuth address is a *URL*, not a namespaced reference, so
+# both objects point at the same endpoint in the same pod and there is still
+# exactly one gate making the decision. Two Middleware objects, one AuthGate.
+#
+# **Why it is not conditional on auth.mode.** The chart renders its Middleware
+# only at canary and full, because an Ingress annotation naming a Middleware
+# that does not exist is a 500 on every request through it - so there the
+# object and the annotation have to agree, and they key off the same value.
+# Kustomize has no conditionals, and it does not need them: AuthGate.Evaluate
+# returns Exempt when Auth:Enabled is false, so at auth.mode none this
+# forwardAuth answers 204 to everything and the route behaves exactly as it
+# would with no middleware at all. The rollback stays complete.
+#
+# **What an un-enrolled browser sees.** A 302 to /apps/auth/ on *this* host -
+# Aerie.Api rebuilds the redirect's origin from X-Forwarded-Host so each host
+# bounces to itself, which is right for kiosk. and wrong here, because this
+# host has no sign-in shell. The trading service answers that path with a
+# redirect to the real one (aerie_trading/control/app.py, TRADING_SIGN_IN_URL
+# in ./deployment.yaml). The cookie is issued for the whole domain, so signing
+# in there covers this host; the return trip is one manual navigation until
+# Phase 7 puts a UI here worth returning to.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: trading-auth
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: trading
+    app.kubernetes.io/component: auth
+    app.kubernetes.io/part-of: aerie
+spec:
+  forwardAuth:
+    # The in-cluster Service, plain http and by FQDN - naming the api through
+    # its Ingress instead would send every request on a round trip back out
+    # through Traefik, including the ones Traefik is asking about. `aerie` is
+    # written out because this object is not in that namespace and has no
+    # .Release.Namespace to read.
+    #
+    # AuthController.Verify reads the original request from the X-Forwarded-*
+    # headers Traefik adds here, not from this request's own path, and fails
+    # closed when they are missing.
+    address: http://api.aerie.svc.cluster.local:8080/api/auth/verify
+    # Traefik copies back only what is named here. Cookie re-issue happens in
+    # Aerie.Api's own in-process middleware, because Set-Cookie cannot be one
+    # of these.
+    authResponseHeaders:
+      - X-Aerie-Grant
+      - X-Aerie-Label

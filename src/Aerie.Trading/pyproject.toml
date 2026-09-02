@@ -19,14 +19,49 @@ readme = "README.md"
 # exercise would be a claim nothing checks.
 requires-python = ">=3.12"
 
-# Empty on purpose. Phase 0b ships a toolchain, not behavior - the first real
-# dependency arrives with Phase 1's FastAPI service.
-dependencies = []
+# Phase 1's floor, and deliberately short. Every entry here is something the
+# control plane cannot be without; the option-pricing and calendar libraries
+# that motivated Python in the first place (QuantLib, py_vollib,
+# exchange_calendars) arrive with the phases that use them, not now.
+#
+# Lower bounds rather than pins, with uv.lock carrying the exact versions -
+# that is the split `uv sync --frozen` exists for. A pin here would be a
+# second, hand-maintained lockfile that can disagree with the real one.
+dependencies = [
+    # The migration tool. It runs from the same image the service does, in an
+    # init container (deploy/cluster/trading/app/deployment.yaml), so it is a
+    # runtime dependency rather than a dev one.
+    "alembic>=1.19.1",
+    "fastapi>=0.141.1",
+    # The /metrics endpoint. The client library, not an exporter framework -
+    # kube-prometheus-stack is already deployed and does the scraping.
+    "prometheus-client>=0.26.0",
+    # psycopg 3, and `binary` for the wheel: the alternative builds libpq from
+    # source in the image, which needs a compiler in a runtime layer that has
+    # no other reason to carry one.
+    "psycopg[binary]>=3.3.5",
+    # Configuration as a typed model rather than os.environ.get() calls
+    # scattered across modules - the same reason the .NET side binds options
+    # classes instead of reading IConfiguration inline.
+    "pydantic-settings>=2.15.0",
+    "sqlalchemy>=2.0",
+    # `standard` pulls uvloop and httptools. Both are C, both are what makes
+    # the "per-op speed is irrelevant because the hot paths are not Python"
+    # claim in docs/plans/trading.md true of the web layer too.
+    "uvicorn[standard]>=0.52.4",
+]
 
 [dependency-groups]
 # uv installs these by default and `uv sync --no-dev` omits them, which is what
 # Phase 1's Dockerfile uses to keep the linters out of the runtime image.
 dev = [
+    # Starlette's TestClient is an HTTP client transport, so the test suite
+    # cannot call the app without one. httpx2 rather than httpx: at the
+    # Starlette version pinned in uv.lock, httpx is deprecated for this use and
+    # its types resolve as Unknown, which is 40 pyright errors in the test
+    # suite for a dependency choice. Dev-only - nothing in the service makes an
+    # outbound HTTP call yet.
+    "httpx2>=2.12.0",
     "pyright>=1.1.400",
     "pytest>=8.3",
     "ruff>=0.9",

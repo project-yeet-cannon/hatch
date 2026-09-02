@@ -1,0 +1,63 @@
+# The trading plan (docs/plans/trading.md) Phase 1 - trading-pg's WAL and
+# base-backup destination. A copy of ../../photos/database/objectstore.yaml,
+# and deliberately a copy rather than a shared base: an ObjectStore is resolved
+# by bare name inside the referring Cluster's namespace, and this Cluster is in
+# a different namespace, so there is no object here to share. Read
+# ../../data/cluster/objectstore.yaml for the reasoning behind every field;
+# only what differs is annotated below.
+#
+# Same bucket and same IAM user as aerie-pg and immich-pg. barman-cloud
+# namespaces everything it writes under the *server name* - the Cluster's name,
+# trading-pg - so three clusters in one bucket land in disjoint prefixes and
+# cannot collide. A second bucket would be a second thing to create, scope, pay
+# for and lifecycle, and it would buy no isolation that matters: one credential
+# already reaches all of them, so the blast radius is identical either way.
+#
+# Note what this covers and what it does not. The Ledger is in the backup path;
+# the Lake (Phase 3 - Parquet on a PVC) deliberately is not, and gets its own
+# durability story sized when it is big enough to matter. That asymmetry is the
+# whole argument of "Why the lake is not in Postgres" in the plan.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: trading-pg-wal
+  namespace: trading
+spec:
+  configuration:
+    destinationPath: s3://${WAL_BUCKET}/
+    s3Credentials:
+      # The same three keys in the same Secret name, synced into *this*
+      # namespace by the third target block added to each of the three
+      # /aerie/postgres/wal-s3-* parameters in
+      # scripts/secrets/parameters.json. An ExternalSecret is namespaced, so
+      # reaching a Secret across namespaces is not a thing that exists - the
+      # value is re-synced here rather than referenced.
+      accessKeyId:
+        name: cnpg-wal-s3
+        key: access-key-id
+      secretAccessKey:
+        name: cnpg-wal-s3
+        key: secret-access-key
+      region:
+        name: cnpg-wal-s3
+        key: region
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+  retentionPolicy: "30d"
+  # 512Mi and a 1-core limit, carried over from the other two tiers rather than
+  # re-derived: 128Mi OOMKilled barman-cloud-backup mid-base-backup on the data
+  # tier (exit 137), and 500m is a 50ms-per-100ms CFS quota that throttles a
+  # single-threaded compressor by construction. This database is much smaller
+  # than either of the others and will stay that way - the Lake is where the
+  # volume goes - but the failure modes above are about the sidecar's own
+  # ceiling, not about how much data it is moving.
+  instanceSidecarConfiguration:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: "1"
+        memory: 512Mi

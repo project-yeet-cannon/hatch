@@ -1,7 +1,10 @@
 # Trading — a strategy laboratory that rides Aerie as a platform
 
-**Status:** Not started. Phases 0–3 are on a **wall-clock critical path** and
-should be kept deliberately lean: Schwab developer-app approval takes days, and
+**Status:** Phases 0b and 1 built on 2026-09-02; Phase 0a is waiting on Schwab.
+What is left of Phase 1 is its gate — five checks that need the cluster — plus
+one line an operator adds to the site repository, both written out under that
+phase. Phases 0–3 are on a **wall-clock critical path** and should be kept
+deliberately lean: Schwab developer-app approval takes days, and
 option-chain history cannot be backfilled at any sane price, so every day the
 snapshotter is not running is a day of data that has to be bought later or done
 without. Everything from Phase 4 on is ordinary engineering that can take the
@@ -201,8 +204,8 @@ ones, which is worse.
 
 The ask asks how to tell Aerie infra what topology the trading app needs. It
 already has an answer: **the app ships a Flux kustomization.**
-`deploy/cluster/apps/trading/` declares a CNPG `Cluster`, a PVC, its
-deployments, and its ingress route. Aerie's side of the contract is *"hand me a
+`deploy/cluster/trading/` declares a CNPG `Cluster`, a PVC, its deployments,
+and its ingress route. Aerie's side of the contract is *"hand me a
 kustomization and you get Postgres-as-an-operator, backups, ingress behind the
 auth wall, log shipping, metrics, and a deploy pipeline."*
 
@@ -211,11 +214,22 @@ building it here an investment in the productization story rather than a
 detour from it.
 
 **The extraction seam**, for when trading becomes its own repo: the silo is
-`src/Aerie.Trading/` plus `deploy/cluster/apps/trading/` plus the SPA. The SPA
+`src/Aerie.Trading/` plus `deploy/cluster/trading/` plus the SPA. The SPA
 is the only piece with a shared dependency (`@aerie/ui`), and it leaves by
 taking a versioned copy of that package as an ordinary npm dependency. Nothing
-else crosses the line, and CI should keep it that way — see Phase 1's import
-guard.
+else crosses the line, and CI keeps it that way — see Phase 1's import guard.
+
+Two objects sit outside that boundary and are worth naming rather than
+discovering during the extraction, because both are what the platform charges
+for the services it provides: a `ServiceMonitor` in
+[`observability/config/scrape/trading.yaml`](../../deploy/cluster/observability/config/scrape/trading.yaml)
+(every instance of a `monitoring.coreos.com` CRD in this repository lives in
+that layer, for the cold-rebuild ordering reason its own kustomization
+explains), and one namespace added to the selector in that directory's
+`cloudnative-pg.yaml`. Extraction deletes both. Everything else the silo needs
+from the platform — the pull secret, the WAL credential, the namespace — is a
+target block in `parameters.json` or a line in `namespaces.yaml`, which is the
+same shape any sideloaded service would add.
 
 ## Phases
 
@@ -291,7 +305,7 @@ this list, and it is why the list is as short as it is.
       written into this document, replacing the reported ones.
 - [ ] **Commit:** "Trading: a clock that started, and what Schwab actually says"
 
-#### [~] Phase 0b — The part that does not wait
+#### [x] Phase 0b — The part that does not wait
 
 **Ships:** a Python package with nothing in it, a Makefile target, a CI lane of
 its own, and two named-but-unseeded secrets. Nothing here touches Schwab, so
@@ -313,45 +327,142 @@ nothing here waits on Schwab.
       and no `kubernetes` block yet, so the generator writes no `ExternalSecret`
       for a parameter nothing reads. Phase 2 flips both when it becomes the
       thing that reads them.
-- [ ] **Gate:** `make trading-test` green against an empty package · the new CI
+- [x] **Gate:** `make trading-test` green against an empty package · the new CI
       lane runs and passes on a pull request, with the .NET and web lanes
       unaffected by its presence · `New-ExternalSecrets.ps1` still agrees with
       `parameters.json`, which is the check `ci.yml` already runs.
-- [ ] **Commit:** "Trading: a silo, a toolchain, and a lane of its own"
+- [x] **Commit:** "Trading: a silo, a toolchain, and a lane of its own"
 
-### [ ] Phase 1 — The Ledger and the silo's floor
+### [x] Phase 1 — The Ledger and the silo's floor
 
 **Ships:** a FastAPI service reachable at `trading.${DOMAIN}`, with its own
 Postgres and nothing to say yet. Deliberately boring: this phase is judged on
 whether the deploy pipeline, logs, metrics and ingress all work before there is
 any logic to confuse them with.
 
-- [ ] `deploy/cluster/apps/trading/` — a Flux kustomization declaring a CNPG
+**Built 2026-09-02.** Everything below is committed; the gate's five checks are
+the part that needs a cluster, and each is marked with what was verified
+locally in its place. Three things came out of building it and are recorded in
+place rather than as a footnote: the layer is a sibling of `photos.yaml` rather
+than a directory inside `apps/` (below), the wall bounces an un-enrolled
+browser to a sign-in shell this host does not serve (below), and the migration
+runs as an init container rather than a Flux `Job` because a `Job`'s spec is
+immutable and its name cannot carry the image tag.
+
+- [x] `deploy/cluster/trading/` — a Flux kustomization declaring a CNPG
       `Cluster` (its own database, its own credentials, its own
-      `ScheduledBackup`), a `Deployment`, a `Service`, and an `IngressRoute`
-      behind the existing auth middleware.
-- [ ] `control/` — FastAPI + uvicorn. `/healthz` (liveness), `/readyz`
+      `ScheduledBackup`), a `Deployment`, a `Service`, and an ingress behind the
+      auth middleware.
+
+      **Two deviations from this bullet as written, both deliberate.**
+
+      *The path.* This bullet said `deploy/cluster/apps/trading/`. It is
+      [`deploy/cluster/trading/`](../../deploy/cluster/trading/) with its own
+      [`trading.yaml`](../../deploy/cluster/trading.yaml), a sibling of
+      `photos.yaml`, for the reason that file argues at length about Immich and
+      this plan argues one section earlier about the silo: `apps.yaml` carries
+      `wait: true` and holds the family's own site tier, so a trading deploy
+      that will not converge would hold the house NotReady. It is also the
+      shape that can be lifted out — a directory nested inside another layer's
+      Kustomization cannot move without editing the layer containing it.
+
+      *`IngressRoute` → `Ingress`.* Every hostname this cluster serves is a
+      plain `Ingress` with no `tls:` block, so the wildcard TLSStore default
+      terminates it; an `IngressRoute` here would be the one route in the house
+      whose certificate story is configured somewhere else. The middleware it
+      needs is reachable by annotation either way.
+
+      **And one thing the auth wall does that had to be answered.**
+      `AuthController.Verify` rebuilds its redirect's origin from
+      `X-Forwarded-Host`, so an un-enrolled browser at `trading.${DOMAIN}` is
+      bounced to `/apps/auth/` *on this host* — which serves no sign-in shell,
+      so the first thing an operator would see is a 404 from a service that is
+      working perfectly. The trading service answers that path with a redirect
+      to the real shell, from a configured URL (`TRADING_SIGN_IN_URL`) rather
+      than a derived one, so the silo does not learn Aerie's URL structure. The
+      cookie is domain-wide, so signing in there covers this host; the return
+      trip is one manual navigation until Phase 7 puts a UI here worth
+      returning to.
+- [x] `control/` — FastAPI + uvicorn. `/healthz` (liveness), `/readyz`
       (database reachable), `/metrics` (Prometheus), and `/api/trading/version`
       reporting the `aerie-revision` it was built from, matching
-      [version.md](version.md).
-- [ ] Structured JSON logging to stdout, with the field names Fluent Bit's
-      pipeline already expects — check
-      [`deploy/cluster/observability/controllers/fluent-bit/`](../../deploy/cluster/observability/controllers/fluent-bit/)
-      rather than inventing a schema and discovering the mismatch in OpenSearch.
-- [ ] SQLAlchemy 2.0 with **Alembic** migrations, run as an init container or a
-      Flux `Job` on deploy — the same shape as the existing `migrate-job`, not a
-      migrate-on-startup race between replicas.
-- [ ] First tables: `instrument`, `data_source`, `ingest_run`. Nothing about
-      strategies yet.
-- [ ] `Dockerfile.trading` — multi-stage, `uv sync --frozen --no-dev` into a
-      slim runtime, non-root, revision stamped as a build arg.
-- [ ] **The import guard:** a CI check asserting that nothing under
-      `src/Aerie.Trading/` imports from `src/Aerie.Api/` and that no `.csproj`
-      references the trading directory. The boundary is a rule that a tired
-      afternoon will otherwise erode; make it fail the build.
+      [version.md](version.md) — same three field names as
+      `GET /api/aerie-revision`, and `Aerie-Revision` on every response
+      including the failures.
+
+      The revision is read from a `build.json` written **into the package**
+      by `Dockerfile.trading`, not from an environment variable: a revision the
+      deployment can supply is one the deployment can get wrong, which is the
+      same argument that put the sha in the .NET assembly rather than in the
+      pod spec.
+- [x] Structured JSON logging to stdout, in `AddJsonConsole`'s shape rather
+      than a new one, checked against
+      [`fluent-bit/service_tag.lua`](../../deploy/cluster/observability/controllers/fluent-bit/service_tag.lua)
+      rather than assumed. Two properties there are load-bearing and are
+      asserted in tests: `State.Service` is never set (its presence marks a
+      line as *relayed*, and a relayed line is deliberately never attributed to
+      its container image), and `State.AerieRevision` is set on every line —
+      which makes this the first thing to use the override path that script
+      already carried for "an image deployed at a moving tag".
+- [x] SQLAlchemy 2.0 with **Alembic** migrations, run as an **init container**.
+      The `Job` alternative was priced and rejected: a `Job`'s spec is
+      immutable once created, so one whose image tag changes every deploy needs
+      either a name carrying that tag — `trading-migrate-<14 digits>-<40 hex>`
+      is past the name length limit — or `force: true` on the Kustomization,
+      which is a blunt instrument to reach for over one object. With
+      `replicas: 1` and `strategy: Recreate`, exactly one process runs
+      `alembic upgrade head` at a time, which is the property this bullet is
+      asking for. When Phase 5 adds workers, they do not migrate; if this
+      Deployment ever needs a second replica, the migration moves to a `Job`
+      first.
+- [x] First tables: `instrument`, `data_source`, `ingest_run`. Nothing about
+      strategies yet. `instrument` is polymorphic from day one — an equity or
+      an option contract, with a CHECK constraint asserting that an option has
+      all four of its defining fields and an equity has none of them — because
+      that is the retrofit this plan exists to avoid.
+- [x] `Dockerfile.trading` — multi-stage, `uv sync --frozen --no-dev` into a
+      slim runtime, non-root, revision stamped as a build arg. Its build
+      context is `src/Aerie.Trading/` rather than the repository root, unlike
+      every other image here: Docker refuses a `COPY` that escapes the context,
+      so the extraction seam is enforced by the build itself.
+- [x] **The import guard:** the `trading-boundary` job in
+      [ci.yml](../../.github/workflows/ci.yml). Five checks rather than the two
+      this bullet names, because the two as written cannot be made honestly:
+      the silo's own comments talk about `Aerie.Api` constantly — the log shape
+      it copies, the wall it sits behind — and a guard that cannot tell prose
+      from code is a guard someone turns off. Each check matches a *mechanism*
+      instead: an import statement, a parent-traversing path, a `.csproj`
+      reference, an import of `aerie_trading` from outside, and a `COPY` out of
+      the image's context. Each also asserts it found files to look at, because
+      a guard that greps a renamed path passes silently forever.
 - [ ] **Gate:** the pod is running in-cluster · logs appear in OpenSearch ·
       the metrics endpoint is scraped · a CNPG backup of the trading database
       has completed once · `/api/trading/version` matches the deployed commit.
+
+      Every one of these needs the cluster. What was verified locally in their
+      place: the image builds and its container answers all four endpoints,
+      with `/readyz` correctly reporting `degraded` against no database and
+      `/api/trading/version` returning the sha passed as a build arg; `alembic
+      upgrade head --sql` renders the schema from inside the image; a test
+      asserts the migration and the models describe the same schema; every
+      kustomization under `deploy/` builds, and `New-ExternalSecrets.ps1
+      -Check` is in sync.
+- [x] **The one step that lives in the site repository.**
+      `${TRADING_IMAGE_TAG}` resolves from the `aerie-image-tags` ConfigMap,
+      and `ImageUpdateAutomation` only *moves* a value next to an existing
+      marker — it cannot add one, so the line had to arrive by hand exactly as
+      the api and kiosk-files lines did. Committed 2026-09-02:
+
+      ```yaml
+      TRADING_IMAGE_TAG: latest  # {"$imagepolicy": "flux-system:trading:tag"}
+      ```
+
+      `latest` as the initial value, matching how those two started: the
+      `aerie-trading` image does not exist until the next push to `main` builds
+      it, and the `ImagePolicy` replaces this with a real
+      `<timestamp>-<sha>` on its first successful scan. Until then the pod is
+      `ImagePullBackOff` rather than the whole layer failing its build, which
+      is the better of the two failures.
 - [ ] **Commit:** "Trading: a silo with a floor"
 
 ### [ ] Phase 2 — Schwab, and the seven-day problem

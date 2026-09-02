@@ -40,3 +40,10 @@ resources:
   # either - see that file's header for why a photo library must not be able
   # to hold the app tier NotReady.
   - photos.yaml
+  # The trading plan (docs/plans/trading.md) Phase 1: trading-database, the
+  # silo's own CNPG cluster, and trading, the control plane behind it. Depends
+  # on infra-config and site-config, and nothing depends on it - the same
+  # containment photos.yaml has, and for a sharper reason: this silo is meant
+  # to be liftable into its own repository, so an edge into it from the app
+  # tier would be a coupling to unpick later.
+  - trading.yaml

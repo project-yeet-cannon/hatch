@@ -1,0 +1,215 @@
+# The trading plan (docs/plans/trading.md) Phase 1 - the control plane itself.
+# Deliberately boring: this phase is judged on whether the deploy pipeline,
+# logs, metrics and ingress all work before there is any logic to confuse them
+# with.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trading
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: trading
+    app.kubernetes.io/component: control
+    app.kubernetes.io/part-of: aerie
+spec:
+  # One. Not an HA decision deferred - a decision. Two replicas would each want
+  # to run the migration below, and the whole point of an init container over a
+  # migrate-on-startup call is that exactly one process migrates. Phase 5's
+  # workers are a second Deployment that does *not* migrate, which is the shape
+  # that scales; if this one ever needs a second replica, the migration moves
+  # to a Job first.
+  replicas: 1
+  # Recreate, not RollingUpdate, and it follows from the line above: a rolling
+  # update would briefly run the new pod's init container - a migration -
+  # against a database the old pod is still serving from. Recreate makes the
+  # ordering explicit at the cost of a few seconds of downtime on a control
+  # plane nothing in the household depends on.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: trading
+      app.kubernetes.io/component: control
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: trading
+        app.kubernetes.io/component: control
+        app.kubernetes.io/part-of: aerie
+    spec:
+      # No API access of any kind. Stated rather than left to the default,
+      # which is true: nothing here reads Kubernetes, and a mounted token is a
+      # credential a compromised process would otherwise be holding.
+      automountServiceAccountToken: false
+      # 5b.1's dockerconfigjson Secret, synced into this namespace by the
+      # trading target block added to registry/pull-username and
+      # registry/pull-token in scripts/secrets/parameters.json. Without it
+      # every pod here is ImagePullBackOff - the image is in a private
+      # registry.
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # The migration, in the same image and at the same tag as the container
+        # it precedes - one substitution feeding both, so a deploy can never
+        # migrate with one build and serve with another. That is the same
+        # property charts/aerie/templates/migrate-job.yaml is built around on
+        # the .NET side.
+        #
+        # An init container rather than a Flux Job, which the plan allows for
+        # explicitly. A Job's spec is immutable once created, so a Job whose
+        # image tag changes on every deploy either needs a name that changes
+        # with it - and `trading-migrate-<14 digits>-<40 hex>` is past the name
+        # length limit - or `force: true` on the Kustomization, which is a
+        # blunt instrument to reach for over one object. With replicas: 1 and
+        # strategy: Recreate above, exactly one process runs `alembic upgrade
+        # head` at a time, which is the property the plan is actually asking
+        # for when it says "not a migrate-on-startup race between replicas".
+        - name: migrate
+          image: "${IMAGE_REGISTRY}/aerie-trading:${TRADING_IMAGE_TAG}"
+          command: ["alembic", "-c", "/app/alembic.ini", "upgrade", "head"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            # The same block the container below gets, deliberately duplicated
+            # rather than shared: kustomize has no equivalent of Helm's named
+            # templates, and a YAML anchor would not survive the strategic
+            # merge if anything ever patches one of the two.
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef:
+                  name: trading-pg-app
+                  key: host
+            - name: PGPORT
+              valueFrom:
+                secretKeyRef:
+                  name: trading-pg-app
+                  key: port
+            - name: PGDATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: trading-pg-app
+                  key: dbname
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: trading-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: trading-pg-app
+                  key: password
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+      containers:
+        - name: trading
+          image: "${IMAGE_REGISTRY}/aerie-trading:${TRADING_IMAGE_TAG}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Nothing writes to disk: the image precompiles its bytecode at
+            # build time and PYTHONDONTWRITEBYTECODE is set, so there is not
+            # even a __pycache__ to create. The /tmp emptyDir below is for
+            # anything in the dependency tree that assumes a writable
+            # temporary directory.
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # Credentials and address from the Secret CNPG generated for the
+            # `trading` role (../database/cluster.yaml's bootstrap.initdb).
+            # libpq's own variable names, which is what
+            # src/Aerie.Trading/aerie_trading/settings.py reads and what psql
+            # in a debugging shell reads too - the same block
+            # ../../data/schema/quartz-ddl-job.yaml uses.
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef:
+                  name: trading-pg-app
+                  key: host
+            - name: PGPORT
+              valueFrom:
+                secretKeyRef:
+                  name: trading-pg-app
+                  key: port
+            - name: PGDATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: trading-pg-app
+                  key: dbname
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: trading-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: trading-pg-app
+                  key: password
+            # Where to send a browser the auth wall bounced to this host with
+            # nowhere to land - see ./middleware-auth.yaml, and the route in
+            # aerie_trading/control/app.py. A full URL rather than a domain:
+            # this silo should not know how Aerie spells the path to its
+            # sign-in shell, and on the day it is its own repository this stays
+            # a value in a manifest.
+            - name: TRADING_SIGN_IN_URL
+              value: "https://home.${DOMAIN}/apps/auth/"
+          # Sized from nothing, because there is nothing to measure yet: a
+          # FastAPI process serving four endpoints. The request is a floor that
+          # lets the scheduler place it; the limit is 2x, matching every other
+          # limit in this repository. Revisit when Phase 3's collectors run in
+          # this process - or, more likely, when they get their own.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          # /healthz never touches the database and /readyz does - the split
+          # charts/aerie/templates/api-deployment.yaml writes out for the .NET
+          # side, and it is copied here for the same reason: a liveness probe
+          # that checks the database restarts every replica at once during a
+          # failover, which makes the outage longer rather than shorter.
+          #
+          # The readiness probe doubles as the startup probe, so a slow first
+          # boot - a pod that came up while its database was still electing a
+          # primary - is a startup probe still trying rather than a crash loop.
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 2
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

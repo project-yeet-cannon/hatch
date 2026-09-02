@@ -28,7 +28,9 @@
 # own output references a CRD this phase installs - not whether the flag has
 # the word "monitoring" in its name.
 #
-# Five objects here; a sixth target (Traefik) is split across this directory
+# Six objects here now - the sixth, ./trading.yaml, is the first *application*
+# in the list rather than a piece of the platform; see its own header. A
+# seventh target (Traefik) is split across this directory
 # and that HelmChartConfig for the reason above, and a seventh
 # (kubelet/cAdvisor/kube-state-metrics/node-exporter) needs nothing here at
 # all - kube-prometheus-stack wires those itself. See
@@ -42,3 +44,4 @@ resources:
   - cloudnative-pg.yaml
   - longhorn.yaml
   - traefik.yaml
+  - trading.yaml

@@ -35,3 +35,5 @@ resources:
   - observability-ghcr-pull.yaml
   - observability-github-datasource.yaml
   - observability-home-assistant.yaml
+  - trading-cnpg-wal-s3.yaml
+  - trading-ghcr-pull.yaml

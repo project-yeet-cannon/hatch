@@ -1,0 +1,22 @@
+# Layer for the trading Flux Kustomization (../../trading.yaml): the control
+# plane itself, behind the trading-database layer next door.
+#
+# Applied order is list order. Nothing here strictly requires it - Kubernetes
+# reconciles a Deployment naming a Secret that does not exist yet by retrying,
+# and Traefik answers a route to a missing Service with a 404 - but the order
+# below is the order a person reads them in when something is wrong: what runs,
+# how it is reached, what stands in front of it.
+#
+# What is *not* here: the Namespace. ../../infrastructure/config/namespaces.yaml
+# owns it, for that file's own one-owner reason and for the one that will
+# matter in Phase 2 - an ExternalSecret carrying the Schwab credential has to
+# land in a namespace that already exists, and infra-config is upstream of this
+# layer.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - image-automation.yaml
+  - deployment.yaml
+  - service.yaml
+  - middleware-auth.yaml
+  - ingress.yaml

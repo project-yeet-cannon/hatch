@@ -1,0 +1,29 @@
+# The trading plan (docs/plans/trading.md) Phase 1 - the `trading` database as
+# a reconciled object rather than a bootstrap-only side effect.
+#
+# ./cluster.yaml's bootstrap.initdb already creates it. This object adopts it
+# (`ensure: present` is satisfied by an existing database) and takes over
+# managing what is in it - which is what makes the next change to it a one-line
+# commit rather than an edit to a bootstrap block that a running cluster
+# silently ignores. ../../photos/database/database.yaml makes the same argument
+# at length for extensions, and it is the same argument here even though this
+# database needs none: the point is that initdb runs exactly once, on an empty
+# data directory, and anything expressed only there is unreconcilable
+# afterwards.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: trading-pg-trading
+  namespace: trading
+spec:
+  cluster:
+    name: trading-pg
+  name: trading
+  owner: trading
+  ensure: present
+  # The default, written out - `delete` would let a mistaken commit, or
+  # `prune: true` on the trading-database Kustomization, drop the whole Ledger
+  # along with the object that declares it. spec.cluster is immutable, so a
+  # wrong cluster name here means deleting and recreating this object rather
+  # than editing it.
+  databaseReclaimPolicy: retain

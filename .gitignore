@@ -524,3 +524,11 @@ $RECYCLE.BIN/
 .venv/
 .pytest_cache/
 .ruff_cache/
+
+# The build stamp Dockerfile.trading writes into the package at image build
+# time (docs/plans/trading.md Phase 1, src/Aerie.Trading/aerie_trading/revision.py).
+# Never committed: a stamp from a developer's machine is indistinguishable from
+# a real one at the endpoint that reports it, which is exactly the confusion
+# that file exists to prevent. Its absence in a working tree is what makes
+# `uv run` report a development build.
+src/Aerie.Trading/aerie_trading/build.json

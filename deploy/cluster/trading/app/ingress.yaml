@@ -1,0 +1,44 @@
+# The trading plan (docs/plans/trading.md) Phase 1 - trading.${DOMAIN}.
+#
+# A plain Ingress, not the IngressRoute the plan's wording suggests, and the
+# reason is ../../photos/app/ingress.yaml's: every hostname this cluster serves
+# is a plain Ingress with no `tls:` block, so that 3b.10d's wildcard TLSStore
+# default is what terminates at the websecure entrypoint. An IngressRoute here
+# would be the one route in the house whose certificate story is configured
+# somewhere else - and Traefik's own CRD buys nothing this route needs, since
+# the middleware it wants is reachable by annotation either way.
+#
+# DNS needs no work: pfSense already resolves every *.${DOMAIN} name to the
+# ingress VIP (docs/file-share.md).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: trading
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: trading
+    app.kubernetes.io/component: control
+    app.kubernetes.io/part-of: aerie
+  annotations:
+    # The wall, unconditionally - see ./middleware-auth.yaml on why this
+    # annotation is not gated on auth.mode the way the chart's are, and why
+    # that still leaves `none` a complete rollback.
+    #
+    # The <namespace>-<name>@kubernetescrd form is required and unforgiving: a
+    # bare name is silently not found and the route serves *unauthenticated*,
+    # which looks exactly like success from outside. Only a 302 from an
+    # un-enrolled browser proves this is on.
+    traefik.ingress.kubernetes.io/router.middlewares: "trading-trading-auth@kubernetescrd"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: "trading.${DOMAIN}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: trading
+                port:
+                  number: 8080

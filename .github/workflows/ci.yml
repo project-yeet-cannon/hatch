@@ -150,6 +150,157 @@ jobs:
         working-directory: src/Aerie.Trading
         run: uv run pytest
 
+  # The import guard (docs/plans/trading.md Phase 1). The silo's whole promise
+  # is that src/Aerie.Trading/ plus deploy/cluster/trading/ plus the SPA can
+  # leave for their own repository without a rewrite, and a boundary that is
+  # only a convention is one a tired afternoon erodes - so it fails the build
+  # instead.
+  #
+  # Its own job rather than a step in `trading` above, and deliberately so: this
+  # check is about *both* sides of the line, which makes it the one thing here
+  # that is not part of the extractable lane. When trading does leave, this job
+  # leaves with it - by being deleted, because there is no longer a line to
+  # cross.
+  #
+  # Four things about how these are written, each of which is a way a guard
+  # like this otherwise fails open rather than closed:
+  #
+  #   - `git grep`, not `grep -r`. It searches tracked files only, which is
+  #     both what a boundary rule is about and what keeps
+  #     src/Aerie.Trading/.venv - thousands of third-party files, several of
+  #     which legitimately contain every pattern below - out of the answer.
+  #     Add `--untracked` to run any of these against a working tree before
+  #     committing.
+  #   - Every check asserts it *found files to look at*. A guard that greps a
+  #     path which no longer exists passes silently and forever, which is
+  #     exactly what a directory rename would do to this one.
+  #   - The exit status is tested rather than swallowed with `|| true`: 1 is
+  #     "no match", the success case here, and anything above it is grep itself
+  #     failing - a bad pattern, an unreadable file - which must not read as a
+  #     pass.
+  #   - POSIX ERE, no PCRE, and no bash-4 builtins. `grep -P` and `mapfile`
+  #     both exist on the runner and not on a macOS developer's machine, and a
+  #     guard that can only be run in CI is one nobody runs before pushing.
+  trading-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Two checks rather than one grep for the string "Aerie.Api", and the
+      # difference is worth stating: this silo's own comments talk about
+      # Aerie.Api constantly - the log shape it copies, the auth wall it sits
+      # behind, the migrate Job it is modeled on - and a guard that cannot tell
+      # prose from code is a guard someone turns off. Each of these matches a
+      # *mechanism* instead.
+      - name: The trading silo imports nothing from the other side
+        run: |
+          set -euo pipefail
+          count=$(git ls-files -- 'src/Aerie.Trading/**/*.py' | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "No Python files found under src/Aerie.Trading/ - this guard is looking at nothing." >&2
+            exit 1
+          fi
+          # An import statement naming anything Aerie-ish, minus this package's
+          # own. Nothing here can import C#; what this catches is a shared
+          # Python helper that someone puts one directory up and imports.
+          set +e
+          hits=$(git grep -nE '^[[:space:]]*(from|import)[[:space:]]+[^[:space:]]*aerie' \
+              -- 'src/Aerie.Trading/**/*.py' \
+            | grep -vE '(from|import)[[:space:]]+aerie_trading')
+          status=$?
+          set -e
+          if [ "$status" -gt 1 ]; then echo "the search failed with status $status" >&2; exit 1; fi
+          if [ -n "$hits" ]; then
+            echo "The trading silo imports an Aerie module that is not its own. docs/plans/trading.md's extraction seam says nothing crosses this line in either direction:" >&2
+            echo "$hits" >&2
+            exit 1
+          fi
+          echo "Checked $count file(s): the silo imports only aerie_trading."
+
+      - name: No path in the trading silo escapes it
+        run: |
+          set -euo pipefail
+          count=$(git ls-files -- 'src/Aerie.Trading/' | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "No files found under src/Aerie.Trading/ - this guard is looking at nothing." >&2
+            exit 1
+          fi
+          # The other way Python reaches across a directory boundary: a
+          # relative path in code, a path dependency in pyproject.toml, or a
+          # local source in the lockfile. All three appear as a parent
+          # traversal inside a quoted string, and none of them can exist in a
+          # silo that stands alone.
+          set +e
+          hits=$(git grep -nE "['\"]\.\./" -- 'src/Aerie.Trading/')
+          status=$?
+          set -e
+          if [ "$status" -gt 1 ]; then echo "the search failed with status $status" >&2; exit 1; fi
+          if [ -n "$hits" ]; then
+            echo "A path under src/Aerie.Trading/ points outside it:" >&2
+            echo "$hits" >&2
+            exit 1
+          fi
+          echo "Checked $count file(s): no path under src/Aerie.Trading/ leaves it."
+
+      - name: No .NET project reaches into the trading silo
+        run: |
+          set -euo pipefail
+          count=$(git ls-files -- '*.csproj' '*.slnx' '*.props' '*.targets' | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "No .NET project files found - this guard is looking at nothing." >&2
+            exit 1
+          fi
+          set +e
+          hits=$(git grep -nE 'Aerie\.Trading' -- '*.csproj' '*.slnx' '*.props' '*.targets')
+          status=$?
+          set -e
+          if [ "$status" -gt 1 ]; then echo "the search failed with status $status" >&2; exit 1; fi
+          if [ -n "$hits" ]; then
+            echo "A .NET project file names Aerie.Trading. The silo is not in src/Aerie.slnx and must not be reachable from it:" >&2
+            echo "$hits" >&2
+            exit 1
+          fi
+          echo "Checked $count file(s): no .NET project references src/Aerie.Trading/."
+
+      - name: Nothing outside the silo imports its package
+        run: |
+          set -euo pipefail
+          # The other direction, and the easier one to break by accident: a
+          # script elsewhere in the repository that imports aerie_trading is a
+          # dependency the extraction would silently take with it.
+          set +e
+          hits=$(git grep -nE 'aerie_trading' -- '*.py' ':!:src/Aerie.Trading/')
+          status=$?
+          set -e
+          if [ "$status" -gt 1 ]; then echo "the search failed with status $status" >&2; exit 1; fi
+          if [ -n "$hits" ]; then
+            echo "Something outside src/Aerie.Trading/ imports aerie_trading:" >&2
+            echo "$hits" >&2
+            exit 1
+          fi
+          echo "Nothing outside the silo imports aerie_trading."
+
+      - name: The trading image cannot see outside the silo
+        run: |
+          set -euo pipefail
+          # Docker refuses a COPY that escapes the build context anyway, and
+          # publish.yml sets that context to src/Aerie.Trading - so this is not
+          # the enforcement. What it catches is the edit that widens the
+          # context in the workflow and then adds the COPY, by making the
+          # second half fail on its own.
+          set +e
+          hits=$(git grep -nE '^[[:space:]]*COPY[[:space:]]+.*\.\./' -- 'src/Aerie.Trading/Dockerfile.trading')
+          status=$?
+          set -e
+          if [ "$status" -gt 1 ]; then echo "the search failed with status $status" >&2; exit 1; fi
+          if [ -n "$hits" ]; then
+            echo "Dockerfile.trading copies from outside its own directory:" >&2
+            echo "$hits" >&2
+            exit 1
+          fi
+          echo "Dockerfile.trading copies only from within the silo."
+
   deploy-manifests:
     # From the cluster plan Phase 3b.3 onward, everything under deploy/ reaches the
     # cluster by being committed - there is no apply step to fail in front of a
@@ -270,15 +421,16 @@ jobs:
           # says nothing when its input disagrees, so both lists have to be
           # sorted the same way it reads them.
           export LC_ALL=C
-          # AERIE_API_IMAGE_TAG / KIOSK_FILES_IMAGE_TAG (5b.10, 5b.12) resolve
-          # from the site repo's aerie-image-tags ConfigMap (5a.3), not
+          # AERIE_API_IMAGE_TAG / KIOSK_FILES_IMAGE_TAG (5b.10, 5b.12) and
+          # TRADING_IMAGE_TAG (docs/plans/trading.md Phase 1) resolve from the
+          # site repo's aerie-image-tags ConfigMap (5a.3), not
           # cluster-config.json - deliberately, since which build one
           # installation runs is exactly the kind of fact docs/ethos.md keeps
           # out of this repository. They are declared here by hand instead,
           # the same reason Test-ClusterPlatform.ps1 hand-excludes its own
           # non-cluster-config tokens.
           declared=$(cat <(jq -r '.keys[].key' scripts/k3s/cluster-config.json) \
-            <(printf '%s\n' AERIE_API_IMAGE_TAG KIOSK_FILES_IMAGE_TAG) | sort -u)
+            <(printf '%s\n' AERIE_API_IMAGE_TAG KIOSK_FILES_IMAGE_TAG TRADING_IMAGE_TAG) | sort -u)
           used=$(find deploy -name kustomization.yaml -exec dirname {} \; | sort \
             | while IFS= read -r dir; do kubectl kustomize "$dir"; done \
             | grep -oP '(?<!\$)\$\{[A-Za-z_][A-Za-z0-9_]*\}' \

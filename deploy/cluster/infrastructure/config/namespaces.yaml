@@ -87,3 +87,24 @@ metadata:
   name: immich
   labels:
     app.kubernetes.io/part-of: aerie
+---
+# The trading plan (docs/plans/trading.md) Phase 1. Here rather than in the
+# `trading` Kustomization that owns everything else in the silo, for the same
+# one-owner reason as `immich` above - and for a second one that lands in Phase
+# 2 rather than now: the Schwab credential arrives as an ExternalSecret in this
+# layer (scripts/secrets/parameters.json already names the two parameters), and
+# infra-config cannot go Ready while an ExternalSecret in it targets a
+# namespace nothing has created yet. That was found live for `observability` on
+# 2026-08-19 and the fix was this file; there is no reason to rediscover it.
+#
+# The three Secrets that reach this namespace and where each comes from, since
+# the mix is unusual: `ghcr-pull` and `cnpg-wal-s3` from ExternalSecrets in
+# ../external-secrets/ (this layer), and `trading-pg-app` from CNPG itself,
+# which generates the role's password and never involves the parameter store at
+# all.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: trading
+  labels:
+    app.kubernetes.io/part-of: aerie

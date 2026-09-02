@@ -1,0 +1,117 @@
+# The trading plan (docs/plans/trading.md) Phase 1 - the Ledger: the trading
+# silo's own Postgres, with its own database, its own credentials and its own
+# backup schedule. Modeled on ../../photos/database/cluster.yaml, which is
+# itself modeled on ../../data/cluster/cluster.yaml; that file carries the
+# reasoning for the fields all three share, and this one annotates only where
+# it differs.
+#
+# Why a third Cluster rather than a database inside aerie-pg: the plan's first
+# decision, and it is about failure domains rather than about schemas. The silo
+# is meant to be liftable into its own repository, and a database it shares
+# with the household is a coupling that no amount of care in the application
+# code removes. It also means a sweep (Phase 5) that pins a connection pool, or
+# a collector that writes badly, degrades trading and nothing else.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: trading-pg
+  namespace: trading
+spec:
+  # One, and a literal rather than a ${...} knob - unlike POSTGRES_INSTANCES
+  # and IMMICH_POSTGRES_INSTANCES. Making it configurable means declaring a key
+  # in scripts/k3s/cluster-config.json, which means an operator has to
+  # re-dispatch Provision 4 before this phase can deploy at all, to supply a
+  # value whose only sensible answer today is 1. Nothing in the household
+  # depends on this database being up, and its recovery story is the WAL
+  # archive in ./objectstore.yaml plus the nightly base backup in
+  # ./scheduledbackup.yaml, not a standby.
+  #
+  # When that changes - live paper trading (Phase 8) is the first thing that
+  # would make an outage here cost something - raise it here and add the
+  # `synchronous:` block ../../data/cluster/cluster.yaml carries. The shape to
+  # copy for making it an operator knob is IMMICH_POSTGRES_INSTANCES's.
+  instances: 1
+
+  # The default (minimal) flavour, not immich's -standard-trixie: that image
+  # exists to host a mounted extension image, and nothing here needs an
+  # extension. The patch version is pinned for the reason
+  # ../../data/cluster/cluster.yaml gives at length - pg_restore only goes
+  # forwards across major versions, so an unpinned major is a one-way change
+  # that could arrive inside a routine bump. 18.4 is what the other two
+  # clusters run, which is not required but is one less version pair to reason
+  # about.
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.4
+
+  storage:
+    # Not Longhorn - docs/plans/swarm/design.md#storage-split.
+    storageClass: local-path
+    # Small on purpose, and it is the design rather than optimism: the volume
+    # of this system lives in the Lake (Parquet on its own PVC, Phase 3), and
+    # what lands here is instruments, providers, run records and - from Phase 5
+    # - strategy parameters and metrics. A sweep of 10,000 runs is on the order
+    # of tens of megabytes of rows. local-path is expandable in the sense that
+    # matters here: the PVC can be edited and the node has the space.
+    size: 10Gi
+
+  walStorage:
+    storageClass: local-path
+    size: 5Gi
+
+  # No `synchronous:` block, deliberately, for the reason instances: 1 above
+  # gives: aerie-pg's dataDurability: required with number: 1 is RPO=0 and
+  # depends entirely on a standby existing to satisfy it. At one instance the
+  # same setting blocks every write forever, because nothing can ever
+  # acknowledge. Add it when the instance count rises, not before.
+
+  # Harmless at one instance and correct the moment there are two, which is
+  # exactly when nobody remembers to add it.
+  affinity:
+    enablePodAntiAffinity: true
+    podAntiAffinityType: required
+
+  # The default, written out. The operator owns the PodDisruptionBudget for a
+  # CNPG Cluster and creates it from this flag; a hand-written PDB here would
+  # be a second object fighting the controller over the same pods.
+  enablePDB: true
+
+  # Goal 2 of design.md: the scheduler cannot place what it cannot size.
+  # Smaller than immich-pg's, which is sized for vchord index builds over a few
+  # hundred thousand embeddings. This database's heaviest query today is a
+  # readiness probe.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+  bootstrap:
+    initdb:
+      database: trading
+      owner: trading
+      # CNPG generates this password and publishes it as the trading-pg-app
+      # Secret, which ../app/deployment.yaml reads with a secretKeyRef. It
+      # never reaches SSM and never reaches this repository - the distinction
+      # matters: scripts/secrets/parameters.json is for values an *operator*
+      # supplies, and a generated one is not.
+
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        # Bare name, resolved in this namespace - ./objectstore.yaml.
+        barmanObjectName: trading-pg-wal
+
+  primaryUpdateStrategy: unsupervised
+
+  enableSuperuserAccess: false
+
+  # False, matching both other clusters, and for the same reason: the
+  # Cluster-level toggle is deprecated upstream in favour of a hand-written
+  # PodMonitor, and this cluster's is
+  # ../../observability/config/scrape/cloudnative-pg.yaml - whose
+  # namespaceSelector this phase widened to include `trading`, exactly as the
+  # photos plan widened it to include `immich`.
+  monitoring:
+    enablePodMonitor: false
