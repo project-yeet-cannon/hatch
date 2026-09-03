@@ -5,6 +5,7 @@ import { BoardPage } from './pages/BoardPage';
 import { IssuePage } from './pages/IssuePage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { StatusesPage } from './pages/StatusesPage';
+import { PlaybooksPage } from './pages/PlaybooksPage';
 import { BulkPage } from './pages/BulkPage';
 import { ImportPage } from './pages/ImportPage';
 
@@ -28,6 +29,7 @@ export function App() {
           <NavLink to="/bulk" className={navLinkClass}>Bulk edit</NavLink>
           <NavLink to="/projects" className={navLinkClass}>Projects</NavLink>
           <NavLink to="/statuses" className={navLinkClass}>Statuses</NavLink>
+          <NavLink to="/playbooks" className={navLinkClass}>Playbooks</NavLink>
           <NavLink to="/import" className={navLinkClass}>Import</NavLink>
         </div>
       </nav>
@@ -38,6 +40,7 @@ export function App() {
           <Route path="/bulk" element={<BulkPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/statuses" element={<StatusesPage />} />
+          <Route path="/playbooks" element={<PlaybooksPage />} />
           <Route path="/issues/:key" element={<IssuePage />} />
           <Route path="/import" element={<ImportPage />} />
           {/* An unknown deep link lands on the board rather than on nothing -

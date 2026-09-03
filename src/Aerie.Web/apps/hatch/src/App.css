@@ -854,3 +854,38 @@
   gap: var(--sp-2);
   color: var(--muted);
 }
+
+/* ---- Playbooks ---- */
+
+/* The four type checkboxes, on one line where the column is wide enough and
+   wrapping rather than stretching the row where it is not. */
+.hatch-playbook-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  align-items: center;
+}
+
+.hatch-playbook-types label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  white-space: nowrap;
+}
+
+/* The prompt, unfolded under its row. Full width and a monospace box, because
+   what is being edited is an instruction whose line breaks are load-bearing -
+   the agent reads it as written. */
+.hatch-playbook-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3) 0;
+}
+
+.hatch-playbook-prompt textarea {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: var(--t-body);
+  line-height: 1.5;
+}
