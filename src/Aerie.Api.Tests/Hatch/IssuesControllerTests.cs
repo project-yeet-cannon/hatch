@@ -775,7 +775,7 @@ public class IssuesControllerTests
     }
 
     [Fact]
-    public async Task AProjectKey_IsNotOfferedForEditingAndTheNameIs()
+    public async Task RenamingAProject_LeavesItsKeyAlone()
     {
         var h = await NewAsync();
 
@@ -783,6 +783,134 @@ public class IssuesControllerTests
 
         Assert.Equal("The House", patched.Name);
         Assert.Equal("AER", patched.Key);
+    }
+
+    // ---- Rekeying ----
+
+    /// <summary>
+    /// The point of the whole feature, and the thing that would make it not
+    /// worth having if it were false: a rekeyed project keeps its tree. Every
+    /// story stays under its epic and every task under its story, because
+    /// parentage is a foreign key and the key is only a prefix.
+    /// </summary>
+    [Fact]
+    public async Task RekeyingAProject_KeepsEveryParentAndChildHookedUp()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("epic", "the plan");
+        await h.CreateAsync("story", "phase 0", parentKey: "AER-1");
+        await h.CreateAsync("task", "first checkbox", parentKey: "AER-2");
+
+        await h.Projects.PatchProject(h.ProjectId, new ProjectPatchRequest(null, "HAT"), default);
+
+        Assert.Equal("HAT-1", Value(await h.Issues.GetIssue("HAT-2", default)).ParentKey);
+        Assert.Equal("HAT-2", Value(await h.Issues.GetIssue("HAT-3", default)).ParentKey);
+        Assert.Equal(["HAT-2"], Value(await h.Issues.GetIssue("HAT-1", default)).ChildKeys);
+    }
+
+    /// <summary>
+    /// The cost, stated as a test so nobody is surprised by it: the old key
+    /// names nothing afterwards. Text that spelled it out - a commit message, a
+    /// chat log - is pointing at a dead link, and that is the trade the operator
+    /// is shown before the speed bump lets them through.
+    /// </summary>
+    [Fact]
+    public async Task AfterARekey_TheOldKeyIsA404()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "the thing");
+
+        await h.Projects.PatchProject(h.ProjectId, new ProjectPatchRequest(null, "HAT"), default);
+
+        Assert.IsType<NotFoundResult>((await h.Issues.GetIssue("AER-1", default)).Result);
+        Assert.Equal("the thing", Value(await h.Issues.GetIssue("HAT-1", default)).Title);
+    }
+
+    /// <summary>
+    /// Numbers are the project's, not the key's. A rekey must not hand HAT-1 to
+    /// a second issue while AER-1 is still sitting there wearing it.
+    /// </summary>
+    [Fact]
+    public async Task ARekey_DoesNotResetTheNumbering()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "first");
+        await h.CreateAsync("task", "second");
+
+        await h.Projects.PatchProject(h.ProjectId, new ProjectPatchRequest(null, "HAT"), default);
+        var next = await h.CreateAsync("task", "third");
+
+        Assert.Equal("HAT-3", next.Key);
+    }
+
+    [Fact]
+    public async Task ARekeyToATakenKey_Is409()
+    {
+        var h = await NewAsync();
+
+        var result = await h.Projects.PatchProject(h.ProjectId, new ProjectPatchRequest(null, "OPS"), default);
+
+        Assert.Contains("already taken", Reason(result.Result));
+        Assert.Equal("AER", Value(await h.Projects.GetProjects(default)).First(p => p.Id == h.ProjectId).Key);
+    }
+
+    /// <summary>A project is not in conflict with itself - re-sending its own key is a no-op, not a 409.</summary>
+    [Fact]
+    public async Task ARekeyToTheKeyItAlreadyHas_IsFine()
+    {
+        var h = await NewAsync();
+
+        var patched = Value(await h.Projects.PatchProject(h.ProjectId, new ProjectPatchRequest(null, "aer"), default));
+
+        Assert.Equal("AER", patched.Key);
+    }
+
+    [Theory]
+    [InlineData("A")]
+    [InlineData("TOOLONGKEY")]
+    [InlineData("1AB")]
+    [InlineData("A-B")]
+    public async Task AMalformedNewKey_IsRefused(string key)
+    {
+        var h = await NewAsync();
+
+        var result = await h.Projects.PatchProject(h.ProjectId, new ProjectPatchRequest(null, key), default);
+
+        Assert.Contains("two to six letters or digits", Reason(result.Result));
+    }
+
+    [Fact]
+    public async Task ARekey_ShoutsALowerCaseKeyRatherThanRefusingIt()
+    {
+        var h = await NewAsync();
+
+        var patched = Value(await h.Projects.PatchProject(h.ProjectId, new ProjectPatchRequest(null, "hat"), default));
+
+        Assert.Equal("HAT", patched.Key);
+    }
+
+    /// <summary>
+    /// Null is no opinion here too. A request that only rekeys must not have to
+    /// re-send a name, and must not blank the one already there.
+    /// </summary>
+    [Fact]
+    public async Task ARekeyThatMentionsNoName_LeavesTheNameAlone()
+    {
+        var h = await NewAsync();
+
+        var patched = Value(await h.Projects.PatchProject(h.ProjectId, new ProjectPatchRequest(null, "HAT"), default));
+
+        Assert.Equal("Aerie", patched.Name);
+    }
+
+    [Fact]
+    public async Task ARenameToNothing_IsRefused()
+    {
+        var h = await NewAsync();
+
+        var result = await h.Projects.PatchProject(h.ProjectId, new ProjectPatchRequest("   "), default);
+
+        Assert.Contains("needs a name", Reason(result.Result));
     }
 
     [Fact]
@@ -814,6 +942,436 @@ public class IssuesControllerTests
         var result = await h.Statuses.CreateStatus(new StatusCreateRequest("todo", null, null), default);
 
         Assert.Contains("already a \"todo\" column", Reason(result.Result));
+    }
+
+    // ---- Column colours ----
+
+    [Fact]
+    public async Task AColumnWithNothingSaidAboutItsColour_WearsTheDefault()
+    {
+        var h = await NewAsync();
+
+        var created = Created(await h.Statuses.CreateStatus(new StatusCreateRequest("review", null, null), default));
+
+        Assert.Equal(EfHatchStatus.DefaultColor, created.Color);
+    }
+
+    /// <summary>
+    /// One stored shape, lower case, so two spellings of one colour compare
+    /// equal - see <see cref="EfHatchStatus.NormalizeColor"/>.
+    /// </summary>
+    [Fact]
+    public async Task AColourIsStoredInOneCase()
+    {
+        var h = await NewAsync();
+
+        var created = Created(await h.Statuses.CreateStatus(new StatusCreateRequest("review", null, null, "#AB12EF"), default));
+
+        Assert.Equal("#ab12ef", created.Color);
+    }
+
+    [Fact]
+    public async Task RecolouringAColumn_KeepsEverythingElseAboutIt()
+    {
+        var h = await NewAsync();
+
+        var patched = Value(await h.Statuses.PatchStatus(h.Todo, new StatusPatchRequest(null, null, null, "#2a78d6"), default));
+
+        Assert.Equal("#2a78d6", patched.Color);
+        Assert.Equal("todo", patched.Name);
+        Assert.Equal(20, patched.SortOrder);
+    }
+
+    [Fact]
+    public async Task RenamingAColumn_DoesNotTakeItsColourOff()
+    {
+        var h = await NewAsync();
+        await h.Statuses.PatchStatus(h.Todo, new StatusPatchRequest(null, null, null, "#2a78d6"), default);
+
+        var patched = Value(await h.Statuses.PatchStatus(h.Todo, new StatusPatchRequest("next up", null, null), default));
+
+        Assert.Equal("#2a78d6", patched.Color);
+    }
+
+    [Theory]
+    [InlineData("red")]
+    [InlineData("#ab1")]
+    [InlineData("6b7280")]
+    [InlineData("#gggggg")]
+    [InlineData("rgb(1,2,3)")]
+    public async Task AColourThatIsNotAHexValue_IsRefusedWithAReason(string color)
+    {
+        var h = await NewAsync();
+
+        var result = await h.Statuses.CreateStatus(new StatusCreateRequest("review", null, null, color), default);
+
+        Assert.Contains("hex value", Reason(result.Result));
+    }
+
+    /// <summary>
+    /// The board draws the colour, so the board has to carry it - the columns
+    /// come from one request and there is no second call to look one up.
+    /// </summary>
+    [Fact]
+    public async Task TheBoard_CarriesEachColumnsColour()
+    {
+        var h = await NewAsync();
+        await h.Statuses.PatchStatus(h.Done, new StatusPatchRequest(null, null, null, "#008300"), default);
+
+        var board = Value(await h.Board.GetBoard(default));
+
+        Assert.Equal("#008300", board.Statuses.Single(s => s.Id == h.Done).Color);
+    }
+
+    // ---- Searching ----
+
+    [Fact]
+    public async Task ASearchWithNoFilters_IsTheWholeBoard()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("epic", "the plan");
+        await h.CreateAsync("task", "a thing");
+
+        Assert.Equal(["AER-1", "AER-2"], await h.SearchAsync());
+    }
+
+    [Fact]
+    public async Task ASearchByType_ReturnsOnlyThatType()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("epic", "the plan");
+        await h.CreateAsync("bug", "the leak");
+
+        Assert.Equal(["AER-2"], await h.SearchAsync(type: "bug"));
+    }
+
+    [Fact]
+    public async Task ASearchByStatus_ReturnsOnlyThatColumn()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "still filed");
+        await h.CreateAsync("task", "started");
+        await h.Issues.PatchIssue("AER-2", Patch(statusId: h.Todo), default);
+
+        Assert.Equal(["AER-2"], await h.SearchAsync(statusId: h.Todo));
+    }
+
+    [Fact]
+    public async Task ASearchByParent_ReturnsItsChildrenAndNotItsGrandchildren()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("epic", "the plan");
+        await h.CreateAsync("story", "phase 0", parentKey: "AER-1");
+        await h.CreateAsync("task", "a checkbox", parentKey: "AER-2");
+
+        Assert.Equal(["AER-2"], await h.SearchAsync(parentKey: "AER-1"));
+    }
+
+    /// <summary>
+    /// The empty string is the one filter that cannot be written any other way:
+    /// "no parent at all", which is how the orphans get found. It reads the same
+    /// as it does on a patch body, where empty clears the parent.
+    /// </summary>
+    [Fact]
+    public async Task ASearchForNoParent_FindsTheOrphans()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("epic", "the plan");
+        await h.CreateAsync("story", "phase 0", parentKey: "AER-1");
+
+        Assert.Equal(["AER-1"], await h.SearchAsync(parentKey: ""));
+    }
+
+    /// <summary>
+    /// The reason the ancestor filter exists: everything under an epic, at every
+    /// level, in one request - and not the epic itself, because "under AER-1" is
+    /// a question about what hangs beneath it.
+    /// </summary>
+    [Fact]
+    public async Task ASearchByAncestor_ReachesEveryLevelBelowItAndNotTheAncestor()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("epic", "the plan");
+        await h.CreateAsync("story", "phase 0", parentKey: "AER-1");
+        await h.CreateAsync("task", "a checkbox", parentKey: "AER-2");
+        await h.CreateAsync("task", "another checkbox", parentKey: "AER-2");
+        await h.CreateAsync("task", "unrelated");
+
+        Assert.Equal(["AER-2", "AER-3", "AER-4"], await h.SearchAsync(ancestorKey: "AER-1"));
+    }
+
+    [Fact]
+    public async Task ASearchByAncestorOfALeaf_FindsNothingRatherThanFailing()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "on its own");
+
+        Assert.Empty(await h.SearchAsync(ancestorKey: "AER-1"));
+    }
+
+    [Fact]
+    public async Task ATextSearch_MatchesPartOfATitleInAnyCase()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "Renew the certificate");
+        await h.CreateAsync("task", "Feed the cat");
+
+        Assert.Equal(["AER-1"], await h.SearchAsync(text: "CERTIF"));
+    }
+
+    /// <summary>
+    /// A key pasted into a search box is a lookup. The key is computed rather
+    /// than stored, so nothing about a substring match on a title would ever
+    /// find it.
+    /// </summary>
+    [Fact]
+    public async Task ATextSearchForAKey_FindsThatIssue()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "nothing alike");
+        await h.CreateAsync("task", "nor this");
+
+        Assert.Equal(["AER-2"], await h.SearchAsync(text: "aer-2"));
+    }
+
+    [Fact]
+    public async Task FiltersCombine()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("epic", "the plan");
+        await h.CreateAsync("story", "phase 0", parentKey: "AER-1");
+        await h.CreateAsync("bug", "phase 0 leaks", parentKey: "AER-1");
+
+        Assert.Equal(["AER-3"], await h.SearchAsync(ancestorKey: "AER-1", type: "bug"));
+    }
+
+    [Fact]
+    public async Task ASearchByProject_StaysInIt()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "house work");
+        await h.CreateAsync("task", "ops work", projectId: h.OtherProjectId);
+
+        Assert.Equal(["OPS-1"], await h.SearchAsync(projectId: h.OtherProjectId));
+    }
+
+    [Fact]
+    public async Task ASearchForATypeThatIsNotOne_IsRefusedWithAReason()
+    {
+        var h = await NewAsync();
+
+        var result = await h.Issues.SearchIssues(null, "epicc", null, null, null, null, default);
+
+        Assert.Contains("epic, story, task, bug", Reason(result.Result));
+    }
+
+    [Fact]
+    public async Task ASearchUnderAnIssueThatDoesNotExist_SaysSo()
+    {
+        var h = await NewAsync();
+
+        var result = await h.Issues.SearchIssues(null, null, null, null, "AER-99", null, default);
+
+        Assert.Contains("there is no AER-99", Reason(result.Result));
+    }
+
+    // ---- Editing in bulk ----
+
+    [Fact]
+    public async Task ABulkEdit_MovesEveryIssueItNames()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "one");
+        await h.CreateAsync("task", "two");
+        await h.CreateAsync("task", "untouched");
+
+        var result = Value(await h.Issues.BulkEdit(Bulk(["AER-1", "AER-2"], statusId: h.Todo), default));
+
+        Assert.Equal(["AER-1", "AER-2"], result.Changed);
+        Assert.Equal(["AER-1", "AER-2"], await h.SearchAsync(statusId: h.Todo));
+        Assert.Equal(h.Inbox, Value(await h.Issues.GetIssue("AER-3", default)).StatusId);
+    }
+
+    [Fact]
+    public async Task ABulkEdit_TouchesOnlyTheFieldsItNames()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "renew the cert", dueAt: "2027-09-01");
+
+        await h.Issues.BulkEdit(Bulk(["AER-1"], statusId: h.Todo), default);
+
+        var issue = Value(await h.Issues.GetIssue("AER-1", default));
+        Assert.Equal("renew the cert", issue.Title);
+        Assert.Equal("2027-09-01", issue.DueAt);
+        Assert.Equal("task", issue.Type);
+    }
+
+    [Fact]
+    public async Task ABulkEdit_WritesOneEventPerChangedFieldPerIssue()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "one");
+        await h.CreateAsync("task", "two");
+
+        await h.Issues.BulkEdit(Bulk(["AER-1", "AER-2"], statusId: h.Todo, dueAt: "2027-09-01"), default);
+
+        foreach (var key in new[] { "AER-1", "AER-2" })
+        {
+            var kinds = (await h.EventsAsync(key)).Select(e => e.Kind).ToList();
+            Assert.Equal([EfHatchIssueEvent.DueChanged, EfHatchIssueEvent.StatusChanged, EfHatchIssueEvent.Created], kinds);
+        }
+    }
+
+    /// <summary>
+    /// Running the same bulk edit twice is not two edits. An issue already
+    /// holding every named value comes back unchanged and writes nothing, which
+    /// is what keeps a trail readable after somebody presses Apply twice.
+    /// </summary>
+    [Fact]
+    public async Task ABulkEditAppliedTwice_IsOneEdit()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "one");
+        await h.Issues.BulkEdit(Bulk(["AER-1"], statusId: h.Todo), default);
+
+        var again = Value(await h.Issues.BulkEdit(Bulk(["AER-1"], statusId: h.Todo), default));
+
+        Assert.Empty(again.Changed);
+        Assert.Equal(["AER-1"], again.Unchanged);
+        Assert.Equal(2, (await h.EventsAsync("AER-1")).Count);
+    }
+
+    [Fact]
+    public async Task ABulkEditWithAnEmptyDate_ClearsItEverywhere()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "one", dueAt: "2027-09-01");
+        await h.CreateAsync("task", "two", dueAt: "2027-10-01");
+
+        var result = Value(await h.Issues.BulkEdit(Bulk(["AER-1", "AER-2"], dueAt: ""), default));
+
+        Assert.Equal(["AER-1", "AER-2"], result.Changed);
+        Assert.Null(Value(await h.Issues.GetIssue("AER-1", default)).DueAt);
+        Assert.Null(Value(await h.Issues.GetIssue("AER-2", default)).DueAt);
+    }
+
+    [Fact]
+    public async Task ABulkEditNamingAnIssueThatIsNotThere_ReportsItAndDoesTheRest()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "one");
+
+        var result = Value(await h.Issues.BulkEdit(Bulk(["AER-1", "AER-99"], statusId: h.Todo), default));
+
+        Assert.Equal(["AER-1"], result.Changed);
+        Assert.Equal("AER-99", result.Failures.Single().Key);
+        Assert.Contains("there is no AER-99", result.Failures.Single().Reason);
+    }
+
+    /// <summary>
+    /// The property the whole bulk path is built around, and the reason
+    /// <c>StageEditAsync</c> looks everything up before it writes anything: one
+    /// issue's refusal must leave that issue exactly as it was, while the batch
+    /// around it goes through. A mutation staged before the refusal would be
+    /// saved by the batch's own SaveChanges.
+    /// </summary>
+    [Fact]
+    public async Task AnIssueThatRefusesTheEdit_IsLeftCompletelyUntouched()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("epic", "the plan");
+        await h.CreateAsync("story", "phase 0");
+        await h.CreateAsync("task", "a checkbox");
+
+        // A story hangs under an epic and a task does not, so the third issue
+        // refuses the parent while the second takes it.
+        var result = Value(await h.Issues.BulkEdit(
+            Bulk(["AER-2", "AER-3"], statusId: h.Todo, parentKey: "AER-1"), default));
+
+        Assert.Equal(["AER-2"], result.Changed);
+        Assert.Equal("AER-3", result.Failures.Single().Key);
+
+        var refused = Value(await h.Issues.GetIssue("AER-3", default));
+        Assert.Equal(h.Inbox, refused.StatusId);
+        Assert.Null(refused.ParentKey);
+        Assert.Single(await h.EventsAsync("AER-3"));
+    }
+
+    [Fact]
+    public async Task ABulkEditNamingNoIssues_IsRefused()
+    {
+        var h = await NewAsync();
+
+        var result = await h.Issues.BulkEdit(Bulk([], statusId: h.Todo), default);
+
+        Assert.Contains("name at least one issue", Reason(result.Result));
+    }
+
+    [Fact]
+    public async Task ABulkEditThatChangesNothing_IsRefusedRatherThanRunAgainstEveryIssue()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "one");
+
+        var result = await h.Issues.BulkEdit(Bulk(["AER-1"]), default);
+
+        Assert.Contains("has to change something", Reason(result.Result));
+    }
+
+    /// <summary>
+    /// Something wrong with the edit itself is the whole request's problem, not
+    /// a hundred identical failures - and nothing is written before it is found.
+    /// </summary>
+    [Theory]
+    [InlineData("epicc", null, null)]
+    [InlineData(null, "whenever", null)]
+    [InlineData(null, null, "soon")]
+    public async Task ABulkEditThatIsNotAnEdit_RefusesTheWholeRequest(string? type, string? readyAt, string? dueAt)
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "one");
+
+        var result = await h.Issues.BulkEdit(
+            new IssueBulkEditRequest(["AER-1"], type, null, null, readyAt, dueAt), default);
+
+        Assert.Contains("400", Reason(result.Result));
+        Assert.Single(await h.EventsAsync("AER-1"));
+    }
+
+    [Fact]
+    public async Task ABulkEditToAColumnThatIsNotThere_RefusesTheWholeRequest()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "one");
+
+        var result = Value(await h.Issues.BulkEdit(Bulk(["AER-1"], statusId: 9999), default));
+
+        Assert.Contains("there is no column 9999", result.Failures.Single().Reason);
+        Assert.Empty(result.Changed);
+    }
+
+    /// <summary>A client that named one issue twice meant it once - that is not a failure to report.</summary>
+    [Fact]
+    public async Task ABulkEditNamingTheSameIssueTwice_CountsItOnce()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "one");
+
+        var result = Value(await h.Issues.BulkEdit(Bulk(["AER-1", "aer-1"], statusId: h.Todo), default));
+
+        Assert.Equal(["AER-1"], result.Changed);
+        Assert.Empty(result.Failures);
+    }
+
+    [Fact]
+    public async Task ABulkEditNamingMoreIssuesThanAnyoneMeantTo_IsRefused()
+    {
+        var h = await NewAsync();
+        var keys = Enumerable.Range(1, 501).Select(n => $"AER-{n}").ToList();
+
+        var result = await h.Issues.BulkEdit(Bulk(keys, statusId: h.Todo), default);
+
+        Assert.Contains("at most 500", Reason(result.Result));
     }
 
     // ---- Harness ----
@@ -850,6 +1408,19 @@ public class IssuesControllerTests
 
         public async Task<IReadOnlyList<IssueEventDto>> EventsAsync(string key) =>
             Value(await Thread.GetEvents(key, default));
+
+        /// <summary>The keys a filter finds, in the order the endpoint returns them.</summary>
+        public async Task<IReadOnlyList<string>> SearchAsync(
+            int? projectId = null,
+            string? type = null,
+            int? statusId = null,
+            string? parentKey = null,
+            string? ancestorKey = null,
+            string? text = null)
+        {
+            var result = await Issues.SearchIssues(projectId, type, statusId, parentKey, ancestorKey, text, default);
+            return Value(result).Select(i => i.Key).ToList();
+        }
     }
 
     private static async Task<Harness> NewAsync()
@@ -914,6 +1485,15 @@ public class IssuesControllerTests
         string? readyAt = null,
         string? dueAt = null) =>
         new(title, description, type, statusId, parentKey, readyAt, dueAt);
+
+    private static IssueBulkEditRequest Bulk(
+        IReadOnlyList<string> keys,
+        string? type = null,
+        int? statusId = null,
+        string? parentKey = null,
+        string? readyAt = null,
+        string? dueAt = null) =>
+        new(keys, type, statusId, parentKey, readyAt, dueAt);
 
     private static T Value<T>(ActionResult<T> result) =>
         result.Value ?? throw new InvalidOperationException($"expected a value, got {Reason(result.Result)}");
