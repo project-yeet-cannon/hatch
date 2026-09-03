@@ -1120,7 +1120,7 @@ one (below).
       with a correctly-shaped JSON log line.
 - [x] **Commit:** "Trading: a lake, and the machinery to fill it"
 
-### [ ] Phase 4 — The engine, proven on equities
+### [x] Phase 4 — The engine, proven on equities
 
 **Ships:** a backtest of two boring strategies over collected equity data,
 producing a result a person can check by hand. Options are not in this phase,
@@ -1134,59 +1134,185 @@ results already in the leaderboard. Phase 7 seeds them. This phase writes them,
 and writes them to the standard of something an operator will read first when
 authoring their own.
 
-- [ ] `engine/clock.py` — the `Clock` protocol and `ReplayClock`. `LiveClock` is
-      Phase 9 and must require no change here when it arrives.
-- [ ] `engine/instruments.py` — `Equity` and `OptionContract` (underlying,
+- [x] `engine/clock.py` — the `Clock` protocol and `ReplayClock`. `LiveClock` is
+      Phase 9 and must require no change here when it arrives. Three members:
+      `now`, `advance()` and `ticks()`. `advance()` returns the new instant
+      rather than a bool, because a live clock blocks until the next tick and
+      then knows what time it is; `None` distinguishes "the data ran out" from
+      "time has not moved". `now` raises before the first advance rather than
+      answering with the first instant, so a loop nobody started is an error
+      instead of a number.
+- [x] `engine/instruments.py` — `Equity` and `OptionContract` (underlying,
       expiry, strike, right, multiplier) behind one `Instrument` type.
       **Written in this phase even though only `Equity` is exercised**, because
-      this is the retrofit the plan exists to avoid.
-- [ ] `engine/portfolio.py` — `Position` as a set of **legs**, cash, mark-to-
+      this is the retrofit the plan exists to avoid. A **union rather than a
+      base class**, so a consumer that must handle both is checked for having
+      handled both; the OCC contract symbol is derived rather than carried, so
+      a contract built from a chain row and one built by a strategy's own
+      arithmetic key the same position.
+- [x] `engine/money.py` — **the boundary where a price stops being a float.**
+      Not in the original list and needed by everything below it. The lake
+      stores `Float64` because Parquet and DuckDB do; a gate asserted *to the
+      cent* cannot be met by a running total that accumulates binary error one
+      fill at a time. Prices become `Decimal` once, through `repr` so that a
+      provider's `4.56` is `Decimal("4.56")` and not its binary neighbour; cash
+      is quantized to the cent at each movement, banker's rounding, because
+      half-up is biased and ten thousand trades through a half-cent is an
+      invisible edge in the trader's favour.
+- [x] `engine/portfolio.py` — `Position` as a set of **legs**, cash, mark-to-
       market, realized and unrealized P&L. Single-leg equity positions are the
-      degenerate case, not the model.
-- [ ] `engine/broker.py` — the `Broker` protocol and `SimBroker`: fills at the
+      degenerate case, not the model. A fill names the position it belongs to;
+      when it does not, the key is the instrument's own symbol — which is what
+      makes the equity case free and leaves Phase 10 a spread that is one
+      position because its legs were submitted under one key. Weighted-average
+      cost, commissions **expensed rather than capitalised** so that a hand
+      check reads the basis straight off the trade prices, and one signed
+      expression for realized P&L that is correct for shorts without a second
+      branch.
+- [x] `engine/broker.py` — the `Broker` protocol and `SimBroker`: fills at the
       next bar's open by default, a configurable slippage model, and a
       commission model. **No same-bar fills on the signal bar** — that single
       shortcut is the most common source of backtests that cannot be
-      reproduced live.
-- [ ] `engine/strategy.py` — the `Strategy` protocol: a pydantic
+      reproduced live. Enforced structurally rather than by convention:
+      `submit()` queues, `fill_at()` is called by the engine *before* the
+      strategy runs, and there is no code path from `on_bar` to a fill on the
+      same bar. Costs are two models rather than one haircut, because they
+      scale differently and Phase 6 varies one of them; `PerUnitCommission`
+      covers both a per-share equity schedule and a per-contract option one,
+      since the difference between them is the multiplier and that is on the
+      instrument. **The defaults are not zero** — a backtester whose default
+      costs are zero is one whose default answer is optimistic — and
+      `ZERO_COSTS` is named so every free run is greppable.
+- [x] `engine/strategy.py` — the `Strategy` protocol: a pydantic
       `Params` model declaring each tunable with its type, range and default,
       plus `on_bar(ctx)`. The declared ranges are what Phase 5 sweeps.
-- [ ] `strategies/` — **two shipped reference strategies**, which together are
-      the proof-of-concept the vertical deploys with:
+      `swept()` writes the range into the field's own constraint *and* into its
+      `json_schema_extra`, so the same numbers that reject an out-of-range
+      parameter are the ones Phase 5 walks and Phase 7 renders — a range that
+      lived in the launcher would be a second declaration that can disagree.
+      `StrategyContext` is the entire surface a strategy has: `now`, `bars()`,
+      `chain()`, `portfolio`, and two ways to order. No handle on the clock,
+      the history or the broker, which is what makes the lookahead gate a short
+      test. `ctx.chain()` is **declared and refused** — the signature belongs
+      here because the two-clock design names it, the implementation belongs to
+      Phase 10 alongside the pricing guardrail that stops it reading the
+      synthetic source's meaningless boards.
+- [x] `engine/history.py` — not in the original list, and where the lookahead
+      guarantee actually lives. Bars from several symbols aligned onto one
+      timeline that is the **union of the timestamps the bars have**, not a
+      generated schedule: nothing is interpolated, and a session the lake is
+      missing is a session the run does not visit. Immutable and stateless
+      about *when* it is — every accessor takes the cursor and slices to it, so
+      there is no method that returns a later bar. Opens are exact and marks
+      are carried forward, and the asymmetry is the point: valuing a position
+      at its last price is what a statement does, trading at one is a fill that
+      never happened.
+- [x] `engine/backtest.py` — the loop, whose whole content is the ordering:
+      fill at the open, mark at the close, run the strategy, record the point.
+      A run is a **value, not a side effect** — nothing is written anywhere,
+      because the `run` and `trade` tables are Phase 5 and an engine that wrote
+      to them could not be exercised without a database. Terminal positions are
+      marked rather than liquidated, since a forced exit would penalise
+      whatever was holding, and `buy_and_hold` — the baseline everything else
+      is measured against — is the strategy that is always holding.
+- [x] `strategies/` — **two shipped reference strategies**, which together are
+      the proof-of-concept the vertical deploys with, plus an explicit
+      `REGISTRY` rather than an import-order-dependent decorator:
 
-      *`buy_and_hold`* — buy at the first bar, hold to the last. Ten lines, no
-      parameters worth sweeping. It is the smallest honest example of the
+      *`buy_and_hold`* — buy at the first bar, hold to the last. Four lines in
+      `on_bar`, no parameters at all. It is the smallest honest example of the
       `Strategy` protocol, so it is the file to read before writing one, and
-      Phase 6 needs it as a baseline regardless, so it costs nothing.
+      Phase 6 needs it as a baseline regardless, so it costs nothing. It buys
+      the *run's whole universe*, equally weighted, rather than taking a symbol
+      as a parameter — which makes it parameter-free in fact rather than in
+      claim, and makes it the correct baseline for Phase 6, where the baseline
+      has to cover the identical window and universe as the result beside it.
 
       *`ma_crossover`* — a moving-average crossover with fast and slow windows
       declared as swept parameters. It exists because it is the only one of the
       two that can exercise a parameter schema, a sweep launcher and a
       multi-run leaderboard. A UI with one unparameterized strategy in it does
-      not demonstrate the product.
+      not demonstrate the product. Long-only, and it orders **on the crossing
+      rather than on the state**: a rule written as "if fast > slow, be long"
+      rebalances every bar as equity drifts, which is hundreds of trades that
+      are an artefact of how the rule was written and each of which pays costs.
 
       Neither is a candidate for making money, and the plan says so in the
-      strategy's own description field so that the UI says so too.
-- [ ] **What the reference strategies are expected to do, written down before
-      they run.** Against a zero-drift random walk, `ma_crossover` should
-      **lose to `buy_and_hold` after costs** — it trades, trading costs money,
-      and there is no signal to pay for it. That is the theoretically correct
-      outcome, and it makes the seeded demo an assertion rather than a
-      decoration: if the shipped leaderboard ever shows the crossover beating
-      buy-and-hold on synthetic data, the cost model, the fill model or the
-      engine is wrong, and it is wrong on the app's own front page. Asserted as
-      a test here and visible as a result in Phase 7.
-- [ ] **Determinism:** the same inputs and seed produce byte-identical results.
+      strategy's own description field so that the UI says so too — asserted in
+      a test, because that field is the only place the disclaimer exists.
+- [x] **What the reference strategies are expected to do, written down before
+      they run — and corrected after running them.** The prediction was that
+      against a zero-drift random walk, `ma_crossover` should **lose to
+      `buy_and_hold` after costs**: it trades, trading costs money, and there is
+      no signal to pay for it. The mechanism is right. **The measurement was
+      wrong, and the gate as originally worded is not a fact about the engine.**
+
+      The head-to-head difference on any one path is dominated by something far
+      larger than costs: the crossover is long about half the time and the
+      baseline is long all of it, so the gap between them is mostly the market's
+      own realized move over the window — a coin flip with a standard deviation
+      of tens of percent under a driftless walk. Measured over twenty seeds of
+      the default universe across five years, the *gross* difference between
+      them has a mean of about −7% against a standard error of about 8%, and
+      the crossover wins outright on roughly half the individual paths. The sign
+      also flips with the window at a fixed seed: on the default seed the
+      crossover loses by 4.7% over 2021–2026 and *wins* by 4.9% over 2023–2026.
+      A build gate asserting "the crossover loses" on one path asserts the sign
+      of a coin flip and fails for reasons that have nothing to do with the
+      engine.
+
+      So the claim is decomposed into the two halves of it that are load-bearing
+      and each is asserted in the form that is true:
+
+      - **There is no gross edge to pay for.** Before costs, the crossover's
+        advantage over the baseline is within three standard errors of zero
+        across seeds — the same convention `test_synthetic_zero_alpha.py` uses.
+        This is the half that breaks if the generator ever acquires structure.
+      - **Costs are always paid, in the trader's direction.** On every seed,
+        pricing the run leaves the crossover strictly further behind the
+        baseline than running it free, by roughly half a percent of the account
+        over five years, because it trades a hundred and sixty times to the
+        baseline's five. This has no variance in it at all, and it is the half
+        that breaks if the fill model, the slippage model or the commission
+        model is wrong — which is what the gate was actually for.
+
+      The shipped demo is asserted as itself on top of both: on `DEMO_WINDOW`
+      (2021–2026, default seed, the configuration Phase 7 should seed from) the
+      crossover does finish behind, so the seeded front page cannot quietly stop
+      saying what the plan says it says.
+- [x] **Determinism:** the same inputs and seed produce byte-identical results.
       Asserted in a test, because a non-reproducible backtest cannot be
       debugged and a comparison between two of them means nothing.
-- [ ] A hand-checkable fixture: a tiny synthetic price series with known correct
+      `BacktestResult.canonical()` renders every number as a decimal string
+      rather than a JSON float — a determinism check must not put its own exact
+      accounting through a binary round trip on the way to being compared — and
+      `fingerprint()` is the sha256 over it, which is what Phase 5's `run` row
+      stores. Asserted in both directions: identical inputs agree, and a change
+      to *any* input (a parameter, the cost model, the starting cash, the data)
+      disagrees, or "identical" is being satisfied by a hash looking at nothing.
+      A third test covers the quieter source of non-determinism — iteration
+      order — by building one history from bars in two different orders.
+- [x] A hand-checkable fixture: a tiny synthetic price series with known correct
       P&L, asserted to the cent. Every later engine change is measured against
-      it.
-- [ ] **Gate:** both reference strategies backtest over collected data · the
+      it. Four bars, two trades, and the arithmetic written out in the comments
+      so it can be checked with a calculator and without reading the engine —
+      which is the property that makes it worth more than its assertions, since
+      a fixture whose expected values were computed could be silently rewritten
+      to match a regression.
+- [x] **Gate:** both reference strategies backtest over collected data · the
       hand-checked fixture passes to the cent · two runs of identical inputs are
       identical · a lookahead test fails the build if a strategy can see a bar
-      it should not · `ma_crossover` loses to `buy_and_hold` on synthetic data
-      after costs, as predicted above.
+      it should not · the crossover has no gross edge over the baseline and
+      pays strictly more in costs on every seed, with the seeded demo showing it
+      behind — see the corrected prediction above.
+
+      All five verified locally: `make trading-test` is green (ruff format,
+      ruff check, pyright strict, 293 tests), the lake-backed gate writes
+      Parquet through `LakeWriter` and reads it back through DuckDB rather than
+      building bars by hand, and `ci.yml`'s `trading-boundary` guards still pass
+      — one test input had to be reworded because the parent-traversal guard
+      cannot tell a test's input from a real path dependency, and a guard that
+      has to be taught exceptions is a guard someone turns off.
 - [ ] **Commit:** "Trading: an engine, a fixture that proves it, and two strategies to run"
 
 ### [ ] Phase 5 — Runs, sweeps, and the queue
