@@ -16,6 +16,10 @@
 #   AERIE_HATCH_KEY  aerie_ak_...                  - minted on the admin app's
 #                                                    API keys page, shown once
 #
+# And one optional, for `work`:
+#
+#   HATCH_CLAUDE_BIN path to the claude CLI, if it is not on PATH
+#
 # Put them in your shell profile or a secrets file you source. Never here:
 # Aerie ships to other operators, and a key in the artifact is one operator's
 # key inherited by everybody who clones it.
@@ -28,6 +32,10 @@
 #   ./hatch.sh start AER-12           # move it to "in progress"
 #   ./hatch.sh move AER-12 todo       # ...or to any non-terminal column
 #   ./hatch.sh comment AER-12 "sha abc123 on branch aer-12-thing"
+#   ./hatch.sh work                   # one increment on the next thing due
+#   ./hatch.sh work AER-12            # ...or on this one
+#   ./hatch.sh work --model opus --effort xhigh AER-12
+#   ./hatch.sh work --dry-run         # print the prompt, spawn nothing
 #   ./hatch.sh api GET /api/hatch/issues?statusId=2
 #   ./hatch.sh api PATCH /api/hatch/issues/AER-12 '{"dueAt":"2026-10-01"}'
 #
@@ -204,6 +212,165 @@ cmd_comment() {
     | jq -r '"commented on '"$key"' as \(.author)"'
 }
 
+
+# ---- Working ----
+
+# Where the repository is, whatever directory this was invoked from. The agent
+# is spawned here, because a ticket is about this codebase and a session that
+# started somewhere else would have to be told so.
+repo_root() { CDPATH= cd -- "$(dirname -- "$0")/.." && pwd; }
+
+# This machine's offset from UTC in minutes, which is what the API wants in
+# order to fold ready dates against the caller's calendar day rather than the
+# server's.
+offset_minutes() { echo $(( $(offset_secs) / 60 )); }
+
+# The CLI that runs the increment.
+#
+# No search of the VS Code extension's bundle, though a binary does live in
+# there: it is an implementation detail of a program that updates itself
+# weekly, and a loop built on that path breaks on somebody else's release
+# schedule. Install the CLI, or name it once in HATCH_CLAUDE_BIN.
+claude_bin() {
+  if [ -n "${HATCH_CLAUDE_BIN:-}" ]; then
+    [ -x "$HATCH_CLAUDE_BIN" ] || { echo "hatch: HATCH_CLAUDE_BIN is not executable: $HATCH_CLAUDE_BIN" >&2; exit 1; }
+    echo "$HATCH_CLAUDE_BIN"
+    return
+  fi
+
+  command -v claude 2>/dev/null && return
+
+  cat >&2 <<'MISSING'
+hatch: no claude CLI on PATH.
+
+  Install it, or point at one you have:
+      export HATCH_CLAUDE_BIN=/path/to/claude
+
+  The binary inside a VS Code extension directory will work, but it moves with
+  every extension update - name it here and expect to rename it, or install the
+  standalone CLI and forget about it.
+MISSING
+  exit 1
+}
+
+# The whole instruction: the playbook first, because it says what kind of job
+# this is, then the ticket it is a job about. Composed here rather than stored
+# whole in the database so that a playbook stays a method - one row that reads
+# sensibly for every ticket it will ever be applied to.
+compose() {
+  local work="$1"
+  jq -r '
+    .playbook.prompt,
+    "",
+    "---",
+    "",
+    "## The ticket",
+    "",
+    "\(.issue.key)  [\(.issue.type)]  \(.issue.title)",
+    "moving:   \(.fromStatus.name) -> \(.toStatus.name)",
+    (if .issue.parentKey then "parent:   \(.issue.parentKey)" else empty end),
+    (if .issue.readyAt then "ready:    \(.issue.readyAt)" else empty end),
+    (if .issue.dueAt then "due:      \(.issue.dueAt)" else empty end),
+    "",
+    (if (.issue.description | length) > 0 then .issue.description else "_No description. That is itself worth noting on the ticket._" end),
+    "",
+    (if (.children | length) > 0 then
+      "## Its children\n\n" + ([.children[] | "- \(.key)  [\(.type)]  \(.title)"] | join("\n")) + "\n"
+     else empty end),
+    "## Reaching Hatch",
+    "",
+    "Run these from the repository root. The key is already in the environment.",
+    "",
+    "```",
+    "./scripts/hatch.sh show \(.issue.key)              the ticket and its comments",
+    "./scripts/hatch.sh start \(.issue.key)             move it to in progress",
+    "./scripts/hatch.sh move \(.issue.key) <column>     move it anywhere non-terminal",
+    "./scripts/hatch.sh comment \(.issue.key) \"...\"    write on the ticket",
+    "./scripts/hatch.sh api GET /api/hatch/issues?parentKey=\(.issue.key)",
+    "```",
+    "",
+    "Filing new issues, editing descriptions and setting dates all go through",
+    "`api` - CLAUDE.md documents the shapes.",
+    "",
+    "## Where this increment ends",
+    "",
+    "\(.issue.key) should be in \"\(.toStatus.name)\" when you stop, and no further.",
+    "Only the operator moves work into a terminal column.",
+    "",
+    "Do not edit playbooks. The API refuses it, and the refusal is deliberate:",
+    "an agent that could widen its own instructions and its own budget is a loop",
+    "with no end. If a playbook is wrong, say so on the ticket and stop."
+  ' <<<"$work"
+}
+
+cmd_work() {
+  local key="" model="" effort="" dry=0
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --model)   model="${2:?--model needs a value}"; shift 2 ;;
+      --effort)  effort="${2:?--effort needs a value}"; shift 2 ;;
+      --dry-run) dry=1; shift ;;
+      -*)        echo "hatch: work does not take $1" >&2; exit 1 ;;
+      *)         key="$1"; shift ;;
+    esac
+  done
+
+  local work
+  if [ -n "$key" ]; then
+    work=$(_get "/api/hatch/work/${key}")
+  else
+    work=$(_get "/api/hatch/work/next?offsetMinutes=$(offset_minutes)")
+    # 204: the board holds nothing an agent may advance. Not a failure - it is
+    # the answer a finished board gives, and a loop should be able to see it.
+    [ -n "$work" ] || { echo "hatch: nothing on the board is an agent's to move"; exit 2; }
+  fi
+
+  local blocked
+  blocked=$(jq -r '.blocked // empty' <<<"$work")
+  [ -z "$blocked" ] || {
+    echo "hatch: $(jq -r '.issue.key' <<<"$work") - ${blocked}" >&2
+    exit 2
+  }
+
+  # The playbook chooses; the flags override. Nothing here writes back, so an
+  # override is one run's opinion and not a change to the matrix.
+  [ -n "$model" ]  || model=$(jq -r '.playbook.model' <<<"$work")
+  [ -n "$effort" ] || effort=$(jq -r '.playbook.effort' <<<"$work")
+
+  local prompt
+  prompt=$(compose "$work")
+
+  if [ "$dry" = 1 ]; then
+    jq -r '"# \(.issue.key) \(.fromStatus.name) -> \(.toStatus.name)"' <<<"$work"
+    echo "# model ${model}, effort ${effort}"
+    echo
+    printf '%s\n' "$prompt"
+    return
+  fi
+
+  local bin root
+  bin=$(claude_bin)
+  root=$(repo_root)
+
+  jq -r '"hatch: \(.issue.key) [\(.issue.type)] \(.issue.title)"' <<<"$work"
+  echo "hatch: ${model}, effort ${effort}, $(jq -r '"\(.fromStatus.name) -> \(.toStatus.name)"' <<<"$work")"
+  echo
+
+  # bypassPermissions because in print mode nothing can answer a prompt: any
+  # permission this did not anticipate becomes a silent denial in the middle of
+  # a run nobody is watching. That is a deliberate grant, and the reason `work`
+  # is a command an operator types rather than something a cron job does.
+  #
+  # The prompt goes in on stdin rather than as an argument - it is long, and an
+  # argument list is the one place where "long" has a limit worth avoiding.
+  printf '%s' "$prompt" | (cd "$root" && "$bin" -p \
+    --model "$model" \
+    --effort "$effort" \
+    --permission-mode bypassPermissions \
+    --add-dir "$root")
+}
+
 usage() {
   sed -n '/^# Usage:/,/^#$/p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
@@ -216,6 +383,7 @@ case "${1:-}" in
   start)   shift; cmd_move "${1:?usage: hatch.sh start AER-12}" "in progress" ;;
   move)    shift; cmd_move "$@" ;;
   comment) shift; cmd_comment "$@" ;;
+  work)    shift; cmd_work "$@" ;;
   api)     shift; api "${1:?method}" "/${2#/}" "${3:-}" ;;
   ''|-h|--help|help) usage 0 ;;
   *) echo "hatch: no such command \"$1\"" >&2; usage 1 ;;

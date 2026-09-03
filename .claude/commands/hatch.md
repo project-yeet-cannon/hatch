@@ -7,6 +7,10 @@ allowed-tools: Bash(./scripts/hatch.sh:*), Bash(git:*), Bash(make:*), Read, Edit
 Work one Hatch ticket end to end. `scripts/hatch.sh` is the client; read its
 header if a call is not obvious.
 
+(From a terminal, `./scripts/hatch.sh work` does this and chooses its own model
+and effort from the ticket's playbook. This command is the hands-on version:
+same flow, this session, no spawn.)
+
 ## Which ticket
 
 $ARGUMENTS

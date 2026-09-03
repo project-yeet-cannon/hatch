@@ -39,6 +39,30 @@ the todo column by name rather than by id, and folds off the cards whose ready
 date has not arrived, exactly as the board does. Prefer it to raw `curl`; the
 raw calls below are what it is doing.
 
+### One increment, unattended
+
+```
+./scripts/hatch.sh work            # the next thing due, whatever it is
+./scripts/hatch.sh work AER-12     # ...or this one
+./scripts/hatch.sh work --dry-run  # print the instruction, spawn nothing
+```
+
+`work` asks the server what to do next and how, then spawns a headless session
+to do it. What that session is told, which model it runs on, and how much
+effort it spends are a **playbook**: a row per (status transition, issue types)
+that the operator edits on Hatch's Playbooks page. Turning a paragraph in the
+inbox into an epic with stories under it is not the same job as implementing an
+already-specified task, and the matrix is where that difference is written
+down.
+
+Two things about it are worth knowing before working on this repo:
+
+- **The board is worked right to left.** `work` with no argument takes the top
+  of the rightmost column that still has something an agent may advance.
+- **Playbooks are readable by a key and writable only by a person.** If a
+  playbook is wrong, say so on the ticket. Do not try to route around it: the
+  API refuses, and it refuses on purpose.
+
 ### Given a ticket
 
 A `hatch.${DOMAIN}/issues/AER-12` link, or a bare `AER-12`, means:
