@@ -31,6 +31,13 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
     /// </summary>
     private const int MintAttempts = 5;
 
+    /// <summary>
+    /// How many issues one bulk edit may name. Far past a board's worth of
+    /// cards, and low enough that a request built by a loop somewhere cannot
+    /// turn into a write nobody is watching.
+    /// </summary>
+    private const int MaxBulkKeys = 500;
+
     // ---- Reading ----
 
     [HttpGet("{key}")]
@@ -38,6 +45,153 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
     {
         var issue = await LoadAsync(key, ct);
         return issue is null ? NotFound() : await ToDtoAsync(issue, ct);
+    }
+
+    /// <summary>
+    /// The issues matching a filter, as cards. What the bulk-edit page runs
+    /// before it changes anything, and what a script asks when "every task
+    /// under this epic" is the set it means.
+    ///
+    /// Every parameter is optional and they combine with AND. No parameters at
+    /// all is the whole board, which is the honest answer to an empty filter -
+    /// there is no page size here, because a household's tracker holds hundreds
+    /// of rows and a paged answer would be a second thing for every caller to
+    /// get right.
+    /// </summary>
+    /// <param name="parentKey">
+    /// The direct parent. The empty string means "no parent at all", which is
+    /// the one filter that cannot be written any other way and is exactly how
+    /// the orphans get found.
+    /// </param>
+    /// <param name="ancestorKey">
+    /// Anything below this issue at any depth - the epic's stories and their
+    /// tasks - and not the issue itself, because "under AER-1" is a question
+    /// about what hangs beneath it.
+    /// </param>
+    /// <param name="text">
+    /// A dumb case-insensitive substring of the title, plus the issue a key
+    /// names outright, so pasting <c>AER-12</c> into a search box finds
+    /// <c>AER-12</c>.
+    /// </param>
+    [HttpGet]
+    public async Task<ActionResult<IReadOnlyList<IssueCardDto>>> SearchIssues(
+        [FromQuery] int? projectId,
+        [FromQuery] string? type,
+        [FromQuery] int? statusId,
+        [FromQuery] string? parentKey,
+        [FromQuery] string? ancestorKey,
+        [FromQuery] string? text,
+        CancellationToken ct)
+    {
+        if (type is not null && !EfHatchIssue.IsValidType(type))
+            return BadRequest($"an issue is one of {string.Join(", ", EfHatchIssue.Types)} - not \"{type}\"");
+
+        var query = db.Issues.AsNoTracking().AsQueryable();
+
+        if (projectId is { } project) query = query.Where(i => i.ProjectId == project);
+        if (type is not null) query = query.Where(i => i.Type == type);
+        if (statusId is { } status) query = query.Where(i => i.StatusId == status);
+
+        if (parentKey is not null)
+        {
+            if (parentKey.Length == 0)
+            {
+                query = query.Where(i => i.ParentId == null);
+            }
+            else
+            {
+                var parent = await LoadAsync(parentKey, ct);
+                if (parent is null) return BadRequest($"there is no {parentKey}");
+                query = query.Where(i => i.ParentId == parent.Id);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(ancestorKey))
+        {
+            var ancestor = await LoadAsync(ancestorKey, ct);
+            if (ancestor is null) return BadRequest($"there is no {ancestorKey}");
+
+            var descendants = await DescendantIdsAsync(ancestor.Id, ct);
+            query = query.Where(i => descendants.Contains(i.Id));
+        }
+
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            var needle = text.Trim().ToLowerInvariant();
+
+            // A key typed into a search box is a lookup, not a substring - and
+            // it is resolved here rather than left to the title match because
+            // the key is computed at the edge and is not a column to compare
+            // against.
+            long? named = IssueKey.TryParse(needle, out var keyProject, out var number)
+                ? await db.Issues.WithKey(keyProject, number).Select(i => (long?)i.Id).FirstOrDefaultAsync(ct)
+                : null;
+
+            query = query.Where(i => i.Title.ToLower().Contains(needle) || (named != null && i.Id == named));
+        }
+
+        var rows = await query
+            .OrderBy(i => i.Project!.Key)
+            .ThenBy(i => i.Number)
+            .Select(i => new
+            {
+                ProjectKey = i.Project!.Key,
+                i.Number,
+                i.Type,
+                i.Title,
+                i.StatusId,
+                i.Rank,
+                ParentProjectKey = i.Parent == null ? null : i.Parent.Project!.Key,
+                ParentNumber = i.Parent == null ? (int?)null : i.Parent.Number,
+                i.ReadyAt,
+                i.ReadyAtHasTime,
+                i.DueAt,
+                i.DueAtHasTime,
+            })
+            .ToListAsync(ct);
+
+        return rows.Select(i => new IssueCardDto(
+            IssueKey.Format(i.ProjectKey, i.Number),
+            i.ProjectKey,
+            i.Type,
+            i.Title,
+            i.StatusId,
+            i.Rank,
+            i.ParentNumber is { } n ? IssueKey.Format(i.ParentProjectKey!, n) : null,
+            IssueMoment.Format(i.ReadyAt, i.ReadyAtHasTime),
+            IssueMoment.Format(i.DueAt, i.DueAtHasTime))).ToList();
+    }
+
+    /// <summary>
+    /// Every issue below this one, at any depth. Walked a level at a time -
+    /// one query per generation rather than one per issue - because the tree
+    /// here is three deep by design (epic, story, task) and a recursive CTE
+    /// would be Postgres-specific in a module whose tests run in memory.
+    /// </summary>
+    /// <remarks>
+    /// The <c>seen</c> set is not decoration. Parenting refuses to close a
+    /// loop, but this walk is the one place where a loop that got in some other
+    /// way - a restored backup, a hand-written UPDATE - would hang a request
+    /// forever rather than return a wrong answer.
+    /// </remarks>
+    private async Task<List<long>> DescendantIdsAsync(long rootId, CancellationToken ct)
+    {
+        var seen = new HashSet<long> { rootId };
+        var found = new List<long>();
+        var generation = new List<long> { rootId };
+
+        while (generation.Count > 0)
+        {
+            var children = await db.Issues.AsNoTracking()
+                .Where(i => i.ParentId != null && generation.Contains(i.ParentId.Value))
+                .Select(i => i.Id)
+                .ToListAsync(ct);
+
+            generation = children.Where(seen.Add).ToList();
+            found.AddRange(generation);
+        }
+
+        return found;
     }
 
     // ---- Creating ----
@@ -139,100 +293,193 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
         if (Invalid(request.Title?.Trim(), request.Description, request.Type, required: false) is { } invalid)
             return BadRequest(invalid);
 
-        if (!ReadMoment(request.ReadyAt, "readyAt", out var readyAt, out var momentError)) return BadRequest(momentError);
-        if (!ReadMoment(request.DueAt, "dueAt", out var dueAt, out momentError)) return BadRequest(momentError);
+        if (!ReadEdit(request, out var edit, out var editError)) return BadRequest(editError);
+
+        var actor = await caller.ActorNameAsync(ct);
+        var (changed, error) = await StageEditAsync(issue, edit, actor, time.GetUtcNow(), new ColumnBottoms(ranks), ct);
+        if (error is not null) return BadRequest(error);
+
+        if (changed) await db.SaveChangesAsync(ct);
+
+        return await ToDtoAsync(issue, ct);
+    }
+
+    /// <summary>
+    /// One edit, applied to many issues. The board's other half: a filter finds
+    /// a hundred cards, and this moves them.
+    ///
+    /// Three properties hold it together. Anything wrong with the <em>edit</em>
+    /// - an unknown type, a date that is not a date, a column that does not
+    /// exist - refuses the whole request, because that is a request nobody
+    /// meant. Anything wrong with one <em>issue</em> - a parent it may not hang
+    /// under, a key naming nothing - is reported against that key and leaves it
+    /// untouched, because the other ninety-nine were fine. And an issue already
+    /// holding every named value is reported as unchanged rather than as
+    /// edited, so re-applying a bulk edit writes no events at all.
+    /// </summary>
+    /// <remarks>
+    /// The whole batch is one <c>SaveChanges</c>, so a database that refuses
+    /// the write takes nothing with it - there is no half-applied bulk edit to
+    /// discover afterwards.
+    /// </remarks>
+    [HttpPost("bulk")]
+    public async Task<ActionResult<IssueBulkResultDto>> BulkEdit(IssueBulkEditRequest request, CancellationToken ct)
+    {
+        // Deduplicated rather than refused: a client that sent AER-1 twice meant
+        // it once, and reporting the second as a failure would be a refusal
+        // about nothing.
+        var keys = (request.Keys ?? []).Where(k => !string.IsNullOrWhiteSpace(k)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (keys.Count == 0) return BadRequest("name at least one issue to edit");
+        if (keys.Count > MaxBulkKeys)
+            return BadRequest($"a bulk edit covers at most {MaxBulkKeys} issues at once - this one named {keys.Count}");
+
+        var patch = new IssuePatchRequest(
+            null, null, request.Type, request.StatusId, request.ParentKey, request.ReadyAt, request.DueAt);
+
+        if (Invalid(null, null, request.Type, required: false) is { } invalid) return BadRequest(invalid);
+        if (!ReadEdit(patch, out var edit, out var editError)) return BadRequest(editError);
+        if (edit.IsEmpty) return BadRequest("a bulk edit has to change something");
 
         var actor = await caller.ActorNameAsync(ct);
         var now = time.GetUtcNow();
+
+        // One tracker for the batch: fifty issues sent to the same column are
+        // fifty appends, and nothing is saved between them - see ColumnBottoms.
+        var bottoms = new ColumnBottoms(ranks);
+
+        var changed = new List<string>();
+        var unchanged = new List<string>();
+        var failures = new List<IssueBulkFailureDto>();
+
+        foreach (var key in keys)
+        {
+            var issue = await LoadAsync(key, ct);
+            if (issue is null)
+            {
+                failures.Add(new IssueBulkFailureDto(key, $"there is no {key}"));
+                continue;
+            }
+
+            var (moved, error) = await StageEditAsync(issue, edit, actor, now, bottoms, ct);
+            if (error is not null) failures.Add(new IssueBulkFailureDto(key, error));
+            else if (moved) changed.Add(await KeyOfAsync(issue, ct));
+            else unchanged.Add(await KeyOfAsync(issue, ct));
+        }
+
+        if (changed.Count > 0) await db.SaveChangesAsync(ct);
+
+        return new IssueBulkResultDto(changed, unchanged, failures);
+    }
+
+    /// <summary>
+    /// Applies an edit to one issue, in two halves that must stay in this
+    /// order: everything that can be refused is looked up first, and only then
+    /// is anything on the issue touched.
+    ///
+    /// That ordering is what makes the bulk path safe. Both paths share one
+    /// <c>SaveChanges</c> per request, so an edit that mutated a title and then
+    /// discovered an illegal parent would leave the title change staged and
+    /// written on behalf of a request that was refused.
+    /// </summary>
+    /// <returns>Whether anything changed, and the sentence to refuse with if it could not be applied.</returns>
+    private async Task<(bool Changed, string? Error)> StageEditAsync(
+        EfHatchIssue issue, IssueEdit edit, string actor, DateTimeOffset now, ColumnBottoms bottoms, CancellationToken ct)
+    {
+        // ---- What could be refused ----
+
+        EfHatchStatus? status = null;
+        if (edit.StatusId is { } statusId && statusId != issue.StatusId)
+        {
+            status = await db.Statuses.FirstOrDefaultAsync(s => s.Id == statusId, ct);
+            if (status is null) return (false, $"there is no column {statusId}");
+        }
+
+        // Present-but-empty is the clear; absent is no opinion. See IssuePatchRequest.
+        (EfHatchIssue? Issue, string? Error) parent = (null, null);
+        if (edit.ParentKey is not null)
+        {
+            parent = await ResolveParentAsync(edit.ParentKey, issue.ProjectId, edit.Type ?? issue.Type, issue.Id, ct);
+            if (parent.Error is { } parentError) return (false, parentError);
+        }
+
+        // ---- What is written ----
+
         var events = new List<EfHatchIssueEvent>();
 
-        if (request.Title?.Trim() is { Length: > 0 } title && title != issue.Title)
+        if (edit.Title is { Length: > 0 } title && title != issue.Title)
         {
             events.Add(Event(actor, EfHatchIssueEvent.Retitled, new { from = issue.Title, to = title }, now));
             issue.Title = title;
         }
 
-        if (request.Description is { } description && description != issue.Description)
+        if (edit.Description is { } description && description != issue.Description)
         {
             events.Add(Event(actor, EfHatchIssueEvent.Redescribed, new { from = issue.Description, to = description }, now));
             issue.Description = description;
         }
 
-        if (request.Type is { } type && type != issue.Type)
+        if (edit.Type is { } type && type != issue.Type)
         {
             events.Add(Event(actor, EfHatchIssueEvent.Retyped, new { from = issue.Type, to = type }, now));
             issue.Type = type;
         }
 
-        if (request.StatusId is { } statusId && statusId != issue.StatusId)
+        if (status is not null)
         {
-            var status = await db.Statuses.FirstOrDefaultAsync(s => s.Id == statusId, ct);
-            if (status is null) return BadRequest($"there is no column {statusId}");
-
             var from = await db.Statuses.Where(s => s.Id == issue.StatusId).Select(s => s.Name).FirstOrDefaultAsync(ct);
             events.Add(Event(actor, EfHatchIssueEvent.StatusChanged, new { from, to = status.Name }, now));
 
-            issue.StatusId = statusId;
+            issue.StatusId = status.Id;
             // A column change through PATCH has no neighbours to sit between,
             // so the card goes to the bottom of the new column. The board sends
             // its drops to `move`, which does have them.
-            issue.Rank = await ranks.BottomAsync(statusId, ct);
+            issue.Rank = await bottoms.NextAsync(status.Id, ct);
         }
 
         // Both dates read present-but-empty as the clear, the same way ParentKey
-        // below does. The comparison is on the formatted string rather than on
-        // the instant and the flag separately: those two are one fact, and
-        // comparing them apart is how "2026-09-12" re-sent unchanged ends up
-        // logged as an edit against the midnight it is stored as.
-        if (request.ReadyAt is not null)
+        // does. The comparison is on the formatted string rather than on the
+        // instant and the flag separately: those two are one fact, and comparing
+        // them apart is how "2026-09-12" re-sent unchanged ends up logged as an
+        // edit against the midnight it is stored as.
+        if (edit.SetReady)
         {
             var from = IssueMoment.Format(issue.ReadyAt, issue.ReadyAtHasTime);
-            var to = IssueMoment.Format(readyAt?.At, readyAt?.HasTime ?? false);
+            var to = IssueMoment.Format(edit.ReadyAt?.At, edit.ReadyAt?.HasTime ?? false);
 
             if (to != from)
             {
                 events.Add(Event(actor, EfHatchIssueEvent.ReadyChanged, new { from, to }, now));
-                issue.ReadyAt = readyAt?.At;
-                issue.ReadyAtHasTime = readyAt?.HasTime ?? false;
+                issue.ReadyAt = edit.ReadyAt?.At;
+                issue.ReadyAtHasTime = edit.ReadyAt?.HasTime ?? false;
             }
         }
 
-        if (request.DueAt is not null)
+        if (edit.SetDue)
         {
             var from = IssueMoment.Format(issue.DueAt, issue.DueAtHasTime);
-            var to = IssueMoment.Format(dueAt?.At, dueAt?.HasTime ?? false);
+            var to = IssueMoment.Format(edit.DueAt?.At, edit.DueAt?.HasTime ?? false);
 
             if (to != from)
             {
                 events.Add(Event(actor, EfHatchIssueEvent.DueChanged, new { from, to }, now));
-                issue.DueAt = dueAt?.At;
-                issue.DueAtHasTime = dueAt?.HasTime ?? false;
+                issue.DueAt = edit.DueAt?.At;
+                issue.DueAtHasTime = edit.DueAt?.HasTime ?? false;
             }
         }
 
-        // Present-but-empty is the clear; absent is no opinion. See IssuePatchRequest.
-        if (request.ParentKey is not null)
+        if (edit.ParentKey is not null && parent.Issue?.Id != issue.ParentId)
         {
-            var parent = await ResolveParentAsync(request.ParentKey, issue.ProjectId, request.Type ?? issue.Type, issue.Id, ct);
-            if (parent.Error is { } error) return BadRequest(error);
-
-            if (parent.Issue?.Id != issue.ParentId)
-            {
-                var from = issue.ParentId is null ? null : await KeyOfAsync(issue.ParentId.Value, ct);
-                var to = parent.Issue is null ? null : await KeyOfAsync(parent.Issue, ct);
-                events.Add(Event(actor, EfHatchIssueEvent.ParentChanged, new { from, to }, now));
-                issue.ParentId = parent.Issue?.Id;
-            }
+            var from = issue.ParentId is null ? null : await KeyOfAsync(issue.ParentId.Value, ct);
+            var to = parent.Issue is null ? null : await KeyOfAsync(parent.Issue, ct);
+            events.Add(Event(actor, EfHatchIssueEvent.ParentChanged, new { from, to }, now));
+            issue.ParentId = parent.Issue?.Id;
         }
 
-        if (events.Count > 0)
-        {
-            foreach (var e in events) issue.Events.Add(e);
-            issue.UpdatedAt = now;
-            await db.SaveChangesAsync(ct);
-        }
+        if (events.Count == 0) return (false, null);
 
-        return await ToDtoAsync(issue, ct);
+        foreach (var e in events) issue.Events.Add(e);
+        issue.UpdatedAt = now;
+        return (true, null);
     }
 
     /// <summary>
@@ -429,6 +676,82 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
             issue.CreatedBy,
             issue.CreatedAt,
             issue.UpdatedAt);
+    }
+
+    /// <summary>
+    /// The bottom of each column, for a request that appends to one more than
+    /// once.
+    ///
+    /// <see cref="RankService.BottomAsync"/> asks the database where the bottom
+    /// is, and a bulk edit saves nothing until it has finished - so fifty issues
+    /// sent to the same column would every one of them be told the same number.
+    /// Ties are survivable (the board breaks them by id, and the next drop into
+    /// that column renumbers it) but they are not what was meant, and the order
+    /// the operator's list was in is lost. So the first append per column asks,
+    /// and the rest count on from it.
+    /// </summary>
+    private sealed class ColumnBottoms(RankService ranks)
+    {
+        private readonly Dictionary<int, long> handedOut = [];
+
+        public async Task<long> NextAsync(int statusId, CancellationToken ct)
+        {
+            var rank = handedOut.TryGetValue(statusId, out var previous)
+                ? previous + RankService.Gap
+                : await ranks.BottomAsync(statusId, ct);
+
+            handedOut[statusId] = rank;
+            return rank;
+        }
+    }
+
+    /// <summary>
+    /// A patch with its dates already read, and with the difference between
+    /// "no opinion" and "clear this" made into a flag rather than left as a
+    /// null that means two things.
+    /// </summary>
+    /// <param name="SetReady">Whether the body mentioned <c>readyAt</c> at all. False leaves the date alone; true with a null <paramref name="ReadyAt"/> clears it.</param>
+    private sealed record IssueEdit(
+        string? Title,
+        string? Description,
+        string? Type,
+        int? StatusId,
+        string? ParentKey,
+        bool SetReady,
+        IssueMoment? ReadyAt,
+        bool SetDue,
+        IssueMoment? DueAt)
+    {
+        /// <summary>Whether this edit names nothing at all - the request a bulk edit refuses rather than reports as a hundred no-ops.</summary>
+        public bool IsEmpty =>
+            Title is null && Description is null && Type is null && StatusId is null
+            && ParentKey is null && !SetReady && !SetDue;
+    }
+
+    /// <summary>
+    /// Turns a patch body into an <see cref="IssueEdit"/>, or says what is
+    /// wrong with it. Both edit paths go through here, so a date that is not a
+    /// date is refused in the same words whether one issue or fifty were named.
+    /// </summary>
+    private static bool ReadEdit(IssuePatchRequest request, out IssueEdit edit, out string? error)
+    {
+        edit = null!;
+
+        if (!ReadMoment(request.ReadyAt, "readyAt", out var readyAt, out error)) return false;
+        if (!ReadMoment(request.DueAt, "dueAt", out var dueAt, out error)) return false;
+
+        edit = new IssueEdit(
+            request.Title?.Trim(),
+            request.Description,
+            request.Type,
+            request.StatusId,
+            request.ParentKey,
+            request.ReadyAt is not null,
+            readyAt,
+            request.DueAt is not null,
+            dueAt);
+
+        return true;
     }
 
     /// <summary>

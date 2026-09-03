@@ -29,3 +29,21 @@ export function routerBasename(pathname: string): string {
     ? APP_BASENAME
     : '/';
 }
+
+/**
+ * An in-app route as an href the browser can follow on its own.
+ *
+ * <Link> applies the basename; a raw anchor does not, and there is one place
+ * that needs a raw anchor - the summary dialog's "open in a new tab", where
+ * `target="_blank"` is the whole point and React Router will not open a second
+ * document. On the subdomain this is the identity, and on the house hostname it
+ * is what keeps the new tab from landing on /issues/AER-12 with nothing served
+ * there.
+ */
+export function hrefWithin(basename: string, path: string): string {
+  return basename === '/' ? path : `${basename}${path}`;
+}
+
+/** The same, against whatever address this document was actually served at. */
+export const appHref = (path: string): string =>
+  hrefWithin(routerBasename(window.location.pathname), path);

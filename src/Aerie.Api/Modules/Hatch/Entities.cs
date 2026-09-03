@@ -33,12 +33,20 @@ public class EfHatchProject
     public int Id { get; set; }
 
     /// <summary>
-    /// The prefix of every issue key in this project, and immutable after
-    /// creation. Renaming it would silently orphan every <c>AER-12</c> written
-    /// into a commit message, a chat log, or a branch name - references this
-    /// database has never seen and cannot rewrite - so the API refuses the edit
-    /// rather than offering a rename that only half works.
+    /// The prefix of every issue key in this project. Changeable, behind a
+    /// speed bump, and the cost of that is worth stating: every <c>AER-12</c>
+    /// written into a commit message, a chat log, or a branch name goes dead,
+    /// because those are references this database has never seen and cannot
+    /// rewrite.
     /// </summary>
+    /// <remarks>
+    /// What does <em>not</em> break is the part that matters: parentage is a
+    /// foreign key on <see cref="EfHatchIssue.ParentId"/>, and issue numbers are
+    /// their own column, so a rekeyed project keeps every story under its epic
+    /// and every task under its story - <c>AER-12</c> becomes <c>OPS-12</c>,
+    /// same issue, same tree. Only text that spelled the old key out loud is
+    /// left pointing at nothing.
+    /// </remarks>
     [MaxLength(MaxKeyLength)]
     public required string Key { get; set; }
 
@@ -85,6 +93,10 @@ public class EfHatchProject
 public class EfHatchStatus
 {
     public const int MaxNameLength = 60;
+    public const int MaxColorLength = 7;
+
+    /// <summary>What a column with nothing said about it wears: the neutral grey of a fact, not of a warning.</summary>
+    public const string DefaultColor = "#6b7280";
 
     [Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]
     public int Id { get; set; }
@@ -108,6 +120,38 @@ public class EfHatchStatus
     /// blank for every row that already exists.
     /// </summary>
     public bool IsTerminal { get; set; }
+
+    /// <summary>
+    /// The column's colour, as <c>#rrggbb</c>. A row rather than a lookup in
+    /// the frontend for the same reason the name is a row: the operator invents
+    /// columns, and a palette keyed on the four names shipped here would leave
+    /// "review" grey forever and would lose a column's colour the moment it was
+    /// renamed.
+    /// </summary>
+    /// <remarks>
+    /// Stored as a hex string rather than as a token name because the value has
+    /// to survive a theme the operator has not chosen yet, and because a status
+    /// picker that offers eight token names is a picker that says no to the
+    /// ninth colour somebody wants.
+    /// </remarks>
+    [MaxLength(MaxColorLength)]
+    public string Color { get; set; } = DefaultColor;
+
+    private static readonly Regex ColorShape =
+        new("^#[0-9a-f]{6}$", RegexOptions.IgnoreCase, TimeSpan.FromSeconds(1));
+
+    /// <summary>
+    /// Whether a string is a colour this will store. Six digits and a hash,
+    /// deliberately narrow: three-digit shorthands, <c>rgb()</c> and named
+    /// colours would all have to be normalised somewhere before a stylesheet or
+    /// a contrast calculation could read them, and one shape stored is one
+    /// shape to reason about.
+    /// </summary>
+    public static bool IsValidColor(string? color) =>
+        color is not null && ColorShape.IsMatch(color);
+
+    /// <summary>The stored form of a colour a client sent: lower case, so two spellings of one colour compare equal.</summary>
+    public static string NormalizeColor(string color) => color.Trim().ToLowerInvariant();
 }
 
 /// <summary>

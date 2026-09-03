@@ -6,10 +6,14 @@ import type {
   ImportRequest,
   ImportResult,
   Issue,
+  IssueBulkEditRequest,
+  IssueBulkResult,
+  IssueCard,
   IssueCreateRequest,
   IssueEvent,
   IssueMoveRequest,
   IssuePatchRequest,
+  IssueSearch,
   ParsedEpic,
   PastedPlan,
   Project,
@@ -104,6 +108,22 @@ export const deleteStatus = (id: number) =>
 // ---- Issues ----
 
 export const getIssue = (key: string) => fetchJson<Issue>(`/api/hatch/issues/${seg(key)}`);
+
+/** The issues a filter finds, as cards. An absent field is left off the query
+    string entirely - an empty `parentKey` means "no parent" to the server, so
+    sending one for a field nobody filled in would silently ask a different
+    question. */
+export const searchIssues = (filter: IssueSearch) => {
+  const params = new URLSearchParams();
+  for (const [name, value] of Object.entries(filter)) {
+    if (value !== null && value !== undefined) params.set(name, String(value));
+  }
+  const query = params.toString();
+  return fetchJson<IssueCard[]>(`/api/hatch/issues${query ? `?${query}` : ''}`);
+};
+
+export const bulkEditIssues = (request: IssueBulkEditRequest) =>
+  fetchJson<IssueBulkResult>('/api/hatch/issues/bulk', { method: 'POST', ...asJson(request) });
 export const createIssue = (request: IssueCreateRequest) =>
   fetchJson<Issue>('/api/hatch/issues', { method: 'POST', ...asJson(request) });
 export const patchIssue = (key: string, request: IssuePatchRequest) =>

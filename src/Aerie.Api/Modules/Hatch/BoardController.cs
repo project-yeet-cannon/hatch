@@ -24,7 +24,7 @@ public class BoardController(HatchContext db) : ControllerBase
         var statuses = await db.Statuses.AsNoTracking()
             .OrderBy(s => s.SortOrder)
             .ThenBy(s => s.Id)
-            .Select(s => new StatusDto(s.Id, s.Name, s.SortOrder, s.IsTerminal))
+            .Select(s => new StatusDto(s.Id, s.Name, s.SortOrder, s.IsTerminal, s.Color))
             .ToListAsync(ct);
 
         // Ordered by (StatusId, Rank, Id) so the client can slice the one list

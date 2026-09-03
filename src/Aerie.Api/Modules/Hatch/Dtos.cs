@@ -12,23 +12,38 @@ public record ProjectDto(int Id, string Key, string Name, int IssueCount, DateTi
 
 /// <summary>
 /// A new project. <paramref name="Key"/> is checked against
-/// <see cref="EfHatchProject.KeyPattern"/> and against every existing key, and
-/// there is deliberately no way to change it afterwards - see
+/// <see cref="EfHatchProject.KeyPattern"/> and against every existing key. It
+/// can be changed later, at a price the operator is shown first - see
 /// <see cref="EfHatchProject.Key"/>.
 /// </summary>
 public record ProjectCreateRequest(string Key, string Name);
 
-/// <summary>The name, and only the name. The key is immutable by design.</summary>
-public record ProjectPatchRequest(string Name);
+/// <summary>
+/// A rename. <paramref name="Name"/> is what usually moves;
+/// <paramref name="Key"/> is the one that costs something and is null in almost
+/// every request - see <see cref="EfHatchProject.Key"/> for what a rekey breaks
+/// and what it does not.
+/// </summary>
+public record ProjectPatchRequest(string? Name, string? Key = null);
 
 // ---- Statuses ----
 
-public record StatusDto(int Id, string Name, int SortOrder, bool IsTerminal);
+/// <param name="Color">
+/// <c>#rrggbb</c>, lower case. Carried on every column the board draws, because
+/// the colour is what makes a column identifiable at a glance once the cards in
+/// it are too narrow to read.
+/// </param>
+public record StatusDto(int Id, string Name, int SortOrder, bool IsTerminal, string Color);
 
-public record StatusCreateRequest(string Name, int? SortOrder, bool? IsTerminal);
+/// <summary>
+/// A new column. The optional fields each have a server-side default -
+/// rightmost position, not terminal, and <see cref="EfHatchStatus.DefaultColor"/>
+/// - so the shortest way to add a column is still a name.
+/// </summary>
+public record StatusCreateRequest(string Name, int? SortOrder, bool? IsTerminal, string? Color = null);
 
 /// <summary>Every field optional: null means "leave this one alone".</summary>
-public record StatusPatchRequest(string? Name, int? SortOrder, bool? IsTerminal);
+public record StatusPatchRequest(string? Name, int? SortOrder, bool? IsTerminal, string? Color = null);
 
 // ---- Issues ----
 
@@ -121,6 +136,46 @@ public record IssuePatchRequest(
 /// <param name="AfterKey">The card immediately above the drop, or null at the top of the column.</param>
 /// <param name="BeforeKey">The card immediately below it, or null at the bottom.</param>
 public record IssueMoveRequest(int StatusId, string? AfterKey, string? BeforeKey);
+
+// ---- Searching and editing in bulk ----
+
+/// <summary>
+/// What a bulk edit acted on, and what it refused. Never an exception and never
+/// a partial-looking success: an issue whose edit could not be applied is named
+/// here with the sentence saying why, and nothing about it was written.
+/// </summary>
+/// <param name="Changed">The keys that actually moved. An issue already holding every named value is not one of them.</param>
+/// <param name="Unchanged">Keys that matched the request but had nothing to change - re-applying a bulk edit is not an edit.</param>
+/// <param name="Failures">Keys the edit was refused for, each with its reason.</param>
+public record IssueBulkResultDto(
+    IReadOnlyList<string> Changed,
+    IReadOnlyList<string> Unchanged,
+    IReadOnlyList<IssueBulkFailureDto> Failures);
+
+public record IssueBulkFailureDto(string Key, string Reason);
+
+/// <summary>
+/// One edit applied to many issues. The fields are
+/// <see cref="IssuePatchRequest"/>'s, minus the two - title and description -
+/// that describe a single issue and could only be applied to a hundred of them
+/// by mistake.
+///
+/// Null still means "leave this alone", and the empty string still clears, so
+/// "take the due date off all of these" is <c>dueAt: ""</c> and nothing else.
+/// </summary>
+/// <param name="Keys">
+/// The issues to edit, named rather than described. The filter that found them
+/// is the client's business: a request that re-ran a query server-side could
+/// act on a row that arrived between the operator reading the list and pressing
+/// the button, which is the one thing a bulk edit must never do.
+/// </param>
+public record IssueBulkEditRequest(
+    IReadOnlyList<string> Keys,
+    string? Type = null,
+    int? StatusId = null,
+    string? ParentKey = null,
+    string? ReadyAt = null,
+    string? DueAt = null);
 
 // ---- Comments and events ----
 

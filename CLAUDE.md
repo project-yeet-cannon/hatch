@@ -42,6 +42,29 @@ GET  ${AERIE_BASE}/api/hatch/issues/AER-12/events   # what has happened to it, n
 
 Read it, then get to work. The description is markdown and is the brief.
 
+### Finding tickets, and editing a lot of them at once
+
+```
+GET  ${AERIE_BASE}/api/hatch/issues?ancestorKey=AER-12&type=task&statusId=2
+POST ${AERIE_BASE}/api/hatch/issues/bulk
+```
+
+The filters are `projectId`, `type`, `statusId`, `parentKey`, `ancestorKey`,
+and `text`; they combine with AND and every one is optional. Two of them are
+worth knowing: `ancestorKey` returns everything below an issue at any depth —
+an epic's stories and their tasks in one request — and `parentKey=` (empty)
+finds the issues with no parent at all.
+
+The bulk endpoint takes `keys` and any of `type`, `statusId`, `parentKey`,
+`readyAt`, `dueAt`, with the same rules a single `PATCH` follows: a field left
+out is left alone, and `""` clears one. It answers with `changed`, `unchanged`
+and `failures` — a key that refuses the edit is reported with its reason and is
+left exactly as it was, while the rest of the batch goes through. Re-applying
+the same edit writes nothing, so it is safe to run twice.
+
+Prefer it to a loop of `PATCH`es when moving a whole epic's worth of work: one
+request, one audit timestamp, and one place to read what did not apply.
+
 ### Planning a ticket
 
 A planning session leaves the plan **on the ticket**, not in a chat log:

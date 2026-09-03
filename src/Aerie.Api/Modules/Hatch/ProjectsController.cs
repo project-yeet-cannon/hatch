@@ -53,10 +53,19 @@ public class ProjectsController(HatchContext db, TimeProvider time) : Controller
     }
 
     /// <summary>
-    /// Renames a project. The key is not offered, and that is the design rather
-    /// than an omission: it is written into commit messages, branch names, and
-    /// chat logs this database has never seen and cannot rewrite, so a rename
-    /// would be a feature that half works.
+    /// Renames a project, and - if the body says so - rekeys it.
+    ///
+    /// The name is the ordinary edit. The key is the one that costs something:
+    /// every <c>AER-12</c> in a commit message, a branch name, or a chat log
+    /// goes dead, because those are references this database has never seen and
+    /// cannot rewrite. What survives is the structure - parentage is a foreign
+    /// key and numbers are their own column, so every story stays under its
+    /// epic and <c>AER-12</c> becomes <c>OPS-12</c> rather than becoming a
+    /// different issue.
+    ///
+    /// The speed bump is the browser's: this endpoint refuses a bad key and
+    /// takes a good one, and does not ask twice. A program that has decided to
+    /// rekey a project has decided.
     /// </summary>
     [HttpPatch("{id:int}")]
     public async Task<ActionResult<ProjectDto>> PatchProject(int id, ProjectPatchRequest request, CancellationToken ct)
@@ -64,12 +73,36 @@ public class ProjectsController(HatchContext db, TimeProvider time) : Controller
         var project = await db.Projects.FirstOrDefaultAsync(p => p.Id == id, ct);
         if (project is null) return NotFound();
 
-        var name = request.Name?.Trim();
-        if (string.IsNullOrEmpty(name)) return BadRequest("a project needs a name");
-        if (name.Length > EfHatchProject.MaxNameLength)
-            return BadRequest($"a project name is at most {EfHatchProject.MaxNameLength} characters");
+        // Both fields are optional here, unlike on a create - a request that
+        // only rekeys must not have to re-send a name it is not touching.
+        if (request.Name is not null)
+        {
+            var name = request.Name.Trim();
+            if (string.IsNullOrEmpty(name)) return BadRequest("a project needs a name");
+            if (name.Length > EfHatchProject.MaxNameLength)
+                return BadRequest($"a project name is at most {EfHatchProject.MaxNameLength} characters");
 
-        project.Name = name;
+            project.Name = name;
+        }
+
+        if (request.Key is not null)
+        {
+            // Upper-cased on the way in, the same way a create does it: keys are
+            // shouted in storage, and typing one in lower case is not a mistake
+            // worth a 400.
+            var key = request.Key.Trim().ToUpperInvariant();
+            if (!EfHatchProject.IsValidKey(key))
+                return BadRequest($"a project key is two to six letters or digits starting with a letter - not \"{request.Key}\"");
+
+            if (key != project.Key)
+            {
+                if (await db.Projects.AnyAsync(p => p.Key == key && p.Id != id, ct))
+                    return Conflict($"{key} is already taken");
+
+                project.Key = key;
+            }
+        }
+
         await db.SaveChangesAsync(ct);
 
         var count = await db.Issues.CountAsync(i => i.ProjectId == id, ct);

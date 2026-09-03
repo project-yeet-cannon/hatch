@@ -5,6 +5,7 @@ import { BoardPage } from './pages/BoardPage';
 import { IssuePage } from './pages/IssuePage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { StatusesPage } from './pages/StatusesPage';
+import { BulkPage } from './pages/BulkPage';
 import { ImportPage } from './pages/ImportPage';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) => `hatch-nav-link${isActive ? ' active' : ''}`;
@@ -24,6 +25,7 @@ export function App() {
           {/* `end` so the board link is only lit on the board itself - every
               other route is beneath "/" and would otherwise light it too. */}
           <NavLink to="/" className={navLinkClass} end>Board</NavLink>
+          <NavLink to="/bulk" className={navLinkClass}>Bulk edit</NavLink>
           <NavLink to="/projects" className={navLinkClass}>Projects</NavLink>
           <NavLink to="/statuses" className={navLinkClass}>Statuses</NavLink>
           <NavLink to="/import" className={navLinkClass}>Import</NavLink>
@@ -33,6 +35,7 @@ export function App() {
       <main className="hatch-content">
         <Routes>
           <Route path="/" element={<BoardPage />} />
+          <Route path="/bulk" element={<BulkPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/statuses" element={<StatusesPage />} />
           <Route path="/issues/:key" element={<IssuePage />} />

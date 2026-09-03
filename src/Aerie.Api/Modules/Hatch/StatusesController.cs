@@ -21,7 +21,7 @@ public class StatusesController(HatchContext db) : ControllerBase
         var statuses = await db.Statuses.AsNoTracking()
             .OrderBy(s => s.SortOrder)
             .ThenBy(s => s.Id)
-            .Select(s => new StatusDto(s.Id, s.Name, s.SortOrder, s.IsTerminal))
+            .Select(s => new StatusDto(s.Id, s.Name, s.SortOrder, s.IsTerminal, s.Color))
             .ToListAsync(ct);
 
         return statuses;
@@ -32,11 +32,13 @@ public class StatusesController(HatchContext db) : ControllerBase
     {
         var name = request.Name?.Trim();
         if (Invalid(name) is { } error) return BadRequest(error);
+        if (InvalidColor(request.Color) is { } colorError) return BadRequest(colorError);
         if (await db.Statuses.AnyAsync(s => s.Name == name, ct)) return Conflict($"there is already a \"{name}\" column");
 
         var status = new EfHatchStatus
         {
             Name = name!,
+            Color = request.Color is null ? EfHatchStatus.DefaultColor : EfHatchStatus.NormalizeColor(request.Color),
             // A column with no stated position goes on the right, a gap past
             // the last one - the same sparse trick ranks use a size up, so the
             // next insertion between two columns is a single write.
@@ -46,7 +48,9 @@ public class StatusesController(HatchContext db) : ControllerBase
         db.Statuses.Add(status);
         await db.SaveChangesAsync(ct);
 
-        return CreatedAtAction(nameof(GetStatuses), new StatusDto(status.Id, status.Name, status.SortOrder, status.IsTerminal));
+        return CreatedAtAction(
+            nameof(GetStatuses),
+            new StatusDto(status.Id, status.Name, status.SortOrder, status.IsTerminal, status.Color));
     }
 
     [HttpPatch("{id:int}")]
@@ -64,11 +68,17 @@ public class StatusesController(HatchContext db) : ControllerBase
             status.Name = name;
         }
 
+        if (request.Color is not null)
+        {
+            if (InvalidColor(request.Color) is { } colorError) return BadRequest(colorError);
+            status.Color = EfHatchStatus.NormalizeColor(request.Color);
+        }
+
         if (request.SortOrder is { } sortOrder) status.SortOrder = sortOrder;
         if (request.IsTerminal is { } terminal) status.IsTerminal = terminal;
 
         await db.SaveChangesAsync(ct);
-        return new StatusDto(status.Id, status.Name, status.SortOrder, status.IsTerminal);
+        return new StatusDto(status.Id, status.Name, status.SortOrder, status.IsTerminal, status.Color);
     }
 
     /// <summary>
@@ -103,6 +113,16 @@ public class StatusesController(HatchContext db) : ControllerBase
         var last = await db.Statuses.OrderByDescending(s => s.SortOrder).Select(s => (int?)s.SortOrder).FirstOrDefaultAsync(ct);
         return (last ?? 0) + 10;
     }
+
+    /// <summary>
+    /// Null is "leave it alone" here as everywhere; anything else has to be a
+    /// colour this can store, said in one shape - see
+    /// <see cref="EfHatchStatus.IsValidColor"/>.
+    /// </summary>
+    private static string? InvalidColor(string? color) =>
+        color is null || EfHatchStatus.IsValidColor(color)
+            ? null
+            : $"a column colour is a hex value like #6b7280 - not \"{color}\"";
 
     private static string? Invalid(string? name) => name switch
     {
