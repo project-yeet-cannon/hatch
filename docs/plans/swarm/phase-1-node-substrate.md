@@ -20,6 +20,8 @@ belongs here rather than there. Nothing in Phases 2–5 waits on it.
 > unchecked items below are the ones that stay manual no matter how many times
 > it runs.
 
+## Phase 1 — The steps
+
 - [x] One Hyper-V Linux VM per host (Debian 13 / Ubuntu 24.04 LTS), **external
       virtual switch** so each VM gets its own LAN IP; DHCP reservations on the MACs
       — *VM, distro and switch attachment are scripted; **the pfSense

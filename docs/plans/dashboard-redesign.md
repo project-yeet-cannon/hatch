@@ -482,9 +482,8 @@ the pinned partition shows two tabs *and* two "More rooms" rows, and the
 stale zone is one of the pinned ones on purpose — the dimmed-tab treatment
 has to be visible without unplugging anything.
 
-## Phases
 
-### Phase 0 — Measure the wall
+## Phase 0 — Measure the wall
 
 The fold budget above is arithmetic on an assumed viewport. Make it measured,
 the way [Degrading gracefully](../kiosk-architecture.md#why-the-fallback-screen-is-not-paranoia) asked the logs
@@ -519,7 +518,7 @@ which white screen it was.
   section, so `proximity` snap is comfortable and revisiting `mandatory`
   stays a Phase 6 feel call.
 
-### Phase 1 — The token pass (no layout change)
+## Phase 1 — The token pass (no layout change)
 
 Pure consistency: after this phase the page *composition* is identical and
 every value is drawn from the tables above. Reviewable as a diff of numbers.
@@ -547,7 +546,7 @@ every value is drawn from the tables above. Reviewable as a diff of numbers.
       ([dev-theme.html](../../src/Aerie.Web/apps/dashboard/dev-theme.html))
       for regressions at noon, dusk, and 3am.
 
-### Phase 2 — Contract and mocks
+## Phase 2 — Contract and mocks
 
 - [x] Extend [types.ts](../../src/Aerie.Web/apps/dashboard/src/types.ts) per
       [the contract](#the-mock-first-data-contract), comments carrying the
@@ -562,7 +561,7 @@ every value is drawn from the tables above. Reviewable as a diff of numbers.
       and the mock's index→band mirror at every EPA boundary
       ([mockDataSource.test.ts](../../src/Aerie.Web/apps/dashboard/src/mock/mockDataSource.test.ts)).
 
-### Phase 3 — The climate card
+## Phase 3 — The climate card
 
 - [x] `lib/leadZones.ts`: `partitionZones(zones)` → pinned leads (fallback:
       first two when none pinned) + the rest. Unit-tested both ways plus the
@@ -587,7 +586,7 @@ every value is drawn from the tables above. Reviewable as a diff of numbers.
       mock variants (stale zone, none zone, `mock-outlook=none`,
       `mock-aqi=none|stale|<index>` per band).
 
-### Phase 4 — The stage
+## Phase 4 — The stage
 
 - [x] `lib/stageFaces.ts` (existence matrix) and `lib/agendaGlance.ts`
       (row selection, backfill, overflow count, tomorrow whisper) — pure,
@@ -608,7 +607,7 @@ every value is drawn from the tables above. Reviewable as a diff of numbers.
 - [x] Lint + 196 unit tests + build green. **Owner still to check**
       swipe-vs-tap feel on hardware when convenient.
 
-### Phase 5 — Two pages
+## Phase 5 — Two pages
 
 - [x] Restructure App.tsx into `.hf-p1` / `.hf-p2`; snap CSS on `html`;
       `100dvh` with the `100vh` fallback line. Vertical padding moved from
@@ -630,7 +629,7 @@ every value is drawn from the tables above. Reviewable as a diff of numbers.
       **Owner confirms the same on hardware in Phase 6.**
 - [x] Lint + 196 unit tests + build green.
 
-### Phase 6 — The hardware pass
+## Phase 6 — The hardware pass
 
 The owner drives; findings land as fix commits, and this phase closes only on
 their sign-off. The checklist to walk, on a wall tablet and the dev scrubber:

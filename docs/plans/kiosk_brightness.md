@@ -196,9 +196,8 @@ older than a configurable staleness window decays to "unknown", which the
 profile treats as "clear" — a sensor that dies or an HA that goes away must fail
 toward the schedule, never toward a display stuck bright all night.
 
-## Phases
 
-### [x] Phase 1 — Backlight follows the sun
+## Phase 1 — Backlight follows the sun
 
 No identity, no new tables, hardcoded curve. **One server change after all**,
 which this plan originally said it wouldn't need: the shell calls
@@ -236,7 +235,7 @@ with the rest of the list.
 
 Kills the 3am lamp on its own. Everything after this makes it adjustable.
 
-### [x] Phase 2 — Idle dim
+## Phase 2 — Idle dim
 
 - [x] Native idle timer off `dispatchTouchEvent`; dim to an idle floor, restore
       instantly on touch. Ramp the dim (4s, 10 steps a second), snap the restore
@@ -247,7 +246,7 @@ Kills the 3am lamp on its own. Everything after this makes it adjustable.
       now" tracks the day instead of being too dark at noon and too bright at
       midnight. Its night keyframe is `0.0`; see the fake-off note above for
       why the black overlay that usually accompanies that is deliberately absent.
-- [~] **Standby view in the dashboard on a longer timeout — built, then
+- [x] **Standby view in the dashboard on a longer timeout — built, then
       removed 2026-08-23 after living with it.** A full-screen clock five
       minutes after the last touch was the wrong call on the wall: it hid the
       dashboard exactly when someone glanced over from across the room, which is
@@ -282,7 +281,7 @@ Kills the 3am lamp on its own. Everything after this makes it adjustable.
       minutes is the right dim timeout for someone reading the wall with their
       hands in their pockets.
 
-### [] Phase 3 — Registry, profiles, per-room curves
+## Phase 3 — Registry, profiles, per-room curves
 
 - [ ] `KioskDevices` + `KioskDisplayProfiles` tables and migration.
 - [ ] `GET /api/kiosk/display-profile`, self-registering, AuthGate allow-listed.
@@ -298,7 +297,7 @@ Kills the 3am lamp on its own. Everything after this makes it adjustable.
 This is the phase that answers the original ask. The bedroom hallway and the
 kitchen stop being the same tablet.
 
-### [] Phase 4 — Presence
+## Phase 4 — Presence
 
 - [ ] `POST /api/kiosk/presence` + in-memory per-zone store with staleness decay.
 - [ ] Fast presence poll in the shell; lift the display on presence, and hold

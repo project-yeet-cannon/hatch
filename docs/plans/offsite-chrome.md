@@ -194,9 +194,8 @@ gates the entry-page switch behind its own flag rather than doing it
 unconditionally, and the status page is created `published: false` first so the
 switch and the exposure are two separate, separately reversible acts.
 
-## Phases
 
-### Phase 0 — Exempt the chrome assets from the auth wall
+## Phase 0 — Exempt the chrome assets from the auth wall
 
 **This blocks Phases 1 and 2 and is the only code change in the plan.**
 
@@ -219,7 +218,7 @@ renders as a broken image on a page whose whole point was to look deliberate.
       `/apps/chromefoo` is not — the `StartsWithSegments` hazard the file's own
       comment at line 93 already calls out.
 
-### Phase 1 — `logs.${DOMAIN}`
+## Phase 1 — `logs.${DOMAIN}`
 
 - [ ] Add `config.opensearch_dashboards.yml` to the `opensearch-dashboards`
       HelmRelease in [`opensearch.yaml`](../../deploy/cluster/observability/controllers/opensearch.yaml)
@@ -237,7 +236,7 @@ renders as a broken image on a page whose whole point was to look deliberate.
 - [ ] Confirm the branding assets resolve cross-origin after Phase 0, in both
       themes, with a cold cache.
 
-### Phase 2 — `status.${DOMAIN}`
+## Phase 2 — `status.${DOMAIN}`
 
 [`provision.py`](../../containers/kuma-provision/provision.py) already logs in
 via `uptime_kuma_api` and drops to `api._call(...)` for raw socket.io methods
@@ -263,7 +262,7 @@ makes a status page's contents declarable rather than clicked.
       `/dashboard` still reaches the operator console and that the status page
       links to it.
 
-### Phase 3 — `metrics.${DOMAIN}`
+## Phase 3 — `metrics.${DOMAIN}`
 
 - [ ] Add an Aerie home dashboard as a `grafana_dashboard`-labelled ConfigMap
       beside the existing ones in
@@ -276,7 +275,7 @@ makes a status page's contents declarable rather than clicked.
 - [ ] Verify a kube-prometheus-stack upgrade leaves all three intact — the whole
       point of the "stay supported" decision is that this step is boring.
 
-### Phase 4 — Close out
+## Phase 4 — Close out
 
 - [ ] Fold the durable half into
       [`monitoring-alerting-architecture.md`](../monitoring-alerting-architecture.md):

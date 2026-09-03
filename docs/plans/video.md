@@ -160,11 +160,12 @@ How much free space is on the share, and roughly how many tapes?
 
 **Q6 — Do you want the monitor path in v1?** See "Scope call." *Default: no, Phase 5 deferred.*
 
-## Todo
+
+## Working the phases
 
 Independent steps, each landing something checkable on its own. Phases 1–2 are pure discovery against the real hardware and should happen before any script is written — every parameter below depends on what the card actually reports.
 
-### Phase 1 — Characterize the hardware (no code)
+## Phase 1 — Characterize the hardware (no code)
 
 - [ ] Confirm the card enumerates: `ffmpeg -list_devices true -f dshow -i dummy` — record the exact video **and** audio device strings verbatim (they contain the vendor's punctuation and are what the config will hold)
 - [ ] Enumerate supported formats: `ffmpeg -f dshow -list_options true -i video="<name>"` — record every pixel format / resolution / fps combination offered
@@ -174,7 +175,7 @@ Independent steps, each landing something checkable on its own. Phases 1–2 are
 - [ ] If a DVD player is in scope, confirm whether HDMI gives a black frame (HDCP) and whether its composite output works instead (bite #1)
 - [ ] Measure sustained write throughput and confirm the staging disk keeps up at the chosen format without dropped frames
 
-### Phase 2 — Nail the capture command
+## Phase 2 — Nail the capture command
 
 - [ ] Build the archival ffmpeg command for the `Archive` profile (FFV1/MKV) and run a full 2-hour capture end to end, unattended, overnight
 - [ ] Same for the `Standard` profile (H.264 CRF 18/MKV)
@@ -183,7 +184,7 @@ Independent steps, each landing something checkable on its own. Phases 1–2 are
 - [ ] Kill ffmpeg mid-capture on purpose and confirm the MKV is still playable up to the cut (bite #6)
 - [ ] Add the `tee` branch (null sink for now) and confirm it changes neither the output nor the drop counters — proves the fan-out seam before Phase 5 needs it
 
-### Phase 3 — `Initialize-CaptureHost.ps1`
+## Phase 3 — `Initialize-CaptureHost.ps1`
 
 Each bullet is a stage that can be written and tested independently.
 
@@ -198,7 +199,7 @@ Each bullet is a stage that can be written and tested independently.
 - [ ] **Verify**: 30-second smoke capture asserting non-black frames, audio above a noise floor, zero dropped frames, and a valid sidecar; delete the artifact afterward
 - [ ] Re-run the whole script three times on a clean box and confirm runs 2 and 3 change nothing and report so
 
-### Phase 4 — Session lifecycle + the handoff contract
+## Phase 4 — Session lifecycle + the handoff contract
 
 - [ ] `Start-CaptureSession` / `Stop-CaptureSession`: launch ffmpeg with the resolved profile, name the file, capture the operator's label
 - [ ] Write the `<session>.capture.json` sidecar with every field listed in "Architecture"
@@ -209,7 +210,7 @@ Each bullet is a stage that can be written and tested independently.
 - [ ] Pester tests for the pure parts (format selection from an enumerated list, path/name construction, sidecar shape) — the device-touching parts stay untested, same precedent as the HA-facing code in the cameras plan Phase 4
 - [ ] `docs/video-capture-architecture.md` documenting the two paths, the inbox contract, and the sidecar schema — this is what the next plan's actor is written against
 
-### Phase 5 — Monitor path (deferred; see Scope call)
+## Phase 5 — Monitor path (deferred; see Scope call)
 
 - [ ] Add the low-bitrate H.264 RTSP branch to the `tee` and confirm the archival write is unaffected when the sink stalls
 - [ ] go2rtc config + WinSW service; firewall rule scoped to the LAN

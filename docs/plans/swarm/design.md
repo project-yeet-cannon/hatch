@@ -5,7 +5,7 @@ Moving Aerie from one Windows Docker host to a resilient 3-node cluster.
 > Originally scoped as "should we use Docker Swarm?" — Swarm was evaluated and
 > rejected. See [Why not Swarm](#why-not-swarm).
 
-## Phases
+## The phase files
 
 The implementation plan lives one file per phase. This document holds everything
 the phases share — goals, decisions, findings, and the verification bar they are

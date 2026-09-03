@@ -1,3 +1,5 @@
+# Temporal theming — the stack dresses for the season
+
 i want to add temporal theming to the app stack. the primary use case is seasonal/holiday theming.
 
 - user configurable holiday schedule, default to standard US holidays. examples

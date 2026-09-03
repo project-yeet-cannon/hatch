@@ -336,9 +336,8 @@ return by hand.
 
 ---
 
-## Phases
 
-### Phase 0 — the sha reaches every artifact `[x]`
+## Phase 0 — the sha reaches every artifact
 
 The dependency of everything else. Nothing here is observable on its own, which
 is why 0.7 is a gate rather than a hope.
@@ -387,7 +386,7 @@ is why 0.7 is a gate rather than a hope.
 *Exit: a built artifact can be asked what commit produced it, by six different
 routes, and answers the same thing six times.*
 
-### Phase 1 — the API says so `[x]`
+## Phase 1 — the API says so
 
 - [x] **1.1** — `IAerieRevision` singleton: `Revision`, `Sequence`, `BuiltAt`,
       read once from the assembly attribute at startup. A singleton because it
@@ -419,7 +418,7 @@ routes, and answers the same thing six times.*
 *Exit: `curl -sI https://<domain>/ | grep Aerie-Revision` is how you learn what
 production is running.*
 
-### Phase 2 — the web apps say so `[x]`
+## Phase 2 — the web apps say so
 
 - [x] **2.1** — **Resolved as: no runtime module at all.** A workspace package
       would have meant one root `package.json`, one lockfile and a Dockerfile
@@ -459,7 +458,7 @@ production is running.*
 *Exit: a log line from a browser names the bundle that browser is running, and
 2.5's second half proves the kiosks did not become chattier.*
 
-### Phase 3 — the kiosk shell says so, separately `[ ]` — NOT STARTED
+## Phase 3 — the kiosk shell says so, separately
 
 - [ ] **3.1** — `MainActivity` appends `?aerieShellRevision=<BuildConfig…>` to
       the URL it loads.
@@ -481,7 +480,7 @@ production is running.*
 *Exit: the administrator story is answerable — one OpenSearch query, grouped by
 `aerie_revision`, listing every `deviceId` on an old shell.*
 
-### Phase 4 — one field in OpenSearch `[x]`
+## Phase 4 — one field in OpenSearch
 
 - [x] **4.1** — `service_tag.lua` gains `set_aerie_revision`, in the shape
       finding 5 describes: default from the `<14 digits>-<40 hex>` tag in
@@ -526,7 +525,7 @@ production is running.*
 *Exit: `aerie_revision` is one field, one meaning, one path — and
 `NOT _exists_:aerie_revision` is a working definition of "not ours".*
 
-### Phase 5 — the drift answer `[~]`
+## Phase 5 — the drift answer
 
 The self-update story, built beside `AppVersionService` rather than on top of
 it. Read finding 3 before starting.
@@ -558,7 +557,7 @@ it. Read finding 3 before starting.
 the new revision yet" has a screen, and rolling out a breaking change stops
 being a guess.*
 
-### Phase 6 — what the cluster has reconciled `[x]`
+## Phase 6 — what the cluster has reconciled
 
 The only phase needing access the API does not have today. Separated for that
 reason, and can ship long after Phase 5.

@@ -44,7 +44,7 @@
 >   correctly; a chain of `dependsOn` between releases does not — and a Ready
 >   `HelmRelease` never did imply a synced Secret (3b.3).
 
-## [x] Phase 3a — Manual prerequisites
+## Phase 3a — Manual prerequisites
 
 *Six one-time steps. None of them are code, all of them block something below.
 Do these first, in order, and the whole of 3b runs unattended.*

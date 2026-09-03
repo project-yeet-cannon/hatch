@@ -314,9 +314,8 @@ from the platform — the pull secret, the WAL credential, the namespace — is 
 target block in `parameters.json` or a line in `namespaces.yaml`, which is the
 same shape any sideloaded service would add.
 
-## Phases
 
-### [ ] Phase 0 — Start the clocks
+## Phase 0 — Start the clocks
 
 **Ships:** no behavior. Two waiting periods begin — a brokerage account opening
 and a developer-app approval, possibly serial — and the repo gains a Python
@@ -338,7 +337,7 @@ load-bearing. Under the original order, everything from Phase 2 on was parked
 behind this approval; now nothing before Phase 8 waits on it, and 0a's only
 consequence is how early Phase 8 becomes available to promote.
 
-#### [ ] Phase 0a — The part only a person can do
+### Phase 0a — The part only a person can do
 
 **Ships:** a Schwab brokerage account, a submitted developer application and a
 callback URL it will accept. Every item needs a human at a vendor's portal
@@ -384,7 +383,7 @@ a clock.
       confirmed against current documentation.
 - [ ] **Commit:** "Trading: a clock that started"
 
-#### [x] Phase 0b — The part that does not wait
+### Phase 0b — The part that does not wait
 
 **Ships:** a Python package with nothing in it, a Makefile target, a CI lane of
 its own, and two named-but-unseeded secrets. Nothing here touches Schwab, so
@@ -412,7 +411,7 @@ nothing here waits on Schwab.
       `parameters.json`, which is the check `ci.yml` already runs.
 - [x] **Commit:** "Trading: a silo, a toolchain, and a lane of its own"
 
-### [x] Phase 1 — The Ledger and the silo's floor
+## Phase 1 — The Ledger and the silo's floor
 
 **Ships:** a FastAPI service reachable at `trading.${DOMAIN}`, with its own
 Postgres and nothing to say yet. Deliberately boring: this phase is judged on
@@ -544,7 +543,7 @@ immutable and its name cannot carry the image tag.
       is the better of the two failures.
 - [x] **Commit:** "Trading: a silo with a floor"
 
-### [x] Phase 2 — The synthetic market
+## Phase 2 — The synthetic market
 
 **Ships:** the `MarketDataProvider` interface and a generator that implements
 it, so that every phase after this one has data to work on without a credential,
@@ -768,7 +767,7 @@ container (below).
       market that was open and silent.
 - [x] **Commit:** "Trading: a market that does not exist"
 
-### [x] Phase 3 — The lake, and the collectors that fill it
+## Phase 3 — The lake, and the collectors that fill it
 
 **Ships:** every piece of machinery that stands between a provider and a
 queryable history — the partition layout, the reader, idempotent writes,
@@ -1135,7 +1134,7 @@ one (below).
       with a correctly-shaped JSON log line.
 - [x] **Commit:** "Trading: a lake, and the machinery to fill it"
 
-### [x] Phase 4 — The engine, proven on equities
+## Phase 4 — The engine, proven on equities
 
 **Ships:** a backtest of two boring strategies over collected equity data,
 producing a result a person can check by hand. Options are not in this phase,
@@ -1330,7 +1329,7 @@ authoring their own.
       has to be taught exceptions is a guard someone turns off.
 - [ ] **Commit:** "Trading: an engine, a fixture that proves it, and two strategies to run"
 
-### [x] Phase 5 — Runs, sweeps, and the queue
+## Phase 5 — Runs, sweeps, and the queue
 
 **Ships:** launching a thousand parameter combinations and watching them land.
 This is the ask's "lots of strategies, lots of parameters" made operational.
@@ -1593,7 +1592,7 @@ needed a real Postgres for the first time in the silo's life (below).
       time Prometheus arrives, so the durable row is the metric.
 - [x] **Commit:** "Trading: sweeps, and a queue that survives a lost worker"
 
-### [x] Phase 6 — The honesty layer
+## Phase 6 — The honesty layer
 
 **Ships:** results that can be trusted, or at least whose untrustworthiness is
 visible. This phase adds no capability and is the most valuable one in the plan.
@@ -1694,7 +1693,7 @@ mistaken for a finding.
       below zero.
 - [x] **Commit:** "Trading: results that admit what they are"
 
-### [ ] Phase 7 — The control panel
+## Phase 7 — The control panel
 
 **Ships:** the ask's top-level interaction, and the point at which the vertical
 becomes a product someone can look at. Strategies as the primary object, sweeps
@@ -1872,7 +1871,7 @@ Phase 4 are its payload.
       to check, and this repository's rule is that the implementer's definition
       of done is lint, build and tests green.
 
-### [ ] Phase 8 — Schwab, and the seven-day problem
+## Phase 8 — Schwab, and the seven-day problem
 
 **Ships:** real market data. The `MarketDataProvider` interface gets its second
 implementation, the collectors from Phase 3 are pointed at it, and option chain
@@ -1972,7 +1971,7 @@ that was deferred to get here.
       synthetic results side by side, correctly labelled.
 - [ ] **Commit:** "Trading: real data, and a credential that expects to expire"
 
-### [ ] Phase 9 — The live clock
+## Phase 9 — The live clock
 
 **Ships:** paper trading. Strategies run forward against live quotes, and the
 leaderboard gains a column that changes during the day.
@@ -2001,7 +2000,7 @@ curiosity, and against real quotes it is the point.
       or the gap is explained in this document.
 - [ ] **Commit:** "Trading: the same engine, on a live clock"
 
-### [ ] Phase 10 — Options
+## Phase 10 — Options
 
 **Ships:** the actual target. Chain-aware strategies, multi-leg positions, and
 the three strategy families the owner named.

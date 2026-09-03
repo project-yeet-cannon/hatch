@@ -200,9 +200,8 @@ clusters, glassmorphism. Those are Phase 1 and Phase 6 material respectively.
 
 ---
 
-## Phases
 
-### [x] Phase 0 — The workspace conversion
+## Phase 0 — The workspace conversion
 
 **Ships:** nothing visual. Every app builds, tests and deploys exactly as
 before, from one lockfile. This is the phase that makes a shared package
@@ -251,7 +250,7 @@ cause is unambiguous.
       modulo content hashes.
 - [x] **Commit:** "Web: six islands become one workspace"
 
-### [x] Phase 1 — The token pass and day/night
+## Phase 1 — The token pass and day/night
 
 **Ships:** admin goes dark at night, and every color/size in it comes from one
 file. Composition is untouched — reviewable as a diff of numbers.
@@ -316,7 +315,7 @@ file. Composition is untouched — reviewable as a diff of numbers.
       so the new `Inputs` glob is doing its job in both directions.
 - [x] **Commit:** "UI: one vocabulary, and a night for it"
 
-### [x] Phase 2 — The design gallery app
+## Phase 2 — The design gallery app
 
 **Ships:** `apps/design`, browsable, with a Tokens section. Small in surface and
 disproportionately valuable: **this is the artifact Phase 6 is handed.** It
@@ -387,7 +386,7 @@ Two deliberate departures from the house pattern, both recorded in
   A gallery holding its own copy of a component's styles is a gallery that can
   drift from the component, which would make it worse than useless in Phase 6.
 
-### [x] Phase 3 — The shared top bar
+## Phase 3 — The shared top bar
 
 **Ships:** the ask's four top-bar demands, in a component built for reuse from
 the first line. Admin adopts it; the gallery adopts it; home adopts it in
@@ -466,7 +465,7 @@ One thing this phase deliberately leaves broken-shaped, for Phase 4:
   `--t-title`), which is exactly what this phase may not do on its own; it
   belongs with `<PageHeader>` in Phase 4, and is listed there.
 
-### [x] Phase 4 — The primitives
+## Phase 4 — The primitives
 
 **Ships:** the nine components from the inventory above, each with a gallery
 page showing its states and contexts, and admin migrated onto them. Do this in
@@ -607,7 +606,7 @@ be discovered:
   the native `<dialog>` element's top-layer behaviour and a tested library is a
   bigger decision than the primitives phase gets to make.
 
-### [x] Phase 5 — Home becomes an app
+## Phase 5 — Home becomes an app
 
 **Ships:** the app picker on the shared library. After this, the two apps in the
 ask share a look and feel for real, and the plan's engineering half is done.
@@ -692,7 +691,7 @@ Three things this phase decided that the plan did not, all of them visible:
 
 ---
 
-## ⛔ Phase 6 — MANUAL: the design pass
+## Phase 6 — MANUAL: the design pass
 
 > **STOP. This phase is not executed by Claude.**
 >
@@ -784,7 +783,7 @@ The open questions, collected. This list is the brief.
 
 ---
 
-### [] Phase 7 — Implement the design
+## Phase 7 — Implement the design
 
 Scope is defined by Phase 6's output, so the checklist below is the shape rather
 than the content.
@@ -802,7 +801,7 @@ than the content.
       laptop and on a phone.
 - [ ] **Commit(s):** by area, not one.
 
-### [] Phase 8 — Dissipate
+## Phase 8 — Dissipate
 
 Per [the plans lifecycle](README.md#the-lifecycle), step 3 — the one that is
 easy to skip and expensive to skip.

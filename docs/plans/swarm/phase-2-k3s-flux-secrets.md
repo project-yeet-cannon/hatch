@@ -13,6 +13,8 @@
 > **`[x]` here means the script/workflow does it, not that the cluster's
 > etcd has actually formed yet** — same convention as Phase 1.
 
+## Phase 2 — The steps
+
 - [x] `scripts/k3s/Install-K3sNode.ps1` — new script, same shape as
       `Initialize-AerieNode.ps1` (reuses `hyperv/lib/AerieSsh.ps1` to connect,
       takes `-VMName`/`-IPAddress` plus `-ClusterInit` or `-JoinServer

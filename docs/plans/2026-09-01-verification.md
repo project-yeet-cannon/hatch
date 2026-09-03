@@ -36,7 +36,7 @@ irreversible half.
 
 ---
 
-## Part 0 — Confirm Phase 1 still holds, before deleting its undo
+## Phase 0 — Confirm Phase 1 still holds, before deleting its undo
 
 *Not in the original plan, and worth the five minutes.* The three disks Part 1
 deletes are the rollback path for the migration whose gate was the etcd fsync
@@ -71,7 +71,7 @@ as it exists, and after Part 1 it is a restore instead.
 
 ---
 
-## Part 1 — Delete the three source OS disks
+## Phase 1 — Delete the three source OS disks
 
 Each node's original `os-disk.vhdx` was left in place at migration as the
 rollback path. `Set-VMHardDiskDrive` pointing back at it is a one-line undo for
@@ -141,7 +141,7 @@ etcd member for no benefit — leave it.
 
 ---
 
-## Part 2 — Read the image-GC gate
+## Phase 2 — Read the image-GC gate
 
 The other half of the node-storage work bounded what fills the root filesystem:
 kubelet's image GC moved from its default 85/80 down to **70/55**, and

@@ -9,6 +9,8 @@
 *No cluster involved. Delivers goals 4 and 5 immediately and de-risks everything
 after it.*
 
+## Phase 0 — The steps
+
 - [x] restic repos: local (second disk) + AWS S3 — `containers/backup/`
       (built on `postgres:18.4-alpine` for a version-matched `pg_dumpall`),
       wired in as `compose.backup.yml`. `cd.yml` inits both repos idempotently

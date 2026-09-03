@@ -1,3 +1,5 @@
+# A game my child and I build while we play it
+
 i want to develop a dynamic web game to play with my young child. i want to allow the player to modify the game, incorporating AI to dynamically rewrite the game as we play.
 
 i'm thinking something along these lines. i'm fine with swapping out any specifics, this is just the most feasible/illustrative path my mind has come up with thus far:

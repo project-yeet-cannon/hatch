@@ -8,6 +8,8 @@ When dissipating the swarm plans, turn this document into its own individual pla
 
 **Status: DEFERRED to its own new plan**
 
+## Phase 9 — The steps
+
 - [ ] `scripts/bootstrap-node.sh` and `scripts/restore.sh`
 - [ ] Helm `values.yaml` holding domain / HA / seed data, so someone else can run
       Phases 1-2 and get a working stack

@@ -137,7 +137,7 @@ Verified before writing; each one changes a step below.
    `provision-2-seed-secrets.yml`. The two new parameters Phase 1 adds follow it
    unchanged, as does Phase 2's; none of them is a new *kind* of credential.
 
-## [x] Phase 1 — The dashboard
+## Phase 1 — The dashboard
 
 The one-stop shop, and the thing that actually answers the question. Depends on
 nothing else here — 1.3 is what turns it from a status board into a timeline,

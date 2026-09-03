@@ -279,7 +279,7 @@ for an installation to want.
 
 ---
 
-## [x] Phase 1 — Teach the tooling about agents
+## Phase 1 — Teach the tooling about agents
 
 **Exit:** a `role: agent` dispatch of Provision 1 produces a node that shows
 `<none>` under ROLES in `kubectl get nodes` and schedules pods.
@@ -358,7 +358,7 @@ code was checked by the run; this is the criterion itself.
       since kubelet, k3s and Longhorn all write onto the same object.
       Exposed on the workflow as a comma-separated `node_labels` input.
 
-## [x] Phase 2 — Make a node leaving a non-event
+## Phase 2 — Make a node leaving a non-event
 
 Independently valuable, and a prerequisite: this lands **before** D joins.
 
@@ -782,7 +782,7 @@ cluster.
       everyone's problem the next time a provisioning workflow is pointed at
       `hyperv-host-0`.
 
-## [] Phase 3 — Build the node
+## Phase 3 — Build the node
 
 **Exit:** four nodes Ready; D holds no Longhorn replicas; the house is unchanged.
 
@@ -1331,7 +1331,7 @@ carries it, along with how to measure which volume is which.
       that ceiling holds. If it is flat here while the node is doing real work,
       that is worth more than the deferred gate the older nodes produced.
 
-## [] Phase 4 — Personal mode
+## Phase 4 — Personal mode
 
 **Exit:** an unelevated desktop user clicks a shortcut; within a minute the node
 is drained, the VM is off and the runner is stopped. Another click returns all
@@ -1459,7 +1459,7 @@ been discovered on an evening somebody wanted their machine:
       should go `NotReady`, its pods should reschedule, and the boot task should
       bring it back correctly on the next power-on.
 
-## [] Phase 5 — An absence that doesn't page anyone
+## Phase 5 — An absence that doesn't page anyone
 
 **Exit:** a full personal-mode evening produces no alert and no red tile, and a
 node that is down *without* personal mode set still produces both.
