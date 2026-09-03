@@ -1192,6 +1192,30 @@ public class IssuesControllerTests
         Assert.Equal(h.Inbox, Value(await h.Issues.GetIssue("AER-3", default)).StatusId);
     }
 
+    /// <summary>
+    /// Nothing is saved until the batch finishes, so every issue in it would be
+    /// told the same "bottom of the column" if the ranks were asked for one at a
+    /// time. Ties are survivable and are still not what was meant - the order
+    /// the list was in is the order the column should end up in.
+    /// </summary>
+    [Fact]
+    public async Task ABulkMoveIntoOneColumn_LandsThemInOrderRatherThanOnTopOfEachOther()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "one");
+        await h.CreateAsync("task", "two");
+        await h.CreateAsync("task", "three");
+
+        await h.Issues.BulkEdit(Bulk(["AER-1", "AER-2", "AER-3"], statusId: h.Todo), default);
+
+        var ranks = new List<long>();
+        foreach (var key in new[] { "AER-1", "AER-2", "AER-3" })
+            ranks.Add(Value(await h.Issues.GetIssue(key, default)).Rank);
+
+        Assert.Equal(ranks.Count, ranks.Distinct().Count());
+        Assert.Equal(ranks.OrderBy(r => r), ranks);
+    }
+
     [Fact]
     public async Task ABulkEdit_TouchesOnlyTheFieldsItNames()
     {

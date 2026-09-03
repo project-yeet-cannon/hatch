@@ -296,7 +296,7 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
         if (!ReadEdit(request, out var edit, out var editError)) return BadRequest(editError);
 
         var actor = await caller.ActorNameAsync(ct);
-        var (changed, error) = await StageEditAsync(issue, edit, actor, time.GetUtcNow(), ct);
+        var (changed, error) = await StageEditAsync(issue, edit, actor, time.GetUtcNow(), new ColumnBottoms(ranks), ct);
         if (error is not null) return BadRequest(error);
 
         if (changed) await db.SaveChangesAsync(ct);
@@ -343,6 +343,10 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
         var actor = await caller.ActorNameAsync(ct);
         var now = time.GetUtcNow();
 
+        // One tracker for the batch: fifty issues sent to the same column are
+        // fifty appends, and nothing is saved between them - see ColumnBottoms.
+        var bottoms = new ColumnBottoms(ranks);
+
         var changed = new List<string>();
         var unchanged = new List<string>();
         var failures = new List<IssueBulkFailureDto>();
@@ -356,7 +360,7 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
                 continue;
             }
 
-            var (moved, error) = await StageEditAsync(issue, edit, actor, now, ct);
+            var (moved, error) = await StageEditAsync(issue, edit, actor, now, bottoms, ct);
             if (error is not null) failures.Add(new IssueBulkFailureDto(key, error));
             else if (moved) changed.Add(await KeyOfAsync(issue, ct));
             else unchanged.Add(await KeyOfAsync(issue, ct));
@@ -379,7 +383,7 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
     /// </summary>
     /// <returns>Whether anything changed, and the sentence to refuse with if it could not be applied.</returns>
     private async Task<(bool Changed, string? Error)> StageEditAsync(
-        EfHatchIssue issue, IssueEdit edit, string actor, DateTimeOffset now, CancellationToken ct)
+        EfHatchIssue issue, IssueEdit edit, string actor, DateTimeOffset now, ColumnBottoms bottoms, CancellationToken ct)
     {
         // ---- What could be refused ----
 
@@ -429,7 +433,7 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
             // A column change through PATCH has no neighbours to sit between,
             // so the card goes to the bottom of the new column. The board sends
             // its drops to `move`, which does have them.
-            issue.Rank = await ranks.BottomAsync(status.Id, ct);
+            issue.Rank = await bottoms.NextAsync(status.Id, ct);
         }
 
         // Both dates read present-but-empty as the clear, the same way ParentKey
@@ -672,6 +676,33 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
             issue.CreatedBy,
             issue.CreatedAt,
             issue.UpdatedAt);
+    }
+
+    /// <summary>
+    /// The bottom of each column, for a request that appends to one more than
+    /// once.
+    ///
+    /// <see cref="RankService.BottomAsync"/> asks the database where the bottom
+    /// is, and a bulk edit saves nothing until it has finished - so fifty issues
+    /// sent to the same column would every one of them be told the same number.
+    /// Ties are survivable (the board breaks them by id, and the next drop into
+    /// that column renumbers it) but they are not what was meant, and the order
+    /// the operator's list was in is lost. So the first append per column asks,
+    /// and the rest count on from it.
+    /// </summary>
+    private sealed class ColumnBottoms(RankService ranks)
+    {
+        private readonly Dictionary<int, long> handedOut = [];
+
+        public async Task<long> NextAsync(int statusId, CancellationToken ct)
+        {
+            var rank = handedOut.TryGetValue(statusId, out var previous)
+                ? previous + RankService.Gap
+                : await ranks.BottomAsync(statusId, ct);
+
+            handedOut[statusId] = rank;
+            return rank;
+        }
     }
 
     /// <summary>
