@@ -335,14 +335,22 @@ jobs:
           fetch-depth: 0
           sparse-checkout: |
             src/Aerie.Trading
+            src/Aerie.Web/apps/trading
             .github/actions/detect-image-changes
 
-      - name: Check for changes under src/Aerie.Trading
+      # Two paths, because the trading image has two sources: the silo, and
+      # the control panel's SPA, which is built in the Aerie.Web workspace and
+      # copied into the silo before the image build (docs/plans/trading.md
+      # Phase 7). Without the second path an edit to the control panel would
+      # never produce a new image - the silo did not change, so nothing would
+      # rebuild, and the deployed UI would sit one commit behind forever with
+      # nothing failing to say so.
+      - name: Check for changes under the trading silo or its SPA
         id: filter
         uses: ./.github/actions/detect-image-changes
         with:
           image: ghcr.io/eouw0o83hf/aerie-trading
-          path: src/Aerie.Trading
+          path: src/Aerie.Trading src/Aerie.Web/apps/trading
           registry-username: ${{ github.actor }}
           registry-password: ${{ secrets.GITHUB_TOKEN }}
 
@@ -389,6 +397,35 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # The control panel, built here rather than inside the image, and this is
+      # the seam Phase 7 names made concrete. The trading image's build context
+      # is src/Aerie.Trading and Docker refuses a COPY that escapes it, so the
+      # SPA cannot be built in the Dockerfile from sources that live in the
+      # Aerie.Web workspace. It is built onto the runner instead, into
+      # src/Aerie.Trading/aerie_trading/control/static/ - which is inside the
+      # context, and is gitignored because it is build output.
+      #
+      # AERIE_REVISION and AERIE_SEQUENCE are read by
+      # src/Aerie.Web/vite-plugin-aerie-revision.mts, which stamps them into
+      # index.html and makes the page send the revision back on every API call.
+      # The same two values go to the image build below, so the page and the
+      # service it talks to report one build.
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: src/Aerie.Web/.nvmrc
+          cache: npm
+          cache-dependency-path: src/Aerie.Web/package-lock.json
+
+      - name: Build the control panel
+        working-directory: src/Aerie.Web
+        env:
+          AERIE_REVISION: ${{ github.sha }}
+          AERIE_SEQUENCE: ${{ steps.revision.outputs.sequence }}
+        run: |
+          npm ci
+          npm run build -w apps/trading
+
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v6
@@ -411,7 +448,8 @@ jobs:
           # outside src/Aerie.Trading/ can reach this image, because Docker
           # refuses a COPY that escapes the context. See
           # src/Aerie.Trading/Dockerfile.trading and ci.yml's trading-boundary
-          # job.
+          # job. The step above is what puts the control panel's bundle
+          # *inside* the context rather than reaching out of it.
           context: ./src/Aerie.Trading
           file: ./src/Aerie.Trading/Dockerfile.trading
           push: false

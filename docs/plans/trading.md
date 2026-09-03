@@ -1708,37 +1708,106 @@ for is to deploy this on autopilot, open it in production, and find a working
 product to react to. So the phase ships a seed job, and the strategies from
 Phase 4 are its payload.
 
-- [ ] `src/Aerie.Web/apps/trading/` — a Vite React app in the existing
+- [x] `src/Aerie.Web/apps/trading/` — a Vite React app in the existing
       workspace, consuming `@aerie/ui` for tokens, day/night, and the shared top
       bar. It must add no palette of its own; the design system is the entire
-      mechanism keeping the suite looking like one product.
-- [ ] Add the app to the workspace build list in the
+      mechanism keeping the suite looking like one product. · The app wears the
+      shared `TopBar` and appears in the app picker's Operations tier
+      (`apps/home/src/apps.ts`), listed unconditionally rather than probed:
+      its bundle is served by the trading pod, so there is no same-origin path
+      for `useWithheldApps` to ask about and a cross-origin HEAD would answer
+      for the wrong reasons.
+
+      **`homeHref` is derived from the address bar, not configured.** The bar's
+      link back to the picker is `home.<the domain this page was served from>`,
+      which is `apps/home/src/lib/siblingOrigin.ts`'s derivation run in the
+      other direction — so an installation on another domain needs no edit, and
+      an address with no domain to borrow (an IP, `localhost`) links to `/`
+      rather than to a hostname that does not resolve.
+- [x] Add the app to the workspace build list in the
       [Makefile](../../Makefile), CI matrix, and its MSBuild `Inputs` glob —
       the per-app plumbing that [design-system-mvp.md](design-system-mvp.md)
       Phase 1 documented as the one thing that does not generalize for free.
       **Note the seam:** this SPA is served by the trading service, not by
       `Aerie.Api`, so it does not join `wwwroot/apps/`.
-- [ ] **Strategies list** — every strategy, its parameter space, its best
+
+      **There is therefore no MSBuild target and deliberately none**, which is
+      the seam being honoured rather than a bullet skipped: an `Inputs` glob in
+      `Aerie.Api.csproj` naming this app would be a .NET project reaching at
+      the trading silo's interface, and `ci.yml`'s `trading-boundary` job fails
+      a build for less. What replaces it is a step in
+      [publish.yml](../../.github/workflows/publish.yml): the bundle is built
+      on the runner into `aerie_trading/control/static/` — inside the image's
+      build context, which is the only place it can be — immediately before
+      `docker build`. The image-change filter for the trading image now names
+      **two** paths, because without the second one an edit to the control
+      panel would rebuild nothing and the deployed UI would sit a commit behind
+      forever with nothing failing to say so.
+- [x] **Strategies list** — every strategy, its parameter space, its best
       walk-forward result, its live status. The top-level interaction from the
-      ask.
-- [ ] **Strategy detail** — parameter ranges, a sweep launcher with an estimated
-      run count before you commit, and the runs that came from it.
-- [ ] **Leaderboard** — sortable across everything, sliceable by today / this
+      ask. · A strategy with no walk-forward result says so rather than showing
+      its best in-sample run: the tempting version puts the highest Sharpe from
+      anywhere on the card, and that is the luckiest member of the widest
+      sweep, on the front page.
+- [x] **Strategy detail** — parameter ranges, a sweep launcher with an
+      estimated run count before you commit, and the runs that came from it. ·
+      The launcher has no one-click path: the Launch button does not exist
+      until an estimate is on screen, and the estimate is held together with
+      the form it described, so editing any field takes the button away again.
+      A form that launched in one click would be a form that satisfied Phase
+      5's handshake on the operator's behalf.
+- [x] **Leaderboard** — sortable across everything, sliceable by today / this
       week / since inception, and by backtest vs. live. The honesty columns from
-      Phase 6 are not optional columns; they ship visible by default.
-- [ ] **Run detail** — trades, the equity curve, the metrics, and the exact
+      Phase 6 are not optional columns; they ship visible by default. · Default
+      slice is `out_of_sample`, so the board opens on the only rows whose
+      figures may be called performance at all. The `live` slice is a filter
+      that matches nothing on this build and says so in a sentence the server
+      supplies — an empty board with an explanation, rather than a control the
+      UI does not offer.
+- [x] **Run detail** — trades, the equity curve, the metrics, and the exact
       parameters and revision, so a result can be reproduced.
-- [ ] **Data provenance is visible on every result** — a run, a leaderboard row
+
+      **The curve needed a table.** Three of those four were already rows; the
+      curve was the one thing `run_backtest` produced that nothing kept.
+      Migration 0006 adds `run_curve` beside `run` rather than a column on it —
+      the leaderboard scans that table and Postgres reads a row's non-TOASTed
+      columns whether a query names them or not, so a curve on the row is a
+      payload every leaderboard page carries and no leaderboard reads. It is
+      sampled to a cap on the way in (`runs/curve.py`), because a curve stored
+      point-per-bar makes one run's storage a function of which interval
+      somebody swept at; both ends are always kept, and the row records what it
+      was sampled from so a chart can say it is not at full resolution.
+      Nothing is backfilled: a run that finished before this existed has no
+      curve, and the page says so rather than drawing a straight line between
+      two numbers it does have.
+- [x] **Data provenance is visible on every result** — a run, a leaderboard row
       and a strategy's headline number all show which source they came from,
       synthetic or Schwab. Not a footnote on a settings page. For as long as the
       app ships seeded with synthetic results, the difference between a number
       that means something and a number that means nothing is exactly this
       field, and a UI that hides it is a UI that lies by omission. It also stops
       being decorative the moment both sources coexist, which is every day after
-      Phase 8.
-- [ ] **The seed job** — a Kubernetes `Job` run on deploy, alongside the
+      Phase 8. · `source` is a **required** field on the row type the API
+      serves, so a screen that wanted to hide it would have to be written to
+      drop a field it was given.
+- [x] **The seed job** — a Kubernetes `Job` run on deploy, alongside the
       migration, that registers the two Phase 4 strategies and enqueues the
-      Phase 5 demo sweep.
+      Phase 5 demo sweep. · `aerie_trading/seed/`, run as a **second init
+      container** rather than a Job — the same deviation the migration beside
+      it already makes, and for the same reason that file writes out: a Job's
+      spec is immutable, and one whose image tag changes every deploy needs
+      either a name past the length limit or `force: true` on the
+      Kustomization.
+
+      **It collects, which the plan does not mention and a cold cluster needs.**
+      The demo runs read five years of daily bars; a fresh Lake is an empty PVC
+      and the collector CronJob fires after the next close with one session in
+      it. Without a backfill the seeded leaderboard is twenty failures on the
+      front page until somebody notices — which is the "shipped framework"
+      outcome this phase exists to prevent, arrived at from the other
+      direction. It is skipped when the Lake already covers the window, per
+      symbol rather than in aggregate, so a deploy onto a cluster that has the
+      data does nothing at all.
 
       **It computes the demo runs through the real engine and the real workers**
       rather than inserting fixture rows. Committed result rows would be a
@@ -1752,9 +1821,14 @@ Phase 4 are its payload.
       **Idempotent, and namespaced to itself.** Seeded rows are marked as
       seeded; re-running the job reconciles only those. It must never touch a
       strategy, sweep or run the owner added, because the deploy that re-runs it
-      is every deploy.
-- [ ] Grafana carries deep-dive time series. Do not build a charting stack to
-      compete with a tool already deployed and already good at this.
+      is every deploy. · `sweep.seeded`, and the flag rather than the name is
+      what makes it safe: `sweep.name` is deliberately not unique, so an
+      operator who calls their own sweep `demo-ma-crossover` would otherwise
+      have it reconciled away by the next push.
+- [x] Grafana carries deep-dive time series. Do not build a charting stack to
+      compete with a tool already deployed and already good at this. · The run
+      detail's equity curve is inline SVG — a path, two axis labels and the
+      starting-cash line. No charting dependency was added.
 - [ ] **Gate:** deploy to a **clean production database**, open the control
       panel without running anything, and find every screen populated —
       strategies list, strategy detail with its parameter space, leaderboard
@@ -1766,7 +1840,37 @@ Phase 4 are its payload.
       leaderboard answers "what did best today" in one glance, which is the
       ask's own success criterion · the app is correct in day and night mode ·
       `make test-web` green.
-- [ ] **Commit:** "Trading: a control panel that arrives with something in it"
+
+      **The half that does not need a browser is asserted and green.**
+      `tests/test_control_panel.py` runs the whole vertical against a real
+      Postgres — a provider writes Parquet, a sweep is enqueued, a worker
+      backtests it with the honesty layer attached — and then asks the API what
+      each screen would show: the strategies list carries the parameter space,
+      a strategy's headline is its walk-forward result, every row names its
+      source, an in-sample row is served under a name that says so, and a
+      launch without the estimate is refused. `tests/test_seed.py` asserts the
+      re-run: no second grid, no second sweep, and an operator's identically
+      named sweep untouched. `tests/test_control_spa.py` covers the serving
+      seam — deep links, cache policy, and an API 404 that stays a 404.
+
+      **The half that needs a browser is the operator's**, per this
+      repository's own rule: the cold-boot deploy, both themes, and watching a
+      sweep launched from the UI complete.
+
+      One item on this gate is a prediction rather than a check, and it is
+      worth saying plainly before anyone reads the front page as a finding:
+      *"the seeded leaderboard shows `ma_crossover` losing to `buy_and_hold`"*
+      is exactly the claim Phase 4 retired — over the configured universe the
+      grid scatters around the baseline, seven of nineteen ahead, and which
+      side any one path lands on is the sign of a coin flip
+      (`runs/demo.py`). What the seeded board demonstrates is the machinery and
+      the honesty columns, not a result.
+- [x] **Commit:** "Trading: a control panel that arrives with something in it"
+
+      The phase's own box stays unticked until the gate above is: the deploy,
+      the two themes and the sweep launched from a browser are the operator's
+      to check, and this repository's rule is that the implementer's definition
+      of done is lint, build and tests green.
 
 ### [ ] Phase 8 — Schwab, and the seven-day problem
 

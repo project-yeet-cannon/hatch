@@ -24,7 +24,14 @@ export interface AppEntry {
       domain this page is served from - see lib/siblingOrigin.ts. */
   subdomain?: string;
   /** Hidden outright when its bundle answers 404 - the operator's own apps,
-      which are withheld from everyone else. See lib/useWithheldApps.ts. */
+      which are withheld from everyone else. See lib/useWithheldApps.ts.
+
+      Not set for an app this pod does not serve the bundle of. Trading is one:
+      its SPA is served by the trading service on its own host, so there is no
+      same-origin path to probe, and a cross-origin HEAD would answer for the
+      wrong reasons. It is listed unconditionally, like the observability
+      services below it, and the wall in front of that host is what decides who
+      gets in. */
   withheldIf404?: boolean;
   /** The same-origin path to HEAD when deciding that, for an app whose own
       address this page cannot probe. `href` is the probe when there is one;
@@ -83,6 +90,12 @@ export const TIERS: Tier[] = [
         subdomain: 'hatch',
         withheldIf404: true,
         probePath: '/apps/hatch/',
+      },
+      {
+        name: 'Trading',
+        description: 'Strategies, sweeps and the leaderboard',
+        icon: '📊',
+        subdomain: 'trading',
       },
       {
         name: 'Docs',

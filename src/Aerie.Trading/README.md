@@ -412,6 +412,82 @@ gate is written against the gap rather than the sign deliberately — machinery
 that only noticed inflated figures above zero would be blind to a leaderboard
 sorted within one strategy, which is the common case.
 
+## The control panel
+
+The four screens the plan's Phase 7 asks for — strategies, one strategy,
+the leaderboard, one run — plus a sweep launcher. Its data is
+`aerie_trading/control/panel/`; its interface is a React app that lives in
+Aerie's web workspace at `src/Aerie.Web/apps/trading/` and is served by **this**
+service rather than by Aerie.Api.
+
+```sh
+# The bundle. It builds into aerie_trading/control/static/, which is inside
+# this directory because the image's build context is this directory - Docker
+# refuses a COPY that escapes it. Gitignored: it is build output.
+cd ../Aerie.Web && npm ci && npm run build -w apps/trading
+
+# Then the service, which finds the bundle beside itself and serves it at /.
+cd ../Aerie.Trading && uv run python -m aerie_trading.control
+```
+
+Without that first step the service starts and serves the API with no UI, which
+is one log line rather than a failure — the migration init container and a
+developer with no Node both import the same app factory.
+
+The API under `/api/trading/` is:
+
+| | |
+|---|---|
+| `GET /strategies` | every strategy the Ledger knows, its parameter space, its best walk-forward result |
+| `GET /strategies/{name}` | that, plus its sweeps and its recent runs |
+| `GET /leaderboard` | sortable across everything; sliced by window, by whether a figure was fitted, and by backtest vs. live |
+| `GET /runs/{id}` | trades, the equity curve, the metrics, the parameters and the build |
+| `GET /sweeps/{id}` | one batch and its runs |
+| `GET /queue` | runs by status |
+| `GET /installation` | what this installation collects, and its ceiling on one sweep |
+| `POST /sweeps/plan` | the estimate. Writes nothing |
+| `POST /sweeps` | the launch, refused unless the estimate's number comes back |
+
+**Two things about it are structural rather than conventional.** A run's
+figures are served as a `Figures` — the object from `honesty/presentation.py`
+that raises rather than putting a fitted number in a field labelled as
+performance — so a screen reads `figures.headline` and `figures.in_sample` and
+cannot flatten the distinction away. And `source` is a required field on the
+row type, so provenance is on every result by construction rather than by a
+route remembering it.
+
+The launcher looks its `data_source` row **up** instead of constructing a
+provider, which is why launching a sweep before anything has been collected is
+refused with a sentence rather than accepted and failed twenty times a minute
+later. It is also why the control plane does not import pandas.
+
+## Seeding
+
+`python -m aerie_trading.seed` is what makes a cold boot arrive with something
+in it, and it runs as an init container on every deploy.
+
+```sh
+# What would it do? Writes nothing, anywhere.
+uv run python -m aerie_trading.seed --dry-run
+
+# For real. Registers the shipped strategies, backfills the demo window if the
+# Lake does not already have it, and enqueues the demo sweeps.
+uv run python -m aerie_trading.seed
+
+# For an installation whose history arrives another way.
+uv run python -m aerie_trading.seed --no-collect
+```
+
+It **computes** the demo rather than inserting result rows: what lands is queue
+rows, and the workers produce the numbers through the real engine. A cold boot
+therefore shows runs in flight for a minute before it shows results, which is a
+better demonstration than instant answers.
+
+It is idempotent and namespaced to itself. Sweeps it wrote carry
+`sweep.seeded`, and that flag — not the name — is what a re-run reconciles
+against, because `sweep.name` is deliberately not unique and an operator may
+legitimately name their own sweep `demo-ma-crossover`.
+
 ## Layout
 
 Directories arrive with the phase that needs them, so most of this is a map of
@@ -422,7 +498,7 @@ where things will go rather than of what is here:
 | `aerie_trading/settings.py` | every value read from the environment, as one typed model |
 | `aerie_trading/revision.py` | which commit this build came from |
 | `aerie_trading/logging.py` | JSON on stdout, in the shape the cluster's log pipeline reads |
-| `aerie_trading/control/` | FastAPI: health, readiness, metrics, version |
+| `aerie_trading/control/` | FastAPI: health, readiness, metrics, version, the control panel's API, and the bundle that renders it |
 | `aerie_trading/db/` | the Ledger — SQLAlchemy models and the engine |
 | `aerie_trading/migrations/` | Alembic, run from an init container on deploy |
 | `tests/` | pytest, mirroring the package |
@@ -433,6 +509,7 @@ where things will go rather than of what is here:
 | `aerie_trading/strategies/` | one strategy per module, plus the explicit registry |
 | `aerie_trading/runs/` | sweeps, the Postgres work queue, and the worker loop |
 | `aerie_trading/honesty/` | walk-forward folds, selection accounting, baselines and cost stress, and the serializer that refuses a fitted headline |
+| `aerie_trading/seed/` | what a fresh installation finds when it opens the control panel |
 
 Type checking is `pyright` in **strict** mode, deliberately: the owner does not
 write Python, and pydantic models under a strict checker read much like C#. If

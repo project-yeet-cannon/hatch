@@ -44,6 +44,14 @@ bld/
 # BuildDashboard/BuildHome targets and Dockerfile.api).
 src/Aerie.Api/wwwroot/apps/
 
+# The trading control panel's bundle (docs/plans/trading.md Phase 7). The one
+# app in the Aerie.Web workspace that does not build into wwwroot/apps: the
+# trading service serves its own SPA, and the trading image's build context is
+# src/Aerie.Trading/, so the bundle has to land inside that directory to be
+# COPYable. Build output all the same - `npm run build -w apps/trading`
+# regenerates it, and CI does so before building the image.
+src/Aerie.Trading/aerie_trading/control/static/
+
 # `tsc -b` output for the two apps whose tsconfig.node.json is still a
 # `composite` project (admin, docs). These were committed once and became a
 # trap: Vite's config lookup tries vite.config.js *before* vite.config.ts, so

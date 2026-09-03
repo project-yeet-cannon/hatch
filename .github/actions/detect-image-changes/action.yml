@@ -14,7 +14,11 @@ inputs:
     description: Image reference without a tag, e.g. ghcr.io/owner/name
     required: true
   path:
-    description: Repo-relative build path whose changes should trigger a rebuild
+    description: >
+      Repo-relative build path whose changes should trigger a rebuild.
+      Whitespace-separated for an image built from more than one directory —
+      the trading image is one, because its SPA is built in the Aerie.Web
+      workspace and copied into the silo before the image build.
     required: true
   registry:
     description: Registry host to authenticate against
@@ -88,7 +92,12 @@ runs:
           exit 0
         fi
 
-        if git diff --quiet "$published_rev" HEAD -- "$BUILD_PATH"; then
+        # Split on whitespace, so an image whose sources live in more than one
+        # directory can name them all. A single path is the common case and is
+        # a one-element array.
+        read -r -a build_paths <<< "$BUILD_PATH"
+
+        if git diff --quiet "$published_rev" HEAD -- "${build_paths[@]}"; then
           echo "$BUILD_PATH unchanged since published revision $published_rev - skipping build."
           echo "changed=false" >> "$GITHUB_OUTPUT"
         else
