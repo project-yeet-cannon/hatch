@@ -307,7 +307,9 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
         if (parent.Id == selfId) return (null, "an issue cannot be its own parent");
 
         if (EfHatchIssue.LegalParentTypes.TryGetValue(type, out var legal) && !legal.Contains(parent.Type))
-            return (null, $"a {type} hangs under a {string.Join(" or a ", legal)}, not a {parent.Type}");
+            return (null,
+                $"{Article(type)} {type} hangs under {string.Join(" or ", legal.Select(t => $"{Article(t)} {t}"))}, "
+                + $"not {Article(parent.Type)} {parent.Type}");
 
         // Walk up from the proposed parent. Reaching the issue being parented
         // means the link would close a loop - which is not merely untidy: the
@@ -328,6 +330,14 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
     }
 
     // ---- Mapping ----
+
+    /// <summary>
+    /// "an epic", "a story". These sentences are read on screen by the person
+    /// who just tried the thing, and "a epic" reads as a bug in everything
+    /// around it.
+    /// </summary>
+    private static string Article(string noun) =>
+        noun.Length > 0 && "aeiou".Contains(char.ToLowerInvariant(noun[0])) ? "an" : "a";
 
     private static EfHatchIssueEvent Event(string actor, string kind, object? payload, DateTimeOffset at) => new()
     {
