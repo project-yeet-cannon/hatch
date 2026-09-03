@@ -258,3 +258,52 @@ export interface IssueMoveRequest {
 export interface CommentCreateRequest {
   body: string;
 }
+
+// ---- Playbooks ----
+
+/** What the CLI's `--model` takes. Aliases rather than pinned ids, because a
+    playbook says "the big one" and should still mean it a year from now. */
+export type PlaybookModel = 'haiku' | 'sonnet' | 'opus' | 'fable';
+
+export const PLAYBOOK_MODELS: PlaybookModel[] = ['haiku', 'sonnet', 'opus', 'fable'];
+
+/** What the CLI's `--effort` takes, cheapest first. */
+export type PlaybookEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+export const PLAYBOOK_EFFORTS: PlaybookEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+/** One row of the matrix: a transition, the types it speaks for, and what an
+    agent making that move is told and spent on. Mirrors PlaybookDto. */
+export interface Playbook {
+  id: number;
+  fromStatusId: number;
+  fromStatusName: string;
+  toStatusId: number;
+  toStatusName: string;
+  /** Empty means every type. */
+  types: IssueType[];
+  prompt: string;
+  /** An alias, or a pinned `claude-…` name an operator typed by hand. */
+  model: string;
+  effort: string;
+  updatedAt: string;
+}
+
+export interface PlaybookCreateRequest {
+  fromStatusId: number;
+  toStatusId: number;
+  types?: IssueType[];
+  prompt: string;
+  model?: string;
+  effort?: string;
+}
+
+/** Null or absent leaves a field alone, as everywhere else in Hatch. */
+export interface PlaybookPatchRequest {
+  fromStatusId?: number;
+  toStatusId?: number;
+  types?: IssueType[];
+  prompt?: string;
+  model?: string;
+  effort?: string;
+}

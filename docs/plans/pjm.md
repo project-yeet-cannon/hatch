@@ -507,6 +507,39 @@ recorded here because three of the items reverse a decision stated above.
 - **Status is the issue page's own band**, in its column's colour, with every
   column beside it as one press each.
 
+### The agent round
+
+A second round, larger than the first, which turns the tracker into something
+an unattended session works rather than something a person reads to a session.
+
+- **A review column.** Seeded left of the first terminal one. The flow now has
+  an end an agent may reach (`review`) and an end only the operator may
+  (`done`), which is what makes "never move a ticket to a terminal status"
+  something the board expresses rather than something a prompt asks for.
+- **Playbooks.** *Narrows "no board configuration beyond statuses-as-columns".*
+  A row per (transition, issue types) carrying a prompt, a model and an effort
+  level. The matrix exists because "do the next increment" is not one job:
+  turning a paragraph into an epic with stories under it is the hardest
+  thinking in the flow and wants the largest model at the highest effort, while
+  picking up a specified task and writing the code is ordinary work. Seeded
+  with six rows; retuned on a page, because nobody guesses the right effort for
+  a transition first time - they find it after watching a run go badly.
+- **Writing a playbook is closed to an API key.** `[RequireAdmin]` naming no
+  scope, on the three writes. This is the one edge in the graph that closes a
+  loop: an agent able to widen its own prompt and raise its own budget has no
+  fixed point to settle at, and the failure is unbounded spend rather than a
+  wrong answer. Cutting it costs nothing and is cut in the route rather than
+  asked for in a prompt.
+- **`GET /api/hatch/work/next` and `/api/hatch/work/{key}`.** What to do next
+  and how, in one request - which issue, which way it is going, whether it may
+  go there, and which playbook speaks for the move. Server-side for the reason
+  the rank is: it keeps every client dumb. The board is worked *right to left*,
+  because a board worked the other way starts everything and finishes nothing.
+- **`scripts/hatch.sh work`.** Reads that answer and spawns a headless session
+  with the playbook's prompt, model and effort - `--model` and `--effort`
+  override for one run without touching the matrix. The loop the operator runs
+  is now one command.
+
 ## Phase 7 — Migrate and dissipate
 
 Hatch becomes the system of record and this plan eats itself. Operator-paced —

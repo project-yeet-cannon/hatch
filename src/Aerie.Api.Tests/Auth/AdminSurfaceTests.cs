@@ -146,6 +146,18 @@ public class AdminSurfaceTests
         "ImportController.Preview",
         "ImportController.PreviewText",
         "ImportController.Import",
+        "WorkController.GetNextWork",
+        "WorkController.GetWork",
+
+        // Playbooks are guarded twice over. Reading one is Hatch-scoped like
+        // the rest; writing one names no scope at all, so an API key is
+        // refused - a playbook chooses the next agent's instructions, its
+        // model and its budget, and an agent that could edit one could widen
+        // its own. See PlaybooksController.
+        "PlaybooksController.GetPlaybooks",
+        "PlaybooksController.CreatePlaybook",
+        "PlaybooksController.PatchPlaybook",
+        "PlaybooksController.DeletePlaybook",
 
         // The whole controller, reads included. See SettingsController.
         "SettingsController.GetAll",

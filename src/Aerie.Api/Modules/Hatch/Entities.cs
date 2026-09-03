@@ -370,3 +370,146 @@ public class EfHatchIssueEvent
 
     public required DateTimeOffset At { get; set; }
 }
+
+/// <summary>
+/// What an agent should be told, and how much thought to spend, when it moves
+/// an issue of some type from one column to the next.
+///
+/// The matrix exists because "do the next increment of work" is not one job.
+/// Turning a paragraph of intent into an epic with stories under it is the
+/// hardest thinking in the flow and wants the largest model at the highest
+/// effort; picking up an already-specified task and writing the code is
+/// ordinary work that a smaller one does well. Encoding that as rows rather
+/// than as branches in a script means the operator retunes it from a page
+/// after watching a run go badly, which is the only way anybody ever finds the
+/// right settings.
+/// </summary>
+/// <remarks>
+/// Deliberately not writable by an API key - see
+/// <see cref="PlaybooksController"/>. A playbook chooses the model and the
+/// prompt for the next agent, so an agent that could edit one could widen its
+/// own instructions and its own budget, and the loop that results has no
+/// natural end. The operator writes these; agents read them.
+/// </remarks>
+[Table("Playbooks")]
+[Index(nameof(FromStatusId), nameof(ToStatusId), nameof(Types), IsUnique = true)]
+public class EfHatchPlaybook
+{
+    public const int MaxTypesLength = 60;
+    public const int MaxModelLength = 60;
+    public const int MaxEffortLength = 10;
+    public const int MaxPromptLength = 20_000;
+
+    /// <summary>
+    /// The thinking budget, as the Claude Code CLI spells it - what
+    /// <c>--effort</c> accepts and nothing else, because a value this does not
+    /// recognise is one the CLI refuses at spawn time, long after the operator
+    /// has stopped looking at the page they typed it on.
+    /// </summary>
+    public static readonly string[] Efforts = ["low", "medium", "high", "xhigh", "max"];
+
+    /// <summary>
+    /// The model aliases the CLI resolves to whatever is current. Aliases
+    /// rather than pinned ids because a playbook says "the big one" and means
+    /// it a year from now; a full <c>claude-…</c> name is accepted too, for an
+    /// operator who has a reason to pin.
+    /// </summary>
+    public static readonly string[] ModelAliases = ["haiku", "sonnet", "opus", "fable"];
+
+    /// <summary>A pinned model id, for the operator who wants exactly one.</summary>
+    private const string FullModelPattern = "^claude-[a-z0-9][a-z0-9.-]{0,48}$";
+
+    /// <summary>
+    /// What a row created without an opinion takes. The middle of the range on
+    /// both axes, deliberately: a playbook nobody has tuned yet should do the
+    /// work adequately and cost adequately, so that the first thing the
+    /// operator learns from it is what the transition actually needs.
+    /// </summary>
+    public const string DefaultModel = "sonnet";
+    public const string DefaultEffort = "medium";
+
+    [Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+    public int Id { get; set; }
+
+    /// <summary>The column the issue is sitting in when the agent picks it up.</summary>
+    public required int FromStatusId { get; set; }
+    public EfHatchStatus? FromStatus { get; set; }
+
+    /// <summary>The column it is meant to be in when the agent stops.</summary>
+    public required int ToStatusId { get; set; }
+    public EfHatchStatus? ToStatus { get; set; }
+
+    /// <summary>
+    /// Which issue types this applies to, comma separated and normalised by
+    /// <see cref="NormalizeTypes"/> - or empty, which means every type.
+    ///
+    /// A string rather than a join table because the set has four members and
+    /// is read whole every time it is read at all; the unique index above is
+    /// what the normalisation is for, and it is why "task,bug" and "bug, task"
+    /// must not be two rows.
+    /// </summary>
+    [MaxLength(MaxTypesLength)]
+    public required string Types { get; set; }
+
+    /// <summary>
+    /// What the agent is told before it is shown the ticket. The ticket body is
+    /// the brief; this is the method - what "one increment" means for this
+    /// transition, and what shape the answer takes.
+    /// </summary>
+    [MaxLength(MaxPromptLength)]
+    public required string Prompt { get; set; }
+
+    [MaxLength(MaxModelLength)]
+    public required string Model { get; set; }
+
+    [MaxLength(MaxEffortLength)]
+    public required string Effort { get; set; }
+
+    public required DateTimeOffset CreatedAt { get; set; }
+    public required DateTimeOffset UpdatedAt { get; set; }
+
+    /// <summary>
+    /// Lower case, de-duplicated, in the order <see cref="EfHatchIssue.Types"/>
+    /// declares them, joined with commas. One set of types has exactly one
+    /// spelling, so the unique index can do its job.
+    /// </summary>
+    public static string NormalizeTypes(IEnumerable<string>? types)
+    {
+        if (types is null) return "";
+
+        var wanted = types
+            .Select(t => t?.Trim().ToLowerInvariant())
+            .Where(t => !string.IsNullOrEmpty(t))
+            .ToHashSet();
+
+        // Every type named is the same as none named - both mean "any issue" -
+        // and storing it as the empty set keeps one meaning to one row.
+        if (wanted.Count == 0 || EfHatchIssue.Types.All(wanted.Contains)) return "";
+
+        return string.Join(",", EfHatchIssue.Types.Where(wanted.Contains));
+    }
+
+    /// <summary>The stored string back as a list. Empty stays empty.</summary>
+    public static string[] SplitTypes(string? types) =>
+        string.IsNullOrEmpty(types) ? [] : types.Split(',', StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>Whether this playbook speaks for an issue of this type.</summary>
+    public bool Covers(string issueType) =>
+        Types.Length == 0 || SplitTypes(Types).Contains(issueType);
+
+    /// <summary>
+    /// How closely it speaks for it. A playbook that names the type beats one
+    /// that names every type, so "inbox to todo, epics" can say something
+    /// different from "inbox to todo, anything else" without either having to
+    /// know about the other.
+    /// </summary>
+    public int Specificity => Types.Length == 0 ? 0 : 1;
+
+    public static bool IsValidEffort(string? effort) =>
+        effort is not null && Efforts.Contains(effort);
+
+    public static bool IsValidModel(string? model) =>
+        model is not null &&
+        (ModelAliases.Contains(model) ||
+         Regex.IsMatch(model, FullModelPattern, RegexOptions.None, TimeSpan.FromSeconds(1)));
+}

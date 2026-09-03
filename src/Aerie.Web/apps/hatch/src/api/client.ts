@@ -16,6 +16,9 @@ import type {
   IssueSearch,
   ParsedEpic,
   PastedPlan,
+  Playbook,
+  PlaybookCreateRequest,
+  PlaybookPatchRequest,
   Project,
   ProjectCreateRequest,
   ProjectPatchRequest,
@@ -106,6 +109,20 @@ export const deleteStatus = (id: number) =>
   fetchJson<void>(`/api/hatch/statuses/${id}`, { method: 'DELETE' });
 
 // ---- Issues ----
+
+// ---- Playbooks ----
+//
+// Reading is all a Hatch-scoped API key may do here; the three writes are
+// refused for one, which is why they exist only on this page and never in a
+// script. See PlaybooksController.
+
+export const getPlaybooks = () => fetchJson<Playbook[]>('/api/hatch/playbooks');
+export const createPlaybook = (request: PlaybookCreateRequest) =>
+  fetchJson<Playbook>('/api/hatch/playbooks', { method: 'POST', body: JSON.stringify(request) });
+export const patchPlaybook = (id: number, request: PlaybookPatchRequest) =>
+  fetchJson<Playbook>(`/api/hatch/playbooks/${id}`, { method: 'PATCH', body: JSON.stringify(request) });
+export const deletePlaybook = (id: number) =>
+  fetchJson<void>(`/api/hatch/playbooks/${id}`, { method: 'DELETE' });
 
 export const getIssue = (key: string) => fetchJson<Issue>(`/api/hatch/issues/${seg(key)}`);
 
