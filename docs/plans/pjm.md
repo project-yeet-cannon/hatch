@@ -3,7 +3,9 @@
 Status: phases 0-6 complete 2026-09-03 — Hatch is shipped for the operator and
 for Claude: the module, the API, the board, `hatch.${DOMAIN}`, the plans
 importer, and wall-level API keys. Phase 7 (migrate and dissipate) remains, and
-is operator-paced.
+is operator-paced. A round of ergonomics landed on top of the plan afterwards —
+see [After the plan](#after-the-plan) for what that changed about the decisions
+below.
 
 Aerie's projects are currently managed by juggling markdown files in
 `docs/plans/`. **Hatch** replaces that with a self-hosted Jira/Trello-lite: a
@@ -47,7 +49,9 @@ document becomes its first migrated epic.
 
 - No reporting or metrics screens (events are recorded, not rendered).
 - No filtration, swimlanes, sprints, WIP limits, or board configuration beyond
-  statuses-as-columns.
+  statuses-as-columns. *(Board filtering and a bulk editor landed after the
+  plan — see [After the plan](#after-the-plan). Swimlanes, sprints and WIP
+  limits are still non-goals.)*
 - No granular permissions — reaching Hatch means trusted to do everything in it.
 - No status-transition rules — any status to any status, we trust ourselves.
 - No GitHub integration (PR/action linking is a stated direction, not built).
@@ -79,14 +83,17 @@ document becomes its first migrated epic.
 All in the `hatch` schema. Entities carry the house `Ef` prefix.
 
 **`EfHatchProject`** — `Id` (int, identity), `Key` (text, unique, must match
-`^[A-Z][A-Z0-9]{1,5}$`, immutable after creation — renaming keys would orphan
-every `AER-n` reference in the world), `Name` (text), `NextIssueNumber` (int,
-default 1, `[ConcurrencyCheck]`), `CreatedAt`.
+`^[A-Z][A-Z0-9]{1,5}$`), `Name` (text), `NextIssueNumber` (int, default 1,
+`[ConcurrencyCheck]`), `CreatedAt`. The key was immutable in the MVP, on the
+grounds that renaming one orphans every `AER-n` reference in the world; it is
+now changeable behind a speed bump, which is the same argument with the operator
+allowed to make the call — see [After the plan](#after-the-plan).
 
 **`EfHatchStatus`** — `Id` (int, identity), `Name` (text, unique),
 `SortOrder` (int; column order on the board), `IsTerminal` (bool; marks "done"
-columns so later reporting knows what shipped). Seeded in the Init migration:
-inbox (10), todo (20), in progress (30), done (40, terminal).
+columns so later reporting knows what shipped), `Color` (text, `#rrggbb`; added
+after the plan). Seeded in the Init migration: inbox (10), todo (20), in
+progress (30), done (40, terminal).
 
 **`EfHatchIssue`** — `Id` (long, identity), `ProjectId` (FK), `Number` (int;
 unique index on `(ProjectId, Number)` as the numbering backstop), `Type` (text:
@@ -462,6 +469,43 @@ deploy: `curl -H "Authorization: Bearer $KEY" https://hatch.${DOMAIN}/api/hatch/
 returns the board through Traefik (forwardAuth hands Verify the original
 request headers — this curl is the proof), the same curl with a revoked key
 gets 401, and against `/api/devices` gets 403.
+
+## After the plan
+
+Phases 0-6 shipped the tracker. Using it for a week produced a round of
+ergonomics that is not a phase - there was no plan to work, only a list - and is
+recorded here because three of the items reverse a decision stated above.
+
+- **Columns carry a colour.** `EfHatchStatus.Color`, `#rrggbb`, operator-editable
+  on the Statuses page. A row rather than a palette keyed on the four seeded
+  names: the operator invents columns, and a lookup by name would leave a new
+  one grey forever and lose a renamed one's colour. The ink written on a colour
+  is computed from its luminance rather than chosen (`lib/color.ts`), because
+  CSS still cannot ask that question.
+- **A project key can change.** *Reverses "immutable after creation".* The cost
+  is unchanged and is now stated to the operator instead of being decided for
+  them: text references (`AER-12` in a commit message, a branch name, a chat
+  log) go dead, while the structure comes through intact, because parentage is a
+  foreign key and the number is the issue's own. The speed bump is the browser's
+  - type the old key to confirm - and the API simply refuses a bad or taken one.
+- **The board filters.** *Narrows "no filtration".* A toggle per type and a dumb
+  substring search over key, title, type and parent, done in the browser over
+  the board already in hand - a filter that refetched would drop the drag in
+  progress. Placement moved to `lib/place.ts` so a drop lands next to the card
+  the operator can see rather than next to a hidden row at the same index.
+- **`GET /api/hatch/issues` and `POST /api/hatch/issues/bulk`.** A filter
+  (project, type, column, parent, ancestor at any depth, title substring) and one
+  edit applied to many issues. The bulk path shares the single-issue edit path,
+  which was pulled apart so that everything refusable is looked up before
+  anything is written - that ordering is what lets one issue's refusal leave
+  that issue untouched while the batch around it goes through.
+- **The board is denser and says more during a drag.** Columns are grid tracks
+  sharing the width, cards are narrower with titles cut to a few hundred
+  characters and three lines, a card follows the cursor, and the column a drop
+  would land in lights up in its own colour. Clicking a card opens a summary
+  built from what the board already downloaded rather than loading the issue.
+- **Status is the issue page's own band**, in its column's colour, with every
+  column beside it as one press each.
 
 ## Phase 7 — Migrate and dissipate
 
