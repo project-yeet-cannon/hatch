@@ -11,12 +11,14 @@ import {
   patchIssue,
 } from '../api/client';
 import { MomentChip } from '../components/MomentChip';
+import { StatusPill } from '../components/StatusPill';
 import { MomentField } from '../components/MomentField';
 import { TypeBadge } from '../components/TypeBadge';
+import { statusVars } from '../lib/color';
 import { message } from '../lib/errors';
 import { renderMarkdown } from '../lib/markdown';
 import { ISSUE_TYPES, LEGAL_PARENT_TYPES } from '../types';
-import type { Board, Comment, Issue, IssueEvent, IssueType } from '../types';
+import type { Board, Comment, Issue, IssueEvent, IssueType, Status } from '../types';
 
 export function IssuePage() {
   const { key = '' } = useParams();
@@ -115,6 +117,12 @@ export function IssuePage() {
 
       {error && <p className="text-danger">{error}</p>}
 
+      <StatusBar
+        statuses={board.statuses}
+        statusId={issue.statusId}
+        onMove={(statusId) => void save({ statusId })}
+      />
+
       <Card>
         <div className="hatch-issue-controls">
           <Field label="Type">
@@ -122,16 +130,6 @@ export function IssuePage() {
               {ISSUE_TYPES.map((t) => (
                 <option key={t} value={t}>
                   {t}
-                </option>
-              ))}
-            </select>
-          </Field>
-
-          <Field label="Status">
-            <select value={issue.statusId} onChange={(e) => void save({ statusId: Number(e.target.value) })}>
-              {board.statuses.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
                 </option>
               ))}
             </select>
@@ -185,6 +183,59 @@ export function IssuePage() {
 
       <EventTrail events={events} />
     </div>
+  );
+}
+
+/**
+ * Where this issue is, and every other place it could be.
+ *
+ * Status was a <select> in a row of five pickers, which made "what is the state
+ * of this thing" - the first question anybody opens an issue with - the same
+ * size as its ready date. Here it is the page's own band: the column it is in,
+ * in that column's colour, and the whole board's worth of columns beside it as
+ * one press each.
+ *
+ * Every column is offered, in board order, because Hatch has no transition
+ * rules on purpose (docs/plans/pjm.md, "Non-goals") - any status to any status,
+ * we trust ourselves.
+ */
+function StatusBar({
+  statuses,
+  statusId,
+  onMove,
+}: {
+  statuses: Status[];
+  statusId: number;
+  onMove: (statusId: number) => void;
+}) {
+  const current = statuses.find((s) => s.id === statusId);
+
+  return (
+    <section className="hatch-status-bar" style={statusVars(current?.color)} aria-label="Status">
+      <div className="hatch-status-bar-now">
+        <span className="hatch-status-bar-label">Status</span>
+        {current ? <StatusPill status={current} size="lg" /> : <span className="text-muted">unknown</span>}
+      </div>
+
+      <div className="hatch-status-steps" role="group" aria-label="Move this issue">
+        {statuses.map((status) => {
+          const here = status.id === statusId;
+          return (
+            <button
+              key={status.id}
+              type="button"
+              className={`hatch-status-step${here ? ' here' : ''}`}
+              style={statusVars(status.color)}
+              aria-pressed={here}
+              disabled={here}
+              onClick={() => onMove(status.id)}
+            >
+              {status.name}
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 

@@ -530,6 +530,103 @@
   flex-wrap: wrap;
 }
 
+/* A form laid out as a grid rather than as a row of flexed fields. The row was
+   what made the Projects form look misaligned: two inputs of different natural
+   widths, each sized by its content, with a button on the end pulling the
+   baseline about. Fixed tracks give every control the same width and the same
+   left edge, and the fields keep their own vertical rhythm inside them. */
+.hatch-field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--sp-4) var(--sp-5);
+  align-items: start;
+}
+
+.hatch-field-grid input,
+.hatch-field-grid select,
+.hatch-field-grid textarea {
+  width: 100%;
+}
+
+/* Buttons that belong to one table row. Spaced rather than butted together:
+   one of them is a delete. */
+.hatch-row-actions {
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+}
+
+/* The colour picker and the pill it is painting. Side by side, because the
+   pill is what says whether the colour works - it is the same element the board
+   draws, ink and all. */
+.hatch-color-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.hatch-color-cell input[type='color'] {
+  width: 3rem;
+  height: 2rem;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  background: var(--card);
+  cursor: pointer;
+}
+
+/* ---- Bulk edit ---- */
+
+/* A date field and the tick that turns it on. The tick has to come first and
+   has to be its own control: an empty date box cannot say both "leave these
+   alone" and "take the date off all of them", and those are opposite edits. */
+.hatch-dated-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.hatch-change-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--t-label);
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.hatch-bulk-outcome {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+  font-size: var(--t-body);
+}
+
+.hatch-bulk-outcome p {
+  margin: 0;
+  font-weight: 600;
+}
+
+/* Every refusal, in full. A bulk edit that reports "3 refused" and not why is
+   one the operator has to reconstruct by hand. */
+.hatch-bulk-failures {
+  list-style: none;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--t-label);
+  color: var(--danger);
+}
+
+/* The results table holds a title column that can be long; the page's own
+   max-width is what keeps it from stretching the layout. */
+.hatch-bulk-page table {
+  font-size: var(--t-body);
+}
+
 /* ---- The issue page ---- */
 
 .hatch-issue-meta {
@@ -541,6 +638,78 @@
 
 .hatch-issue-key {
   font-family: var(--mono);
+}
+
+/* ---- The status band ----
+
+   The issue page's loudest element, and deliberately so: "where is this" is the
+   first question an issue is opened with, and it was previously a <select> the
+   same size as the ready date beside it.
+
+   Painted from the column's own colour: a wash behind the band, the colour
+   itself down the leading edge, and the pill filled with it. Three uses of one
+   value, so the page tells the operator what column they are in before they
+   have read the word. */
+.hatch-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  flex-wrap: wrap;
+  padding: var(--sp-4) var(--sp-5);
+  background: color-mix(in srgb, var(--status-color) 10%, var(--card));
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--status-color);
+  border-radius: var(--r);
+}
+
+.hatch-status-bar-now {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.hatch-status-bar-label {
+  font-size: var(--t-label);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+/* Every column, one press each. A segmented control rather than a dropdown:
+   there are four of them, they are the whole vocabulary of the board, and a
+   dropdown hides three quarters of it behind a click. */
+.hatch-status-steps {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.hatch-status-step {
+  padding: var(--sp-1-5) var(--sp-3);
+  border: 1px solid var(--status-color);
+  border-radius: var(--r-pill);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-label);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.hatch-status-step:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--status-color) 18%, transparent);
+}
+
+/* The column it is already in. Disabled rather than merely marked - pressing it
+   would write an event saying an issue moved from todo to todo. */
+.hatch-status-step.here {
+  background: var(--status-color);
+  color: var(--status-ink);
+  cursor: default;
+  opacity: 1;
 }
 
 .hatch-issue-controls {

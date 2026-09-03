@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Button, Card, Field, PageHeader, Table } from '@aerie/ui';
 import { createStatus, deleteStatus, getStatuses, patchStatus } from '../api/client';
+import { StatusPill } from '../components/StatusPill';
+import { safeColor } from '../lib/color';
 import { message } from '../lib/errors';
 import { useLoaded } from '../lib/useLoaded';
 import type { Status } from '../types';
@@ -51,10 +53,13 @@ export function StatusesPage() {
       {error && <p className="text-danger">{error}</p>}
 
       <Card>
-        <div className="hatch-inline-form">
-          <Field label="Name">
+        <h2 className="hatch-section-title">New column</h2>
+        <div className="hatch-field-grid">
+          <Field label="Name" hint="What the column is called on the board.">
             <input value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
+        </div>
+        <div className="hatch-form-actions">
           <Button variant="primary" loading={saving} disabled={!name} onClick={() => void create()}>
             Add column
           </Button>
@@ -67,6 +72,7 @@ export function StatusesPage() {
             <thead>
               <tr>
                 <th>Name</th>
+                <th>Colour</th>
                 <th>Done column</th>
                 <th>Order</th>
                 <th />
@@ -77,6 +83,12 @@ export function StatusesPage() {
                 <tr key={status.id}>
                   <td>
                     <NameCell status={status} onRename={(next) => void act(() => patchStatus(status.id, { name: next }))} />
+                  </td>
+                  <td>
+                    <ColorCell
+                      status={status}
+                      onRecolor={(color) => void act(() => patchStatus(status.id, { color }))}
+                    />
                   </td>
                   <td>
                     <input
@@ -111,6 +123,45 @@ export function StatusesPage() {
           </Table>
         </Card>
       )}
+    </div>
+  );
+}
+
+/**
+ * A column's colour, edited where it is read.
+ *
+ * The pill beside the picker is the point: the board writes the status name on
+ * the colour, and whether that name comes out white or black is computed rather
+ * than chosen (lib/color.ts). Showing the pill here is how the operator finds
+ * out that their pale yellow is fine and their mid grey is not, before the
+ * board tells them.
+ *
+ * Committed on blur rather than on change: a colour input fires continuously
+ * while a swatch is being dragged around, and a PATCH per frame is a PATCH per
+ * frame.
+ */
+function ColorCell({ status, onRecolor }: { status: Status; onRecolor: (color: string) => void }) {
+  const [draft, setDraft] = useState(safeColor(status.color));
+  const [known, setKnown] = useState(status.color);
+
+  // Re-syncs when the row changes underneath - see InlineTitle on the issue page.
+  if (status.color !== known) {
+    setKnown(status.color);
+    setDraft(safeColor(status.color));
+  }
+
+  return (
+    <div className="hatch-color-cell">
+      <input
+        type="color"
+        value={draft}
+        aria-label={`${status.name} colour`}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          if (draft !== safeColor(status.color)) onRecolor(draft);
+        }}
+      />
+      <StatusPill status={{ ...status, color: draft }} />
     </div>
   );
 }
