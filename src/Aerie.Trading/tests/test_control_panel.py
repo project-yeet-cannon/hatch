@@ -48,6 +48,7 @@ from aerie_trading.runs.sweep import SweepSpec, enqueue_sweep, plan_sweep
 from aerie_trading.runs.worker import Assessor, HistoryCache, Worker
 from aerie_trading.settings import Settings
 from tests.conftest import STAMPED, StubDatabase
+from tests.test_control import NO_BUNDLE
 
 SYMBOL = "ZVZZT"
 FIRST_SESSION = date(2022, 1, 3)
@@ -115,6 +116,10 @@ def client(ledger: Engine) -> TestClient:
             database=StubDatabase(),
             revision=STAMPED,
             engine=ledger,
+            # No bundle, so these tests describe the API alone whether or not
+            # whoever ran them had also built the control panel. See
+            # tests/test_control.py's note on the same seam.
+            static_root=NO_BUNDLE,
         )
     )
 

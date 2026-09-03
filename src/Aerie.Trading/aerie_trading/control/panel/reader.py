@@ -67,8 +67,6 @@ __all__ = [
     "DEFAULT_LIMIT",
     "MAX_LIMIT",
     "Panel",
-    "Sample",
-    "Since",
     "UnknownRun",
     "UnknownStrategy",
     "UnknownSweep",
@@ -116,10 +114,6 @@ _MODE: Final[Mapping[str, str]] = {
     "backtest": "",
     "live": " AND false",
 }
-
-Sample = str
-Since = str
-
 
 class UnknownStrategy(LookupError):
     """No ``strategy`` row by that name."""

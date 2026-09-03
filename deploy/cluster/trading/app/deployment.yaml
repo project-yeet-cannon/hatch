@@ -140,6 +140,16 @@ spec:
         # namespaced to itself: it reconciles only rows it marked as seeded,
         # and it collects only a window the Lake does not already hold. See
         # aerie_trading/seed/.
+        #
+        # **What this costs, stated rather than discovered:** an init container
+        # that fails keeps the control plane down. That is the right trade
+        # here and it is worth knowing why - the only ways this step fails are
+        # an unreachable Ledger and an unwritable Lake, and in either of those
+        # the workers behind this pod cannot run anything either. A panel that
+        # came up to serve an empty leaderboard in that state would be a
+        # working-looking UI in front of a broken silo. On a cold cluster this
+        # container also backfills five years of daily bars before the service
+        # starts, which is the one deploy where it is not instant.
         - name: seed
           image: "${IMAGE_REGISTRY}/aerie-trading:${TRADING_IMAGE_TAG}"
           command: ["python", "-m", "aerie_trading.seed"]

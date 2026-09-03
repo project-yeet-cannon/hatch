@@ -43,6 +43,7 @@ outside will get a 401 until they are enrolled, which is correct.
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Final
 
 from fastapi import FastAPI, Response
@@ -52,7 +53,7 @@ from starlette.requests import Request
 
 from aerie_trading.control.metrics import CONTENT_TYPE, build_registry, render_metrics
 from aerie_trading.control.panel import create_panel_router
-from aerie_trading.control.spa import mount_spa
+from aerie_trading.control.spa import STATIC_ROOT, mount_spa
 from aerie_trading.db import Database, SqlDatabase
 from aerie_trading.db.engine import create_ledger_engine
 from aerie_trading.revision import Revision, read_revision
@@ -72,6 +73,7 @@ def create_app(
     database: Database | None = None,
     revision: Revision | None = None,
     engine: Engine | None = None,
+    static_root: Path | None = None,
 ) -> FastAPI:
     """Build the application.
 
@@ -87,6 +89,13 @@ def create_app(
     over eight tables with `DISTINCT ON` and a partial index in them, whose
     interesting case is a real Postgres holding real runs. So a test points the
     engine at a scratch database and leaves the stub where it is.
+
+    ``static_root`` is a third seam and exists for a smaller reason that is
+    easy to get wrong: the control panel's bundle is build output, so whether
+    it is present depends on whether anybody has run ``npm`` in this working
+    tree. Registering the SPA's catch-all changes what an unmatched path
+    answers, so a test of *that* has to say which world it is in rather than
+    inheriting one from the developer's last command.
     """
     resolved_settings = settings if settings is not None else get_settings()
     resolved_revision = revision if revision is not None else read_revision()
@@ -245,6 +254,6 @@ def create_app(
     app.include_router(create_panel_router(resolved_engine, resolved_settings))
 
     # And the bundle itself, last, because its catch-all matches everything.
-    mount_spa(app)
+    mount_spa(app, static_root if static_root is not None else STATIC_ROOT)
 
     return app

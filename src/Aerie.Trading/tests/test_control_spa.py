@@ -7,6 +7,10 @@ app, that an unmatched API path does not, and that a missing bundle leaves a
 working API rather than a service that will not start.
 """
 
+# FastAPI's decorator idiom - the routes below are registered by decoration and
+# never referenced by name, which pyright's strict mode reads as dead code.
+# pyright: reportUnusedFunction=false
+
 from __future__ import annotations
 
 from pathlib import Path

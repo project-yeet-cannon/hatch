@@ -1,10 +1,20 @@
 """The four endpoints, and the platform contract each of them stands for."""
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from aerie_trading.control.app import REVISION_HEADER, create_app
 from aerie_trading.settings import Settings
 from tests.conftest import STAMPED, StubDatabase
+
+#: A bundle location with nothing in it, so that these tests describe the API
+#: alone. The control panel's bundle is build output (`control/spa.py`), and
+#: without this the answers below would depend on whether whoever ran the suite
+#: had also run `npm run build -w apps/trading` - the SPA's catch-all serves
+#: index.html for any path no route claimed, which is the right behaviour and
+#: is asserted in tests/test_control_spa.py.
+NO_BUNDLE = Path(__file__).resolve().parent / "no-such-bundle"
 
 
 def client(database: StubDatabase | None = None, **settings: object) -> TestClient:
@@ -13,6 +23,7 @@ def client(database: StubDatabase | None = None, **settings: object) -> TestClie
             settings=Settings(**settings),  # pyright: ignore[reportArgumentType]
             database=database if database is not None else StubDatabase(),
             revision=STAMPED,
+            static_root=NO_BUNDLE,
         )
     )
 
