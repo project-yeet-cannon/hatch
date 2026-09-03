@@ -22,12 +22,14 @@ return series at all. Returning 0 for those would put a number on a question
 that has no answer, and a leaderboard would then rank it. ``db/models.RunMetric``
 writes out the sorting half of the same argument.
 
-**What is deliberately *not* here:** anything needing a second run to interpret.
-A baseline comparison, a walk-forward figure, a selection-adjusted Sharpe and a
-re-score at a higher cost assumption are all Phase 6, and each of them is a
-function of several runs rather than of one. Every name below can be computed
-from a single ``BacktestResult`` and nothing else, which is what lets a worker
-write them in the transaction that records the run.
+**What is deliberately *not* computed here:** anything needing a second run to
+interpret. A baseline comparison, a walk-forward figure, a selection-adjusted
+Sharpe and a re-score at a higher cost assumption are all Phase 6, and each of
+them is a function of several runs rather than of one. Their *names* are below,
+because a metric name has to be one string and every process reads this file;
+their arithmetic is in ``honesty/scoring.py``. Everything ``compute_metrics``
+emits can be computed from a single ``BacktestResult`` and nothing else, which
+is what lets a worker write those rows in the transaction that records the run.
 """
 
 from __future__ import annotations
@@ -44,19 +46,31 @@ from aerie_trading.providers.base import REGULAR_SESSION_MINUTES, Interval
 
 __all__ = [
     "ANNUALIZED_RETURN",
+    "BASELINE_RETURN",
     "COMMISSION_PAID",
+    "COST_SENSITIVITY",
+    "DEFLATED_SHARPE",
+    "EXCESS_RETURN",
+    "EXCESS_RETURN_INDEX",
+    "EXPECTED_MAX_SHARPE",
     "EXPOSURE",
     "FINAL_EQUITY",
+    "HONESTY_METRIC_NAMES",
+    "INDEX_RETURN",
     "MAX_DRAWDOWN",
     "MAX_DRAWDOWN_DAYS",
     "METRIC_NAMES",
+    "SELECTION_TRIALS",
     "SHARPE",
     "SLIPPAGE_PAID",
     "SORTINO",
+    "STRESSED_SHARPE",
+    "STRESSED_TOTAL_RETURN",
     "TOTAL_RETURN",
     "TRADE_COUNT",
     "TURNOVER",
     "VOLATILITY",
+    "WALK_FORWARD_FOLDS",
     "WIN_RATE",
     "compute_metrics",
     "periods_per_year",
@@ -80,6 +94,26 @@ TRADE_COUNT: Final = "trade_count"
 COMMISSION_PAID: Final = "commission_paid"
 SLIPPAGE_PAID: Final = "slippage_paid"
 
+# Phase 6's names, which this file predicted it would carry: *"Phase 6's
+# honesty layer adds names to this file."* Declared here and **computed in
+# `honesty/scoring.py`**, and the split is the point of both docstrings. A
+# metric name is read by a worker that writes it and by a leaderboard in
+# another process that sorts on it, so it belongs in the one place every
+# consumer already imports; the arithmetic behind these needs a second run - a
+# baseline, a stressed re-score, the siblings of a sweep - which is precisely
+# what this module refuses to know about.
+BASELINE_RETURN: Final = "baseline_return"
+INDEX_RETURN: Final = "index_return"
+EXCESS_RETURN: Final = "excess_return"
+EXCESS_RETURN_INDEX: Final = "excess_return_index"
+STRESSED_TOTAL_RETURN: Final = "stressed_total_return"
+STRESSED_SHARPE: Final = "stressed_sharpe"
+COST_SENSITIVITY: Final = "cost_sensitivity"
+SELECTION_TRIALS: Final = "selection_trials"
+EXPECTED_MAX_SHARPE: Final = "expected_max_sharpe"
+DEFLATED_SHARPE: Final = "deflated_sharpe"
+WALK_FORWARD_FOLDS: Final = "walk_forward_folds"
+
 #: Every name this module can emit. Not every run has every one - see the
 #: module docstring on absence - so this is the vocabulary rather than a
 #: promise about any particular row.
@@ -98,6 +132,24 @@ METRIC_NAMES: Final[tuple[str, ...]] = (
     TRADE_COUNT,
     COMMISSION_PAID,
     SLIPPAGE_PAID,
+)
+
+#: The names Phase 6 adds. Kept as a second tuple rather than folded into
+#: ``METRIC_NAMES`` because the two differ in something a caller cares about:
+#: everything above can be computed from one ``BacktestResult``, and nothing
+#: below can. ``compute_metrics`` emits the first set and never the second.
+HONESTY_METRIC_NAMES: Final[tuple[str, ...]] = (
+    BASELINE_RETURN,
+    INDEX_RETURN,
+    EXCESS_RETURN,
+    EXCESS_RETURN_INDEX,
+    STRESSED_TOTAL_RETURN,
+    STRESSED_SHARPE,
+    COST_SENSITIVITY,
+    SELECTION_TRIALS,
+    EXPECTED_MAX_SHARPE,
+    DEFLATED_SHARPE,
+    WALK_FORWARD_FOLDS,
 )
 
 #: Sessions in a year. The conventional 252 rather than a count off the

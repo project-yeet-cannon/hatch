@@ -30,6 +30,13 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from aerie_trading.db.models import DataSource, ParamSet, Run, RunStatus, Strategy
+from aerie_trading.engine.metrics import (
+    BASELINE_RETURN,
+    COST_SENSITIVITY,
+    SELECTION_TRIALS,
+    WALK_FORWARD_FOLDS,
+)
+from aerie_trading.honesty.config import WalkForwardSpec
 from aerie_trading.lake.reader import LakeReader
 from aerie_trading.lake.schema import Provenance
 from aerie_trading.lake.writer import LakeWriter
@@ -88,6 +95,14 @@ def spec_for_grid(**overrides: object) -> SweepSpec:
         "window_start": WINDOW[0],
         "window_end": WINDOW[1],
         "costs": CostSpec(),
+        # No walk-forward row. Phase 6 adds one to every sweep by default, and
+        # these tests are about the queue rather than about it: a run count
+        # that silently gained one would make every assertion below off by one
+        # for a reason that has nothing to do with SKIP LOCKED. The
+        # walk-forward's own trip through this queue is asserted in
+        # the walk-forward tests at the bottom of this file, which use a
+        # lake long enough to fold.
+        "walk_forward": None,
     }
     values.update(overrides)
     return SweepSpec.model_validate(values)
@@ -354,3 +369,145 @@ def _drain_concurrently(
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         return list(pool.map(one, range(workers)))
+
+
+# -- Phase 6's walk-forward, through the same queue ---------------------------
+#
+# Its own lake, and the reason is the shape of a fold rather than a preference:
+# five folds over the six-month lake above give a train window of about
+# forty-five sessions, which is shorter than the warm-up of half the grid, and
+# the run correctly fails saying so. Three years is long enough that every
+# candidate has room in every fold, which is what makes this a test of the
+# machinery rather than of the window.
+
+WF_FIRST_SESSION = date(2022, 1, 3)
+WF_LAST_SESSION = date(2024, 12, 31)
+WF_WINDOW = (datetime(2022, 1, 1, tzinfo=UTC), datetime(2025, 1, 1, tzinfo=UTC))
+
+
+@pytest.fixture(scope="session")
+def long_lake_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    root: Path = tmp_path_factory.mktemp("walk-forward-lake")
+    provider = SyntheticMarketDataProvider()
+    writer = LakeWriter(
+        root=root,
+        provenance=Provenance("synthetic", REVISION, datetime(2025, 1, 1, tzinfo=UTC)),
+    )
+    sessions = provider.market_hours(WF_FIRST_SESSION, WF_LAST_SESSION)
+    writer.write_bars(
+        provider.bars(
+            [SYMBOL],
+            Interval.ONE_DAY,
+            sessions[0].open,
+            sessions[-1].close + timedelta(minutes=1),
+        )
+    )
+    return root
+
+
+def test_a_sweep_carries_a_walk_forward_run_that_the_same_worker_executes(
+    ledger: Engine, long_lake_root: Path, source_id: int
+) -> None:
+    spec = spec_for_grid(
+        window_start=WF_WINDOW[0],
+        window_end=WF_WINDOW[1],
+        walk_forward=WalkForwardSpec(folds=3, train_multiple=2),
+    )
+    plan = plan_sweep(spec)
+    with Session(ledger) as session, session.begin():
+        sweep_id = enqueue_sweep(
+            session, plan, confirm=plan.total, data_source_id=source_id, ceiling=100_000
+        )
+
+    # The grid, plus one. The extra row is the honest number, and it is on the
+    # denominator of the sweep's own progress from the moment it is enqueued.
+    assert plan.rows == plan.total + 1
+
+    claimed, ok, failed = drain(ledger, long_lake_root)
+
+    assert (claimed, ok, failed) == (plan.rows, plan.rows, 0)
+    assert sweep_progress(ledger, sweep_id).is_complete
+
+    with ledger.connect() as connection:
+        row = (
+            connection.execute(
+                text(
+                    "SELECT kind, param_set_id, oos_start, oos_end, status"
+                    " FROM run WHERE kind = 'walk_forward'"
+                )
+            )
+            .mappings()
+            .one()
+        )
+        folds = (
+            connection.execute(
+                text(
+                    "SELECT fold, candidates, param_set_id, train_start, train_end,"
+                    " test_start, test_end FROM walk_forward_fold ORDER BY fold"
+                )
+            )
+            .mappings()
+            .all()
+        )
+        metrics = {
+            str(entry["name"]): entry["value"]
+            for entry in connection.execute(
+                text(
+                    "SELECT m.name, m.value FROM run_metric m"
+                    " JOIN run r ON r.id = m.run_id WHERE r.kind = 'walk_forward'"
+                )
+            )
+            .mappings()
+            .all()
+        }
+
+    assert row["status"] == RunStatus.SUCCEEDED.value
+    # No single parameter set, because it does not have one - it has the three
+    # it chose, which are in walk_forward_fold.
+    assert row["param_set_id"] is None
+    assert row["oos_start"] is not None
+    assert row["oos_end"] == WF_WINDOW[1]
+
+    assert [fold["fold"] for fold in folds] == [0, 1, 2]
+    assert all(fold["candidates"] == plan.total for fold in folds)
+    # Every fold's winner is a real param_set row, which is what makes "did an
+    # ordinary run of this choice agree" a join rather than a comparison of two
+    # renderings of the same numbers.
+    assert all(fold["param_set_id"] is not None for fold in folds)
+    # And no fold trained on its own test window.
+    assert all(fold["train_end"] == fold["test_start"] for fold in folds)
+
+    assert metrics[WALK_FORWARD_FOLDS] == 3
+    # The sweep's grid, not its row count: the walk-forward is not one of its
+    # own trials.
+    assert metrics[SELECTION_TRIALS] == plan.total
+
+
+def test_every_run_in_a_sweep_is_scored_against_a_baseline(
+    ledger: Engine, long_lake_root: Path, source_id: int
+) -> None:
+    # Phase 6: "baselines, computed over the identical window and shown next to
+    # every result". Next to *every* result means the metric is on the row
+    # rather than one join away, which is what this asserts.
+    spec = spec_for_grid(window_start=WF_WINDOW[0], window_end=WF_WINDOW[1])
+    plan = plan_sweep(spec)
+    with Session(ledger) as session, session.begin():
+        enqueue_sweep(session, plan, confirm=plan.total, data_source_id=source_id, ceiling=100_000)
+
+    drain(ledger, long_lake_root)
+
+    with ledger.connect() as connection:
+        scored = connection.execute(
+            text("SELECT COUNT(DISTINCT run_id) FROM run_metric WHERE name = :name"),
+            {"name": BASELINE_RETURN},
+        ).scalar_one()
+        stressed = connection.execute(
+            text("SELECT COUNT(DISTINCT run_id) FROM run_metric WHERE name = :name"),
+            {"name": COST_SENSITIVITY},
+        ).scalar_one()
+
+    assert scored == plan.total
+    # The cost re-score is per backtest and is deliberately not computed for a
+    # walk-forward: re-scoring one would mean re-selecting every fold at the
+    # stressed prices, which is a second walk-forward rather than a re-score.
+    assert stressed == plan.total

@@ -52,19 +52,27 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from typing import Final
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from aerie_trading.db.models import RunMetric, RunStatus, Trade
+from aerie_trading.db.models import (
+    RunKind,
+    RunMetric,
+    RunStatus,
+    Strategy,
+    Trade,
+    WalkForwardFold,
+)
 from aerie_trading.engine.backtest import BacktestResult
+from aerie_trading.honesty.walkforward import FoldOutcome
 from aerie_trading.providers.base import Interval
-from aerie_trading.runs.catalog import ensure_instrument
+from aerie_trading.runs.catalog import ensure_instrument, ensure_param_set
 from aerie_trading.runs.costs import CostSpec
 
 __all__ = [
@@ -103,13 +111,26 @@ class ClaimedRun:
     attempts: int
     max_attempts: int
     strategy: str
-    params: Mapping[str, object]
     symbols: tuple[str, ...]
     interval: Interval
     window_start: datetime
     window_end: datetime
     starting_cash: Decimal
     costs: CostSpec
+    #: ``backtest`` or ``walk_forward``. The worker branches on it and on
+    #: nothing else - see ``db/models.RunKind`` for why one queue carries both.
+    kind: RunKind = RunKind.BACKTEST
+    #: The parameters, for a backtest. Empty for a walk-forward, which chooses
+    #: its own per fold out of ``sweep_spec``.
+    params: Mapping[str, object] = field(default_factory=dict[str, object])
+    #: The sweep's launch spec, carried on the claim rather than fetched, so a
+    #: walk-forward has the grid it evaluates without a second round trip and
+    #: without the worker having to hold a session while it works.
+    sweep_spec: Mapping[str, object] | None = None
+    #: How many parameter sets this run's sweep expanded to - Phase 6's
+    #: selection-accounting divisor. 1 for a run that was not selected out of
+    #: anything, which earns no haircut.
+    trials: int = 1
 
     @property
     def history_key(self) -> tuple[str, ...]:
@@ -185,23 +206,32 @@ _CLAIM_SQL = text(
            started_at = COALESCE(run.started_at, now())
       FROM picked
      WHERE run.id = picked.id
- RETURNING run.id, run.sweep_id, run.attempts, run.max_attempts,
+ RETURNING run.id, run.sweep_id, run.kind, run.attempts, run.max_attempts,
            run.param_set_id, run.symbols, run.interval,
            run.window_start, run.window_end, run.starting_cash, run.costs
     """
 )
 
-# The detail a claim needs and the UPDATE cannot return: the strategy's name
-# and the parameters, which live one join away. A second statement inside the
-# same transaction rather than a join on the UPDATE, because an UPDATE ... FROM
-# that joined three tables would be one where the row being locked is harder to
-# see than the rows being read.
+# The detail a claim needs and the UPDATE cannot return: the strategy's name,
+# the parameters, and - from Phase 6 - the sweep's grid and how many parameter
+# sets it expanded to. A second statement inside the same transaction rather
+# than a join on the UPDATE, because an UPDATE ... FROM that joined four tables
+# would be one where the row being locked is harder to see than the rows being
+# read.
+#
+# Both joins are LEFT, and neither is loose typing: a walk-forward run has no
+# param_set by construction (`db/models.RunKind`), and a run an operator
+# launched by hand has no sweep. An inner join would return no row for either,
+# which the claim would then read as a corrupt row rather than as an ordinary
+# one.
 _CLAIMED_DETAIL_SQL = text(
     """
-    SELECT s.name AS strategy, p.params AS params
+    SELECT s.name AS strategy, p.params AS params,
+           w.spec AS sweep_spec, w.trials AS trials
       FROM run r
       JOIN strategy s ON s.id = r.strategy_id
-      JOIN param_set p ON p.id = r.param_set_id
+      LEFT JOIN param_set p ON p.id = r.param_set_id
+      LEFT JOIN sweep w ON w.id = r.sweep_id
      WHERE r.id = :run_id
     """
 )
@@ -286,13 +316,19 @@ class RunQueue:
                 attempts=int(row["attempts"]),
                 max_attempts=int(row["max_attempts"]),
                 strategy=str(detail["strategy"]),
-                params=dict(detail["params"]),
                 symbols=tuple(str(symbol) for symbol in row["symbols"]),
                 interval=Interval(str(row["interval"])),
                 window_start=row["window_start"],
                 window_end=row["window_end"],
                 starting_cash=row["starting_cash"],
                 costs=CostSpec.from_blob(row["costs"]),
+                kind=RunKind(str(row["kind"])),
+                params={} if detail["params"] is None else dict(detail["params"]),
+                sweep_spec=(None if detail["sweep_spec"] is None else dict(detail["sweep_spec"])),
+                # One trial, not zero, for a run with no sweep behind it. It
+                # was not selected out of anything, and the haircut for a
+                # single draw is zero rather than undefined.
+                trials=max(int(detail["trials"] or 1), 1),
             )
 
     def reclaim_expired(self, backoff_seconds: int = 0) -> Sequence[tuple[int, str]]:
@@ -335,8 +371,9 @@ class RunQueue:
         metrics: Mapping[str, Decimal],
         data_fingerprint: str,
         revision: str,
+        folds: Sequence[FoldOutcome] = (),
     ) -> bool:
-        """Record a completed run, its blotter and its metrics. Fenced.
+        """Record a completed run, its blotter, its metrics and its folds. Fenced.
 
         Returns ``False`` and writes nothing when the lease was lost, which is
         not an error: it means another worker was handed this run and either
@@ -425,7 +462,45 @@ class RunQueue:
                 RunMetric(run_id=claimed.id, name=name, value=value)
                 for name, value in metrics.items()
             )
+            self._record_folds(session, claimed, folds)
         return True
+
+    def _record_folds(
+        self, session: Session, claimed: ClaimedRun, folds: Sequence[FoldOutcome]
+    ) -> None:
+        """One ``walk_forward_fold`` row per fold, inside the same transaction.
+
+        The chosen parameters go through ``ensure_param_set`` rather than into
+        a JSONB copy, so a fold's winner is the *same row* an ordinary sweep
+        run of those parameters points at - which is what makes "did the
+        in-sample run of this fold's choice agree with what the fold saw" a
+        join rather than a comparison of two renderings. It is idempotent by
+        hash, so the usual case writes nothing new: every fold winner came out
+        of the grid this sweep already enqueued.
+        """
+        if not folds:
+            return
+        strategy = session.scalar(select(Strategy).where(Strategy.name == claimed.strategy))
+        if strategy is None:  # pragma: no cover - the claim joined this row
+            raise LookupError(f"no strategy row named {claimed.strategy!r}")
+        for outcome in folds:
+            param_set = ensure_param_set(session, strategy, outcome.params)
+            session.flush()
+            session.add(
+                WalkForwardFold(
+                    run_id=claimed.id,
+                    fold=outcome.fold.index,
+                    train_start=outcome.fold.train_start,
+                    train_end=outcome.fold.train_end,
+                    test_start=outcome.fold.test_start,
+                    test_end=outcome.fold.test_end,
+                    param_set_id=param_set.id,
+                    candidates=outcome.candidates,
+                    train_objective=outcome.train_objective,
+                    starting_cash=outcome.starting_cash,
+                    ending_equity=outcome.ending_equity,
+                )
+            )
 
     def fail(self, claimed: ClaimedRun, error: str) -> bool:
         """Record a run that raised. Requeues it unless its attempts are spent.

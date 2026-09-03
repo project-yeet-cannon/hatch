@@ -63,7 +63,7 @@ from aerie_trading.runs.sweep import (
     full_grid,
     plan_sweep,
 )
-from aerie_trading.runs.worker import HistoryCache, Worker, default_worker_name
+from aerie_trading.runs.worker import Assessor, HistoryCache, Worker, default_worker_name
 from aerie_trading.settings import Settings, get_settings
 from aerie_trading.strategies import spec_for
 
@@ -216,6 +216,7 @@ def _work(arguments: argparse.Namespace, settings: Settings) -> int:
     )
     try:
         with LakeReader(settings.lake_root) as reader:
+            cache = HistoryCache(reader, maxsize=config.history_cache)
             worker = Worker(
                 queue=RunQueue(
                     engine,
@@ -223,9 +224,21 @@ def _work(arguments: argparse.Namespace, settings: Settings) -> int:
                     lease_seconds=config.lease_seconds,
                     retry_backoff_seconds=config.retry_backoff_seconds,
                 ),
-                cache=HistoryCache(reader, maxsize=config.history_cache),
+                cache=cache,
                 revision=revision,
                 config=config,
+                # The composition root is where "a broad index" stops being an
+                # abstraction: an installation that named one gets it, and one
+                # that did not gets everything it collects bars for, which is
+                # the broadest thing this lake has. Resolved here rather than
+                # inside the Assessor because `settings.collection` is the
+                # installation's answer and the honesty layer should not be
+                # reaching for it.
+                assessor=Assessor(
+                    cache,
+                    settings.honesty,
+                    settings.honesty.index_symbols or settings.collection.bar_symbols,
+                ),
             )
             worker.install_signal_handlers()
             report = worker.run(
@@ -258,7 +271,7 @@ def _launch(arguments: argparse.Namespace, settings: Settings) -> int:
     if arguments.command == "demo":
         # Over what this installation collects, rather than over the constants'
         # own universe - see runs/demo.demo_sweeps.
-        specs = demo_sweeps(settings.collection.bar_symbols)
+        specs = demo_sweeps(settings.collection.bar_symbols, settings.honesty.walk_forward)
         dry_run = bool(arguments.dry_run)
         confirmations = [None] * len(specs)
     else:
@@ -387,6 +400,11 @@ def _spec_from(arguments: argparse.Namespace, settings: Settings) -> SweepSpec:
         starting_cash=arguments.cash,
         costs=costs,
         priority=arguments.priority,
+        # The installation's default, baked into the spec at launch. See
+        # honesty/config.py on why the sweep carries it instead of a worker
+        # reading it back: a fold count that changed under a finished result
+        # would relabel every number already on the leaderboard.
+        walk_forward=settings.honesty.walk_forward,
     )
 
 

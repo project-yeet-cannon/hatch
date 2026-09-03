@@ -36,20 +36,36 @@ import socket
 import threading
 import time
 from collections import OrderedDict
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from types import FrameType
 
+from aerie_trading.db.models import RunKind
 from aerie_trading.engine.backtest import BacktestResult, run_backtest
 from aerie_trading.engine.history import BarHistory, load_history
 from aerie_trading.engine.metrics import compute_metrics
+from aerie_trading.honesty.config import HonestyConfig, WalkForwardSpec
+from aerie_trading.honesty.scoring import HonestyInputs, score, stress
+from aerie_trading.honesty.walkforward import FoldOutcome, walk_forward
 from aerie_trading.lake.reader import LakeReader
 from aerie_trading.providers.base import Interval
 from aerie_trading.runs.config import RunnerConfig
+from aerie_trading.runs.costs import CostSpec
 from aerie_trading.runs.queue import ClaimedRun, RunQueue
+from aerie_trading.runs.sweep import SweepSpec, plan_sweep
 from aerie_trading.strategies import spec_for
 
-__all__ = ["HistoryCache", "Worker", "WorkerReport", "default_worker_name", "execute"]
+__all__ = [
+    "Assessor",
+    "Execution",
+    "HistoryCache",
+    "Worker",
+    "WorkerReport",
+    "default_worker_name",
+    "execute",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -121,8 +137,169 @@ class WorkerReport:
         return self.succeeded + self.failed
 
 
-def execute(claimed: ClaimedRun, cache: HistoryCache) -> tuple[BacktestResult, str]:
-    """Run one claimed backtest. Returns the result and the data fingerprint.
+@dataclass(frozen=True, slots=True)
+class Execution:
+    """Everything one claimed run produced, before any of it is written down.
+
+    A value rather than four return values, because Phase 6 added two of them
+    and a five-tuple is where the third and fourth get swapped. ``metrics``
+    already holds the honesty layer's names folded in beside the engine's, so
+    the queue writes one mapping and does not have to know which came from
+    where.
+    """
+
+    result: BacktestResult
+    data_fingerprint: str
+    metrics: Mapping[str, Decimal]
+    folds: tuple[FoldOutcome, ...] = ()
+
+
+class Assessor:
+    """The honesty layer, as one object a worker holds for its whole life.
+
+    docs/plans/trading.md Phase 6 wants a baseline, a broad-index baseline and
+    a stressed re-score beside *every* result. Computed naively that is three
+    extra backtests per run, and two of the three are the same answer for every
+    run in a sweep - the baseline over a window does not depend on which
+    parameters are being compared against it. So they are memoized on the
+    history they were computed over, which turns "three extra backtests per
+    run" into "three extra backtests per sweep, plus one stressed re-score per
+    run" - and the re-score is the one that genuinely cannot be shared, since
+    it is the run itself at different prices.
+
+    Bounded by the same argument as ``HistoryCache``: keyed on the history and
+    the money, and small, because a worker that drifts across sweeps must not
+    accumulate one entry per window it has ever seen.
+    """
+
+    #: The strategy every baseline is. Named rather than passed in: the plan's
+    #: baseline is buy-and-hold, and an installation that could configure it to
+    #: something else would be one where two leaderboards are not comparable.
+    BASELINE_STRATEGY = "buy_and_hold"
+
+    def __init__(
+        self,
+        cache: HistoryCache,
+        config: HonestyConfig | None = None,
+        index_symbols: Sequence[str] = (),
+    ) -> None:
+        self._cache = cache
+        self._config = config if config is not None else HonestyConfig()
+        self._index_symbols = tuple(dict.fromkeys(symbol.upper() for symbol in index_symbols))
+        self._baselines: OrderedDict[tuple[str, ...], BacktestResult] = OrderedDict()
+
+    @property
+    def index_symbols(self) -> tuple[str, ...]:
+        return self._index_symbols
+
+    @property
+    def config(self) -> HonestyConfig:
+        return self._config
+
+    def inputs(
+        self, claimed: ClaimedRun, result: BacktestResult, history: BarHistory
+    ) -> HonestyInputs:
+        """The three comparisons and the two counts, for one finished run.
+
+        Every one of them is optional and every failure is swallowed into a
+        ``None``. That is deliberate and is the difference between a honesty
+        layer and a liability: a lake that has no bars for the broad universe,
+        or a baseline that raised, must not turn a run that worked into a run
+        that failed. The metric goes absent, which reads on a leaderboard as
+        "this run has no such comparison" rather than as a zero.
+        """
+        return HonestyInputs(
+            baseline=self._baseline(claimed, history),
+            index=self._index(claimed),
+            stressed=self._stressed(claimed, history),
+            trials=claimed.trials,
+        )
+
+    # -- the comparisons -----------------------------------------------------
+
+    def _baseline(self, claimed: ClaimedRun, history: BarHistory) -> BacktestResult | None:
+        """Buy-and-hold over the run's own universe, window, cash and costs."""
+        key = (*claimed.history_key, "own", str(claimed.starting_cash))
+        return self._memoized(key, history, claimed.starting_cash, claimed.costs)
+
+    def _index(self, claimed: ClaimedRun) -> BacktestResult | None:
+        """Buy-and-hold over the broad universe. ``None`` when none is configured."""
+        if not self._index_symbols:
+            return None
+        try:
+            history = self._cache.load(
+                self._index_symbols, claimed.interval, claimed.window_start, claimed.window_end
+            )
+        except Exception:
+            logger.warning(
+                "No broad-index baseline: the lake has no bars for it over this window",
+                extra={"RunId": claimed.id, "Symbols": list(self._index_symbols)},
+                exc_info=True,
+            )
+            return None
+        key = (
+            claimed.interval.value,
+            claimed.window_start.isoformat(),
+            claimed.window_end.isoformat(),
+            "index",
+            str(claimed.starting_cash),
+            *self._index_symbols,
+        )
+        return self._memoized(key, history, claimed.starting_cash, claimed.costs)
+
+    def _stressed(self, claimed: ClaimedRun, history: BarHistory) -> BacktestResult | None:
+        """The same run at the stressed cost model. Not memoized - it is per run."""
+        multiple = self._config.cost_stress_multiple
+        if multiple <= 1:
+            return None
+        try:
+            return run_backtest(
+                spec_for(claimed.strategy).build(claimed.params),
+                history,
+                starting_cash=claimed.starting_cash,
+                costs=stress(claimed.costs, multiple).build(),
+                name=claimed.strategy,
+            )
+        except Exception:
+            logger.warning(
+                "No cost-sensitivity figure: the stressed re-score raised",
+                extra={"RunId": claimed.id},
+                exc_info=True,
+            )
+            return None
+
+    def _memoized(
+        self,
+        key: tuple[str, ...],
+        history: BarHistory,
+        starting_cash: Decimal,
+        costs: CostSpec,
+    ) -> BacktestResult | None:
+        cached = self._baselines.get(key)
+        if cached is not None:
+            self._baselines.move_to_end(key)
+            return cached
+        try:
+            baseline = run_backtest(
+                spec_for(self.BASELINE_STRATEGY).default(),
+                history,
+                starting_cash=starting_cash,
+                costs=costs.build(),
+                name=self.BASELINE_STRATEGY,
+            )
+        except Exception:
+            logger.warning("A baseline could not be computed", exc_info=True)
+            return None
+        self._baselines[key] = baseline
+        while len(self._baselines) > 4:
+            self._baselines.popitem(last=False)
+        return baseline
+
+
+def execute(
+    claimed: ClaimedRun, cache: HistoryCache, assessor: Assessor | None = None
+) -> Execution:
+    """Run one claimed item of work, whichever kind it is.
 
     Free of the queue and of the database on purpose: everything it needs was
     copied onto ``ClaimedRun`` under the claim's transaction, and everything it
@@ -134,11 +311,21 @@ def execute(claimed: ClaimedRun, cache: HistoryCache) -> tuple[BacktestResult, s
     the row, so a run enqueued by a build that shipped a strategy this one does
     not is a ``LookupError`` naming both - which the caller records as a failed
     run rather than a crashed worker.
+
+    ``assessor`` of ``None`` means "record what the engine can say about this
+    run and nothing else". Not a production configuration - every entry point
+    passes one - but the honesty layer is three extra backtests, and a test
+    measuring the engine's own accounting should not have to pay for them or
+    reason about them.
     """
     history = cache.load(
         claimed.symbols, claimed.interval, claimed.window_start, claimed.window_end
     )
     spec = spec_for(claimed.strategy)
+
+    if claimed.kind is RunKind.WALK_FORWARD:
+        return _walk_forward(claimed, history, assessor)
+
     result = run_backtest(
         spec.build(claimed.params),
         history,
@@ -146,7 +333,67 @@ def execute(claimed: ClaimedRun, cache: HistoryCache) -> tuple[BacktestResult, s
         costs=claimed.costs.build(),
         name=claimed.strategy,
     )
-    return result, history.fingerprint()
+    metrics = dict(compute_metrics(result))
+    if assessor is not None:
+        metrics.update(score(result, assessor.inputs(claimed, result, history)))
+    return Execution(result=result, data_fingerprint=history.fingerprint(), metrics=metrics)
+
+
+def _walk_forward(claimed: ClaimedRun, history: BarHistory, assessor: Assessor | None) -> Execution:
+    """Phase 6's evaluation of a whole sweep, as one item of work.
+
+    The grid comes off ``sweep.spec``, which the claim carried, and is expanded
+    through the same ``plan_sweep`` the launcher used - so the parameter sets
+    walked here are exactly the ones enqueued beside this row, pruned corners
+    and all. Re-expanding rather than reading the sibling ``param_set`` rows is
+    what keeps this a pure function of the spec: the siblings may still be
+    queued, may have been cancelled, and are in any case a different question
+    from "what was this sweep asked to search".
+    """
+    if claimed.sweep_spec is None:  # pragma: no cover - the CHECK forbids it
+        raise LookupError("a walk-forward run has no sweep to read its grid from")
+    spec = SweepSpec.model_validate(dict(claimed.sweep_spec))
+    schedule = spec.walk_forward if spec.walk_forward is not None else WalkForwardSpec()
+    config = assessor.config if assessor is not None else HonestyConfig()
+
+    evaluation = walk_forward(
+        history,
+        spec_for(claimed.strategy),
+        plan_sweep(spec).param_sets,
+        window=(claimed.window_start, claimed.window_end),
+        folds=schedule.folds,
+        train_multiple=schedule.train_multiple,
+        objective=schedule.objective,
+        starting_cash=claimed.starting_cash,
+        costs=claimed.costs.build(),
+        ceiling=config.max_fold_evaluations,
+        name=claimed.strategy,
+    )
+
+    metrics = dict(compute_metrics(evaluation.result))
+    if assessor is not None:
+        inputs = assessor.inputs(claimed, evaluation.result, history)
+        # The trials count is the grid, and the fold count is what makes this
+        # row a walk-forward rather than a backtest that happens to be out of
+        # sample. Both are on the row a leaderboard reads.
+        metrics.update(
+            score(
+                evaluation.result,
+                HonestyInputs(
+                    baseline=inputs.baseline,
+                    index=inputs.index,
+                    stressed=None,
+                    trials=claimed.trials,
+                    folds=len(evaluation.outcomes),
+                ),
+            )
+        )
+    return Execution(
+        result=evaluation.result,
+        data_fingerprint=history.fingerprint(),
+        metrics=metrics,
+        folds=evaluation.outcomes,
+    )
 
 
 class Worker:
@@ -158,11 +405,20 @@ class Worker:
         cache: HistoryCache,
         revision: str,
         config: RunnerConfig | None = None,
+        assessor: Assessor | None = None,
     ) -> None:
         self._queue = queue
         self._cache = cache
         self._revision = revision
         self._config = config if config is not None else RunnerConfig()
+        # Constructed here when the caller did not, rather than left ``None``.
+        # The honesty layer is not optional in a deployment - a leaderboard
+        # whose baseline column is empty because a composition root forgot an
+        # argument is precisely the failure Phase 6 exists to prevent - so the
+        # default is "on, with the shipped defaults" and switching it off is a
+        # configuration value (``cost_stress_multiple``, ``index_symbols``)
+        # rather than an omission.
+        self._assessor = assessor if assessor is not None else Assessor(cache)
         self._stopping = threading.Event()
 
     def stop(self) -> None:
@@ -245,7 +501,7 @@ class Worker:
         """
         started = time.monotonic()
         try:
-            result, data_fingerprint = execute(work, self._cache)
+            execution = execute(work, self._cache, self._assessor)
         except Exception as failure:
             # Bare, and deliberately. Everything a strategy can do wrong -
             # a lookback of zero, a division, a symbol the lake does not have -
@@ -261,10 +517,11 @@ class Worker:
 
         recorded = self._queue.succeed(
             work,
-            result,
-            compute_metrics(result),
-            data_fingerprint,
+            execution.result,
+            execution.metrics,
+            execution.data_fingerprint,
             self._revision,
+            execution.folds,
         )
         if not recorded:
             return None
@@ -272,9 +529,11 @@ class Worker:
             "Run complete",
             extra={
                 "RunId": work.id,
+                "Kind": work.kind.value,
                 "Strategy": work.strategy,
-                "Bars": result.bars,
-                "Trades": result.trades,
+                "Bars": execution.result.bars,
+                "Trades": execution.result.trades,
+                "Folds": len(execution.folds),
                 "ElapsedMs": int((time.monotonic() - started) * 1000),
             },
         )

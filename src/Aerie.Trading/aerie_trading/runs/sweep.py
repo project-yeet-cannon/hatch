@@ -49,8 +49,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from sqlalchemy import insert
 from sqlalchemy.orm import Session
 
-from aerie_trading.db.models import Run, RunStatus, Sweep
+from aerie_trading.db.models import Run, RunKind, RunStatus, Sweep
 from aerie_trading.engine.strategy import StrategySpec
+from aerie_trading.honesty.config import WalkForwardSpec
+from aerie_trading.honesty.windows import folds_over, out_of_sample
 from aerie_trading.providers.base import Interval
 from aerie_trading.runs.catalog import ensure_param_set, ensure_strategy
 from aerie_trading.runs.costs import RETAIL_EQUITY, CostSpec
@@ -132,6 +134,15 @@ class SweepSpec(BaseModel):
     priority: int = Field(default=100, ge=0, le=1000)
     max_attempts: int = Field(default=3, ge=1, le=10)
 
+    #: How this sweep is evaluated out of sample (Phase 6). ``None`` means it
+    #: is not, which is an explicit choice with a visible consequence: every
+    #: run in the sweep is then in-sample only, and the API will refuse to
+    #: serve any of their figures as performance
+    #: (``honesty/presentation.py``). Carried on the spec rather than read
+    #: from the environment at scoring time so that a finished result stays
+    #: described by the numbers it actually ran with.
+    walk_forward: WalkForwardSpec | None = WalkForwardSpec()
+
     @field_validator("symbols")
     @classmethod
     def _upper_and_unique(cls, value: tuple[str, ...]) -> tuple[str, ...]:
@@ -186,16 +197,33 @@ class SweepPlan:
 
     @property
     def total(self) -> int:
-        """Runs this plan would enqueue. The number that must be confirmed."""
+        """Parameter sets this plan would run. The number that must be confirmed.
+
+        The *grid*, not the row count. The walk-forward evaluation Phase 6 adds
+        beside it is machinery rather than a search, and asking an operator to
+        confirm ``20`` for a grid they can see is nineteen points would make
+        the handshake a number to be copied rather than one to be read.
+        """
         return len(self.param_sets)
+
+    @property
+    def rows(self) -> int:
+        """Runs this plan would put on the queue, walk-forward included."""
+        return self.total + (1 if self.spec.walk_forward is not None else 0)
 
     def describe(self) -> str:
         """One line an operator reads before confirming."""
         pruned = "" if self.rejected == 0 else f" ({self.rejected} pruned: {self.rejection})"
+        forward = (
+            ""
+            if self.spec.walk_forward is None
+            else f" plus a {self.spec.walk_forward.folds}-fold walk-forward"
+        )
         return (
             f"{self.spec.name}: {self.total} run(s) of {self.spec.strategy}"
             f" over {len(self.spec.symbols)} symbol(s) at {self.spec.interval.value}"
-            f" from {self.spec.window_start.date()} to {self.spec.window_end.date()}{pruned}"
+            f" from {self.spec.window_start.date()} to {self.spec.window_end.date()}"
+            f"{pruned}{forward}"
         )
 
 
@@ -309,7 +337,8 @@ def enqueue_sweep(
         name=plan.spec.name,
         strategy_id=strategy.id,
         spec=plan.spec.model_dump(mode="json"),
-        total_runs=plan.total,
+        total_runs=plan.rows,
+        trials=plan.total,
         aerie_revision=revision,
     )
     session.add(sweep)
@@ -329,27 +358,32 @@ def enqueue_sweep(
     # place in this silo that writes rows in bulk, and the ORM's unit of work
     # would spend the whole insert building identity-mapped instances nothing
     # then reads.
-    session.execute(
-        insert(Run),
-        [
-            {
-                "sweep_id": sweep.id,
-                "strategy_id": strategy.id,
-                "param_set_id": param_set_id,
-                "data_source_id": data_source_id,
-                "symbols": list(spec.symbols),
-                "interval": spec.interval.value,
-                "window_start": spec.window_start,
-                "window_end": spec.window_end,
-                "starting_cash": spec.starting_cash,
-                "costs": costs,
-                "status": RunStatus.QUEUED.value,
-                "priority": spec.priority,
-                "max_attempts": spec.max_attempts,
-            }
-            for param_set_id in param_set_ids
-        ],
-    )
+    common: dict[str, object] = {
+        "sweep_id": sweep.id,
+        "strategy_id": strategy.id,
+        "data_source_id": data_source_id,
+        "symbols": list(spec.symbols),
+        "interval": spec.interval.value,
+        "window_start": spec.window_start,
+        "window_end": spec.window_end,
+        "starting_cash": spec.starting_cash,
+        "costs": costs,
+        "status": RunStatus.QUEUED.value,
+        "max_attempts": spec.max_attempts,
+    }
+    rows: list[dict[str, object]] = [
+        {
+            **common,
+            "kind": RunKind.BACKTEST.value,
+            "param_set_id": param_set_id,
+            "priority": spec.priority,
+        }
+        for param_set_id in param_set_ids
+    ]
+    if spec.walk_forward is not None:
+        rows.append(_walk_forward_row(common, spec))
+
+    session.execute(insert(Run), rows)
 
     logger.info(
         "Sweep enqueued",
@@ -357,8 +391,47 @@ def enqueue_sweep(
             "Sweep": spec.name,
             "SweepId": sweep.id,
             "Strategy": spec.strategy,
-            "Runs": plan.total,
+            "Trials": plan.total,
+            "Runs": plan.rows,
             "Pruned": plan.rejected,
         },
     )
     return sweep.id
+
+
+def _walk_forward_row(common: Mapping[str, object], spec: SweepSpec) -> dict[str, object]:
+    """The one extra row that evaluates this sweep out of sample.
+
+    Enqueued **behind the grid it evaluates** - priority is nudged one step
+    later - which is not a detail. A walk-forward is the most expensive item in
+    the batch by an order of magnitude, and a worker that claimed it first
+    would hold the only leaderboard-eligible row for as long as the whole grid
+    would otherwise have taken to finish. Behind the grid, a cold boot shows
+    the in-sample results filling in and then the honest number arriving, which
+    is also the order in which they are worth reading.
+
+    ``oos_start`` and ``oos_end`` are computed here rather than by the worker,
+    from the same ``folds_over`` the worker will walk. They are on the row from
+    the moment it is enqueued because they are a *promise about what this run
+    is*, and a run that only became leaderboard-eligible once it succeeded
+    would be one whose eligibility could not be queried while it was queued.
+    The worker recomputes the schedule against the bars it actually loaded, so
+    a lake that turns out to be short at one end narrows the folds rather than
+    the promise being silently wrong - see ``runs/worker.py``.
+    """
+    assert spec.walk_forward is not None
+    schedule = folds_over(
+        spec.window_start,
+        spec.window_end,
+        spec.walk_forward.folds,
+        spec.walk_forward.train_multiple,
+    )
+    span = out_of_sample(schedule)
+    return {
+        **common,
+        "kind": RunKind.WALK_FORWARD.value,
+        "param_set_id": None,
+        "priority": min(spec.priority + 1, 1000),
+        "oos_start": span.start,
+        "oos_end": span.end,
+    }
