@@ -1,0 +1,18 @@
+# The trading plan (docs/plans/trading.md) Phase 5 - the sweep workers.
+#
+# Not its own Flux Kustomization, for the reason ../lake/kustomization.yaml
+# gives about itself: ../../trading.yaml's `trading` reaches this directory as
+# a base, which puts it behind that Kustomization's `dependsOn:
+# trading-database` and inherits its postBuild.substituteFrom, where
+# ${IMAGE_REGISTRY} and ${TRADING_IMAGE_TAG} resolve. A worker whose PGHOST
+# comes from a Secret CNPG has not created yet is the failure that split
+# exists to prevent.
+#
+# It carries its own kustomization.yaml anyway because ci.yml's
+# deploy-manifests job discovers build roots by finding them, so this is built
+# standalone there as well as through ../app.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - worker-deployment.yaml
+  - worker-pdb.yaml

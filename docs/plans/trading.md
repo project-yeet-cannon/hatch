@@ -1,11 +1,19 @@
 # Trading — a strategy laboratory that rides Aerie as a platform
 
-**Status:** Phases 0b, 1, 2 and 3 built on 2026-09-02; Phase 0a is waiting on
+**Status:** Phases 0b through 5 built on 2026-09-02; Phase 0a is waiting on
 Schwab. What is left of Phase 1 is its gate — five checks that need the cluster
 — plus one line an operator adds to the site repository, both written out under
-that phase. Phase 2's gate passed in full, and Phase 3's passed in full but for
-the two checks that need a running cluster to observe; both are cases of the
-same argument for having built them without one.
+that phase. Phase 2's and Phase 4's gates passed in full. Phase 3's passed but
+for the two checks that need a running cluster to observe, and Phase 5's but for
+the one that does; all three are cases of the same argument for having built
+them without one, and Phase 5 records what was measured in place of the check it
+could not make.
+
+Phase 5 is also where the suite stopped being able to run with no database at
+all: the run queue is a Postgres queue, so `ci.yml`'s trading lane now carries a
+Postgres service container and `make trading-test-db` starts a throwaway one
+locally. `make trading-test` is still green on a box with nothing installed — it
+simply leaves that phase's gate unasserted.
 
 **The plan was re-cut on 2026-09-02 to build on a synthetic data source first.**
 Schwab was the second phase and is now the eighth. Every phase between them is
@@ -1315,38 +1323,268 @@ authoring their own.
       has to be taught exceptions is a guard someone turns off.
 - [ ] **Commit:** "Trading: an engine, a fixture that proves it, and two strategies to run"
 
-### [ ] Phase 5 — Runs, sweeps, and the queue
+### [x] Phase 5 — Runs, sweeps, and the queue
 
 **Ships:** launching a thousand parameter combinations and watching them land.
 This is the ask's "lots of strategies, lots of parameters" made operational.
 
-- [ ] Tables: `strategy`, `param_set`, `run`, `trade`, `run_metric`. A `run`
+**Built 2026-09-02.** Every bullet below is committed and the gate passed in
+full but for its fourth check, which needs the cluster and is marked with what
+was measured in its place. Four things came out of building it and are recorded
+in place rather than as a footnote: the phase needed a sixth table (below), the
+queue needed a *second* mechanism beyond the visibility timeout the bullet names
+(below), the demo needed a second sweep beside the grid (below), and the suite
+needed a real Postgres for the first time in the silo's life (below).
+
+- [x] Tables: `strategy`, `param_set`, `run`, `trade`, `run_metric`. A `run`
       records its strategy, its parameters, its data window, the
       `aerie-revision` that produced it, and the lake state it read.
-- [ ] A **Postgres work queue** — `SELECT … FOR UPDATE SKIP LOCKED`, retry
+
+      **Six tables, not five: `sweep` is the addition.** Cancellation is
+      "cancel this sweep" rather than "cancel these thousand rows I hope I
+      listed correctly", progress is a count against a denominator that has to
+      exist before the runs finish, and Phase 6's selection accounting is
+      explicit that *a run knows how many siblings its sweep produced* — which
+      is a number about the batch and not about any run in it. A `sweep_id` on
+      `run` with no table behind it would be a foreign key to a string somebody
+      typed twice. It deliberately carries no `status` column: a sweep is
+      finished when its runs are, and the one fact the runs cannot carry is
+      that somebody asked it to stop, which is `cancelled_at`.
+
+      *"The lake state it read"* is a sha256 over the bars the run actually
+      read, not a partition list. A window and an interval cannot answer
+      "were these two runs over the same data", because a partition
+      re-collected after a provider correction covers the identical window with
+      different numbers. Stored beside the result fingerprint, the pair makes a
+      disagreement diagnosable rather than merely visible: same data and
+      different results is a determinism bug, different data and different
+      results is a lake that moved.
+
+      `run_metric` is tall — `(run_id, name) → value` — because Phase 6 adds a
+      walk-forward return, a deflated Sharpe and a re-score at every point of a
+      cost-sensitivity sweep, and each of those is a migration if metrics are
+      columns and an insert if they are rows. **An undefined metric is an
+      absent row, never a NaN**: `NUMERIC` stores `NaN` happily and Postgres
+      sorts it *above* every number, so one degenerate run would top a
+      leaderboard sorted by risk-adjusted return.
+- [x] A **Postgres work queue** — `SELECT … FOR UPDATE SKIP LOCKED`, retry
       counts, visibility timeouts. No Redis, no Celery, no new infrastructure,
       and queue depth becomes rows the control panel already reads.
-- [ ] A worker deployment, horizontally scalable, with a `PodDisruptionBudget`
+
+      The last clause decided the shape: **the `run` table *is* the queue.** A
+      `job` table beside it would make depth a join and would admit two states
+      that cannot be represented at all this way — a job whose run was deleted,
+      and a run with two jobs. The scheduling columns live on the row they
+      schedule, behind two partial indexes so that a claim reads an index over
+      the queued minority rather than over a table that grows forever.
+
+      **The visibility timeout this bullet names is only half of the gate, and
+      building it is what made that obvious.** A lease that expires is what
+      stops work being *lost*. It does nothing about work being *duplicated* —
+      because the worker declared dead may not be dead, but merely frozen, and
+      about to wake up and write a result for a run somebody else has since
+      completed. So every claim also mints a **fence token**, and a worker may
+      only write while its token is still the one on the row. A reclaimed
+      worker updates zero rows and discards its answer.
+
+      Duplicated *execution* stays possible and is the price: two workers may
+      compute the same backtest and exactly one may record it. That is the
+      right side of the trade for a pure function of its inputs, and a backtest
+      is one. The unique index on `(run_id, sequence)` in `trade` is the
+      backstop under the fence — if the fence is ever wrong, a second blotter
+      is a constraint violation rather than a doubled P&L.
+
+      The reaper is a statement a worker runs **before each claim**, not a
+      CronJob and not a second deployment. A worker is already connected and
+      already about to ask the queue a question; a reaper is a deployment whose
+      own death is silent; and the moment this most needs to run is the moment
+      a worker died, which is exactly when its replacement is starting up.
+- [x] A worker deployment, horizontally scalable, with a `PodDisruptionBudget`
       and a CPU limit — a sweep is deliberately unbounded compute, and the
       cluster runs a household. The limit is the point.
-- [ ] A sweep: pick a strategy, pick ranges over its declared parameters, get
+
+      [`deploy/cluster/trading/runs/`](../../deploy/cluster/trading/runs/), two
+      replicas, reached as a base from the `trading` layer the way `../lake` is.
+      **The CPU limit is the one deliberate break with this repository's
+      convention**, which is memory limits and no CPU limits everywhere else,
+      and the difference is the workload rather than a change of mind: every
+      other pod here consumes CPU in proportion to work that arrives, and a
+      backtest worker consumes exactly as much as it is given for as long as
+      the queue is not empty. Without a limit, four replicas make the
+      household's DNS, its Home Assistant and its photo library all mildly
+      worse for an afternoon — which is worse than an outage, because nobody
+      notices it.
+
+      Three things follow from the workers being a Deployment rather than a Job
+      per sweep, and each is a reason: parallelism becomes `kubectl scale`
+      rather than a number fixed at creation, `replicas: 0` is a pause nothing
+      else has to know about, and a pod that dies takes nothing with it because
+      the queue already knows what is outstanding. The workers mount the lake
+      **read-only** and run **no migration** — that is the control plane's init
+      container, with one replica, for exactly this reason.
+- [x] A sweep: pick a strategy, pick ranges over its declared parameters, get
       the cross product, enqueue N runs, watch them complete. Sweep size is
       estimated and confirmed **before** enqueueing.
-- [ ] Metrics per run: total and annualized return, Sharpe, Sortino, max
+
+      **The estimate is a handshake, not advice.** `plan_sweep` expands the
+      grid; `enqueue_sweep` refuses unless the caller passes back the number
+      the plan reported. A caller that never looked at the estimate cannot
+      supply it, and one whose grid changed in between is told so instead of
+      quietly launching the new one. An estimate that were merely *printed*
+      would be satisfied by a launcher printing it into a log nobody reads,
+      which is the version of this bullet that costs an afternoon of cluster
+      CPU. `plan` and `enqueue` are therefore two commands rather than one with
+      a flag, the refusal exits 2, and it happens **before a database
+      connection is opened** — a correct refusal that first needs the database
+      to be reachable is one an operator cannot get on the day the database is
+      the problem. `TRADING_RUNS__MAX_SWEEP_RUNS` is the other half of the
+      guard: the ceiling that does not depend on anyone reading the estimate.
+
+      *"Ranges over its declared parameters"* is literal. `--sweep fast` walks
+      the range the field itself declares via `swept()`, at the step it
+      declares, so there is no number on the command line that can disagree
+      with the model that validates it. Invalid corners are pruned at expansion
+      through the strategy's own `Params` model — `ma_crossover`'s
+      `fast >= slow` is rejected while the `param_set` is built rather than
+      after a worker spent a minute producing it — and the difference between
+      the cross product and the total is reported rather than hidden.
+- [x] Metrics per run: total and annualized return, Sharpe, Sortino, max
       drawdown and its duration, exposure, turnover, win rate, trade count. All
       computed in one place; a metric defined twice will diverge.
-- [ ] Cancellation, and resumption after a worker dies mid-run.
-- [ ] **A named demo sweep**, defined here and enqueued by Phase 7's seed job:
+
+      `engine/metrics.py`, one function, taking a `BacktestResult` and nothing
+      else — which is what lets a worker write them in the same transaction
+      that records the run, and what keeps the control plane from computing one
+      a second way. Decimal throughout including the square roots, because a
+      statistics layer that converted back to float would undo `engine/money.py`
+      one ratio at a time. Every definition that has two conventions picks one
+      and says why in place: the sample (`n − 1`) standard deviation, the
+      full-sample downside deviation, a zero minimum acceptable return, and a
+      turnover that is deliberately **not** annualized because its whole use is
+      comparing two strategies over the same window.
+
+      What is deliberately *not* here is anything needing a second run to
+      interpret — a baseline, a walk-forward figure, a selection-adjusted
+      Sharpe, a re-score at a higher cost assumption. All four are Phase 6, and
+      all four are functions of several runs.
+- [x] Cancellation, and resumption after a worker dies mid-run.
+
+      Cancellation stops the *queued* runs immediately and lets the in-flight
+      ones finish, which is a choice rather than a limitation. Killing them
+      would need either a channel a worker polls mid-backtest — the engine loop
+      has no callback for one and should not grow one for this — or rows left
+      `running` with nobody holding them, waiting on a lease before anything
+      reports the truth. In-flight work is bounded by the worker count, which
+      is small and known. `cancelled_at` on the sweep is what makes a run that
+      completes after the cancellation legible as exactly that.
+- [x] **A named demo sweep**, defined here and enqueued by Phase 7's seed job:
       `ma_crossover` over a small grid of its two windows, on one synthetic
       symbol, over a fixed window. Small enough to finish on a cold cluster in
       minutes, large enough that the leaderboard has something to sort. Sizing
       it is a decision made once, in code, rather than a number an operator has
       to guess at first boot.
-- [ ] **Gate:** a 1,000-run sweep completes · killing a worker mid-sweep loses
+
+      **Two sweeps, not one.** The grid is four fast windows by five slow ones
+      — twenty combinations, of which `fast = slow = 20` is pruned by the
+      strategy's own validator, so nineteen runs — and beside it a single
+      `buy_and_hold` run over the identical window, universe, cash and cost
+      model. The plan names only the grid; the baseline is added because Phase
+      6 requires *baselines computed over the identical window and shown next
+      to every result*, and a seeded leaderboard holding nineteen crossovers
+      with nothing to compare them against would demonstrate the machinery
+      while withholding the one number that says whether any of it was worth
+      doing — on the app's own front page, which is where this plan says the
+      vertical must arrive demonstrating itself. It costs one run.
+
+      It falls out of the sweep machinery rather than needing a second path:
+      `buy_and_hold` has no swept parameters, so its grid is empty, and the
+      cross product of no axes is exactly one run at every default.
+
+      **The universe is the configured one, not a single symbol — a deviation
+      from this bullet's wording, forced by measuring what the bullet
+      produced.** Built as written, on `ZVZZT` alone over `DEMO_WINDOW`, the
+      baseline falls 42% — one driftless five-year walk doing what a coin flip
+      with a standard deviation of tens of percent does — and because the
+      crossover is long only about half the time, **all nineteen of them beat
+      it.** A seeded front page reporting nineteen out of nineteen strategies
+      beating buy-and-hold, on data with no alpha in it by construction, is the
+      exact false positive Phase 6 exists to keep from being mistaken for a
+      finding, printed on the home page two phases before Phase 6 arrives.
+
+      Over the configured universe the same grid scatters around the baseline,
+      seven of nineteen ahead, with the baseline landing eighth of twenty. Nothing
+      about the strategies changed: averaging five independent walks shrinks
+      the *market's* own realized move without touching them. This is Phase 4's corrected prediction happening live —
+      *"the head-to-head difference on any one path is dominated by something
+      far larger than costs"* — and the response is the one that phase already
+      chose, which is to stop reading a single path as a result.
+
+      The sizing argument for one symbol survives the change intact, because
+      the run count is what costs: nineteen runs plus a baseline either way,
+      each a fraction of a second, over five symbols instead of one. Phase 4
+      also calls `DEMO_WINDOW` *"the configuration Phase 7 should seed from"*,
+      and the configuration it measures there is the default universe — so this
+      is the reading that makes the two phases agree rather than a new
+      preference.
+
+      **The demo asserts nothing about who wins**, and that is the last
+      deliberate part of it. Phase 4 retired exactly that claim — *"a build
+      gate asserting 'the crossover loses' on one path asserts the sign of a
+      coin flip"* — so what is asserted instead is the structural property that
+      makes the page's comparison a comparison: the baseline covers the
+      identical window, universe, cash and cost model as the grid beside it,
+      and re-pointing the demo at a re-configured universe moves both or
+      neither.
+- [x] **Gate:** a 1,000-run sweep completes · killing a worker mid-sweep loses
       no runs and duplicates none · metrics for a hand-checked run match a
       hand-computed answer · the cluster stays responsive under a full sweep,
       measured rather than assumed.
-- [ ] **Commit:** "Trading: sweeps, and a queue that survives a lost worker"
+
+      Three of the four are asserted in `make trading-test-db`; the fourth
+      needs the cluster.
+
+      **The first three needed a real Postgres, which is new for this silo.**
+      Everything through Phase 4 was tested with no database anywhere — the
+      `Database` and `RunLog` protocols exist so that the *unreachable* branch
+      is reachable from a suite that has none. The queue cannot be tested that
+      way and it is worth being precise about why: `FOR UPDATE SKIP LOCKED`
+      deciding which of two concurrent workers gets a row, a conditional
+      `UPDATE` matching zero rows, and a partial index over a predicate are all
+      things the server does, and a Python reimplementation of them would pass
+      while the SQL was wrong. So `ci.yml`'s trading lane gained a Postgres 18
+      service container — the major CNPG runs — and the tests skip unless
+      `TRADING_TEST_DATABASE_URL` names a scratch database. Opt-in rather than
+      discovered, because they `TRUNCATE` what they connect to and a fixture
+      that defaulted to `localhost:5432` would eventually find something that
+      mattered. `make trading-test` stays green with nothing installed;
+      `make trading-test-db` starts a throwaway server on 55432 and runs the
+      lot.
+
+      The 1,000-run sweep is 40 fast windows by 25 slow ones — a thousand
+      rather than a thousand-and-something pruned to a number nobody chose —
+      drained by two workers concurrently, because one worker would assert
+      nothing about `SKIP LOCKED`. The worker-death gate is asserted at both
+      levels: statement by statement, that a reclaimed run is claimable again
+      and that its original holder's write lands nowhere; and end to end, that
+      a worker which claims every run and then stops renewing leaves a sweep a
+      successor finishes with exactly one blotter per run.
+
+      A fourth thing was rehearsed while a live server was available and is
+      worth naming because the offline check cannot do it: the migrations are
+      applied forwards and rolled all the way back **against Postgres**, in a
+      scratch schema. `tests/test_migrations.py` compares rendered DDL to the
+      models and sends it nowhere, so a CHECK constraint calling a function
+      that does not exist would have passed it and failed on the first deploy.
+
+      **What was measured in place of the cluster check**, which needs one:
+      the workers carry a 1-core limit each at two replicas, which is the
+      bound the check is really about, and `/metrics` now carries
+      `trading_runs{status=…}` beside an `up` gauge — so "the cluster stayed
+      responsive under a full sweep" becomes a graph with the load on it rather
+      than a recollection. Queue depth is derived at scrape time from the
+      Ledger for the reason collection health is: a worker pod is gone by the
+      time Prometheus arrives, so the durable row is the metric.
+- [x] **Commit:** "Trading: sweeps, and a queue that survives a lost worker"
 
 ### [ ] Phase 6 — The honesty layer
 

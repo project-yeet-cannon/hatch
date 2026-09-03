@@ -75,6 +75,18 @@ run and the CI run resolve to identical versions. Adding a dependency is
 `uv add <package>`, which updates `pyproject.toml` and the lockfile together;
 commit both.
 
+**One part of the suite needs a Postgres, and skips without one.** The run
+queue is a Postgres queue — `SELECT … FOR UPDATE SKIP LOCKED`, a partial index,
+a conditional update — and a fake implementing those in Python would be a test
+of the fake. Those tests skip unless `TRADING_TEST_DATABASE_URL` names a
+scratch database, which they will `TRUNCATE`; that is why it is an explicit
+variable rather than a discovered default. CI's trading lane always sets it,
+against a service container. Locally:
+
+```sh
+make trading-test-db       # the same suite, plus a throwaway Postgres on 55432
+```
+
 To run the service itself:
 
 ```sh
@@ -99,6 +111,15 @@ PGHOST=localhost PGDATABASE=trading PGUSER=trading PGPASSWORD=... \
 | `GET /readyz` | readiness. 503 when the Ledger does not answer |
 | `GET /metrics` | Prometheus. Carries `trading_build_info` |
 | `GET /api/trading/version` | `revision`, `sequence`, `builtAt` — the same three field names as `GET /api/aerie-revision` on the .NET side |
+
+`/metrics` also carries what the collectors and the run queue are doing, both
+derived from the Ledger at scrape time rather than from counters: a CronJob pod
+and a worker pod are both gone by the time Prometheus arrives, so the durable
+row is the metric. `trading_collection_*` is collection health and
+`trading_runs{status=…}` is queue depth, each beside an `up` gauge — a scrape
+that could not reach the Ledger says so rather than failing, because a failed
+scrape looks identical to a pod being down and would fire every alert at once
+saying the wrong thing.
 
 ## How it deploys
 
@@ -275,6 +296,70 @@ What is collected is configuration, not code: `TRADING_COLLECTION__*` (or the
 whole model as JSON in `TRADING_COLLECTION`) carries the watchlists, the bar
 intervals, the snapshot cadence and the backfill depth.
 
+## Runs, sweeps and the queue
+
+A **strategy** is code and a deploy. A **variation** is data: a `param_set`
+row. A **sweep** is a grid over a strategy's declared parameter ranges, and a
+**run** is one backtest — which is also one row on the work queue, because the
+queue *is* the `run` table.
+
+```sh
+# What would this sweep cost? Writes nothing.
+uv run python -m aerie_trading.runs plan --strategy ma_crossover \
+    --sweep fast --sweep slow --symbol ZVZZT \
+    --start 2021-01-01 --end 2026-01-01
+
+# The same thing, enqueued - and refused unless the count matches the estimate.
+uv run python -m aerie_trading.runs enqueue --strategy ma_crossover \
+    --sweep fast --sweep slow --symbol ZVZZT \
+    --start 2021-01-01 --end 2026-01-01 --confirm 1725
+
+# The named demo sweep, sized once in code (aerie_trading/runs/demo.py):
+# nineteen crossovers plus the buy-and-hold baseline they are measured against,
+# over the universe this installation collects.
+uv run python -m aerie_trading.runs demo
+
+# A worker. This is what the worker Deployment runs; --drain exits when empty.
+uv run python -m aerie_trading.runs work --drain
+
+uv run python -m aerie_trading.runs status --sweep 1
+uv run python -m aerie_trading.runs cancel --sweep 1
+```
+
+`--sweep fast` walks the range **the strategy's own field declares** — there is
+no range on the command line to disagree with the model. `--set fast=5,10,15`
+gives explicit values instead. Either way the cross product is validated
+through the strategy's `Params` model before anything is enqueued, so a corner
+the strategy would refuse (`fast >= slow`) is pruned while planning rather than
+after a worker has produced it.
+
+**`plan` and `enqueue` are two commands rather than a flag**, and that is the
+estimate-and-confirm handshake made into something that cannot be skipped by
+not reading: `enqueue` needs `--confirm N`, and the only way to learn N is to
+plan. A refusal exits **`2`** and happens before a database connection is
+opened. `TRADING_RUNS__MAX_SWEEP_RUNS` is the other half — the ceiling that
+does not depend on anyone reading the estimate.
+
+**Losing a worker loses no runs and duplicates none**, and those are two
+different mechanisms. A claim takes a *lease*; a lease that stops being renewed
+is reclaimed and the run goes back on the queue, which is what stops work being
+lost. A claim also mints a *fence token*, and a worker may only write a result
+while its token is still the one on the row — so a "dead" worker that turns out
+to have been merely frozen updates zero rows and discards its answer, which is
+what stops work being written twice. A visibility timeout alone gives you the
+first and quietly costs you the second.
+
+Every run records the revision that produced it, a fingerprint of the bars it
+read, and a fingerprint of the result. Two runs that disagree on the result and
+agree on the data are a determinism bug; two that disagree on both were not run
+over the same history, whatever their windows say.
+
+Metrics are computed in exactly one place (`engine/metrics.py`) and stored one
+row per metric, so Phase 6 adds names without a migration. **An undefined
+metric is an absent row** — never zero and never `NaN`, because `NUMERIC` will
+store `NaN` happily and Postgres sorts it above every number, which would put
+one degenerate run at the top of a leaderboard sorted by Sharpe.
+
 ## Layout
 
 Directories arrive with the phase that needs them, so most of this is a map of
@@ -292,8 +377,9 @@ where things will go rather than of what is here:
 | `aerie_trading/providers/` | `MarketDataProvider`, the market calendar, and the synthetic source |
 | `aerie_trading/lake/` | the Parquet lake — layout, schemas, idempotent writes, the DuckDB reader |
 | `aerie_trading/collect/` | the bar and option-chain collectors, and the CLI a CronJob runs |
-| `aerie_trading/engine/` | Phase 4 — clock, instruments, portfolio, broker, strategy |
-| `aerie_trading/strategies/` | Phase 4 on — one strategy per module |
+| `aerie_trading/engine/` | the backtester — clock, instruments, portfolio, broker, strategy, and the one place run metrics are computed |
+| `aerie_trading/strategies/` | one strategy per module, plus the explicit registry |
+| `aerie_trading/runs/` | sweeps, the Postgres work queue, and the worker loop |
 
 Type checking is `pyright` in **strict** mode, deliberately: the owner does not
 write Python, and pydantic models under a strict checker read much like C#. If

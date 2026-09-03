@@ -21,6 +21,14 @@ resources:
   # it is what the CronJobs there mount, and last in reading order is not the
   # same as last in apply order.
   - ../lake
+  # The sweep workers (docs/plans/trading.md Phase 5), reached as a base for
+  # the same reason ../lake is - see that directory's kustomization.yaml. They
+  # are listed after the lake because they mount the PVC declared there and
+  # before the control plane because the control plane's init container is
+  # what applies the migration they assume; neither ordering is enforced by
+  # Kubernetes, and both are the order a person reads them in when something
+  # is wrong.
+  - ../runs
   - image-automation.yaml
   - deployment.yaml
   - service.yaml

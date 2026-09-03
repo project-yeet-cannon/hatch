@@ -108,6 +108,45 @@ jobs:
       # this repository asking. Same setting the Makefile target carries, and
       # the reason is written out there.
       PYRIGHT_PYTHON_GLOBAL_NODE: "off"
+      # The queue tests (docs/plans/trading.md Phase 5) point at the service
+      # container below. They skip when this is unset, which is what keeps
+      # `make trading-test` runnable on a laptop with no Postgres - so this
+      # variable is the difference between the phase's gate being *asserted*
+      # here and merely being assertable. See src/Aerie.Trading/tests/conftest.py
+      # for why the tests demand an explicit URL rather than discovering one:
+      # they TRUNCATE what they connect to.
+      TRADING_TEST_DATABASE_URL: postgresql+psycopg://trading:trading@localhost:5432/trading_test
+    # A real Postgres, because the queue is a Postgres queue. `SELECT ... FOR
+    # UPDATE SKIP LOCKED` deciding which of two concurrent workers gets a row,
+    # a conditional UPDATE matching zero rows, and a partial index over the
+    # queued minority are all server behaviours; a fake implementing them in
+    # Python would pass while the SQL was wrong, which is the one failure mode
+    # this lane exists to prevent.
+    #
+    # 18, matching the major CNPG runs in the cluster
+    # (deploy/cluster/trading/database/cluster.yaml pins
+    # ghcr.io/cloudnative-pg/postgresql:18.4). A queue tested against a
+    # different major than it deploys onto is a queue whose locking semantics
+    # were checked somewhere else. The minor is deliberately not pinned here:
+    # this is a test service, not the cluster's data, and a floating minor is
+    # the same trade `kubectl kustomize` makes one job below.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: trading
+          POSTGRES_PASSWORD: trading
+          POSTGRES_DB: trading_test
+        ports:
+          - 5432:5432
+        # Without this the test step can start before the server accepts
+        # connections, which reads as a flaky suite rather than as a race in
+        # this file.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7

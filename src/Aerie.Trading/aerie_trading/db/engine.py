@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from aerie_trading.db.health import CollectorHealth, read_collection_health
+from aerie_trading.runs.queue import QueueDepth, read_queue_depth
 from aerie_trading.settings import Settings
 
 __all__ = ["Database", "SqlDatabase", "create_ledger_engine"]
@@ -54,6 +55,17 @@ class Database(Protocol):
         """One row per collector, for ``/metrics``. Raise if unreachable."""
         ...
 
+    def queue_depth(self) -> Sequence[QueueDepth]:
+        """Runs by status, for ``/metrics``. Raise if unreachable.
+
+        Here rather than on a separate protocol so that one object answers
+        every question ``/metrics`` asks of the Ledger. The two collectors take
+        narrower protocols of their own (``HealthSource``, ``QueueSource``),
+        which is what keeps the exposition layer from being handed a pool it
+        could dispose.
+        """
+        ...
+
     def dispose(self) -> None:
         """Release pooled connections at shutdown."""
         ...
@@ -77,6 +89,9 @@ class SqlDatabase:
 
     def collection_health(self) -> Sequence[CollectorHealth]:
         return read_collection_health(self._engine)
+
+    def queue_depth(self) -> Sequence[QueueDepth]:
+        return read_queue_depth(self._engine)
 
     def dispose(self) -> None:
         self._engine.dispose()

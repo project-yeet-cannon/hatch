@@ -1,23 +1,38 @@
 """Fixtures shared across the suite.
 
-The one thing worth sharing is a database that is not a database: every test
-here runs in CI with no Postgres anywhere near it, and the endpoints under test
-are the ones whose whole job is to report on a database's state. A stub is not
-a shortcut around that - it is the only way to exercise the *unreachable*
-branch at all, which is the branch that matters.
+Two things worth sharing, and they answer opposite problems.
+
+**A database that is not a database.** Most of this suite runs with no Postgres
+anywhere near it, and several of the things under test are the ones whose whole
+job is to report on a database's state. ``StubDatabase`` is not a shortcut
+around that - it is the only way to exercise the *unreachable* branch at all,
+which is the branch that matters.
+
+**A database that is.** Phase 5's queue cannot be tested that way, and the
+fixtures at the bottom of this file say why: ``SKIP LOCKED``, a partial index
+and a conditional update are Postgres behaviours, so a fake would be a test of
+the fake. Those fixtures skip unless ``TRADING_TEST_DATABASE_URL`` names a
+scratch database, which keeps ``make trading-test`` runnable on a laptop with
+nothing installed while letting CI run them for real.
 """
 
-from collections.abc import Mapping, Sequence
+import os
+from collections.abc import Generator, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 
 from aerie_trading.collect.runs import RunRecord
 from aerie_trading.db.health import CollectorHealth
+from aerie_trading.db.models import Base
 from aerie_trading.engine.instruments import equity
 from aerie_trading.engine.strategy import Params, StrategyContext
 from aerie_trading.providers.base import Bar, Interval, MarketDataProvider
 from aerie_trading.revision import Revision
+from aerie_trading.runs.queue import QueueDepth
 
 
 class StubDatabase:
@@ -28,11 +43,14 @@ class StubDatabase:
         *,
         healthy: bool = True,
         health: Sequence[CollectorHealth] = (),
+        depth: Sequence[QueueDepth] = (),
     ) -> None:
         self.healthy = healthy
         self.health = health
+        self.depth = depth
         self.checks = 0
         self.health_reads = 0
+        self.depth_reads = 0
         self.disposed = False
 
     def check(self) -> None:
@@ -53,6 +71,20 @@ class StubDatabase:
         if not self.healthy:
             raise ConnectionError("the Ledger is not answering")
         return self.health
+
+    def queue_depth(self) -> Sequence[QueueDepth]:
+        """Phase 5's half of the same story, sharing the same failure switch.
+
+        The interesting assertion about ``/metrics`` under a broken Ledger is
+        that it still answers - with ``trading_collection_up 0`` *and*
+        ``trading_runs_up 0`` - rather than failing the scrape. One flag for
+        both, because "the database is down" is one condition and two would be
+        settable inconsistently.
+        """
+        self.depth_reads += 1
+        if not self.healthy:
+            raise ConnectionError("the Ledger is not answering")
+        return self.depth
 
     def dispose(self) -> None:
         self.disposed = True
@@ -178,3 +210,76 @@ class ScriptedStrategy:
         quantity = self.script.get(ctx.bar_number)
         if quantity:
             ctx.order(equity(self.symbol), quantity, tag=f"bar{ctx.bar_number}")
+
+
+# -- the Ledger, when there is one -----------------------------------------
+#
+# Everything above this line runs with no database anywhere. The queue does
+# not get that option: `SELECT ... FOR UPDATE SKIP LOCKED`, a partial index, a
+# conditional update and `make_interval` are Postgres behaviours, and a fake
+# implementing them in Python would be a test of the fake. So these fixtures
+# connect to a real Postgres when one is offered and skip when it is not.
+#
+# **Opt-in by an environment variable, never discovered.** A fixture that
+# defaulted to `localhost:5432` would connect to whatever a developer happens
+# to be running - and then TRUNCATE it. Requiring TRADING_TEST_DATABASE_URL to
+# be set makes "which database do these tests destroy" an answer someone typed.
+# CI sets it against a service container; `make trading-test-db` sets it against
+# a throwaway one.
+
+#: The variable that turns the Postgres-backed tests on.
+LEDGER_URL_VAR = "TRADING_TEST_DATABASE_URL"
+
+#: Emptied between tests, children first so the foreign keys are satisfied
+#: without relying on CASCADE to reach something it should not. RESTART
+#: IDENTITY so that a test asserting on an id is not reading the previous
+#: test's sequence position.
+_LEDGER_TABLES = (
+    "run_metric",
+    "trade",
+    "run",
+    "sweep",
+    "param_set",
+    "strategy",
+    "ingest_run",
+    "data_source",
+    "instrument",
+)
+
+
+@pytest.fixture(scope="session")
+def ledger_engine() -> Generator[Engine, None, None]:
+    """An engine against a scratch Postgres, or a skip.
+
+    Session-scoped because creating the schema costs more than the tests do,
+    and because a connection pool per test would be a pool per test.
+    """
+    url = os.environ.get(LEDGER_URL_VAR)
+    if not url:
+        pytest.skip(f"{LEDGER_URL_VAR} is not set; the queue tests need a Postgres")
+
+    engine = create_engine(url, pool_pre_ping=True)
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except OperationalError as unreachable:  # pragma: no cover - environment, not logic
+        engine.dispose()
+        pytest.skip(f"{LEDGER_URL_VAR} is set but unreachable: {unreachable}")
+
+    # `create_all` rather than `alembic upgrade head`: the two are asserted
+    # equal offline by tests/test_migrations.py, and running Alembic here would
+    # mean mutating the process's cached Settings so env.py picks up this URL -
+    # which would leak into every other test in the session. The migration is
+    # rehearsed against this same live database by
+    # tests/test_run_queue.py::test_the_migrations_apply_to_a_real_postgres.
+    Base.metadata.create_all(engine)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture
+def ledger(ledger_engine: Engine) -> Engine:
+    """The same engine, with every table emptied first."""
+    with ledger_engine.begin() as connection:
+        connection.execute(text(f"TRUNCATE {', '.join(_LEDGER_TABLES)} RESTART IDENTITY CASCADE"))
+    return ledger_engine

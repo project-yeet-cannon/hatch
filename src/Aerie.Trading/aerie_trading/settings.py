@@ -33,6 +33,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # this file, and not all of them can afford pandas.
 from aerie_trading.collect.config import CollectionConfig
 from aerie_trading.providers.synthetic.config import SyntheticConfig
+from aerie_trading.runs.config import RunnerConfig
 
 __all__ = ["Settings", "get_settings"]
 
@@ -109,6 +110,17 @@ class Settings(BaseSettings):
     # JSON in TRADING_COLLECTION, which is how a watchlist widens without a
     # rebuild.
     collection: CollectionConfig = CollectionConfig()
+
+    # -- Runs and the queue -------------------------------------------------
+    # How long a worker holds a run, how hard a sweep is allowed to be, and
+    # what a worker calls itself. See aerie_trading/runs/config.py - the two
+    # numbers worth understanding before changing either are written out there.
+    #
+    # Carried on Settings rather than read by the worker directly for the same
+    # reason the synthetic config is: the control plane reports queue state, a
+    # launcher enforces the ceiling and a worker takes the lease, and all three
+    # must be reading one answer.
+    runs: RunnerConfig = RunnerConfig()
 
     @property
     def database_url(self) -> str:

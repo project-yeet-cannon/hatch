@@ -31,6 +31,7 @@ that proves the accounting to the cent builds its bars by hand.
 from __future__ import annotations
 
 import bisect
+import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -172,6 +173,47 @@ class BarHistory:
         if count <= 0:
             raise ValueError("a lookback of zero or fewer bars is not a lookback")
         return series[max(0, cutoff - count) : cutoff]
+
+    # -- identity ------------------------------------------------------------
+
+    def fingerprint(self) -> str:
+        """A sha256 over every bar this history holds - "the lake state it read".
+
+        Phase 5's ``run`` row stores this beside the result fingerprint, and the
+        pair is what makes a disagreement between two runs diagnosable rather
+        than merely visible: same data and different results is a determinism
+        bug in the engine, different data and different results is a lake that
+        was rewritten underneath them. A run window and an interval cannot
+        answer that on their own, because a partition re-collected after a
+        provider correction covers the identical window with different numbers.
+
+        Every field is rendered as a string for the reason
+        ``BacktestResult.canonical`` gives - a float on its way through JSON is
+        a binary round trip, and a fingerprint that survives one is a
+        fingerprint that would also survive the change it exists to catch.
+        Iteration is over ``symbols``, which is sorted, so two histories built
+        from the same bars in different orders agree.
+        """
+        digest = hashlib.sha256()
+        digest.update(self.interval.value.encode("utf-8"))
+        for symbol in self.symbols:
+            digest.update(b"\x00")
+            digest.update(symbol.encode("utf-8"))
+            for bar in self._series[symbol]:
+                digest.update(
+                    "|".join(
+                        (
+                            bar.timestamp.isoformat(),
+                            repr(bar.open),
+                            repr(bar.high),
+                            repr(bar.low),
+                            repr(bar.close),
+                            repr(bar.adjusted_close),
+                            str(bar.volume),
+                        )
+                    ).encode("utf-8")
+                )
+        return digest.hexdigest()
 
     def opens_at(self, index: int) -> Mapping[str, Decimal]:
         """Opening price of every bar that exists at exactly ``timeline[index]``.

@@ -78,6 +78,11 @@ db-shell:
 # minified bundle rather than as anything resembling "wrong node". Off makes
 # nodeenv fetch pyright's own, so the type check is a function of uv.lock and
 # not of what the box happens to have.
+# The queue tests (docs/plans/trading.md Phase 5) skip unless
+# TRADING_TEST_DATABASE_URL names a scratch Postgres, so this target is green
+# on a box with none - it just leaves the phase's gate unasserted. Set the
+# variable, or run `make trading-test-db` below, to run them for real. CI
+# always does: its `trading` lane carries a service container.
 trading-test:
 	cd ./src/Aerie.Trading && \
 	export PYRIGHT_PYTHON_GLOBAL_NODE=off; \
@@ -86,3 +91,30 @@ trading-test:
 	uv run ruff check . && \
 	uv run pyright && \
 	uv run pytest
+
+# The same suite with the queue tests actually running, against a throwaway
+# Postgres on 55432 - deliberately not 5432, so this cannot collide with, or be
+# mistaken for, anything a developer is already running. The container is
+# removed on the way out whether the tests passed or not; `--rm` plus the trap
+# is what keeps a failed run from leaving a listener behind that the next run
+# then fails to bind.
+#
+# The major matches what CNPG runs in the cluster and what the CI lane starts.
+# A queue whose locking was verified against a different major was verified
+# somewhere else.
+TRADING_TEST_PG_PORT ?= 55432
+trading-test-db:
+	@docker rm -f aerie-trading-test-pg >/dev/null 2>&1 || true
+	docker run -d --rm --name aerie-trading-test-pg \
+		-e POSTGRES_USER=trading -e POSTGRES_PASSWORD=trading -e POSTGRES_DB=trading_test \
+		-p $(TRADING_TEST_PG_PORT):5432 postgres:18 >/dev/null
+	@until docker exec aerie-trading-test-pg pg_isready -U trading >/dev/null 2>&1; do sleep 1; done
+	- cd ./src/Aerie.Trading && \
+	export PYRIGHT_PYTHON_GLOBAL_NODE=off; \
+	export TRADING_TEST_DATABASE_URL=postgresql+psycopg://trading:trading@localhost:$(TRADING_TEST_PG_PORT)/trading_test; \
+	uv sync --frozen && \
+	uv run ruff format --check . && \
+	uv run ruff check . && \
+	uv run pyright && \
+	uv run pytest
+	@docker rm -f aerie-trading-test-pg >/dev/null 2>&1 || true

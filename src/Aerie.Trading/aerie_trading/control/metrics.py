@@ -15,22 +15,35 @@ argument and removes the class of failure. The three default collectors are
 registered onto it explicitly, so nothing is lost by not using the global one.
 """
 
+from typing import Protocol
+
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Gauge, generate_latest
 from prometheus_client.gc_collector import GCCollector
 from prometheus_client.platform_collector import PlatformCollector
 from prometheus_client.process_collector import ProcessCollector
 
 from aerie_trading.control.collection_health import CollectionHealthCollector, HealthSource
+from aerie_trading.control.queue_depth import QueueDepthCollector, QueueSource
 from aerie_trading.revision import Revision
 
-__all__ = ["CONTENT_TYPE", "build_registry", "render_metrics"]
+__all__ = ["CONTENT_TYPE", "LedgerSource", "build_registry", "render_metrics"]
 
 #: The exposition format's content type, re-exported so the route that serves
 #: it does not import from two places.
 CONTENT_TYPE = CONTENT_TYPE_LATEST
 
 
-def build_registry(revision: Revision, health: HealthSource | None = None) -> CollectorRegistry:
+class LedgerSource(HealthSource, QueueSource, Protocol):
+    """Both of the questions ``/metrics`` asks the Ledger, in one argument.
+
+    An intersection of the two narrow protocols rather than ``db.Database``,
+    which would also hand the exposition layer a ``dispose``. Written as a
+    Protocol so that ``SqlDatabase`` satisfies it structurally and a test can
+    satisfy it with two methods.
+    """
+
+
+def build_registry(revision: Revision, ledger: LedgerSource | None = None) -> CollectorRegistry:
     """A registry holding the process defaults and this build's identity.
 
     ``trading_build_info`` is a constant gauge whose labels carry the identity -
@@ -58,13 +71,15 @@ def build_registry(revision: Revision, health: HealthSource | None = None) -> Co
     )
     build_info.labels(revision=revision.revision, sequence=str(revision.sequence)).set(1)
 
-    # Collection health (docs/plans/trading.md Phase 3), registered onto this
-    # registry rather than exposed by the collectors themselves - see
-    # aerie_trading/db/health.py for why a CronJob cannot own a counter.
-    # Optional so that a registry can be built without a database at all, which
-    # is what the build-info tests do.
-    if health is not None:
-        registry.register(CollectionHealthCollector(health))
+    # Collection health (docs/plans/trading.md Phase 3) and queue depth (Phase
+    # 5), registered onto this registry rather than exposed by the processes
+    # that produce them - see aerie_trading/db/health.py for why a CronJob
+    # cannot own a counter, and the same argument covers a worker pod that is
+    # gone by the time Prometheus scrapes. Optional so that a registry can be
+    # built without a database at all, which is what the build-info tests do.
+    if ledger is not None:
+        registry.register(CollectionHealthCollector(ledger))
+        registry.register(QueueDepthCollector(ledger))
 
     return registry
 
