@@ -1,22 +1,38 @@
-# Hatch's root rewrite (docs/plans/pjm.md Phase 4). The same shape as
-# middleware-kiosk.yaml, for the same reason and with the same caveat.
+# Hatch's hostname rewrite (docs/plans/pjm.md Phase 4). Near enough to
+# middleware-kiosk.yaml to have been copied from it, with one difference that
+# matters: the kiosk is a pinned tablet that only ever asks for "/", and Hatch
+# is a tool whose links are the point of it.
 #
 # replacePathRegex, not redirectRegex: the rewrite happens server-side, so
 # hatch.${DOMAIN} stays hatch.${DOMAIN} in the address bar. A redirect would
 # turn every bookmark and every pasted link into a two-hop trip through
 # /apps/hatch/, which is the path an issue link should never have to name.
 #
-# Only "^/$" - the bare root. Everything under it (/apps/hatch/..., /api/...)
-# already resolves against the api pod as-is, and a broader regex would rewrite
-# the API calls the app itself makes.
+# Every path, not only "^/$" as this began. `hatch.${DOMAIN}/issues/AER-12` is
+# the link that gets pasted into a chat window and into a prompt (CLAUDE.md),
+# and it has to survive being opened cold; with the bare root alone rewritten it
+# reached the api pod as /issues/AER-12, matched no controller and no SPA
+# fallback, and 404ed. Everything on this host that already names its own path -
+# the bundle's assets under /apps/hatch/, the sign-in shell at /apps/auth/, and
+# the /api/hatch/* endpoints the app and an API key both call - is kept off this
+# router by the `hatch-direct` Ingress beside `hatch` in ingress.yaml, which
+# claims those two prefixes and carries no rewrite. Rewriting them here instead
+# would send /apps/hatch/assets/index-*.js to /apps/hatch/apps/hatch/assets/...,
+# and the API to a page.
+#
+# Because a client-side router cannot see any of this, the bundle reads its
+# basename off the URL rather than assuming the prefix - see
+# src/Aerie.Web/apps/hatch/src/lib/basename.ts. The two have to be changed
+# together: a rewrite the app does not expect renders a blank page with nothing
+# in the network panel to explain it.
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
-  name: hatch-root-rewrite
+  name: hatch-rewrite
   labels:
     {{- include "aerie.labels" . | nindent 4 }}
     app.kubernetes.io/component: hatch
 spec:
   replacePathRegex:
-    regex: "^/$"
-    replacement: "/apps/hatch/"
+    regex: "^/(.*)"
+    replacement: "/apps/hatch/$1"

@@ -72,7 +72,7 @@ public class ImportControllerTests
     public async Task ImportedNumbers_ContinueTheProjectsOwn()
     {
         var h = await NewAsync();
-        await h.Issues.CreateIssue(new IssueCreateRequest(h.ProjectId, "bug", "found something", null, null), default);
+        await h.Issues.CreateIssue(new IssueCreateRequest(h.ProjectId, "bug", "found something", null, null, null, null), default);
 
         var result = await h.ImportAsync("pjm.md", Plan);
 
@@ -175,7 +175,7 @@ public class ImportControllerTests
     public async Task ImportedCards_SitBelowWhatIsAlreadyInTheColumn()
     {
         var h = await NewAsync();
-        await h.Issues.CreateIssue(new IssueCreateRequest(h.ProjectId, "bug", "already here", null, null), default);
+        await h.Issues.CreateIssue(new IssueCreateRequest(h.ProjectId, "bug", "already here", null, null, null, null), default);
         await h.Issues.MoveIssue("AER-1", new IssueMoveRequest(h.Todo, null, null), default);
         var sitting = h.Issue("AER-1").Rank;
 

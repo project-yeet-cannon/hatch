@@ -106,7 +106,7 @@ metadata:
     # 404s the bundle for anyone who is not an administrator and every endpoint
     # carries [RequireAdmin] - so an enrolled family member reaching this host
     # gets a page that does not exist rather than the operator's board.
-    traefik.ingress.kubernetes.io/router.middlewares: "{{ if eq .Values.auth.mode "full" }}{{ .Release.Namespace }}-aerie-auth@kubernetescrd,{{ end }}{{ .Release.Namespace }}-hatch-root-rewrite@kubernetescrd"
+    traefik.ingress.kubernetes.io/router.middlewares: "{{ if eq .Values.auth.mode "full" }}{{ .Release.Namespace }}-aerie-auth@kubernetescrd,{{ end }}{{ .Release.Namespace }}-hatch-rewrite@kubernetescrd"
 spec:
   ingressClassName: traefik
   rules:
@@ -114,6 +114,65 @@ spec:
       http:
         paths:
           - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8080
+---
+# The other half of Hatch's hostname: the paths that have to reach the api pod
+# exactly as written.
+#
+# `hatch` above sends everything on this host through hatch-rewrite and into
+# /apps/hatch/, so that /issues/AER-12 survives being opened cold. Two families
+# of request must not take that trip. Under /apps: the bundle's own assets,
+# which already name the prefix and would arrive doubled as
+# /apps/hatch/apps/hatch/assets/index-*.js, and the sign-in shell at /apps/auth/
+# that the wall bounces a stale device to. Under /api: everything the app
+# fetches, and `curl -H "Authorization: Bearer $KEY"
+# https://hatch.${DOMAIN}/api/hatch/board` - the API is reachable on this host
+# by design (docs/plans/pjm.md), and rewritten it would answer an agent with a
+# page of HTML and a 200.
+#
+# What decides which router a request lands on is Traefik's rule-length
+# priority, the same mechanism the docs canary below leans on: Host(...) &&
+# PathPrefix(`/apps`) is a longer rule than Host(...) && PathPrefix(`/`), so this
+# Ingress wins for the two prefixes it names and `hatch` keeps the rest. A
+# separate Ingress rather than two paths on that one because the middleware
+# annotation applies to every path an Ingress carries, and the whole point here
+# is that these paths take a different middleware list.
+#
+# Which is the other half of why this is annotated at all: it is inside the wall
+# exactly as `hatch` is, and the annotation is the only thing that puts it
+# there. Unannotated it would be an open route past the wall covering every API
+# endpoint on the host - the failure `hatch` warns about above, silent from
+# outside and, here, on the paths that would matter most.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hatch-direct
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hatch
+  {{- if eq .Values.auth.mode "full" }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: "{{ .Release.Namespace }}-aerie-auth@kubernetescrd"
+  {{- end }}
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: "hatch.{{ .Values.domain }}"
+      http:
+        paths:
+          - path: /apps
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8080
+          - path: /api
             pathType: Prefix
             backend:
               service:

@@ -58,6 +58,15 @@ const GROUPS: ColorGroup[] = [
     ],
   },
   {
+    title: 'Warn',
+    note: 'Not wrong yet, and wanting looking at before it is - a due date three days out, a certificate two weeks from expiry. Amber rather than orange so it is not read as danger at a glance.',
+    tokens: [
+      { name: '--warn', use: 'Approaching, expiring, nearly out of room' },
+      { name: '--warn-bg', use: 'The wash behind a caution' },
+      { name: '--warn-ink', use: 'Hover, and caution text' },
+    ],
+  },
+  {
     title: 'Ink on an accent',
     note: 'These flip with the theme rather than being white forever: the dark accents are light blues and corals, and white on them is a label nobody can read.',
     tokens: [
@@ -74,7 +83,7 @@ const GROUPS: ColorGroup[] = [
 
 const ALL_TOKENS = GROUPS.flatMap((group) => group.tokens.map((token) => token.name));
 
-/* The three accents, laid out the way they are actually used: a filled block
+/* The four accents, laid out the way they are actually used: a filled block
    with its --on-accent label. This is the only honest way to show an ink token
    - a swatch of near-white on --card says nothing about whether it is legible
    where it lands. */
@@ -82,6 +91,7 @@ const ACCENTS = [
   { fill: '--primary', label: 'Primary' },
   { fill: '--danger', label: 'Danger' },
   { fill: '--success', label: 'Success' },
+  { fill: '--warn', label: 'Warn' },
 ];
 
 export function ColorPage() {

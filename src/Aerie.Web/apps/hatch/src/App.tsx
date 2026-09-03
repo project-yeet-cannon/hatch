@@ -12,7 +12,12 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) => `hatch-nav-link${i
 export function App() {
   return (
     <div className="hatch-app">
-      <TopBar appName="Hatch" />
+      {/* Named rather than left to default to "/", because on
+          hatch.${DOMAIN} "/" is this app's own board and the switcher would
+          be a button that goes nowhere. /apps/home/ is the picker on either
+          host - it is what "/" redirects to on the house, and it is reachable
+          on this one through the `hatch-direct` Ingress. */}
+      <TopBar appName="Hatch" homeHref="/apps/home/" />
 
       <nav className="hatch-nav">
         <div className="hatch-nav-content">

@@ -66,7 +66,7 @@ Seven, all covered by the one wildcard certificate and the one resolver entry:
 |---|---|---|
 | `home.${DOMAIN}` | the API and every family app it hosts | [`charts/aerie/templates/ingress.yaml`](../charts/aerie/templates/ingress.yaml) |
 | `kiosk.${DOMAIN}` | the same API, root-rewritten to the dashboard SPA | same |
-| `hatch.${DOMAIN}` | the same API, root-rewritten to the Hatch SPA — behind the wall *and* the admin gate, so a non-admin gets a 404 rather than the board | same |
+| `hatch.${DOMAIN}` | the same API, rewritten to the Hatch SPA — every path and not just the root, so `/issues/AER-12` opens cold; `/apps` and `/api` are claimed unrewritten by the `hatch-direct` Ingress. Behind the wall *and* the admin gate, so a non-admin gets a 404 rather than the board | same |
 | `files.${DOMAIN}` | the published-app manifest and bundles | same |
 | `share.${DOMAIN}` | dufs, in front of the house share | same |
 | `status.${DOMAIN}` | Uptime Kuma | [`ingress-status.yaml`](../deploy/cluster/observability/config/ingress-status.yaml) |
