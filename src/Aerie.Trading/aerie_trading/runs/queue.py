@@ -62,6 +62,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from aerie_trading.db.models import (
+    RunCurve,
     RunKind,
     RunMetric,
     RunStatus,
@@ -74,6 +75,7 @@ from aerie_trading.honesty.walkforward import FoldOutcome
 from aerie_trading.providers.base import Interval
 from aerie_trading.runs.catalog import ensure_instrument, ensure_param_set
 from aerie_trading.runs.costs import CostSpec
+from aerie_trading.runs.curve import sample_curve
 
 __all__ = [
     "LEASE_LOST",
@@ -373,7 +375,10 @@ class RunQueue:
         revision: str,
         folds: Sequence[FoldOutcome] = (),
     ) -> bool:
-        """Record a completed run, its blotter, its metrics and its folds. Fenced.
+        """Record a completed run and everything it produced. Fenced.
+
+        The blotter, the metrics, the equity curve and the walk-forward folds,
+        in one transaction with the status update.
 
         Returns ``False`` and writes nothing when the lease was lost, which is
         not an error: it means another worker was handed this run and either
@@ -461,6 +466,20 @@ class RunQueue:
             session.add_all(
                 RunMetric(run_id=claimed.id, name=name, value=value)
                 for name, value in metrics.items()
+            )
+            # The curve, sampled to a bound (``runs/curve.py``). Written in
+            # this transaction rather than a later one for the reason the
+            # blotter is: a run that is `succeeded` and has no curve is a state
+            # the run detail would have to render, and the only way to be sure
+            # it cannot exist is to write both under the same fence.
+            curve = sample_curve(result.curve)
+            session.add(
+                RunCurve(
+                    run_id=claimed.id,
+                    points=curve.points,
+                    points_total=curve.points_total,
+                    sampled=curve.sampled,
+                )
             )
             self._record_folds(session, claimed, folds)
         return True
