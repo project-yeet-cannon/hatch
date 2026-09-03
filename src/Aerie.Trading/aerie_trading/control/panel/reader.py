@@ -115,6 +115,7 @@ _MODE: Final[Mapping[str, str]] = {
     "live": " AND false",
 }
 
+
 class UnknownStrategy(LookupError):
     """No ``strategy`` row by that name."""
 
