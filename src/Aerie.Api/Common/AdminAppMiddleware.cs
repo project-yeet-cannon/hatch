@@ -3,7 +3,9 @@ using Aerie.Api.Services.Auth;
 namespace Aerie.Api.Common;
 
 /// <summary>
-/// Keeps the admin app off screens that have no business rendering it.
+/// Keeps the operator's own apps off screens that have no business rendering
+/// them. The admin app was the first; Hatch is the second, and the boundary is
+/// the same one rather than a second copy of it.
 ///
 /// The bundle is the boundary here, not the data behind it - every verb that
 /// matters carries <see cref="RequireAdminAttribute"/> of its own, so a copy of
@@ -30,15 +32,23 @@ namespace Aerie.Api.Common;
 public class AdminAppMiddleware(RequestDelegate next)
 {
     /// <summary>
-    /// Matched by segment, so /apps/admin and /apps/admin/devices are covered
-    /// and a later /apps/administration would not be - the same rule
-    /// AuthGate's allow-list uses, for the same reason.
+    /// The operator-only bundles. Matched by segment, so /apps/admin and
+    /// /apps/admin/devices are covered and a later /apps/administration would
+    /// not be - the same rule AuthGate's allow-list uses, for the same reason.
     /// </summary>
-    private static readonly PathString AdminApp = "/apps/admin";
+    /// <remarks>
+    /// A list rather than one path because there is more than one operator app
+    /// now, and the alternative - a second middleware beside this one - would
+    /// be a second place to get the 404-not-403 reasoning right. Adding an
+    /// entry here is the whole of gating a new operator bundle; the family
+    /// apps are not on it and must not be, because their authorization is
+    /// ownership rather than a role (Modules/README.md).
+    /// </remarks>
+    private static readonly PathString[] GatedApps = ["/apps/admin", "/apps/hatch"];
 
     public async Task InvokeAsync(HttpContext context, IAdminGate gate)
     {
-        if (!gate.Enabled || !context.Request.Path.StartsWithSegments(AdminApp, StringComparison.OrdinalIgnoreCase))
+        if (!gate.Enabled || !IsGated(context.Request.Path))
         {
             await next(context);
             return;
@@ -66,5 +76,15 @@ public class AdminAppMiddleware(RequestDelegate next)
         // here would double every entry an operator greps for.
         context.Response.Headers.CacheControl = "no-store";
         context.Response.StatusCode = StatusCodes.Status404NotFound;
+    }
+
+    private static bool IsGated(PathString path)
+    {
+        foreach (var app in GatedApps)
+        {
+            if (path.StartsWithSegments(app, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
     }
 }

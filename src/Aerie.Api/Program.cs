@@ -552,6 +552,13 @@ if (Directory.Exists(Path.Combine(appsPath, "docs")))
 {
     app.MapFallbackToFile("/apps/docs/{*path:nonfile}", "apps/docs/index.html");
 }
+// Hatch deep links are the point rather than a nicety: /apps/hatch/issues/AER-12
+// is what gets pasted into a chat window and into a VS Code prompt, so it has
+// to survive being opened cold (docs/plans/pjm.md).
+if (Directory.Exists(Path.Combine(appsPath, "hatch")))
+{
+    app.MapFallbackToFile("/apps/hatch/{*path:nonfile}", "apps/hatch/index.html");
+}
 if (Directory.Exists(Path.Combine(appsPath, "design")))
 {
     app.MapFallbackToFile("/apps/design/{*path:nonfile}", "apps/design/index.html");
@@ -584,6 +591,7 @@ opt.AddRedirect("^apps/?$", "apps/home/");
 opt.AddRedirect("^apps/home$", "apps/home/");
 opt.AddRedirect("^apps/dashboard$", "apps/dashboard/");
 opt.AddRedirect("^apps/admin$", "apps/admin/");
+opt.AddRedirect("^apps/hatch$", "apps/hatch/");
 opt.AddRedirect("^apps/logo$", "apps/logo/");
 opt.AddRedirect("^apps/modeler$", "apps/modeler/");
 opt.AddRedirect("^apps/docs$", "apps/docs/");

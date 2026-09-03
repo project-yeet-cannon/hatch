@@ -1,0 +1,62 @@
+/* Hatch's chrome. Values come from @aerie/ui's tokens (imported by theme.css);
+   a literal here is a bug.
+
+   The page idioms - header, table, field, badge, button - are components in
+   @aerie/ui. What is stated here is Hatch's own shell: the nav strip under the
+   bar and the content area, which unlike admin's is not a centred column,
+   because the board wants every pixel of width it can have. */
+
+.hatch-app {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.hatch-nav {
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+}
+
+.hatch-nav-content {
+  display: flex;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-5);
+}
+
+.hatch-nav-link {
+  padding: var(--sp-3) var(--sp-4);
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: var(--t-body);
+  border-bottom: 2px solid transparent;
+  transition: color var(--transition), border-color var(--transition);
+}
+
+.hatch-nav-link:hover {
+  color: var(--ink);
+}
+
+.hatch-nav-link.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+/* min-height: 0 so a board that overflows scrolls inside this box rather than
+   stretching the flex column and taking the nav off the top of the screen. */
+.hatch-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.hatch-crash-note {
+  font-size: var(--t-body);
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--muted);
+  padding: var(--sp-6) var(--sp-5);
+}
