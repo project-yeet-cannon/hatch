@@ -52,6 +52,12 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 1000
+        # The Lake's volume is chowned to this group on mount, which is what
+        # lets the seed init container below write Parquet into it as a
+        # non-root user. Set here rather than on that container because
+        # fsGroup is a pod-level field; the collectors that write the same
+        # volume set it the same way (../lake/cronjob-bars.yaml).
+        fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
       initContainers:
@@ -114,6 +120,84 @@ spec:
               memory: 128Mi
             limits:
               memory: 256Mi
+        # The seed (docs/plans/trading.md Phase 7). A second init container,
+        # after the migration and before the service, and the ordering is the
+        # dependency: it writes rows the migration has to have created, and it
+        # must have written them before the control panel is reachable - a
+        # first boot whose leaderboard is empty for the first thirty seconds is
+        # exactly the "shipped framework" impression the phase exists to avoid.
+        #
+        # **The plan asks for a Job and this is an init container**, which is
+        # the same deviation the migration above makes and for the same reason:
+        # a Job's spec is immutable once created, so one whose image tag
+        # changes every deploy needs either a name that changes with it - past
+        # the name length limit - or `force: true` on the Kustomization. The
+        # property the plan is asking for is "runs on deploy, exactly once,
+        # before the thing that depends on it", and `replicas: 1` plus
+        # `strategy: Recreate` above gives that here.
+        #
+        # It is safe to run on every deploy because it is idempotent and
+        # namespaced to itself: it reconciles only rows it marked as seeded,
+        # and it collects only a window the Lake does not already hold. See
+        # aerie_trading/seed/.
+        - name: seed
+          image: "${IMAGE_REGISTRY}/aerie-trading:${TRADING_IMAGE_TAG}"
+          command: ["python", "-m", "aerie_trading.seed"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            # The Lake, which this container mounts and the two beside it do
+            # not: a first boot has an empty volume and the demo runs read five
+            # years of daily bars, so the seed backfills them. The mount is on
+            # this container alone - a volume is declared for the pod and
+            # mounted per container, so the control plane below stays a process
+            # with no filesystem to corrupt.
+            - name: TRADING_LAKE_ROOT
+              value: /lake
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef:
+                  name: trading-pg-app
+                  key: host
+            - name: PGPORT
+              valueFrom:
+                secretKeyRef:
+                  name: trading-pg-app
+                  key: port
+            - name: PGDATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: trading-pg-app
+                  key: dbname
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: trading-pg-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: trading-pg-app
+                  key: password
+          volumeMounts:
+            - name: lake
+              mountPath: /lake
+            - name: tmp
+              mountPath: /tmp
+          # Sized like the bar collector next door, because on a cold cluster
+          # this *is* the bar collector: it holds one month of one symbol's
+          # bars at a time and writes a partition per month. On every deploy
+          # after the first it reads a coverage query and exits, which costs
+          # none of this.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
       containers:
         - name: trading
           image: "${IMAGE_REGISTRY}/aerie-trading:${TRADING_IMAGE_TAG}"
@@ -211,5 +295,11 @@ spec:
             - name: tmp
               mountPath: /tmp
       volumes:
+        # Mounted by the seed init container only - see its note above. The
+        # control plane serves rows and a static bundle and has no business
+        # holding the Lake open.
+        - name: lake
+          persistentVolumeClaim:
+            claimName: trading-lake
         - name: tmp
           emptyDir: {}
