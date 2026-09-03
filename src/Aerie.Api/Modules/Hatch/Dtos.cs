@@ -262,3 +262,57 @@ public record ImportRequest(int ProjectId, IReadOnlyList<ParsedEpic> Docs);
 public record ImportedEpicDto(string Filename, string Key, string Title, int StoryCount, int TaskCount);
 
 public record ImportResultDto(IReadOnlyList<ImportedEpicDto> Epics, int IssueCount);
+
+// ---- Playbooks ----
+
+/// <summary>One row of the matrix: a transition, the types it speaks for, and what to spend on them.</summary>
+/// <param name="Types">Empty means every type.</param>
+public record PlaybookDto(
+    int Id,
+    int FromStatusId,
+    string FromStatusName,
+    int ToStatusId,
+    string ToStatusName,
+    IReadOnlyList<string> Types,
+    string Prompt,
+    string Model,
+    string Effort,
+    DateTimeOffset UpdatedAt);
+
+public record PlaybookCreateRequest(
+    int FromStatusId,
+    int ToStatusId,
+    IReadOnlyList<string>? Types,
+    string Prompt,
+    string? Model,
+    string? Effort);
+
+/// <summary>Null leaves a field alone, as everywhere else in Hatch.</summary>
+public record PlaybookPatchRequest(
+    int? FromStatusId,
+    int? ToStatusId,
+    IReadOnlyList<string>? Types,
+    string? Prompt,
+    string? Model,
+    string? Effort);
+
+// ---- Work ----
+
+/// <summary>
+/// Everything a spawned agent needs to do one increment on one issue, decided
+/// here rather than in the shell: which issue, which way it is going, what to
+/// tell the agent, and how much thought to spend.
+/// </summary>
+/// <param name="Blocked">
+/// Why no agent should be spawned, or null when one should. A sentence rather
+/// than a code - it is printed at a terminal and read by a person.
+/// </param>
+/// <param name="ToStatus">Where the increment ends, or null when there is nowhere to go.</param>
+/// <param name="Playbook">The matched row, or null when the matrix says nothing about this transition.</param>
+public record WorkDto(
+    IssueDto Issue,
+    StatusDto FromStatus,
+    StatusDto? ToStatus,
+    PlaybookDto? Playbook,
+    IReadOnlyList<IssueCardDto> Children,
+    string? Blocked);

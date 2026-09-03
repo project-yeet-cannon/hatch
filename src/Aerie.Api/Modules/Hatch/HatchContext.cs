@@ -4,7 +4,7 @@ namespace Aerie.Api.Modules.Hatch;
 
 /// <summary>
 /// Hatch's slice of the Aerie database: the <c>hatch</c> schema, its own
-/// migration history, five tables.
+/// migration history, six tables.
 /// </summary>
 public class HatchContext(DbContextOptions<HatchContext> options) : DbContext(options), IModuleContext
 {
@@ -15,6 +15,7 @@ public class HatchContext(DbContextOptions<HatchContext> options) : DbContext(op
     public DbSet<EfHatchIssue> Issues => Set<EfHatchIssue>();
     public DbSet<EfHatchComment> Comments => Set<EfHatchComment>();
     public DbSet<EfHatchIssueEvent> IssueEvents => Set<EfHatchIssueEvent>();
+    public DbSet<EfHatchPlaybook> Playbooks => Set<EfHatchPlaybook>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -66,6 +67,23 @@ public class HatchContext(DbContextOptions<HatchContext> options) : DbContext(op
             // the day someone asks "which issues moved out of review twice"
             // that is a query against this column rather than a migration.
             e.Property(x => x.Payload).HasColumnType("jsonb");
+        });
+
+        // Restrict for the same reason issues restrict: a column is deleted
+        // through an endpoint that refuses while anything still points at it,
+        // and cascade here would let deleting "review" quietly take the
+        // instructions for reaching it as well.
+        modelBuilder.Entity<EfHatchPlaybook>(e =>
+        {
+            e.HasOne(p => p.FromStatus)
+                .WithMany()
+                .HasForeignKey(p => p.FromStatusId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(p => p.ToStatus)
+                .WithMany()
+                .HasForeignKey(p => p.ToStatusId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         base.OnModelCreating(modelBuilder);

@@ -641,42 +641,11 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
             issue.Project?.Key ?? await db.Projects.Where(p => p.Id == issue.ProjectId).Select(p => p.Key).SingleAsync(ct),
             issue.Number);
 
-    private async Task<string?> KeyOfAsync(long issueId, CancellationToken ct)
-    {
-        var found = await db.Issues.Where(i => i.Id == issueId)
-            .Select(i => new { i.Project!.Key, i.Number })
-            .FirstOrDefaultAsync(ct);
+    private Task<string?> KeyOfAsync(long issueId, CancellationToken ct) =>
+        IssueProjection.KeyOfAsync(db, issueId, ct);
 
-        return found is null ? null : IssueKey.Format(found.Key, found.Number);
-    }
-
-    private async Task<IssueDto> ToDtoAsync(EfHatchIssue issue, CancellationToken ct)
-    {
-        var projectKey = issue.Project?.Key
-            ?? await db.Projects.Where(p => p.Id == issue.ProjectId).Select(p => p.Key).SingleAsync(ct);
-
-        var children = await db.Issues.Where(i => i.ParentId == issue.Id)
-            .OrderBy(i => i.Number)
-            .Select(i => new { i.Project!.Key, i.Number })
-            .ToListAsync(ct);
-
-        return new IssueDto(
-            IssueKey.Format(projectKey, issue.Number),
-            issue.ProjectId,
-            projectKey,
-            issue.Type,
-            issue.Title,
-            issue.Description,
-            issue.StatusId,
-            issue.Rank,
-            issue.ParentId is { } parentId ? await KeyOfAsync(parentId, ct) : null,
-            children.Select(c => IssueKey.Format(c.Key, c.Number)).ToList(),
-            IssueMoment.Format(issue.ReadyAt, issue.ReadyAtHasTime),
-            IssueMoment.Format(issue.DueAt, issue.DueAtHasTime),
-            issue.CreatedBy,
-            issue.CreatedAt,
-            issue.UpdatedAt);
-    }
+    private Task<IssueDto> ToDtoAsync(EfHatchIssue issue, CancellationToken ct) =>
+        IssueProjection.ToDtoAsync(db, issue, ct);
 
     /// <summary>
     /// The bottom of each column, for a request that appends to one more than
