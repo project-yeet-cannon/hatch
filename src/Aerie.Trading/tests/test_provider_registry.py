@@ -1,13 +1,17 @@
 """Registering a provider in the Ledger, and what the row has to carry.
 
-No Postgres runs in CI (``tests/conftest.py`` says why), so the session here is
-a stand-in that records what it was asked to do - the same idiom as
-``StubDatabase``. What is under test is the decision, not SQLAlchemy: whether
-the first caller inserts, whether the second updates rather than duplicating,
-and whether the provenance that lands in the row is enough to reproduce the
-numbers it describes. The last one is the whole reason the column exists.
+The session here is a stand-in that records what it was asked to do - the same
+idiom as ``StubDatabase``. What is under test is the decision, not SQLAlchemy:
+whether the first caller inserts, whether the second updates rather than
+duplicating, and whether the provenance that lands in the row is enough to
+reproduce the numbers it describes. The last one is the whole reason the column
+exists. The *concurrent* case - two collectors registering at the same instant -
+is not a decision and cannot be stubbed; it is in
+``tests/test_catalog_races.py``, against a real Postgres.
 """
 
+from collections.abc import Generator
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
@@ -32,6 +36,8 @@ class StubSession:
         self.existing = existing
         self.added: list[DataSource] = []
         self.queries = 0
+        self.flushes = 0
+        self.savepoints = 0
 
     def scalar(self, _statement: Any) -> DataSource | None:
         self.queries += 1
@@ -39,6 +45,22 @@ class StubSession:
 
     def add(self, instance: DataSource) -> None:
         self.added.append(instance)
+
+    def flush(self) -> None:
+        self.flushes += 1
+
+    @contextmanager
+    def begin_nested(self) -> Generator[None]:
+        """The savepoint ``db/upsert.insert_or_find`` opens around its insert.
+
+        A no-op here, and that is the honest stand-in: a savepoint is a thing
+        Postgres does, and the branch it protects - an insert that loses a race
+        to another connection - is not reachable from a stub with one
+        connection and no concurrency. Present so the happy path runs; the
+        branch is tested where it can be.
+        """
+        self.savepoints += 1
+        yield
 
 
 @pytest.fixture

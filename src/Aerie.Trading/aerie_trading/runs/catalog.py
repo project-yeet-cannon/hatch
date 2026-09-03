@@ -12,6 +12,14 @@ Every function here is **idempotent and does not commit**, matching
 shaped after. The caller owns the transaction, because these rows are written
 in the same one as the run they are for; a helper that committed on its own
 would leave a ``param_set`` behind for a sweep that then failed to enqueue.
+
+**Idempotent against other processes as well as against itself**, which is a
+stronger claim than looking-then-inserting can make on its own and is not free:
+every insert here goes through ``db/upsert.insert_or_find``, so two workers that
+finish their first run at the same instant and both reach for the same
+``instrument`` row produce one row and no error rather than a unique violation
+that takes one of the two runs down with it. That module holds the argument for
+the savepoint and the reason a lock would have been the wrong answer.
 """
 
 from __future__ import annotations
@@ -26,6 +34,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from aerie_trading.db.models import Instrument, InstrumentKind, ParamSet, Strategy
+from aerie_trading.db.upsert import insert_or_find
 from aerie_trading.engine.instruments import Equity, OptionContract
 from aerie_trading.engine.instruments import Instrument as EngineInstrument
 from aerie_trading.engine.strategy import StrategySpec
@@ -70,13 +79,11 @@ def ensure_strategy(session: Session, spec: StrategySpec) -> Strategy:
     schema = _jsonable(spec.params_model.model_json_schema())
 
     if existing is None:
-        created = Strategy(
-            name=spec.name,
-            description=spec.description,
-            params_schema=schema,
+        return insert_or_find(
+            session,
+            Strategy(name=spec.name, description=spec.description, params_schema=schema),
+            lambda: session.scalar(select(Strategy).where(Strategy.name == spec.name)),
         )
-        session.add(created)
-        return created
 
     existing.description = spec.description
     existing.params_schema = schema
@@ -130,18 +137,31 @@ def ensure_param_set(
     """
     digest = params_hash(params)
     session.flush()
-    existing = session.scalar(
-        select(ParamSet).where(
-            ParamSet.strategy_id == strategy.id,
-            ParamSet.params_hash == digest,
+
+    def look() -> ParamSet | None:
+        return session.scalar(
+            select(ParamSet).where(
+                ParamSet.strategy_id == strategy.id,
+                ParamSet.params_hash == digest,
+            )
         )
-    )
+
+    existing = look()
     if existing is not None:
         return existing
 
-    created = ParamSet(strategy=strategy, params=dict(params), params_hash=digest)
-    session.add(created)
-    return created
+    # `strategy_id` rather than the `strategy` relationship, and it is not a
+    # style choice. Assigning the relationship cascades the new object into the
+    # session at construction - before `insert_or_find` has opened the savepoint
+    # that owns it - so the losing side of a race is expunged by the rollback
+    # while `strategy.param_sets` still holds a reference to it, and SQLAlchemy
+    # warns that it is about to skip a cascade it can no longer perform. The
+    # foreign key is the same row with none of that.
+    return insert_or_find(
+        session,
+        ParamSet(strategy_id=strategy.id, params=dict(params), params_hash=digest),
+        look,
+    )
 
 
 def ensure_instrument(session: Session, instrument: EngineInstrument) -> Instrument:
@@ -157,7 +177,11 @@ def ensure_instrument(session: Session, instrument: EngineInstrument) -> Instrum
     has all four of its defining fields or the insert fails.
     """
     session.flush()
-    existing = session.scalar(select(Instrument).where(Instrument.symbol == instrument.symbol))
+
+    def look() -> Instrument | None:
+        return session.scalar(select(Instrument).where(Instrument.symbol == instrument.symbol))
+
+    existing = look()
     if existing is not None:
         return existing
 
@@ -178,5 +202,4 @@ def ensure_instrument(session: Session, instrument: EngineInstrument) -> Instrum
             option_right=contract.right.value,
             multiplier=contract.multiplier,
         )
-    session.add(created)
-    return created
+    return insert_or_find(session, created, look)
