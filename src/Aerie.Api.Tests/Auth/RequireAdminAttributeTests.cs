@@ -90,7 +90,7 @@ public class RequireAdminAttributeTests
 
         await new RequireAdminAttribute().OnAuthorizationAsync(context);
 
-        Assert.Equal(("DELETE", "/api/zones/2b1a", "10.0.0.7"), gate.LastAsked);
+        Assert.Equal(("DELETE", "/api/zones/2b1a", "10.0.0.7", null), gate.LastAsked);
     }
 
     private static AuthorizationFilterContext NewContext(IAdminGate gate)

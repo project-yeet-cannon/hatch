@@ -13,6 +13,9 @@ public enum AdminOutcome
     /// <summary>The caller's device belongs to a person carrying <see cref="EfPerson.IsAdmin"/>.</summary>
     Admin,
 
+    /// <summary>An API key carrying the scope this route is willing to accept. Not a person, and never an administrator - a key reaches exactly what its scopes name.</summary>
+    Key,
+
     /// <summary>Refused. What that looks like is the caller's choice: a 404 for the admin app, a 403 for the API.</summary>
     Refused,
 }
@@ -22,7 +25,7 @@ public enum AdminOutcome
 /// <see cref="AuthDecision"/> carries, and for the same reason: a refusal
 /// nobody can explain is a support conversation with no starting point.
 /// </summary>
-public record AdminDecision(AdminOutcome Outcome, EfPerson? Person, string? Reason)
+public record AdminDecision(AdminOutcome Outcome, EfPerson? Person, string? Reason, EfApiKey? ApiKey = null)
 {
     /// <summary>No credential at all. Reachable only where the wall itself does not enforce in-process - otherwise this request never got here.</summary>
     public const string NoGrant = "no_grant";
@@ -33,18 +36,31 @@ public record AdminDecision(AdminOutcome Outcome, EfPerson? Person, string? Reas
     /// <summary>A device belonging to a person who is not an administrator.</summary>
     public const string NotAdmin = "not_admin";
 
+    /// <summary>
+    /// An API key reaching a route that accepts no scope at all. Every plain
+    /// <c>[RequireAdmin]</c> is one: minting credentials, revoking sessions,
+    /// editing the house. Those are the operator's, and a key is not a person.
+    /// </summary>
+    public const string KeyNotAccepted = "key_not_accepted";
+
+    /// <summary>An API key reaching a route that accepts a scope this key does not carry.</summary>
+    public const string ScopeMismatch = "scope_mismatch";
+
     public bool IsAllowed => Outcome != AdminOutcome.Refused;
 
     public static readonly AdminDecision Dormant = new(AdminOutcome.Dormant, null, null);
 
     public static AdminDecision Allow(EfPerson person) => new(AdminOutcome.Admin, person, null);
 
+    public static AdminDecision AllowKey(EfApiKey key) => new(AdminOutcome.Key, null, null, key);
+
     public static AdminDecision Refuse(string reason) => new(AdminOutcome.Refused, null, reason);
 }
 
 /// <summary>
 /// Whether the caller may do the things only an operator should - the second
-/// question the wall asks, after "is this device enrolled at all".
+/// question the wall asks, after "is this device enrolled at all", and now also
+/// the question that decides what an API key may reach.
 ///
 /// It is deliberately a *separate* gate from <see cref="IAuthGate"/> rather
 /// than a widening of it. The wall decides whether a request reaches the app,
@@ -67,9 +83,15 @@ public interface IAdminGate
     /// <summary>
     /// The decision for the current request. The three descriptive arguments
     /// are only ever the refusal log line's - the decision itself reads
-    /// nothing but the caller's grant.
+    /// nothing but the caller's credential and
+    /// <paramref name="acceptScope"/>.
     /// </summary>
-    Task<AdminDecision> EvaluateAsync(string? method, PathString path, string? clientIp, CancellationToken ct);
+    /// <param name="acceptScope">
+    /// The scope this route is willing to accept from an API key, or null for
+    /// the ordinary case: operators only. It changes nothing for a person -
+    /// a route that accepts a scope is not thereby open to non-administrators.
+    /// </param>
+    Task<AdminDecision> EvaluateAsync(string? method, PathString path, string? clientIp, string? acceptScope, CancellationToken ct);
 }
 
 /// <summary>
@@ -106,9 +128,25 @@ public class AdminGate(
     /// </summary>
     public bool Enabled => options.Enabled && options.EnforceAdmin;
 
-    public async Task<AdminDecision> EvaluateAsync(string? method, PathString path, string? clientIp, CancellationToken ct)
+    public async Task<AdminDecision> EvaluateAsync(string? method, PathString path, string? clientIp, string? acceptScope, CancellationToken ct)
     {
         if (!Enabled) return AdminDecision.Dormant;
+
+        // The key lane, decided before the person lane and never falling
+        // through to it. A key has no person and never will, so a key that
+        // fails here has to be refused rather than handed on to a check that
+        // would refuse it again for the wrong reason - and, more importantly,
+        // a key must not inherit the answer that a browser signed in on the
+        // same machine would have got.
+        if (await caller.ApiKeyAsync(ct) is { } key)
+        {
+            if (acceptScope is not { Length: > 0 })
+                return Refuse(AdminDecision.KeyNotAccepted, method, path, clientIp, null);
+
+            return key.HasScope(acceptScope)
+                ? AdminDecision.AllowKey(key)
+                : Refuse(AdminDecision.ScopeMismatch, method, path, clientIp, null);
+        }
 
         var grant = await caller.GrantAsync(ct);
         if (grant is null) return Refuse(AdminDecision.NoGrant, method, path, clientIp, null);

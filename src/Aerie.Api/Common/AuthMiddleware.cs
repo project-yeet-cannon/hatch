@@ -74,12 +74,13 @@ public class AuthMiddleware(RequestDelegate next, IOptions<AuthOptions> options,
         }
 
         var tokens = AuthCookie.ReadAll(request, options);
+        var bearer = AuthBearer.Read(request);
         var clientIp = context.Connection.RemoteIpAddress?.ToString();
-        var decision = await gate.EvaluateAsync(request.Path, host, tokens, clientIp, context.RequestAborted);
+        var decision = await gate.EvaluateAsync(request.Path, host, tokens, bearer, clientIp, context.RequestAborted);
 
         if (decision.Outcome == AuthOutcome.Challenge)
         {
-            Refuse(context);
+            Refuse(context, presentedKey: bearer is not null);
             return;
         }
 
@@ -88,6 +89,11 @@ public class AuthMiddleware(RequestDelegate next, IOptions<AuthOptions> options,
             context.SetAuthGrant(grant);
             await RenewCookieIfStaleAsync(context, auth, grant, decision.Token, time);
         }
+
+        // No cookie re-issue on this lane, and nothing else either: a key is
+        // the whole credential, held in a file the wall did not write and
+        // cannot refresh.
+        if (decision.ApiKey is { } key) context.SetApiKey(key);
 
         await next(context);
     }
@@ -131,7 +137,13 @@ public class AuthMiddleware(RequestDelegate next, IOptions<AuthOptions> options,
     /// Content-negotiated, for the reason spelled out on <see cref="AuthChallenge"/>:
     /// a 302 handed to a fetch is invisible to the code that made it.
     /// </summary>
-    private void Refuse(HttpContext context)
+    /// <param name="presentedKey">
+    /// Whether the caller sent a bearer key. One that did gets a 401 whatever
+    /// its Accept header says: a program holding a key has no browser to send
+    /// to a sign-in page, and a 302 into one would arrive as a 200 full of HTML
+    /// - a refusal that looks like a success is the worst answer available.
+    /// </param>
+    private void Refuse(HttpContext context, bool presentedKey)
     {
         var response = context.Response;
 
@@ -140,7 +152,7 @@ public class AuthMiddleware(RequestDelegate next, IOptions<AuthOptions> options,
         // cache - which is not a thing anyone will guess.
         response.Headers.CacheControl = "no-store";
 
-        if (AuthChallenge.PrefersRedirect(context.Request.Headers, context.Request.Method))
+        if (!presentedKey && AuthChallenge.PrefersRedirect(context.Request.Headers, context.Request.Method))
         {
             response.StatusCode = StatusCodes.Status302Found;
             response.Headers.Location = AuthChallenge.SignInLocation(options, context.Request.GetEncodedPathAndQuery());
@@ -160,10 +172,21 @@ public class AuthMiddleware(RequestDelegate next, IOptions<AuthOptions> options,
 public static class AuthContextExtensions
 {
     private const string GrantKey = "aerie.auth.grant";
+    private const string ApiKeyKey = "aerie.auth.apikey";
 
     public static void SetAuthGrant(this HttpContext context, EfAuthGrant grant) => context.Items[GrantKey] = grant;
 
     /// <summary>The grant the middleware authenticated, or null - which is also what every request looks like while Auth:Enabled is false.</summary>
     public static EfAuthGrant? GetAuthGrant(this HttpContext context) =>
         context.Items.TryGetValue(GrantKey, out var grant) ? grant as EfAuthGrant : null;
+
+    public static void SetApiKey(this HttpContext context, EfApiKey key) => context.Items[ApiKeyKey] = key;
+
+    /// <summary>
+    /// The API key the middleware authenticated, or null. A request never has
+    /// both this and a grant: the gate takes the bearer lane or the cookie
+    /// lane, never one and then the other.
+    /// </summary>
+    public static EfApiKey? GetApiKey(this HttpContext context) =>
+        context.Items.TryGetValue(ApiKeyKey, out var key) ? key as EfApiKey : null;
 }

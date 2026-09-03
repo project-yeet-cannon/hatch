@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Aerie.Api.Common;
+using Aerie.Api.Ef;
 using Aerie.Api.Services.Auth;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -22,7 +23,7 @@ namespace Aerie.Api.Modules.Hatch;
 /// </remarks>
 [ApiController]
 [Route("api/hatch/import")]
-[RequireAdmin]
+[RequireAdmin(AcceptScope = ApiKeyScopes.Hatch)]
 public class ImportController(HatchContext db, PlanImportParser parser, RankService ranks, ICallerIdentity caller, TimeProvider time) : ControllerBase
 {
     /// <summary>A plan file is prose; a megabyte of it is a mistake, not a plan.</summary>
@@ -103,7 +104,7 @@ public class ImportController(HatchContext db, PlanImportParser parser, RankServ
         if (statuses.Count == 0) return Conflict("this board has no columns to put an issue in");
 
         var columns = Columns.From(statuses);
-        var actor = await caller.ActorAsync(ct);
+        var actor = await caller.ActorNameAsync(ct);
         var now = time.GetUtcNow();
 
         for (var attempt = 1; ; attempt++)

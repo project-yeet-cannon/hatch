@@ -60,6 +60,15 @@ public class AdminSurfaceTests
         "AuthController.LinkGrantPerson",
         "AuthController.CreateInvite",
 
+        // API keys, and the one entry in this file with a second reason. They
+        // are credentials, so they belong beside the sessions above - and they
+        // carry no AcceptScope, so a key cannot mint a key. Allowing that would
+        // make the scope system decorative, since any key could issue itself a
+        // second one carrying whatever it liked.
+        "ApiKeysController.ListKeys",
+        "ApiKeysController.CreateKey",
+        "ApiKeysController.RevokeKey",
+
         // People. The writes above all, because IsAdmin is set here: an
         // unguarded PUT would let any enrolled device promote itself, which
         // makes the whole boundary a formality. The name and the photo stay

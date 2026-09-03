@@ -50,6 +50,14 @@ public record AuthRedemption(EfAuthGrant? Grant, string? Token, string? Error)
     public static AuthRedemption Failed(string error) => new(null, null, error);
 }
 
+/// <summary>
+/// A freshly minted API key. <paramref name="Secret"/> is the only time the key
+/// exists outside a hash - it goes into the response, onto the operator's
+/// screen once, and is then unrecoverable. A lost key is replaced by minting
+/// another.
+/// </summary>
+public record ApiKeyCreated(EfApiKey Key, string Secret);
+
 public interface IAuthService
 {
     /// <summary>
@@ -68,6 +76,34 @@ public interface IAuthService
     /// AuthOptions.LastSeenThrottleSeconds.
     /// </summary>
     Task<AuthVerification?> VerifyAsync(IReadOnlyList<string> tokens, string? clientIp, CancellationToken ct);
+
+    /// <summary>
+    /// The key a bearer secret belongs to, or null if no live row answers to
+    /// it - never minted, mistyped, or revoked, which are deliberately the same
+    /// answer here for the same reason a bad grant token is.
+    ///
+    /// Keeps <see cref="EfApiKey.LastUsedAt"/> current, throttled exactly as a
+    /// grant's last-seen is: this is the hot path for every request an agent
+    /// makes, and an unthrottled write on it would be a write per request.
+    /// </summary>
+    Task<EfApiKey?> VerifyApiKeyAsync(string? secret, CancellationToken ct);
+
+    /// <summary>Every key, newest first, for the admin API Keys page - revoked ones included, because a revocation is a fact worth seeing.</summary>
+    Task<IReadOnlyList<EfApiKey>> ListApiKeysAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Mints a key. The returned secret is the only time it exists outside a
+    /// hash, exactly as for an invite code - it is shown once and then gone.
+    /// Returns null when the name is already taken.
+    /// </summary>
+    Task<ApiKeyCreated?> CreateApiKeyAsync(string name, IReadOnlyList<string> scopes, CancellationToken ct);
+
+    /// <summary>
+    /// Stops a key working. Returns false if there was no such key, which a
+    /// caller turns into a 404; revoking an already-revoked key is a no-op
+    /// rather than a refusal - the caller wanted it off and it is off.
+    /// </summary>
+    Task<bool> RevokeApiKeyAsync(Guid id, CancellationToken ct);
 
     /// <summary>
     /// Records that the browser was just handed a fresh cookie for this grant,
@@ -288,6 +324,75 @@ public class AuthService(
         }
     }
 
+    public async Task<EfApiKey?> VerifyApiKeyAsync(string? secret, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(secret)) return null;
+
+        var hash = AuthTokens.Hash(secret);
+        var key = await db.ApiKeys.FirstOrDefaultAsync(k => k.Hash == hash, ct);
+
+        if (key is null || !AuthTokens.Matches(key.Hash, hash)) return null;
+
+        var now = time.GetUtcNow();
+        if (!key.IsLive(now))
+        {
+            // Warning rather than Debug, and the one refusal in this file worth
+            // a line on its own: a revoked key still being presented means a
+            // program somewhere is still holding it, and that is the operator's
+            // cue to go and take it out of whatever file it lives in.
+            logger.LogWarning("Revoked API key {KeyId} ({Name}) was presented", key.Id, key.Name);
+            return null;
+        }
+
+        await TouchKeyAsync(key, now, ct);
+        return key;
+    }
+
+    public async Task<IReadOnlyList<EfApiKey>> ListApiKeysAsync(CancellationToken ct) =>
+        await db.ApiKeys.AsNoTracking().OrderByDescending(k => k.CreatedAt).ToListAsync(ct);
+
+    public async Task<ApiKeyCreated?> CreateApiKeyAsync(string name, IReadOnlyList<string> scopes, CancellationToken ct)
+    {
+        // Checked rather than left to the unique index, because the index turns
+        // a name somebody typed twice into a 500 and this turns it into a
+        // sentence. The index is still there underneath as the backstop.
+        if (await db.ApiKeys.AnyAsync(k => k.Name == name, ct)) return null;
+
+        var secret = AuthTokens.NewApiKey();
+        var key = new EfApiKey
+        {
+            Name = name,
+            Prefix = AuthTokens.ApiKeyPrefixOf(secret),
+            Hash = AuthTokens.Hash(secret),
+            Scopes = [.. scopes],
+            CreatedAt = time.GetUtcNow(),
+        };
+
+        db.ApiKeys.Add(key);
+        await db.SaveChangesAsync(ct);
+
+        logger.LogInformation("API key {KeyId} ({Name}) minted with scopes {Scopes}", key.Id, key.Name, key.Scopes);
+        return new ApiKeyCreated(key, secret);
+    }
+
+    public async Task<bool> RevokeApiKeyAsync(Guid id, CancellationToken ct)
+    {
+        var key = await db.ApiKeys.FirstOrDefaultAsync(k => k.Id == id, ct);
+        if (key is null) return false;
+
+        // Already revoked stays revoked at the moment it first was. Overwriting
+        // the timestamp would quietly rewrite the answer to "when did this stop
+        // working", which is the whole reason the column is not a bool.
+        if (key.RevokedAt is null)
+        {
+            key.RevokedAt = time.GetUtcNow();
+            await db.SaveChangesAsync(ct);
+            logger.LogWarning("API key {KeyId} ({Name}) revoked", key.Id, key.Name);
+        }
+
+        return true;
+    }
+
     public async Task<IReadOnlyList<EfAuthGrant>> ListGrantsAsync(CancellationToken ct) =>
         await db.AuthGrants.AsNoTracking().Include(g => g.Person).OrderByDescending(g => g.CreatedAt).ToListAsync(ct);
 
@@ -343,6 +448,27 @@ public class AuthService(
     /// the IP is checked too so a device that moved networks shows its new one
     /// without waiting out the window.
     /// </summary>
+    /// <summary>
+    /// The key's last-seen, on the same throttle a grant's is and swallowing
+    /// the same failure. No client IP: a key is a program, and the address it
+    /// dials from says nothing about who is holding it.
+    /// </summary>
+    private async Task TouchKeyAsync(EfApiKey key, DateTimeOffset now, CancellationToken ct)
+    {
+        if (key.LastUsedAt is { } lastUsed && now - lastUsed < options.LastSeenThrottle) return;
+
+        key.LastUsedAt = now;
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex)
+        {
+            logger.LogDebug(ex, "Could not update last-used for API key {KeyId}", key.Id);
+        }
+    }
+
     private async Task TouchAsync(EfAuthGrant grant, string? clientIp, DateTimeOffset now, CancellationToken ct)
     {
         var due = grant.LastSeenAt is not { } lastSeen

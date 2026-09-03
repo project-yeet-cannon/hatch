@@ -31,6 +31,21 @@ namespace Aerie.Api.Common;
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = false, Inherited = true)]
 public sealed class RequireAdminAttribute : Attribute, IAsyncAuthorizationFilter
 {
+    /// <summary>
+    /// The one scope this route will accept from an API key, or null - the
+    /// default, and the right default - for operators only.
+    ///
+    /// Opt-in for the same reason the attribute itself is: naming a scope here
+    /// is a claim that this surface has been thought through for a caller that
+    /// is a program rather than a person, and the honest number of surfaces
+    /// that have been is small. Everything unnamed keeps refusing keys, which
+    /// is what makes adding a key a bounded act rather than a broad one.
+    ///
+    /// It widens nothing for a person: a route that accepts a scope is still
+    /// closed to a household member who is not an administrator.
+    /// </summary>
+    public string? AcceptScope { get; init; }
+
     public async Task OnAuthorizationAsync(AuthorizationFilterContext context)
     {
         var http = context.HttpContext;
@@ -44,6 +59,7 @@ public sealed class RequireAdminAttribute : Attribute, IAsyncAuthorizationFilter
             http.Request.Method,
             http.Request.Path,
             http.Connection.RemoteIpAddress?.ToString(),
+            AcceptScope,
             http.RequestAborted);
 
         if (decision.IsAllowed) return;

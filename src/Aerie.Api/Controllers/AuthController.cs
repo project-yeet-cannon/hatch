@@ -72,6 +72,12 @@ public class AuthController(
             path,
             string.IsNullOrEmpty(host) ? Request.Host.Value : host,
             AuthCookie.ReadAll(Request, options),
+            // Read off this request exactly as the cookies are: Traefik
+            // proxies the original's headers here unchanged, so Authorization
+            // arrives the same way Cookie does. This is what makes a curl with
+            // a bearer key work through the proxy rather than only inside the
+            // cluster.
+            AuthBearer.Read(Request),
             HttpContext.Connection.RemoteIpAddress?.ToString(),
             ct);
 
@@ -79,7 +85,10 @@ public class AuthController(
         {
             Response.Headers.CacheControl = "no-store";
 
-            if (AuthChallenge.PrefersRedirect(Request.Headers, method))
+            // A caller that presented a key gets a 401 whatever it said it
+            // accepts - the same rule the in-process middleware follows, and
+            // for the same reason: a program has no browser to send anywhere.
+            if (AuthBearer.Read(Request) is null && AuthChallenge.PrefersRedirect(Request.Headers, method))
             {
                 // Absolute here, and *only* here. Traefik resolves a redirect
                 // from this endpoint against its own request to it, so the

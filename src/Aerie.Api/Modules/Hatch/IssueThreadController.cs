@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Aerie.Api.Common;
+using Aerie.Api.Ef;
 using Aerie.Api.Services.Auth;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -16,7 +17,7 @@ namespace Aerie.Api.Modules.Hatch;
 /// </summary>
 [ApiController]
 [Route("api/hatch/issues/{key}")]
-[RequireAdmin]
+[RequireAdmin(AcceptScope = ApiKeyScopes.Hatch)]
 public class IssueThreadController(HatchContext db, ICallerIdentity caller, TimeProvider time) : ControllerBase
 {
     [HttpGet("comments")]
@@ -45,7 +46,7 @@ public class IssueThreadController(HatchContext db, ICallerIdentity caller, Time
         if (body.Length > EfHatchComment.MaxBodyLength)
             return BadRequest($"a comment is at most {EfHatchComment.MaxBodyLength} characters");
 
-        var actor = await caller.ActorAsync(ct);
+        var actor = await caller.ActorNameAsync(ct);
         var now = time.GetUtcNow();
 
         var comment = new EfHatchComment { IssueId = issueId, Author = actor, Body = body, CreatedAt = now };

@@ -394,11 +394,19 @@ public class ImportControllerTests
     {
         public EfPerson? Person { get; set; }
 
+        /// <summary>The key this test says is calling, when it is a program rather than a person.</summary>
+        public EfApiKey? Key { get; set; }
+
         public Task<EfAuthGrant?> GrantAsync(CancellationToken ct) => Task.FromResult<EfAuthGrant?>(null);
 
         public Task<Guid?> PersonIdAsync(CancellationToken ct) => Task.FromResult(Person?.Id);
 
         public Task<EfPerson?> PersonAsync(CancellationToken ct) => Task.FromResult(Person);
+
+        public Task<EfApiKey?> ApiKeyAsync(CancellationToken ct) => Task.FromResult(Key);
+
+        public Task<string> ActorNameAsync(CancellationToken ct) =>
+            Task.FromResult(Person?.Name ?? Key?.Name ?? CallerIdentity.Unattributed);
     }
 
     private static T Value<T>(ActionResult<T> result) =>
