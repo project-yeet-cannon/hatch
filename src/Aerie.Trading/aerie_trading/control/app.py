@@ -1,7 +1,7 @@
-"""The FastAPI application, and the four things it answers at Phase 1.
+"""The FastAPI application: the platform's four contracts, and the panel.
 
-Four endpoints, and each of them is a contract with a piece of the platform
-rather than a feature:
+The four Phase 1 endpoints, each of them a contract with a piece of the
+platform rather than a feature:
 
 ==========================  ============================================
 ``GET /healthz``            liveness. Never touches the database.
@@ -9,6 +9,12 @@ rather than a feature:
 ``GET /metrics``            Prometheus scrape.
 ``GET /api/trading/version``  which commit this pod was built from.
 ==========================  ============================================
+
+Phase 7 adds two things to that, both mounted below and both documented where
+they live: ``control/panel/`` serves the control panel's data, and
+``control/spa.py`` serves the bundle that renders it. The ordering at the
+bottom of ``create_app`` is load-bearing - the SPA's catch-all is registered
+last, so it only ever sees a path no API route claimed.
 
 **Why liveness and readiness are different endpoints, answering differently.**
 A liveness probe that checks the database restarts every replica at once during
@@ -37,14 +43,19 @@ outside will get a 401 until they are enrolled, which is correct.
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Final
 
 from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse, RedirectResponse
+from sqlalchemy.engine import Engine
 from starlette.requests import Request
 
 from aerie_trading.control.metrics import CONTENT_TYPE, build_registry, render_metrics
+from aerie_trading.control.panel import create_panel_router
+from aerie_trading.control.spa import STATIC_ROOT, mount_spa
 from aerie_trading.db import Database, SqlDatabase
+from aerie_trading.db.engine import create_ledger_engine
 from aerie_trading.revision import Revision, read_revision
 from aerie_trading.settings import Settings, get_settings
 
@@ -61,6 +72,8 @@ def create_app(
     settings: Settings | None = None,
     database: Database | None = None,
     revision: Revision | None = None,
+    engine: Engine | None = None,
+    static_root: Path | None = None,
 ) -> FastAPI:
     """Build the application.
 
@@ -68,13 +81,31 @@ def create_app(
     database that fails on demand. "Readiness reports not-ready when the
     database is unreachable" is a claim about a failure path, and a suite that
     can only reach the happy path is not evidence for it.
+
+    ``database`` and ``engine`` are two seams rather than one because they
+    answer different questions. ``Database`` is what the *probes and the
+    metrics* need, and its interesting case is the one where it raises - which
+    is why a stub implements it. The panel's queries are the opposite: joins
+    over eight tables with `DISTINCT ON` and a partial index in them, whose
+    interesting case is a real Postgres holding real runs. So a test points the
+    engine at a scratch database and leaves the stub where it is.
+
+    ``static_root`` is a third seam and exists for a smaller reason that is
+    easy to get wrong: the control panel's bundle is build output, so whether
+    it is present depends on whether anybody has run ``npm`` in this working
+    tree. Registering the SPA's catch-all changes what an unmatched path
+    answers, so a test of *that* has to say which world it is in rather than
+    inheriting one from the developer's last command.
     """
     resolved_settings = settings if settings is not None else get_settings()
     resolved_revision = revision if revision is not None else read_revision()
     # Constructed here rather than in the lifespan because a SQLAlchemy engine
     # opens no connection until it is asked for one - so this is cheap, and it
     # keeps the injected-database seam simple.
-    resolved_database = database if database is not None else SqlDatabase(resolved_settings)
+    resolved_engine = (
+        engine if engine is not None else create_ledger_engine(resolved_settings, pool_size=5)
+    )
+    resolved_database = database if database is not None else SqlDatabase(resolved_engine)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
@@ -85,7 +116,11 @@ def create_app(
         try:
             yield
         finally:
+            # The database and the engine are the same pool in production and
+            # deliberately not in a test, so both are released. Disposing an
+            # engine twice is a no-op; leaking the one a test injected is not.
             resolved_database.dispose()
+            resolved_engine.dispose()
             logger.info("Trading control plane stopped")
 
     app = FastAPI(
@@ -212,5 +247,13 @@ def create_app(
         of it and does not need an exemption.
         """
         return Response(render_metrics(registry), media_type=CONTENT_TYPE)
+
+    # The control panel's data (docs/plans/trading.md Phase 7). Registered
+    # before the bundle below and after everything above it, which is the
+    # whole of the routing decision: Starlette matches in registration order.
+    app.include_router(create_panel_router(resolved_engine, resolved_settings))
+
+    # And the bundle itself, last, because its catch-all matches everything.
+    mount_spa(app, static_root if static_root is not None else STATIC_ROOT)
 
     return app

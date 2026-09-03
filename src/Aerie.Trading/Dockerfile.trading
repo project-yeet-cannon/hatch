@@ -44,6 +44,15 @@ ENV UV_LINK_MODE=copy \
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 
+# The package, and with it the control panel's bundle: Phase 7's SPA builds
+# into aerie_trading/control/static/, which is inside this directory and
+# therefore inside this build context. That is not a coincidence of layout - it
+# is the only place the bundle *can* be, because the context is this directory
+# and Docker refuses a COPY that escapes it. The bundle is gitignored build
+# output; .github/workflows/publish.yml runs `npm run build -w apps/trading`
+# before this build, and an image built without that step serves the API and no
+# UI, which aerie_trading/control/spa.py handles as one log line rather than a
+# failure to start.
 COPY aerie_trading ./aerie_trading
 COPY alembic.ini ./
 

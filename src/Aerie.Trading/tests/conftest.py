@@ -235,6 +235,7 @@ LEDGER_URL_VAR = "TRADING_TEST_DATABASE_URL"
 #: IDENTITY so that a test asserting on an id is not reading the previous
 #: test's sequence position.
 _LEDGER_TABLES = (
+    "run_curve",
     "run_metric",
     "trade",
     "run",

@@ -66,6 +66,7 @@ __all__ = [
     "OptionRight",
     "ParamSet",
     "Run",
+    "RunCurve",
     "RunMetric",
     "RunStatus",
     "Strategy",
@@ -513,6 +514,19 @@ class Sweep(Base):
     trials: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )
+    # Whether the seed job wrote this batch (docs/plans/trading.md Phase 7:
+    # *"Seeded rows are marked as seeded; re-running the job reconciles only
+    # those. It must never touch a strategy, sweep or run the owner added"*).
+    #
+    # A flag on the batch rather than a naming convention, because the name is
+    # the one thing an operator can reproduce by accident: a person who
+    # launches a sweep and calls it `demo-ma-crossover` would otherwise have
+    # their work reconciled away by the next deploy. Nothing else in the
+    # schema needs it - a run belongs to its sweep, so "is this row seeded"
+    # is answered one join away for everything the seed writes.
+    seeded: Mapped[bool] = mapped_column(
+        nullable=False, default=False, server_default=text("false")
+    )
     aerie_revision: Mapped[str | None] = mapped_column(String(40))
     created_at: Mapped[datetime] = _utcnow()
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -520,6 +534,15 @@ class Sweep(Base):
     __table_args__ = (
         CheckConstraint("total_runs >= 0", name="total_runs"),
         CheckConstraint("trials >= 0", name="trials"),
+        # The seed's own lookup: "which batch did I write for this spec". A
+        # partial index because seeded rows are two of however many an
+        # installation accumulates, and the query never asks the question of
+        # the others.
+        Index(
+            "ix_sweep_seeded_name",
+            "name",
+            postgresql_where=text("seeded"),
+        ),
     )
 
 
@@ -827,6 +850,64 @@ class RunMetric(Base):
     )
     name: Mapped[str] = mapped_column(String(48), primary_key=True)
     value: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+
+
+class RunCurve(Base):
+    """One run's equity curve, as the run detail screen plots it.
+
+    docs/plans/trading.md Phase 7 asks a run detail for *"trades, the equity
+    curve, the metrics, and the exact parameters and revision"*. Three of those
+    four were already rows; the curve was the one thing ``run_backtest``
+    produced and nothing kept.
+
+    **A table beside ``run`` rather than a column on it.** The leaderboard
+    scans ``run``, and Postgres reads a row's non-TOASTed columns whether a
+    query names them or not: a curve on that row makes every leaderboard page
+    carry a payload no leaderboard reads. Here, the curve is fetched by exactly
+    the one screen that draws it, and pruning curves to reclaim space is a
+    ``DELETE`` against a table nothing else joins to.
+
+    **Timestamp and equity, and deliberately not the whole ``EquityPoint``.**
+    Cash, market value, realized and unrealized are recoverable from the
+    blotter beside them and are not what a curve is looked at for; storing all
+    five would be five times the bytes for a chart that plots one. The plan is
+    explicit that *"Grafana carries deep-dive time series"*, and this is the
+    shape that keeps that division honest rather than growing a second
+    time-series store here.
+
+    **Both values are strings, and that is not laziness.** JSON has one numeric
+    type and it is a double; an equity of 100_000.01 written as a JSON number
+    comes back as a float, and the run detail would quietly disagree with the
+    ``final_equity`` metric that was stored as ``NUMERIC``. Strings round-trip
+    the ``Decimal`` the engine actually computed.
+
+    **Bounded, and it says when it was.** A five-year daily run is about 1,250
+    points; the same window at one-minute bars is half a million, and a table
+    that stored those would be a table whose size is a strategy parameter. See
+    ``runs/curve.py``: the curve is sampled to a cap, ``sampled`` records
+    whether that happened, and ``points_total`` says what it was sampled from -
+    so a chart that is missing a spike can say so instead of looking complete.
+    """
+
+    __tablename__ = "run_curve"
+
+    run_id: Mapped[int] = mapped_column(
+        BigInteger,
+        # CASCADE like ``trade`` and ``walk_forward_fold``: this is part of one
+        # run's output, not an observation of the world.
+        ForeignKey("run.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    #: ``[[timestamp, equity], ...]``, both strings, oldest first.
+    points: Mapped[list[list[str]]] = mapped_column(JSONB, nullable=False)
+    #: How many points the curve had before sampling. Equal to ``len(points)``
+    #: when ``sampled`` is false.
+    points_total: Mapped[int] = mapped_column(Integer, nullable=False)
+    sampled: Mapped[bool] = mapped_column(
+        nullable=False, default=False, server_default=text("false")
+    )
+
+    __table_args__ = (CheckConstraint("points_total >= 0", name="points_total"),)
 
 
 class WalkForwardFold(Base):

@@ -310,12 +310,18 @@ def enqueue_sweep(
     data_source_id: int,
     revision: str | None = None,
     ceiling: int = 50_000,
+    seeded: bool = False,
 ) -> int:
     """Write ``plan`` to the queue. Returns the new sweep's id.
 
     Refuses unless ``confirm`` is the number ``plan.total`` reported - see the
     module docstring on why that is a handshake rather than a formality - and
     unless the plan is within ``ceiling``.
+
+    ``seeded`` marks the batch as the seed job's rather than an operator's
+    (``seed/``). A parameter rather than something the seed sets afterwards,
+    because the flag is what makes the seed's reconcile safe and a row that was
+    briefly unmarked is a row a concurrent seed would enqueue a second copy of.
 
     Does not commit; the caller owns the transaction, matching every other
     write helper in this package. A sweep whose ``sweep`` row committed and
@@ -339,6 +345,7 @@ def enqueue_sweep(
         spec=plan.spec.model_dump(mode="json"),
         total_runs=plan.rows,
         trials=plan.total,
+        seeded=seeded,
         aerie_revision=revision,
     )
     session.add(sweep)

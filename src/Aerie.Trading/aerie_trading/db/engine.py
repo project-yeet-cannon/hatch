@@ -1,5 +1,7 @@
 """Connecting to the Ledger, and the two questions the control plane asks it."""
 
+from __future__ import annotations
+
 from collections.abc import Sequence
 from typing import Protocol
 
@@ -72,12 +74,24 @@ class Database(Protocol):
 
 
 class SqlDatabase:
-    """The real one: a SQLAlchemy engine over psycopg 3."""
+    """The real one: a SQLAlchemy engine over psycopg 3.
 
-    def __init__(self, settings: Settings) -> None:
-        # Small on purpose. This process is a control plane, not a data path;
-        # Phase 5's workers size their own.
-        self._engine: Engine = create_ledger_engine(settings, pool_size=5)
+    Takes the engine rather than building one, since Phase 7: the control
+    plane's panel queries (``control/panel/reader.py``) need the same
+    connection pool this does, and a class that made its own would give one pod
+    two pools against one database - which is twice the connections CNPG
+    budgets for it, for no second purpose. ``from_settings`` is the composition
+    root's constructor and keeps the sizing decision in one place.
+    """
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine: Engine = engine
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> SqlDatabase:
+        """A database over its own pool. Small on purpose: this process is a
+        control plane, not a data path, and the workers size their own."""
+        return cls(create_ledger_engine(settings, pool_size=5))
 
     @property
     def engine(self) -> Engine:

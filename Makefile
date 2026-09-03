@@ -31,13 +31,20 @@ test-api:
 # One `npm ci` at the workspace root, then each app in turn. The apps are still
 # named one at a time rather than run with `--workspaces` so that the "==>" line
 # says which one is building when something fails.
+#
+# `trading` is in the list like any other app, and its build output is the one
+# that does not land in src/Aerie.Api/wwwroot/apps: the trading service serves
+# its own SPA (docs/plans/trading.md Phase 7), so `npm run build -w
+# apps/trading` writes into src/Aerie.Trading/aerie_trading/control/static/.
+# Running this target is therefore also how a developer gets a control panel in
+# front of `python -m aerie_trading.control`.
 test-web:
 	bash -c 'export NVM_DIR="$$HOME/.nvm"; [ -s "$$NVM_DIR/nvm.sh" ] && \. "$$NVM_DIR/nvm.sh"; \
 	set -e; \
 	cd ./src/Aerie.Web && nvm use && npm ci; \
 	echo "==> @aerie/lib"; \
 	npm run test --if-present -w packages/lib; \
-	for app in admin auth chrome dashboard design home modeler docs family hatch; do \
+	for app in admin auth chrome dashboard design home modeler docs family hatch trading; do \
 		echo "==> $$app"; \
 		npm run lint -w apps/$$app && npm run test --if-present -w apps/$$app && npm run build -w apps/$$app; \
 	done'
