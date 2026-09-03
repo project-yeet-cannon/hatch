@@ -132,6 +132,8 @@ public class AdminSurfaceTests
         "IssueThreadController.GetComments",
         "IssueThreadController.AddComment",
         "IssueThreadController.GetEvents",
+        "ImportController.Preview",
+        "ImportController.Import",
 
         // The whole controller, reads included. See SettingsController.
         "SettingsController.GetAll",

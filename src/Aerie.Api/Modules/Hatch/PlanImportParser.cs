@@ -44,9 +44,9 @@ public partial class PlanImportParser
             // description that opens by repeating the title reads like a bug.
             // Only the first one: a second H1 is somebody's document, not a
             // second epic.
-            if (title is null && H1().Match(line) is { Success: true } h1)
+            if (title is null && H1().Match(line) is { Success: true } h1 && h1.Groups[1].Value.Trim() is { Length: > 0 } heading1)
             {
-                title = h1.Groups[1].Value.Trim();
+                title = heading1;
                 continue;
             }
 
@@ -134,7 +134,10 @@ public partial class PlanImportParser
 
         public ParsedStory ToStory(string source)
         {
-            var tasks = _tasks.Select(t => t.ToTask(source)).ToList();
+            // An empty box - "- [ ]" with nothing after it - is a formatting
+            // artifact rather than a thing to do, and an issue with no title is
+            // not something the API would accept anyway.
+            var tasks = _tasks.Select(t => t.ToTask(source)).Where(t => t.Title.Length > 0).ToList();
             return new ParsedStory(Clip(title), Describe(_body.ToString(), source), RollUp(tasks.Select(t => t.State)), tasks);
         }
     }

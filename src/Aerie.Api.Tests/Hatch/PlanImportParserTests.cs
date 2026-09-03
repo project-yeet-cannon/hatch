@@ -211,6 +211,18 @@ public class PlanImportParserTests
         Assert.Equal(PlanState.Todo, epic.State);
     }
 
+    /// <summary>
+    /// A box with nothing in it is a formatting artifact rather than a thing to
+    /// do - and an issue with no title is not something the API would take.
+    /// </summary>
+    [Fact]
+    public void AnEmptyCheckbox_IsNotATask()
+    {
+        var epic = Parser.Parse("plan.md", "# Plan\n\n## Phase 0\n\n- [ ]\n- [x] a real one\n");
+
+        Assert.Equal(["a real one"], epic.Stories[0].Tasks.Select(t => t.Title));
+    }
+
     // ---- Provenance ----
 
     [Fact]
