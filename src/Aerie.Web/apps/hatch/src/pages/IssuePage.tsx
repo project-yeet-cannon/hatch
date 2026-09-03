@@ -10,6 +10,8 @@ import {
   getIssue,
   patchIssue,
 } from '../api/client';
+import { MomentChip } from '../components/MomentChip';
+import { MomentField } from '../components/MomentField';
 import { TypeBadge } from '../components/TypeBadge';
 import { message } from '../lib/errors';
 import { renderMarkdown } from '../lib/markdown';
@@ -74,6 +76,10 @@ export function IssuePage() {
     (i) => i.projectKey === issue.projectKey && i.key !== issue.key && legal.includes(i.type),
   );
 
+  // Sitting in a column that means it shipped, so the due chip stops warning -
+  // the same rule the board follows, for the same reason.
+  const terminal = board.statuses.find((s) => s.id === issue.statusId)?.isTerminal ?? false;
+
   async function remove() {
     if (!confirm(`Delete ${key}? Its comments and its history go with it.`)) return;
     try {
@@ -93,6 +99,8 @@ export function IssuePage() {
             <span className="hatch-issue-key">{issue.key}</span>
             <TypeBadge type={issue.type} />
             {issue.parentKey && <Link to={`/issues/${issue.parentKey}`}>↳ {issue.parentKey}</Link>}
+            <MomentChip kind="ready" value={issue.readyAt} />
+            <MomentChip kind="due" value={issue.dueAt} muted={terminal} />
             <span className="text-muted">
               filed by {issue.createdBy} on {new Date(issue.createdAt).toLocaleDateString()}
             </span>
@@ -141,6 +149,20 @@ export function IssuePage() {
               ))}
             </select>
           </Field>
+
+          <MomentField
+            label="Ready"
+            hint="Folded off the board until this day."
+            value={issue.readyAt}
+            onChange={(readyAt) => void save({ readyAt })}
+          />
+
+          <MomentField
+            label="Due"
+            hint="A past date is fine - nothing here argues with one."
+            value={issue.dueAt}
+            onChange={(dueAt) => void save({ dueAt })}
+          />
         </div>
       </Card>
 

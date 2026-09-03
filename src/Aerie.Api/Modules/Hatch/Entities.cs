@@ -194,6 +194,38 @@ public class EfHatchIssue
     public required long Rank { get; set; }
 
     /// <summary>
+    /// The day this becomes workable, and nothing about it before then. An
+    /// issue whose <c>ReadyAt</c> is in the future is folded off the board
+    /// (<c>BoardPage</c>), which is what lets a ticket be filed the moment it is
+    /// thought of rather than the moment it can be started: buy a certificate in
+    /// September and the renewal appears next August on its own.
+    /// </summary>
+    /// <remarks>
+    /// A gate, not a schedule. Nothing refuses to move a card that is not ready
+    /// yet, and nothing checks this against <see cref="DueAt"/> - an issue ready
+    /// after it is due is a mistake worth seeing on screen, not one worth a 400.
+    /// </remarks>
+    public DateTimeOffset? ReadyAt { get; set; }
+
+    /// <summary>Whether <see cref="ReadyAt"/>'s time of day was meant - see <see cref="IssueMoment"/>.</summary>
+    public bool ReadyAtHasTime { get; set; }
+
+    /// <summary>
+    /// When it is owed. Drawn on the card as a chip that warms as the date
+    /// approaches, and the field the eventual automatic prioritisation will
+    /// sort on.
+    /// </summary>
+    /// <remarks>
+    /// A date in the past is accepted without comment. Half of what a tracker
+    /// is for is recording that something was due last Tuesday, and a form that
+    /// argues about it is a form people stop telling the truth to.
+    /// </remarks>
+    public DateTimeOffset? DueAt { get; set; }
+
+    /// <summary>Whether <see cref="DueAt"/>'s time of day was meant - see <see cref="IssueMoment"/>.</summary>
+    public bool DueAtHasTime { get; set; }
+
+    /// <summary>
     /// Who filed it, as a name rather than a foreign key. The audit trail wants
     /// to read the same after a person row is deleted, and Phase 6 puts API key
     /// names in this column beside human ones - neither of which a
@@ -266,6 +298,8 @@ public class EfHatchIssueEvent
     public const string Retyped = "retyped";
     public const string StatusChanged = "status_changed";
     public const string ParentChanged = "parent_changed";
+    public const string ReadyChanged = "ready_changed";
+    public const string DueChanged = "due_changed";
     public const string Commented = "commented";
     public const string Imported = "imported";
 

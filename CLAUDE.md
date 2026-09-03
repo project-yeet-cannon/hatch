@@ -53,6 +53,16 @@ A planning session leaves the plan **on the ticket**, not in a chat log:
 - Move it out of the inbox: `POST /api/hatch/issues/AER-12/move` with the
   `statusId` of **todo**. `GET /api/hatch/board` names the columns.
 
+Two optional dates go on the same `PATCH`, and either may be a date
+(`2027-08-15`) or an instant (`2027-09-01T17:00:00Z`); `""` clears one:
+
+- `readyAt` — the day the work *can* start. An issue whose ready date has not
+  arrived is folded off the board, so anything that has to wait for a soak
+  test, a renewal window, or a date on a calendar is filed now and surfaces on
+  its own. Prefer this to a note in a description saying "not until March".
+- `dueAt` — the day it is *owed*, drawn on the card and warming from three days
+  out. A past date is accepted without comment.
+
 ### Implementing a ticket
 
 - Move it to **in progress** before starting, so the board says what is being

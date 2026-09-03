@@ -92,8 +92,21 @@ inbox (10), todo (20), in progress (30), done (40, terminal).
 unique index on `(ProjectId, Number)` as the numbering backstop), `Type` (text:
 `epic|story|task|bug`), `Title` (text), `Description` (text, markdown, default
 empty), `StatusId` (FK), `ParentId` (nullable self-FK), `Rank` (long),
+`ReadyAt`/`DueAt` (nullable timestamps, each with a `…HasTime` bool),
 `CreatedBy` (text actor name), `CreatedAt`, `UpdatedAt`. The display key
 `AER-12` is computed (`Project.Key + "-" + Number`), never stored.
+
+The two dates are a pair with different jobs: `ReadyAt` is a gate — an issue
+whose ready date has not arrived is folded off the board, so next August's
+certificate renewal can be filed the day the certificate is bought — and
+`DueAt` is a deadline, drawn as a chip that warms from three days out. Both are
+optional and both are written on the wire as one string per field, either a
+date (`2027-08-15`) or an instant (`2027-09-01T17:00:00Z`); the `HasTime` bool
+is what keeps those two apart in the database, because a bare date has to be
+pinned to some midnight to be stored and a reader west of UTC would otherwise
+draw the day before. Only formal validity is checked: a past date is a fact
+worth recording, and a ready date after a due date is a mix-up worth seeing on
+the card rather than one worth a 400.
 
 Parent rules, enforced server-side: parent must exist, be in the same project,
 and not create a cycle. Type pairing: epic→epic, story→epic, task→story or bug,
@@ -118,9 +131,9 @@ that attribute for scoped keys). Issue routes take the display key (`AER-12`).
 | `/api/hatch/projects/{id}` | PATCH, DELETE | PATCH: name only. DELETE: 409 unless the project has zero issues |
 | `/api/hatch/statuses` | GET, POST | |
 | `/api/hatch/statuses/{id}` | PATCH, DELETE | PATCH: name, sortOrder, isTerminal. DELETE: 409 while any issue holds it |
-| `/api/hatch/board` | GET | Statuses (sorted) + all issues (key, type, title, statusId, rank, parentKey, projectKey), ordered by `(StatusId, Rank, Id)` |
-| `/api/hatch/issues` | POST | `{ projectId, type, title, description?, parentKey? }` — mints number, lands in the lowest-`SortOrder` status, rank = bottom of column, writes `created` |
-| `/api/hatch/issues/{key}` | GET, PATCH, DELETE | GET includes parent/children keys. PATCH: title/description/type/statusId/parentKey, one event per changed field. DELETE: confirm-worthy, cascades |
+| `/api/hatch/board` | GET | Statuses (sorted) + all issues (key, type, title, statusId, rank, parentKey, projectKey, readyAt, dueAt), ordered by `(StatusId, Rank, Id)`. Never filtered — the browser folds not-yet-ready cards away, the server hands over all of them |
+| `/api/hatch/issues` | POST | `{ projectId, type, title, description?, parentKey?, readyAt?, dueAt? }` — mints number, lands in the lowest-`SortOrder` status, rank = bottom of column, writes `created` |
+| `/api/hatch/issues/{key}` | GET, PATCH, DELETE | GET includes parent/children keys and both dates. PATCH: title/description/type/statusId/parentKey/readyAt/dueAt, one event per changed field; `""` clears a parent or a date. DELETE: confirm-worthy, cascades |
 | `/api/hatch/issues/{key}/move` | POST | `{ statusId, afterKey?, beforeKey? }` — server computes rank; writes `status_changed` only if the column changed |
 | `/api/hatch/issues/{key}/comments` | GET, POST | POST writes `commented` |
 | `/api/hatch/issues/{key}/events` | GET | Newest first |

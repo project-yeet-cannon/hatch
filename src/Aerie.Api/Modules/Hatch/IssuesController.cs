@@ -54,6 +54,9 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
         var title = request.Title?.Trim();
         if (Invalid(title, request.Description, request.Type) is { } invalid) return BadRequest(invalid);
 
+        if (!ReadMoment(request.ReadyAt, "readyAt", out var readyAt, out var momentError)) return BadRequest(momentError);
+        if (!ReadMoment(request.DueAt, "dueAt", out var dueAt, out momentError)) return BadRequest(momentError);
+
         var status = await db.Statuses.OrderBy(s => s.SortOrder).ThenBy(s => s.Id).FirstOrDefaultAsync(ct);
         if (status is null) return Conflict("this board has no columns to put an issue in");
 
@@ -78,6 +81,10 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
                 StatusId = status.Id,
                 ParentId = parent.Issue?.Id,
                 Rank = await ranks.BottomAsync(status.Id, ct),
+                ReadyAt = readyAt?.At,
+                ReadyAtHasTime = readyAt?.HasTime ?? false,
+                DueAt = dueAt?.At,
+                DueAtHasTime = dueAt?.HasTime ?? false,
                 CreatedBy = actor,
                 CreatedAt = now,
                 UpdatedAt = now,
@@ -132,6 +139,9 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
         if (Invalid(request.Title?.Trim(), request.Description, request.Type, required: false) is { } invalid)
             return BadRequest(invalid);
 
+        if (!ReadMoment(request.ReadyAt, "readyAt", out var readyAt, out var momentError)) return BadRequest(momentError);
+        if (!ReadMoment(request.DueAt, "dueAt", out var dueAt, out momentError)) return BadRequest(momentError);
+
         var actor = await caller.ActorNameAsync(ct);
         var now = time.GetUtcNow();
         var events = new List<EfHatchIssueEvent>();
@@ -167,6 +177,37 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
             // so the card goes to the bottom of the new column. The board sends
             // its drops to `move`, which does have them.
             issue.Rank = await ranks.BottomAsync(statusId, ct);
+        }
+
+        // Both dates read present-but-empty as the clear, the same way ParentKey
+        // below does. The comparison is on the formatted string rather than on
+        // the instant and the flag separately: those two are one fact, and
+        // comparing them apart is how "2026-09-12" re-sent unchanged ends up
+        // logged as an edit against the midnight it is stored as.
+        if (request.ReadyAt is not null)
+        {
+            var from = IssueMoment.Format(issue.ReadyAt, issue.ReadyAtHasTime);
+            var to = IssueMoment.Format(readyAt?.At, readyAt?.HasTime ?? false);
+
+            if (to != from)
+            {
+                events.Add(Event(actor, EfHatchIssueEvent.ReadyChanged, new { from, to }, now));
+                issue.ReadyAt = readyAt?.At;
+                issue.ReadyAtHasTime = readyAt?.HasTime ?? false;
+            }
+        }
+
+        if (request.DueAt is not null)
+        {
+            var from = IssueMoment.Format(issue.DueAt, issue.DueAtHasTime);
+            var to = IssueMoment.Format(dueAt?.At, dueAt?.HasTime ?? false);
+
+            if (to != from)
+            {
+                events.Add(Event(actor, EfHatchIssueEvent.DueChanged, new { from, to }, now));
+                issue.DueAt = dueAt?.At;
+                issue.DueAtHasTime = dueAt?.HasTime ?? false;
+            }
         }
 
         // Present-but-empty is the clear; absent is no opinion. See IssuePatchRequest.
@@ -383,9 +424,38 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
             issue.Rank,
             issue.ParentId is { } parentId ? await KeyOfAsync(parentId, ct) : null,
             children.Select(c => IssueKey.Format(c.Key, c.Number)).ToList(),
+            IssueMoment.Format(issue.ReadyAt, issue.ReadyAtHasTime),
+            IssueMoment.Format(issue.DueAt, issue.DueAtHasTime),
             issue.CreatedBy,
             issue.CreatedAt,
             issue.UpdatedAt);
+    }
+
+    /// <summary>
+    /// Reads one of the two dates off a request body. Absent and empty both
+    /// arrive here as "no moment" - which the create path reads as "never had
+    /// one" and the patch path, having already checked the field was present,
+    /// reads as the clear.
+    ///
+    /// Formal validity is the only thing checked. A date in the past is a
+    /// fact, not a mistake, and a ready date after a due date is a mix-up worth
+    /// seeing on the card rather than one worth refusing the whole edit for.
+    /// </summary>
+    private static bool ReadMoment(string? text, string field, out IssueMoment? moment, out string? error)
+    {
+        moment = null;
+        error = null;
+
+        if (string.IsNullOrWhiteSpace(text)) return true;
+
+        if (!IssueMoment.TryParse(text, out var parsed))
+        {
+            error = $"\"{text}\" is not {field} - give {IssueMoment.Expected}";
+            return false;
+        }
+
+        moment = parsed;
+        return true;
     }
 
     /// <summary>
