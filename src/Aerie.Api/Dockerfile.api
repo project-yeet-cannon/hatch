@@ -32,6 +32,7 @@ COPY src/Aerie.Web/apps/dashboard/package.json src/Aerie.Web/apps/dashboard/
 COPY src/Aerie.Web/apps/design/package.json src/Aerie.Web/apps/design/
 COPY src/Aerie.Web/apps/docs/package.json src/Aerie.Web/apps/docs/
 COPY src/Aerie.Web/apps/family/package.json src/Aerie.Web/apps/family/
+COPY src/Aerie.Web/apps/hatch/package.json src/Aerie.Web/apps/hatch/
 COPY src/Aerie.Web/apps/home/package.json src/Aerie.Web/apps/home/
 COPY src/Aerie.Web/apps/modeler/package.json src/Aerie.Web/apps/modeler/
 # The shared packages are workspaces too: `npm ci` reads the lockfile, finds a

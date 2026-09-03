@@ -124,7 +124,8 @@ public class AdminAppMiddlewareTests
 
         await Run("/apps/admin/settings", gate: gate);
 
-        Assert.Equal(("GET", "/apps/admin/settings", "10.0.0.7"), gate.LastAsked);
+        // No scope: a bundle is for a browser, and an API key has no browser.
+        Assert.Equal(("GET", "/apps/admin/settings", "10.0.0.7", null), gate.LastAsked);
     }
 
     private static async Task<(HttpContext Context, bool Served)> Run(
@@ -177,12 +178,12 @@ internal sealed class StubAdminGate : IAdminGate
 
     public int Evaluations { get; private set; }
 
-    public (string? Method, string? Path, string? ClientIp) LastAsked { get; private set; }
+    public (string? Method, string? Path, string? ClientIp, string? AcceptScope) LastAsked { get; private set; }
 
-    public Task<AdminDecision> EvaluateAsync(string? method, PathString path, string? clientIp, CancellationToken ct)
+    public Task<AdminDecision> EvaluateAsync(string? method, PathString path, string? clientIp, string? acceptScope, CancellationToken ct)
     {
         Evaluations++;
-        LastAsked = (method, path.Value, clientIp);
+        LastAsked = (method, path.Value, clientIp, acceptScope);
         return Task.FromResult(Decision);
     }
 }

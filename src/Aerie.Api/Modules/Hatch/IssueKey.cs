@@ -1,5 +1,3 @@
-using Aerie.Api.Services.Auth;
-
 namespace Aerie.Api.Modules.Hatch;
 
 /// <summary>
@@ -42,22 +40,6 @@ public static class IssueKey
 /// <summary>Queries and names that more than one Hatch controller needs.</summary>
 public static class HatchQueries
 {
-    /// <summary>
-    /// The actor written into <c>CreatedBy</c>, <c>Author</c>, and every event:
-    /// the person this device belongs to, or the literal <c>operator</c> when
-    /// nobody is linked - which is local development, an unlinked device, and
-    /// every request while the wall is off.
-    /// </summary>
-    /// <remarks>
-    /// A name rather than a person id, because Phase 6 puts API key names in
-    /// the same column beside human ones, and because an audit trail should
-    /// still read after the row it named is gone.
-    /// </remarks>
-    public const string Unattributed = "operator";
-
-    public static async Task<string> ActorAsync(this ICallerIdentity caller, CancellationToken ct) =>
-        (await caller.PersonAsync(ct))?.Name is { Length: > 0 } name ? name : Unattributed;
-
     /// <summary>The issue a display key names, in whatever project owns that prefix.</summary>
     public static IQueryable<EfHatchIssue> WithKey(this IQueryable<EfHatchIssue> issues, string projectKey, int number) =>
         issues.Where(i => i.Project!.Key == projectKey && i.Number == number);

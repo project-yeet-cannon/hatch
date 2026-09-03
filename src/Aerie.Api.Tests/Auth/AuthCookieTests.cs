@@ -77,7 +77,7 @@ public class AuthCookieTests
             Microsoft.Extensions.Options.Options.Create(new Aerie.Api.Services.Media.MediaLibraryOptions { RequestPath = "/media" }),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthGate>.Instance);
 
-        var decision = await gate.EvaluateAsync("/apps/family/", "home.example.com", ["stale", "good"], "10.0.0.7", CancellationToken.None);
+        var decision = await gate.EvaluateAsync("/apps/family/", "home.example.com", ["stale", "good"], bearer: null, "10.0.0.7", CancellationToken.None);
 
         Assert.Equal(AuthOutcome.Authenticated, decision.Outcome);
         Assert.Same(grant, decision.Grant);

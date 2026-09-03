@@ -318,6 +318,34 @@ export interface AuthInvite {
   label: string | null;
 }
 
+/** What a key may reach. One scope today - see ApiKeyScopes in Ef/ApiKeys.cs. */
+export type ApiKeyScope = 'hatch';
+
+/** The scopes the mint dialog offers, mirroring ApiKeyScopes.All. */
+export const API_KEY_SCOPES: ApiKeyScope[] = ['hatch'];
+
+/**
+ * One API key as the list sees it. The secret is not here and never will be:
+ * it exists in plaintext exactly once, in the response to the mint.
+ */
+export interface ApiKey {
+  id: string;
+  name: string;
+  /** The leading characters of the secret - enough to match a row against a config file, useless to hold. */
+  prefix: string;
+  scopes: ApiKeyScope[];
+  createdAt: string;
+  lastUsedAt: string | null;
+  /** When it stopped working, or null while it still does. */
+  revokedAt: string | null;
+}
+
+/** A freshly minted key, on its way to a screen once. */
+export interface ApiKeyMinted {
+  key: ApiKey;
+  secret: string;
+}
+
 /** `GET /api/apps/config` - the deploy-time values a client can't derive (Modules/AppsController.cs). */
 export interface AppsConfig {
   /** Absolute base URL of this install, no trailing slash, or null when unset. */

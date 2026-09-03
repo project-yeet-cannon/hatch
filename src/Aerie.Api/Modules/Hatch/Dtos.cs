@@ -117,3 +117,45 @@ public record IssueEventDto(long Id, string Actor, string Kind, JsonElement? Pay
 /// that arrives in pieces cannot answer "what is in progress" in one glance.
 /// </summary>
 public record BoardDto(IReadOnlyList<StatusDto> Statuses, IReadOnlyList<IssueCardDto> Issues);
+
+// ---- The importer ----
+
+/// <summary>
+/// How far along an imported node is, before it is matched to a column. The
+/// parser reads a shape and this names it; the import endpoint is the only
+/// thing that knows which status row a shape lands in, because column names are
+/// the operator's to change.
+/// </summary>
+public enum PlanState
+{
+    Todo,
+    InProgress,
+    Done,
+}
+
+/// <summary>One checkbox from a plan.</summary>
+public record ParsedTask(string Title, string Description, PlanState State);
+
+/// <summary>One <c>## Phase</c> section: its heading, its prose, and its checkboxes.</summary>
+public record ParsedStory(string Title, string Description, PlanState State, IReadOnlyList<ParsedTask> Tasks);
+
+/// <summary>
+/// One uploaded plan file, as the issues it would become. Handed back by
+/// <c>preview</c> and handed in again to <c>import</c> unchanged - so what the
+/// operator approved on screen is exactly what gets written, with no second
+/// parse in between to disagree with the first.
+/// </summary>
+public record ParsedEpic(
+    string Filename,
+    string Title,
+    string Description,
+    PlanState State,
+    IReadOnlyList<ParsedStory> Stories);
+
+/// <param name="Docs">The trees from <c>preview</c>, whichever of them the operator kept.</param>
+public record ImportRequest(int ProjectId, IReadOnlyList<ParsedEpic> Docs);
+
+/// <param name="Key">The epic's display key, so the result list can link to what it made.</param>
+public record ImportedEpicDto(string Filename, string Key, string Title, int StoryCount, int TaskCount);
+
+public record ImportResultDto(IReadOnlyList<ImportedEpicDto> Epics, int IssueCount);

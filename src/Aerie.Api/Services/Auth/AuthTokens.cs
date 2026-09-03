@@ -6,8 +6,8 @@ using Microsoft.AspNetCore.WebUtilities;
 namespace Aerie.Api.Services.Auth;
 
 /// <summary>
-/// The two secrets the wall deals in, and the only place either is generated,
-/// hashed, formatted or parsed.
+/// The three secrets the wall deals in, and the only place any of them is
+/// generated, hashed, formatted or parsed.
 ///
 /// They are deliberately different shapes because they are handled by different
 /// things. A grant token is read by a browser and nothing else, so it is 256
@@ -15,13 +15,16 @@ namespace Aerie.Api.Services.Auth;
 /// across a room and typed on a tablet's soft keyboard, so it is eight
 /// Crockford characters - the same alphabet and the same fold-on-parse rules as
 /// <see cref="Aerie.Api.Modules.Storage.CrateCode"/>, for the same reason: a
-/// character a person can mistake is a character that sends them nowhere.
+/// character a person can mistake is a character that sends them nowhere. An
+/// API key is read by a program out of a file, so it optimises for a third
+/// thing again: being unmistakable on sight, which is what the
+/// <c>aerie_ak_</c> prefix buys.
 ///
-/// Both are stored only as SHA-256. Plain SHA-256 rather than a password KDF is
-/// right for the token - the input is full-entropy random, so there is nothing
-/// for iteration count to defend - and is an accepted, bounded compromise for
-/// the code, whose 40 bits are protected by a minutes-long TTL and single use
-/// instead (see EfAuthInvite).
+/// All three are stored only as SHA-256. Plain SHA-256 rather than a password
+/// KDF is right for the token and the key - the input is full-entropy random,
+/// so there is nothing for iteration count to defend - and is an accepted,
+/// bounded compromise for the code, whose 40 bits are protected by a
+/// minutes-long TTL and single use instead (see EfAuthInvite).
 /// </summary>
 public static class AuthTokens
 {
@@ -36,6 +39,20 @@ public static class AuthTokens
 
     /// <summary>What a formatted code leads with, so someone looking at eight characters on a screen knows what they are for.</summary>
     public const string InvitePrefix = "AERIE";
+
+    /// <summary>
+    /// What every API key secret starts with. It is there so that a string
+    /// pasted into a config file, a log line, or a commit is recognisable as an
+    /// Aerie credential on sight - by a person reading it, and by the secret
+    /// scanners that read a public repository for exactly these shapes.
+    /// </summary>
+    public const string ApiKeyPrefix = "aerie_ak_";
+
+    /// <summary>Random characters after the prefix. 32 of 62 is ~190 bits, which is a secret nobody guesses and a string that still fits on one line.</summary>
+    public const int ApiKeyBodyLength = 32;
+
+    /// <summary>Letters and digits only: a key is copied through shells, YAML and JSON, and every one of those has an opinion about punctuation.</summary>
+    public const string ApiKeyAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
     private const int InviteGroupSize = InviteCodeLength / 2;
 
@@ -94,6 +111,22 @@ public static class AuthTokens
 
         return new string(code);
     }
+
+    /// <summary>
+    /// A fresh API key secret. Read by a program out of a file rather than by a
+    /// person off a screen, so unlike an invite code it optimises for entropy
+    /// and for being unmistakable, not for being sayable.
+    /// </summary>
+    public static string NewApiKey() =>
+        ApiKeyPrefix + RandomNumberGenerator.GetString(ApiKeyAlphabet, ApiKeyBodyLength);
+
+    /// <summary>
+    /// The leading characters of a secret, which is all of it that is ever
+    /// stored in the clear or shown twice - enough to tell two keys apart in a
+    /// list, and useless to anybody holding it.
+    /// </summary>
+    public static string ApiKeyPrefixOf(string secret) =>
+        secret.Length <= EfApiKey.PrefixLength ? secret : secret[..EfApiKey.PrefixLength];
 
     /// <summary>SHA-256 of a secret, as it is stored. ASCII because both secrets are drawn from ASCII alphabets by construction.</summary>
     public static byte[] Hash(string secret) => SHA256.HashData(Encoding.UTF8.GetBytes(secret));

@@ -27,7 +27,7 @@ public class AdminGateTests
         var gate = NewGate(caller, enabled: true, enforceAdmin: false);
 
         Assert.False(gate.Enabled);
-        var decision = await gate.EvaluateAsync("GET", "/apps/admin/", null, default);
+        var decision = await gate.EvaluateAsync("GET", "/apps/admin/", null, acceptScope: null, default);
 
         Assert.Equal(AdminOutcome.Dormant, decision.Outcome);
         Assert.True(decision.IsAllowed);
@@ -45,7 +45,7 @@ public class AdminGateTests
         var gate = NewGate(new StubCallerIdentity(null), enabled: false, enforceAdmin: true);
 
         Assert.False(gate.Enabled);
-        Assert.Equal(AdminOutcome.Dormant, (await gate.EvaluateAsync("GET", "/apps/admin/", null, default)).Outcome);
+        Assert.Equal(AdminOutcome.Dormant, (await gate.EvaluateAsync("GET", "/apps/admin/", null, acceptScope: null, default)).Outcome);
     }
 
     [Fact]
@@ -54,7 +54,7 @@ public class AdminGateTests
         var person = Person(isAdmin: true);
         var gate = NewGate(new StubCallerIdentity(Grant(person)));
 
-        var decision = await gate.EvaluateAsync("DELETE", "/api/zones/x", "10.0.0.7", default);
+        var decision = await gate.EvaluateAsync("DELETE", "/api/zones/x", "10.0.0.7", acceptScope: null, default);
 
         Assert.Equal(AdminOutcome.Admin, decision.Outcome);
         Assert.True(decision.IsAllowed);
@@ -67,7 +67,7 @@ public class AdminGateTests
     {
         var gate = NewGate(new StubCallerIdentity(Grant(Person(isAdmin: false))));
 
-        var decision = await gate.EvaluateAsync("DELETE", "/api/zones/x", "10.0.0.7", default);
+        var decision = await gate.EvaluateAsync("DELETE", "/api/zones/x", "10.0.0.7", acceptScope: null, default);
 
         Assert.Equal(AdminOutcome.Refused, decision.Outcome);
         Assert.False(decision.IsAllowed);
@@ -85,7 +85,7 @@ public class AdminGateTests
     {
         var gate = NewGate(new StubCallerIdentity(Grant(person: null)));
 
-        var decision = await gate.EvaluateAsync("POST", "/api/people", "10.0.0.7", default);
+        var decision = await gate.EvaluateAsync("POST", "/api/people", "10.0.0.7", acceptScope: null, default);
 
         Assert.Equal(AdminDecision.NoPerson, decision.Reason);
     }
@@ -101,7 +101,7 @@ public class AdminGateTests
     {
         var gate = NewGate(new StubCallerIdentity(null));
 
-        var decision = await gate.EvaluateAsync("GET", "/apps/admin/", "10.0.0.7", default);
+        var decision = await gate.EvaluateAsync("GET", "/apps/admin/", "10.0.0.7", acceptScope: null, default);
 
         Assert.Equal(AdminDecision.NoGrant, decision.Reason);
     }
@@ -116,7 +116,7 @@ public class AdminGateTests
     {
         var caller = new StubCallerIdentity(Grant(Person(isAdmin: true)));
 
-        await NewGate(caller).EvaluateAsync("GET", "/apps/admin/", null, default);
+        await NewGate(caller).EvaluateAsync("GET", "/apps/admin/", null, acceptScope: null, default);
 
         Assert.Equal(1, caller.Asked);
     }
@@ -149,7 +149,7 @@ public class AdminGateTests
     /// Answers with one grant, or none, and counts the asking - which is how a
     /// test proves the dormant path never looks at a credential at all.
     /// </summary>
-    private sealed class StubCallerIdentity(EfAuthGrant? grant) : ICallerIdentity
+    private sealed class StubCallerIdentity(EfAuthGrant? grant, EfApiKey? key = null) : ICallerIdentity
     {
         public int Asked { get; private set; }
 
@@ -162,5 +162,11 @@ public class AdminGateTests
         public Task<Guid?> PersonIdAsync(CancellationToken ct) => Task.FromResult(grant?.PersonId);
 
         public Task<EfPerson?> PersonAsync(CancellationToken ct) => Task.FromResult(grant?.Person);
+
+        /// <summary>Uncounted: <see cref="Asked"/> is about grant lookups, which are the expensive ones - they write LastSeenAt.</summary>
+        public Task<EfApiKey?> ApiKeyAsync(CancellationToken ct) => Task.FromResult(key);
+
+        public Task<string> ActorNameAsync(CancellationToken ct) =>
+            Task.FromResult(grant?.Person?.Name ?? key?.Name ?? CallerIdentity.Unattributed);
     }
 }

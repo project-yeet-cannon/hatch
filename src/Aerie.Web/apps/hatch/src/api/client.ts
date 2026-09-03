@@ -3,11 +3,14 @@ import type {
   Board,
   Comment,
   CommentCreateRequest,
+  ImportRequest,
+  ImportResult,
   Issue,
   IssueCreateRequest,
   IssueEvent,
   IssueMoveRequest,
   IssuePatchRequest,
+  ParsedEpic,
   Project,
   ProjectCreateRequest,
   ProjectPatchRequest,
@@ -18,7 +21,13 @@ import type {
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
-    headers: { Accept: 'application/json', ...(init?.body ? { 'Content-Type': 'application/json' } : {}) },
+    // Only a string body is ours to label. FormData sets its own content type
+    // with the multipart boundary in it, and stating one here would produce a
+    // header the server cannot parse the body against.
+    headers: {
+      Accept: 'application/json',
+      ...(typeof init?.body === 'string' ? { 'Content-Type': 'application/json' } : {}),
+    },
     ...init,
   });
   if (handledUnauthorized(res)) {
@@ -109,3 +118,17 @@ export const getComments = (key: string) => fetchJson<Comment[]>(`/api/hatch/iss
 export const addComment = (key: string, request: CommentCreateRequest) =>
   fetchJson<Comment>(`/api/hatch/issues/${seg(key)}/comments`, { method: 'POST', ...asJson(request) });
 export const getEvents = (key: string) => fetchJson<IssueEvent[]>(`/api/hatch/issues/${seg(key)}/events`);
+
+// ---- The importer ----
+
+/** What these files would become, without writing anything. Multipart because
+    it is several files at once; the browser sets the boundary, so this is the
+    one request here that does not name its own content type. */
+export const previewImport = (files: File[]) => {
+  const form = new FormData();
+  for (const file of files) form.append('files', file, file.name);
+  return fetchJson<ParsedEpic[]>('/api/hatch/import/preview', { method: 'POST', body: form });
+};
+
+export const runImport = (request: ImportRequest) =>
+  fetchJson<ImportResult>('/api/hatch/import', { method: 'POST', ...asJson(request) });

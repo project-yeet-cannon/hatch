@@ -1,4 +1,5 @@
 using Aerie.Api.Common;
+using Aerie.Api.Ef;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,7 +12,7 @@ namespace Aerie.Api.Modules.Hatch;
 /// </summary>
 [ApiController]
 [Route("api/hatch/projects")]
-[RequireAdmin]
+[RequireAdmin(AcceptScope = ApiKeyScopes.Hatch)]
 public class ProjectsController(HatchContext db, TimeProvider time) : ControllerBase
 {
     [HttpGet]

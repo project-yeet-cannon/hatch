@@ -310,5 +310,10 @@ public class QuillControllerTests
 
         /// <summary>Quill never asks for the row - it scopes by id, which is the shape the module's queries want. See ICallerIdentity.PersonAsync.</summary>
         public Task<EfPerson?> PersonAsync(CancellationToken ct) => Task.FromResult<EfPerson?>(null);
+
+        /// <summary>Nor for a key: Quill's notes belong to a person, and a program is not one.</summary>
+        public Task<EfApiKey?> ApiKeyAsync(CancellationToken ct) => Task.FromResult<EfApiKey?>(null);
+
+        public Task<string> ActorNameAsync(CancellationToken ct) => Task.FromResult(CallerIdentity.Unattributed);
     }
 }

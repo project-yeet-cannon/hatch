@@ -94,3 +94,42 @@ public record AuthInviteDto(
     string RedeemPath,
     DateTimeOffset ExpiresAt,
     string? Label);
+
+/// <summary>
+/// One API key as the admin page sees it. The secret is not here and never will
+/// be: it exists in plaintext exactly once, in the response to the mint that
+/// created it.
+/// </summary>
+/// <param name="Prefix">
+/// The leading characters of the secret - what lets an operator match a row
+/// against the value in a config file without either of them holding the whole
+/// thing.
+/// </param>
+public record ApiKeyDto(
+    Guid Id,
+    string Name,
+    string Prefix,
+    IReadOnlyList<string> Scopes,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? LastUsedAt,
+    DateTimeOffset? RevokedAt)
+{
+    public static ApiKeyDto From(EfApiKey key) =>
+        new(key.Id, key.Name, key.Prefix, key.Scopes, key.CreatedAt, key.LastUsedAt, key.RevokedAt);
+}
+
+/// <summary>
+/// A freshly minted key, on its way to a screen once. The same shape as
+/// <see cref="ApiKeyDto"/> plus the one field that never appears again -
+/// modelled as a separate record rather than a nullable field on that one, so
+/// that no list response can ever be the thing that leaks a secret.
+/// </summary>
+public record ApiKeyMintedDto(ApiKeyDto Key, string Secret);
+
+/// <summary>What an operator asks for when they want to hand a program a credential.</summary>
+/// <param name="Scopes">
+/// What it may reach. Null is not "everything" - it is the empty list, and a
+/// key with no scopes reaches nothing, which is the right way for a mistyped
+/// request to fail.
+/// </param>
+public record CreateApiKeyRequest(string? Name, string[]? Scopes);

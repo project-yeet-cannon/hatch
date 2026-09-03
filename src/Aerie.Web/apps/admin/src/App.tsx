@@ -12,6 +12,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { ProvisioningPage } from './pages/ProvisioningPage';
 import { PeoplePage } from './pages/PeoplePage';
 import { SessionsPage } from './pages/SessionsPage';
+import { ApiKeysPage } from './pages/ApiKeysPage';
 import { RevisionsPage } from './pages/RevisionsPage';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) => `admin-nav-link${isActive ? ' active' : ''}`;
@@ -34,6 +35,7 @@ export function App() {
           <NavLink to="/provisioning" className={navLinkClass}>Provisioning</NavLink>
           <NavLink to="/people" className={navLinkClass}>People</NavLink>
           <NavLink to="/sessions" className={navLinkClass}>Sessions</NavLink>
+          <NavLink to="/api-keys" className={navLinkClass}>API keys</NavLink>
           <NavLink to="/revisions" className={navLinkClass}>Revisions</NavLink>
         </div>
       </nav>
@@ -52,6 +54,7 @@ export function App() {
           <Route path="/provisioning" element={<ProvisioningPage />} />
           <Route path="/people" element={<PeoplePage />} />
           <Route path="/sessions" element={<SessionsPage />} />
+          <Route path="/api-keys" element={<ApiKeysPage />} />
           <Route path="/revisions" element={<RevisionsPage />} />
           <Route path="*" element={<Navigate to="/zones" replace />} />
         </Routes>

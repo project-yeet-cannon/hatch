@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Aerie.Api.Common;
+using Aerie.Api.Ef;
 using Aerie.Api.Services.Auth;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -19,7 +20,7 @@ namespace Aerie.Api.Modules.Hatch;
 /// </summary>
 [ApiController]
 [Route("api/hatch/issues")]
-[RequireAdmin]
+[RequireAdmin(AcceptScope = ApiKeyScopes.Hatch)]
 public class IssuesController(HatchContext db, RankService ranks, ICallerIdentity caller, TimeProvider time) : ControllerBase
 {
     /// <summary>
@@ -56,7 +57,7 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
         var status = await db.Statuses.OrderBy(s => s.SortOrder).ThenBy(s => s.Id).FirstOrDefaultAsync(ct);
         if (status is null) return Conflict("this board has no columns to put an issue in");
 
-        var actor = await caller.ActorAsync(ct);
+        var actor = await caller.ActorNameAsync(ct);
         var now = time.GetUtcNow();
 
         for (var attempt = 1; ; attempt++)
@@ -131,7 +132,7 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
         if (Invalid(request.Title?.Trim(), request.Description, request.Type, required: false) is { } invalid)
             return BadRequest(invalid);
 
-        var actor = await caller.ActorAsync(ct);
+        var actor = await caller.ActorNameAsync(ct);
         var now = time.GetUtcNow();
         var events = new List<EfHatchIssueEvent>();
 
@@ -242,7 +243,7 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
         var changedColumn = issue.StatusId != status.Id;
         if (changedColumn)
         {
-            var actor = await caller.ActorAsync(ct);
+            var actor = await caller.ActorNameAsync(ct);
             var now = time.GetUtcNow();
             var from = await db.Statuses.Where(s => s.Id == issue.StatusId).Select(s => s.Name).FirstOrDefaultAsync(ct);
             issue.Events.Add(Event(actor, EfHatchIssueEvent.StatusChanged, new { from, to = status.Name }, now));

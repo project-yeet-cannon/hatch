@@ -11,7 +11,7 @@ public enum AuthOutcome
     /// <summary>Exempt - on the allow-list, on an exempt host, or the gate is switched off. No credential was looked at.</summary>
     Allow,
 
-    /// <summary>A live grant was presented.</summary>
+    /// <summary>A live credential was presented - a grant off a cookie, or an API key off an Authorization header.</summary>
     Authenticated,
 
     /// <summary>Refused. The caller decides what a refusal looks like: a redirect for a document request, a bare 401 for everything else.</summary>
@@ -23,10 +23,13 @@ public enum AuthOutcome
 /// Warning log line carries, and eventually what a support conversation starts
 /// from.
 /// </summary>
-public record AuthDecision(AuthOutcome Outcome, EfAuthGrant? Grant, string? Reason, string? Token = null)
+public record AuthDecision(AuthOutcome Outcome, EfAuthGrant? Grant, string? Reason, string? Token = null, EfApiKey? ApiKey = null)
 {
     public const string NoCredential = "no_credential";
     public const string UnknownGrant = "unknown_grant";
+
+    /// <summary>A bearer key that no live row answers to - never minted, mistyped, or revoked. One reason for all three, as with a grant.</summary>
+    public const string UnknownKey = "unknown_key";
 
     public bool IsAllowed => Outcome != AuthOutcome.Challenge;
 
@@ -34,6 +37,13 @@ public record AuthDecision(AuthOutcome Outcome, EfAuthGrant? Grant, string? Reas
 
     /// <summary>Carries the token that verified, so the sliding re-issue writes back the same secret rather than guessing which cookie won.</summary>
     public static AuthDecision Authenticated(EfAuthGrant grant, string token) => new(AuthOutcome.Authenticated, grant, null, token);
+
+    /// <summary>
+    /// The other lane. No token, because there is no cookie to re-issue: a
+    /// program holding a key already has its credential in a file, and handing
+    /// it a Set-Cookie would be the wall inventing a session nobody asked for.
+    /// </summary>
+    public static AuthDecision AuthenticatedKey(EfApiKey key) => new(AuthOutcome.Authenticated, null, null, null, key);
 
     public static AuthDecision Challenge(string reason) => new(AuthOutcome.Challenge, null, reason);
 }
@@ -62,7 +72,16 @@ public interface IAuthGate
     /// forwardAuth endpoint means the ones Traefik forwarded rather than the
     /// proxied request's own.
     /// </summary>
-    Task<AuthDecision> EvaluateAsync(PathString path, string? host, IReadOnlyList<string> tokens, string? clientIp, CancellationToken ct);
+    /// <param name="tokens">Grant tokens off the cookie jar - plural, because a browser can present several cookies of one name.</param>
+    /// <param name="bearer">
+    /// The secret from an <c>Authorization: Bearer</c> header, or null. A
+    /// distinct argument rather than a fourth entry in
+    /// <paramref name="tokens"/>: it is a different credential answered by a
+    /// different table, and a list that mixed the two would be a list where a
+    /// key could be tried as a cookie.
+    /// </param>
+    Task<AuthDecision> EvaluateAsync(
+        PathString path, string? host, IReadOnlyList<string> tokens, string? bearer, string? clientIp, CancellationToken ct);
 }
 
 /// <summary>
@@ -225,7 +244,8 @@ public class AuthGate(
         return false;
     }
 
-    public async Task<AuthDecision> EvaluateAsync(PathString path, string? host, IReadOnlyList<string> tokens, string? clientIp, CancellationToken ct)
+    public async Task<AuthDecision> EvaluateAsync(
+        PathString path, string? host, IReadOnlyList<string> tokens, string? bearer, string? clientIp, CancellationToken ct)
     {
         // Off is the rollback, and it is also the whole of local dev. Deciding
         // it here rather than in each caller means there is no way to reach the
@@ -233,6 +253,20 @@ public class AuthGate(
         if (!options.Enabled) return AuthDecision.Exempt;
 
         if (IsExempt(path, host)) return AuthDecision.Exempt;
+
+        // The bearer lane goes first, and its refusal is final rather than a
+        // fall-through to the cookie. A caller that sent a key meant to send a
+        // key: quietly trying its cookies afterwards would answer 200 to a
+        // request made with a revoked credential whenever the same browser
+        // happened to be signed in, which is precisely the case revocation
+        // exists to close.
+        if (!string.IsNullOrEmpty(bearer))
+        {
+            var key = await auth.VerifyApiKeyAsync(bearer, ct);
+            return key is null
+                ? Refuse(AuthDecision.UnknownKey, path, host, clientIp)
+                : AuthDecision.AuthenticatedKey(key);
+        }
 
         if (tokens.Count == 0) return Refuse(AuthDecision.NoCredential, path, host, clientIp);
 

@@ -1,6 +1,9 @@
 import { handledUnauthorized } from '../lib/signIn';
 import type {
   AerieRevisionInfo,
+  ApiKey,
+  ApiKeyMinted,
+  ApiKeyScope,
   AppsConfig,
   AuthGrant,
   AuthInvite,
@@ -278,6 +281,13 @@ export const personPhotoUrl = (person: Person) =>
 // ---- Sessions ----
 
 export const getGrants = () => fetchJson<AuthGrant[]>('/api/auth/grants');
+export const getApiKeys = () => fetchJson<ApiKey[]>('/api/auth/keys');
+/** The only other response in the app that carries a live credential, and it carries it once. */
+export const createApiKey = (name: string, scopes: ApiKeyScope[]) =>
+  fetchJson<ApiKeyMinted>('/api/auth/keys', { method: 'POST', ...asJson({ name, scopes }) });
+/** A POST rather than a DELETE: the row stays, because the audit trail names it. */
+export const revokeApiKey = (id: string) =>
+  fetchJson<void>(`/api/auth/keys/${id}/revoke`, { method: 'POST' });
 /** Revocation is deletion; the server refuses the caller's own grant, which signOutDevice is for. */
 export const deleteGrant = (id: string) => fetchJson<void>(`/api/auth/grants/${id}`, { method: 'DELETE' });
 /** The only response in the app that carries a live credential, and it carries it once - it cannot be fetched again. */

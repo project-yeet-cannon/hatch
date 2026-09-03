@@ -47,6 +47,32 @@ public interface ICallerIdentity
     Task<Guid?> PersonIdAsync(CancellationToken ct);
 
     /// <summary>
+    /// The API key this request presented, or null - which is every request a
+    /// browser makes.
+    ///
+    /// Read here rather than off the header by whoever is curious, for the same
+    /// reason <see cref="GrantAsync"/> exists: one implementation of "who is
+    /// this", so the day the ceremony changes there is one place to change it.
+    /// </summary>
+    Task<EfApiKey?> ApiKeyAsync(CancellationToken ct);
+
+    /// <summary>
+    /// The name to write into an audit row: the person holding the device, else
+    /// the API key's own name, else the literal <c>operator</c>.
+    ///
+    /// A name rather than a foreign key, and the same column takes all three,
+    /// because a trail should still read after the row it named is gone - and
+    /// because "Claude" and "Nathan" belong in one column if the question the
+    /// trail answers is "who did this".
+    ///
+    /// The last case is not a fallback so much as the ordinary state of local
+    /// development: <c>Auth:Enabled</c> is false, nobody is enrolled, and
+    /// <c>operator</c> is the honest name for whoever is sitting at the
+    /// machine.
+    /// </summary>
+    Task<string> ActorNameAsync(CancellationToken ct);
+
+    /// <summary>
     /// The person themselves rather than their key - for the one caller that
     /// needs a column off that row instead of something to compare a foreign
     /// key against.
@@ -73,8 +99,14 @@ public class CallerIdentity(
 {
     private readonly AuthOptions options = options.Value;
 
+    /// <summary>What <see cref="ActorNameAsync"/> answers when nobody is holding the phone. See the interface.</summary>
+    public const string Unattributed = "operator";
+
     private EfAuthGrant? grant;
     private bool resolved;
+
+    private EfApiKey? apiKey;
+    private bool keyResolved;
 
     public async Task<EfAuthGrant?> GrantAsync(CancellationToken ct)
     {
@@ -94,6 +126,45 @@ public class CallerIdentity(
 
         resolved = true;
         return grant;
+    }
+
+    /// <summary>
+    /// The key the middleware authenticated, or - when the wall is switched
+    /// off - the one this request's own Authorization header names.
+    ///
+    /// The fallback is the same shape <see cref="GrantAsync"/> takes and exists
+    /// for the same reason, with one added consequence worth stating: it is
+    /// what makes a bearer key work against <c>make run</c>, where
+    /// <c>Auth:Enabled</c> is false and no middleware ever looked at a header.
+    /// An agent developing against a local API is the first user of this lane.
+    /// </summary>
+    public async Task<EfApiKey?> ApiKeyAsync(CancellationToken ct)
+    {
+        if (keyResolved) return apiKey;
+
+        var context = accessor.HttpContext;
+        if (context is not null)
+        {
+            apiKey = context.GetApiKey()
+                ?? await auth.VerifyApiKeyAsync(AuthBearer.Read(context.Request), ct);
+        }
+
+        keyResolved = true;
+        return apiKey;
+    }
+
+    /// <summary>
+    /// The person first, because a person holding a device is the more specific
+    /// answer: a request cannot carry both a grant and a key, but the wall
+    /// being off makes both fallbacks live at once, and a browser signed in as
+    /// somebody is who that request is from.
+    /// </summary>
+    public async Task<string> ActorNameAsync(CancellationToken ct)
+    {
+        if ((await PersonAsync(ct))?.Name is { Length: > 0 } person) return person;
+        if ((await ApiKeyAsync(ct))?.Name is { Length: > 0 } key) return key;
+
+        return Unattributed;
     }
 
     public async Task<Guid?> PersonIdAsync(CancellationToken ct) => (await GrantAsync(ct))?.PersonId;

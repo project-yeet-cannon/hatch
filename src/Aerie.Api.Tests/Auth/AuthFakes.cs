@@ -94,5 +94,47 @@ internal sealed class StubAuthService(EfAuthGrant? grant = null) : IAuthService
     public Task<IReadOnlyList<EfAuthGrant>> ListGrantsAsync(CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<EfAuthGrant>>(Grants);
 
+    // ---- API keys ----
+
+    /// <summary>Every bearer secret the gate presented, so a test can prove it passed the header on rather than reading a cookie.</summary>
+    public List<string?> KeysVerified { get; } = [];
+
+    /// <summary>What VerifyApiKeyAsync answers. Null by default, so a test has to opt into a live key rather than inherit one.</summary>
+    public EfApiKey? Key { get; set; }
+
+    /// <summary>What ListApiKeysAsync answers - the admin API Keys page's list.</summary>
+    public List<EfApiKey> Keys { get; } = [];
+
+    /// <summary>What CreateApiKeyAsync answers; null is how a test reaches the duplicate-name 409.</summary>
+    public ApiKeyCreated? MintResult { get; set; }
+
+    public List<(string Name, IReadOnlyList<string> Scopes)> KeysCreated { get; } = [];
+
+    public List<Guid> KeysRevoked { get; } = [];
+
+    /// <summary>Whether RevokeApiKeyAsync found a row. False is how a test reaches the 404.</summary>
+    public bool RevokeKeyResult { get; set; } = true;
+
+    public Task<EfApiKey?> VerifyApiKeyAsync(string? secret, CancellationToken ct)
+    {
+        KeysVerified.Add(secret);
+        return Task.FromResult(Key);
+    }
+
+    public Task<IReadOnlyList<EfApiKey>> ListApiKeysAsync(CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<EfApiKey>>(Keys);
+
+    public Task<ApiKeyCreated?> CreateApiKeyAsync(string name, IReadOnlyList<string> scopes, CancellationToken ct)
+    {
+        KeysCreated.Add((name, scopes));
+        return Task.FromResult(MintResult);
+    }
+
+    public Task<bool> RevokeApiKeyAsync(Guid id, CancellationToken ct)
+    {
+        KeysRevoked.Add(id);
+        return Task.FromResult(RevokeKeyResult);
+    }
+
     public Task<bool> HasAnyAccessAsync(CancellationToken ct) => throw new NotSupportedException();
 }

@@ -15,6 +15,11 @@ public static class HatchModule
         // land in one SaveChanges.
         services.AddScoped<RankService>();
 
+        // Singleton, because it is a pure function with a class around it: it
+        // reads a string and returns a tree, and touches neither the database
+        // nor the clock.
+        services.AddSingleton<PlanImportParser>();
+
         return services;
     }
 }
