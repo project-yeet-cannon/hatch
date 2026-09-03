@@ -110,7 +110,7 @@
   min-height: 0;
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r);
 }
 
 /* The only feedback a drop target gives. A column that lights up under the
@@ -135,7 +135,7 @@
 
 .hatch-column-count {
   color: var(--muted);
-  font-size: var(--t-small);
+  font-size: var(--t-label);
 }
 
 /* min-height so an empty column is still tall enough to drop onto - a
@@ -155,7 +155,7 @@
   padding: var(--sp-3);
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r);
   text-decoration: none;
   color: var(--ink);
   cursor: grab;
@@ -179,8 +179,8 @@
 }
 
 .hatch-card-key {
-  font-family: var(--font-mono, monospace);
-  font-size: var(--t-small);
+  font-family: var(--mono);
+  font-size: var(--t-label);
   color: var(--muted);
 }
 
@@ -191,7 +191,7 @@
 
 .hatch-card-parent {
   margin-top: var(--sp-2);
-  font-size: var(--t-small);
+  font-size: var(--t-label);
   color: var(--muted);
 }
 
@@ -340,7 +340,7 @@
 }
 
 .hatch-issue-key {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--mono);
 }
 
 .hatch-issue-controls {
@@ -382,8 +382,8 @@
 
 .hatch-description-editor {
   width: 100%;
-  font-family: var(--font-mono, monospace);
-  font-size: var(--t-small);
+  font-family: var(--mono);
+  font-size: var(--t-body);
 }
 
 .hatch-child-list,
@@ -405,7 +405,7 @@
   display: flex;
   gap: var(--sp-3);
   align-items: baseline;
-  font-size: var(--t-small);
+  font-size: var(--t-label);
   margin-bottom: var(--sp-2);
 }
 
@@ -436,7 +436,7 @@
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-2) 0;
-  font-size: var(--t-small);
+  font-size: var(--t-label);
   border-top: 1px solid var(--line);
 }
 
