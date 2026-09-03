@@ -23,9 +23,15 @@ export interface AppEntry {
   /** A sibling service on its own subdomain, resolved at render against the
       domain this page is served from - see lib/siblingOrigin.ts. */
   subdomain?: string;
-  /** Hidden outright when its bundle answers 404. Only admin sets this; see
-      the note in App.tsx. */
+  /** Hidden outright when its bundle answers 404 - the operator's own apps,
+      which are withheld from everyone else. See lib/useWithheldApps.ts. */
   withheldIf404?: boolean;
+  /** The same-origin path to HEAD when deciding that, for an app whose own
+      address this page cannot probe. `href` is the probe when there is one;
+      Hatch needs this because it lives on its own subdomain while its bundle
+      is served by the same pod as this page, and a cross-origin HEAD would
+      answer for the wrong reasons. */
+  probePath?: string;
 }
 
 export interface Tier {
@@ -69,6 +75,14 @@ export const TIERS: Tier[] = [
         icon: '⚙️',
         href: '/apps/admin/',
         withheldIf404: true,
+      },
+      {
+        name: 'Hatch',
+        description: 'The house project tracker — plans, issues, the board',
+        icon: '🐣',
+        subdomain: 'hatch',
+        withheldIf404: true,
+        probePath: '/apps/hatch/',
       },
       {
         name: 'Docs',
