@@ -60,3 +60,56 @@ def test_a_misspelled_log_level_fails_at_startup(monkeypatch: pytest.MonkeyPatch
 
     with pytest.raises(ValueError, match="log_level"):
         Settings()
+
+
+def test_the_generators_configuration_is_environment_addressable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # docs/plans/trading.md Phase 2 asks for the generator's universe, seed,
+    # drift and volatility as "values rather than code". A pydantic model with
+    # defaults is only half of that - the other half is being able to re-seed
+    # an installation without rebuilding an image, which is what the nested
+    # delimiter buys.
+    monkeypatch.setenv("TRADING_SYNTHETIC__SEED", "4242")
+    monkeypatch.setenv("TRADING_SYNTHETIC__ANNUAL_DRIFT", "0.05")
+
+    settings = Settings()
+
+    assert settings.synthetic.seed == 4242
+    assert settings.synthetic.annual_drift == 0.05
+
+
+def test_the_whole_universe_can_be_replaced_at_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The model as JSON, for an installation that wants a different market
+    # rather than a differently-seeded one.
+    monkeypatch.setenv(
+        "TRADING_SYNTHETIC",
+        '{"seed": 5, "universe": [{"symbol": "zvzzt", "start_price": 12.5}]}',
+    )
+
+    settings = Settings()
+
+    assert settings.synthetic.seed == 5
+    # Upper-cased on the way in, because a ticker is not case-sensitive and a
+    # universe that answers to one spelling and not the other is a lookup
+    # failure waiting for the first lower-case watchlist entry.
+    assert settings.synthetic.symbols == ("ZVZZT",)
+
+
+def test_a_universe_with_a_repeated_symbol_fails_at_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Loudly, and before anything reads a price. `SyntheticConfig.symbol`
+    # returns the first match, so a duplicate is a silently-ignored
+    # configuration entry - which is the shape of bug that is found by
+    # wondering why a parameter change did nothing.
+    monkeypatch.setenv(
+        "TRADING_SYNTHETIC",
+        '{"universe": [{"symbol": "ZVZZT", "start_price": 1.0},'
+        ' {"symbol": "zvzzt", "start_price": 2.0}]}',
+    )
+
+    with pytest.raises(ValueError, match="duplicate symbols"):
+        Settings()

@@ -19,10 +19,10 @@ readme = "README.md"
 # exercise would be a claim nothing checks.
 requires-python = ">=3.12"
 
-# Phase 1's floor, and deliberately short. Every entry here is something the
-# control plane cannot be without; the option-pricing and calendar libraries
-# that motivated Python in the first place (QuantLib, py_vollib,
-# exchange_calendars) arrive with the phases that use them, not now.
+# Deliberately short. Every entry here is something a phase that is built
+# cannot be without; the option-pricing libraries that motivated Python in the
+# first place (QuantLib, py_vollib) arrive with the phase that prices an
+# option, not now.
 #
 # Lower bounds rather than pins, with uv.lock carrying the exact versions -
 # that is the split `uv sync --frozen` exists for. A pin here would be a
@@ -32,6 +32,18 @@ dependencies = [
     # init container (deploy/cluster/trading/app/deployment.yaml), so it is a
     # runtime dependency rather than a dev one.
     "alembic>=1.19.1",
+    # The market calendar (Phase 2), and one of the three libraries this silo
+    # is in Python for. A wrong market calendar does not throw - it silently
+    # corrupts every backtest that crosses a holiday - and this one knows every
+    # NYSE half-day forward and back.
+    #
+    # It is the heaviest thing here by a wide margin: it brings pandas and
+    # numpy, which is 142 MB of image. Contained rather than avoided -
+    # `aerie_trading/providers/calendar.py` is the only module that imports it,
+    # and `providers/synthetic/__init__.py` re-exports nothing so that the
+    # migration init container, which runs under a 256 Mi limit, never pays for
+    # it.
+    "exchange-calendars>=4.13.2",
     "fastapi>=0.141.1",
     # The /metrics endpoint. The client library, not an exporter framework -
     # kube-prometheus-stack is already deployed and does the scraping.

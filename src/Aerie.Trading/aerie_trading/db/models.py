@@ -211,6 +211,20 @@ class DataSource(Base):
     is_enabled: Mapped[bool] = mapped_column(
         nullable=False, default=True, server_default=text("true")
     )
+
+    # Everything needed to reproduce what this source returns - for the
+    # synthetic generator (Phase 2) the seed, the universe and every parameter
+    # of the walk; for a vendor the endpoint and the API version, and never
+    # the credential. Written by
+    # ``aerie_trading.providers.registry.ensure_data_source``.
+    #
+    # JSONB rather than columns because the shape differs per provider and
+    # there is no query that filters on it: this is read one row at a time by
+    # a person asking "what produced these numbers", or by the chain guardrail
+    # asking one boolean of it (``base.chains_are_priceable_in``). A column per
+    # provider parameter would be a migration every time a provider gains one.
+    config: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+
     created_at: Mapped[datetime] = _utcnow()
 
     runs: Mapped[list[IngestRun]] = relationship(back_populates="data_source")

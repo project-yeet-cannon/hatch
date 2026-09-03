@@ -4,15 +4,17 @@ A strategy laboratory that rides Aerie as a platform. The plan is
 [`docs/plans/trading.md`](../../docs/plans/trading.md); this file is only the
 part you need to run it.
 
-At Phase 1 this is a control plane with nothing to control: a FastAPI service
-that can say whether it is alive, whether it can reach its database, what
-commit it was built from, and what its metrics are. That is the point — the
-phase is judged on whether the deploy pipeline, the logs, the metrics and the
-ingress all work, and that is only checkable while there is nothing
-interesting behind them.
+At Phase 2 this is a control plane with nothing to control and a market that
+does not exist. The service can say whether it is alive, whether it can reach
+its database, what commit it was built from and what its metrics are; beside it
+is a `MarketDataProvider` interface and a generator that implements it, so every
+phase after this one has bars and option chains to work on without a credential,
+a network call or a market being open.
 
-Phases 2 and 3 wait on a Schwab approval measured in business days, and the day
-it lands should be spent writing a collector, not a `Dockerfile`.
+Nothing here waits on Schwab. That is the plan's re-cut: the collector, the
+lake, the engine and the sweeps are all built and hardened against the synthetic
+source, and Phase 8 becomes a second provider class dropped into machinery that
+already works.
 
 ## Why this is a silo
 
@@ -126,6 +128,64 @@ line been missing, the `trading` Kustomization would fail its build under
 strict substitution — contained to this layer by design, since nothing else in
 the cluster depends on it.
 
+## The synthetic market
+
+`aerie_trading/providers/` is the interface every data source implements and
+one implementation of it. There is no Schwab yet and nothing is waiting for
+one.
+
+```py
+from datetime import datetime, timezone
+
+from aerie_trading.providers.base import Interval
+from aerie_trading.providers.synthetic.provider import SyntheticMarketDataProvider
+
+market = SyntheticMarketDataProvider()
+market.bars(["ZVZZT"], Interval.ONE_DAY, start, end)
+market.chain("ZVZZT", datetime(2026, 9, 1, 15, 0, tzinfo=timezone.utc))
+```
+
+Four things about it are worth knowing before you use it for anything.
+
+**It is pure noise, permanently.** No implied-volatility surface, no jumps, no
+regime switching, no microstructure, and none of those are coming. It is the
+plan's null hypothesis — zero alpha by construction, asserted in
+`tests/test_synthetic_zero_alpha.py` — which is what lets Phase 6 measure an
+overfitting gate against a known correct answer. The moment it becomes
+interesting it stops being a control.
+
+**Its option prices are refused, in code.** The chains are structurally valid
+and numerically meaningless: a delta of 0.62 on one strike and 0.31 on the next
+does not mean the first is further in the money, they are independent draws that
+happen to be adjacent in a ladder. `require_priceable_chains(provider)` raises
+for this source, and the claim travels into the `data_source` row so the same
+check works from the far side of the lake — failing closed when a row does not
+say. Bars are a different matter and are a legitimate thing to backtest against.
+
+**A value is a function of its coordinates, not of the request.** The same
+request returns the same bar forever, in this process or another one, on this
+architecture or the image's. Nothing is persisted and there is no cursor, which
+is what makes a backfill and an incremental collection of the same window agree
+by construction.
+
+**The universe is ZVZZT, ZWZZT, ZXZZT, ZBZZT and ZJZZT** — Nasdaq's reserved
+test tickers, so that no row, screenshot or leaderboard entry can be mistaken
+for a claim about a real instrument. `ZJZZT` deliberately has no options board.
+Re-seed or replace it from the environment without a rebuild:
+
+```sh
+TRADING_SYNTHETIC__SEED=4242 uv run python -m aerie_trading.control
+TRADING_SYNTHETIC='{"universe": [{"symbol": "ZVZZT", "start_price": 42.0}]}' ...
+```
+
+The market calendar is real even though the prices are not: `XNYS` via
+`exchange_calendars`, with its holidays and its early closes, because a
+synthetic session that ran 24/7 would leave Phase 3's calendar handling — the
+one piece of it that fails silently rather than loudly — completely
+unexercised. Asking for a quote or a chain on a holiday raises rather than
+returning nothing, since an empty answer is indistinguishable from a market
+that was open and silent.
+
 ## The two things that look like details and are not
 
 **The log shape.** `aerie_trading/logging.py` reproduces .NET's
@@ -159,7 +219,7 @@ where things will go rather than of what is here:
 | `aerie_trading/db/` | the Ledger — SQLAlchemy models and the engine |
 | `aerie_trading/migrations/` | Alembic, run from an init container on deploy |
 | `tests/` | pytest, mirroring the package |
-| `aerie_trading/providers/` | Phase 2 — `MarketDataProvider` and its Schwab implementation |
+| `aerie_trading/providers/` | `MarketDataProvider`, the market calendar, and the synthetic source |
 | `aerie_trading/collect/` | Phase 3 — the bar and option-chain collectors |
 | `aerie_trading/engine/` | Phase 4 — clock, instruments, portfolio, broker, strategy |
 | `aerie_trading/strategies/` | Phase 4 on — one strategy per module |

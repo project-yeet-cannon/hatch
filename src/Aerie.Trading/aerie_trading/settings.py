@@ -26,6 +26,12 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# The module rather than the package: importing
+# `aerie_trading.providers.synthetic` itself is free, and is kept that way on
+# purpose - see that package's docstring. Every process in the silo reaches
+# this file, and not all of them can afford pandas.
+from aerie_trading.providers.synthetic.config import SyntheticConfig
+
 __all__ = ["Settings", "get_settings"]
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -41,6 +47,11 @@ class Settings(BaseSettings):
         # come from that nothing in deploy/ can see.
         env_file=None,
         extra="ignore",
+        # Nested models are addressed with a double underscore, so the
+        # generator's seed is TRADING_SYNTHETIC__SEED. The whole model can also
+        # be replaced at once with JSON in TRADING_SYNTHETIC, which is how a
+        # different universe arrives without a rebuild.
+        env_nested_delimiter="__",
     )
 
     # -- Postgres -----------------------------------------------------------
@@ -62,6 +73,20 @@ class Settings(BaseSettings):
     # running with the wall off. A full URL rather than a domain: this silo
     # should not know how Aerie spells the path to its sign-in shell.
     sign_in_url: str = ""
+
+    # -- Market data --------------------------------------------------------
+    # The synthetic generator's whole configuration (docs/plans/trading.md
+    # Phase 2 asks for "universe, seed, starting price level, drift and
+    # volatility, all values rather than code"). Defaulted rather than
+    # required, because the defaults are a working universe and a source that
+    # needs configuring before it produces anything is one more thing standing
+    # between a fresh clone and a backtest.
+    #
+    # It is carried here rather than constructed at each call site so that the
+    # provenance recorded on the `data_source` row is the configuration this
+    # *process* is running under, which is the only one a run can honestly
+    # claim to be reproducible from.
+    synthetic: SyntheticConfig = SyntheticConfig()
 
     @property
     def database_url(self) -> str:

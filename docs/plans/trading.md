@@ -1,9 +1,10 @@
 # Trading — a strategy laboratory that rides Aerie as a platform
 
-**Status:** Phases 0b and 1 built on 2026-09-02; Phase 0a is waiting on Schwab.
-What is left of Phase 1 is its gate — five checks that need the cluster — plus
-one line an operator adds to the site repository, both written out under that
-phase.
+**Status:** Phases 0b, 1 and 2 built on 2026-09-02; Phase 0a is waiting on
+Schwab. What is left of Phase 1 is its gate — five checks that need the cluster
+— plus one line an operator adds to the site repository, both written out under
+that phase. Phase 2's gate passed in full: it needs no cluster, which is the
+whole argument for having built it.
 
 **The plan was re-cut on 2026-09-02 to build on a synthetic data source first.**
 Schwab was the second phase and is now the eighth. Every phase between them is
@@ -520,7 +521,7 @@ immutable and its name cannot carry the image tag.
       is the better of the two failures.
 - [x] **Commit:** "Trading: a silo with a floor"
 
-### [ ] Phase 2 — The synthetic market
+### [x] Phase 2 — The synthetic market
 
 **Ships:** the `MarketDataProvider` interface and a generator that implements
 it, so that every phase after this one has data to work on without a credential,
@@ -533,29 +534,95 @@ because the moment it becomes interesting it stops being a control and starts
 being a thing whose own behavior has to be reasoned about. Its job is to have
 the right *shape*, not the right *statistics*.
 
-- [ ] `providers/base.py` — the `MarketDataProvider` protocol: `quotes()`,
+**Built 2026-09-02.** Every bullet below is committed and the gate passed in
+full — no part of it needs a cluster, which is the argument for the re-cut
+restated as a fact. Five things came out of building it and are recorded in
+place rather than as a footnote: the `data_source` table had nowhere to record a
+seed (below), the daily and intraday walks deliberately do not reconcile
+(below), the option-backtest refusal is a provider property plus a guard rather
+than a check at a call site that does not exist yet (below), the universe is
+Nasdaq's own test tickers (below), and `exchange_calendars` brings pandas, which
+is 142 MB of image and a package that must not be imported by the migration init
+container (below).
+
+- [x] `providers/base.py` — the `MarketDataProvider` protocol: `quotes()`,
       `bars()`, `chain()`, `market_hours()`. **Written here rather than
       alongside Schwab on purpose.** A protocol whose only implementation is a
       vendor API ends up encoding that vendor's quirks as though they were the
       shape of market data; this one has to satisfy a second implementation
       before it hardens, and the trivial one is the better first because it can
       be bent to the interface rather than the reverse.
-- [ ] `providers/synthetic/` — the generator. **Stateless and deterministic:** a
+
+      Two decisions the writing forced, both of which a Schwab-first draft
+      would have got wrong. **Every call names the instant it asks about**,
+      including `quotes()`, which a live vendor only ever answers for "now" —
+      that argument is what lets `ReplayClock` and `LiveClock` drive the same
+      code at Phases 4 and 9, and a live provider satisfies it by refusing an
+      `as_of` that is not approximately now. And **`market_hours()` is answered
+      from `exchange_calendars`, not from the vendor**: a session's boundaries
+      are a property of the exchange rather than of whoever is reporting
+      prices, and a provider answering out of its own head would be a second
+      opinion about a fact.
+- [x] `providers/synthetic/` — the generator. **Stateless and deterministic:** a
       bar is derived from a hash of `(seed, symbol, timestamp, interval)` rather
       than from a stored path, so the same request returns the same bar forever,
       no generated series has to be persisted, and a backfill and an incremental
       collection of the same window agree by construction. That last property is
       what Phase 3's idempotency gate is actually testing, and this makes it
       testable without a network.
-- [ ] Bars: a random walk per symbol — open, high, low, close, volume, with the
+
+      `providers/synthetic/noise.py` is where that property actually lives:
+      blake2b turns a coordinate tuple into a stream key and splitmix64 turns a
+      `(key, index)` pair into a value, so a draw has an address rather than a
+      position. A seeded `random.Random` cannot do this — its output depends on
+      how many values were drawn before it, so two callers asking for
+      overlapping windows would get different prices for the same minute.
+      Python's own `hash()` cannot either: it is salted per process, which is a
+      determinism bug that appears only *between* the collector pod and the
+      worker pod, and never in a test. Both are asserted; the second by running
+      two interpreters under different `PYTHONHASHSEED`s. Verified further by
+      generating the same bar on macOS/arm64 and inside the linux image and
+      diffing the two.
+- [x] Bars: a random walk per symbol — open, high, low, close, volume, with the
       OHLC relationships internally consistent, because a collector or an engine
       that trips over `high < close` should trip over real data, not over the
       fixture.
-- [ ] Chains: **structurally valid, numerically meaningless.** A plausible
+
+      `Bar` rejects a violation in its constructor rather than trusting the
+      generator not to produce one, and the generator makes the invariant
+      arithmetic rather than probabilistic: prices are rounded to cents *first*
+      and the extremes clamped afterwards, because rounding four numbers
+      independently can otherwise put a close a cent above its own high.
+
+      **The one non-property worth stating out loud: the daily bar and the
+      intraday bars of the same session share an opening price and nothing
+      else.** They are separate walks, so the last five-minute close of a
+      session is not the daily close. Making them agree needs a Brownian
+      bridge — generate the intraday path, then pull it onto the session's
+      known terminal price — and a bridge's increments are negatively
+      correlated *by construction*, because their sum is constrained. Trading a
+      guaranteed structural defect for a cosmetic agreement between two views
+      of a fictional price is the wrong side of that trade when zero
+      exploitable autocorrelation is the single property this source exists to
+      have. Nothing in the plan needs the agreement: Phase 3 writes each
+      interval to its own partition and Phase 4 runs one interval per backtest.
+- [x] Chains: **structurally valid, numerically meaningless.** A plausible
       strike ladder and expiry calendar, the full row shape Phase 3's partition
       layout expects, and noise in every price, greek and IV field. This is
       enough to exercise the collector, the partition scheme, the DuckDB reader
       and the health metrics — the plumbing, which is all Phase 3 is about.
+
+      The structure that *is* honest, and only because a collector tripping
+      over it should be tripping over real data: the strike increment follows
+      the price level, expiries are weekly and monthly Fridays that fall back
+      to the previous session when the Friday is a holiday, the contract symbol
+      is spelled the way the OCC spells it, bid never exceeds ask, gamma and
+      vega are non-negative, theta is non-positive, and delta carries the sign
+      and range its right implies. One line looks like modelling and is not: a
+      contract's price is floored at its intrinsic value, which is
+      `max(0, spot - strike)` on two numbers already in the row — arithmetic,
+      not a pricing model, and without it the board carries contracts trading
+      below their own exercise value, a shape no venue produces.
 
       **The guardrail:** every row the lake stores already carries its
       `data_source`, and an option backtest against a synthetic source is
@@ -565,26 +632,118 @@ the right *shape*, not the right *statistics*.
       between those two is exactly where a plausible-looking wrong answer would
       come from. Phase 10 is unaffected: it lands after Phase 8, so real chain
       history exists by the time anything wants to backtest against one.
-- [ ] **The calendar is real even though the prices are not.** The generator
+
+      **How it is built, since the thing it guards does not exist yet.** The
+      claim is a property on the provider (`chains_are_priceable`, `False`
+      here), the refusal is `require_priceable_chains()` in `providers/base.py`,
+      and the two are joined by the provenance blob: the claim is written into
+      the `data_source` row and `chains_are_priceable_in()` reads it back, so
+      the check also works from the far side of the lake — where all that
+      survives of a provider is a row. It **fails closed**: a provenance that
+      does not say reads as not priceable, because the rows a collector wrote
+      before the key existed cannot vouch for themselves. What is *not* built
+      is the call site, because Phase 4's engine and Phase 10's option
+      backtests are the things that would call it. Those phases wire it; this
+      one makes wiring it a one-line import rather than a design question.
+- [x] **The calendar is real even though the prices are not.** The generator
       honors `exchange_calendars` — same session boundaries, same holidays, same
       early closes. A synthetic session that runs 24/7 would leave Phase 3's
       calendar handling completely unexercised, which is the one piece of Phase
       3 that fails silently rather than loudly.
-- [ ] Configuration: universe, seed, starting price level, drift and volatility,
+
+      `providers/calendar.py` is the only module in the silo that touches
+      `exchange_calendars` or pandas, and the containment is doing two jobs.
+      *Typing:* neither library ships type information, so under this project's
+      strict pyright every value out of them is Unknown — the suppressions are
+      scoped to one adapter whose exports are all builtins, rather than being a
+      global loosening. *Cost:* the session boundaries are read out of pandas
+      once at construction into plain tuples, because a price is derived by
+      walking every session since the anchor and a pandas lookup inside that
+      loop would be the whole runtime.
+
+      **And the cost that is not contained: `exchange_calendars` brings pandas
+      and numpy, which took the image from 214 MB to 356 MB.** Unavoidable —
+      it is the library this plan chose Python for. What *is* avoidable is
+      importing it in a process that only wanted the seed, so
+      `providers/synthetic/__init__.py` deliberately re-exports nothing:
+      `Settings` carries a `SyntheticConfig`, so every process in the silo
+      imports `.config`, including the migration init container that runs under
+      a 256 Mi limit. A convenience re-export there would have put half a second
+      and something like a hundred megabytes into a process whose entire job is
+      `alembic upgrade head`.
+- [x] Configuration: universe, seed, starting price level, drift and volatility,
       all values rather than code. Drift defaults to zero.
-- [ ] **Zero alpha, asserted.** A test establishes that generated returns carry
+
+      A `SyntheticConfig` model on `Settings`, so an installation re-seeds with
+      `TRADING_SYNTHETIC__SEED` or replaces the universe wholesale with JSON in
+      `TRADING_SYNTHETIC` — values rather than code means an operator can change
+      them without a rebuild, or it means nothing. The drift is on the *log*
+      price, which is what makes "zero" mean "the log price is a martingale".
+
+      **The universe is `ZVZZT` and its siblings, which are Nasdaq's own
+      reserved test tickers.** A synthetic universe named SPY and AAPL is a
+      loaded gun: a screenshot of a leaderboard, a row in a lake partition or a
+      figure quoted out of context reads as a claim about the real instrument,
+      and nothing downstream can tell the difference. These cannot be mistaken
+      for anything, which puts the guardrail in the data itself rather than only
+      in a `data_source` join. One of them carries no options board, so that
+      "this symbol has no chain" is a case the collector meets here rather than
+      at Phase 8.
+- [x] **Zero alpha, asserted.** A test establishes that generated returns carry
       no exploitable autocorrelation at the sample sizes the plan uses. Phase 6's
       gate rests on this being true, so it is a test rather than a claim — if the
       generator ever acquires structure, the phase that depends on it should
       break loudly here rather than quietly there.
-- [ ] Registered as a `data_source` row, with the seed and configuration
+
+      `tests/test_synthetic_zero_alpha.py`, and it is the load-bearing file in
+      the phase. The threshold is three standard errors under the null that the
+      returns are independent — `3 / sqrt(n)` — measured at lags 1 through 10,
+      across the whole universe, across three seeds, over every session the
+      calendar holds. The intraday walk is measured separately, because it is a
+      separate process and because it is the test that would fail the day
+      somebody bridges it. Every input is deterministic, so a pass is a fact
+      about the generator rather than a lucky draw, and a failure is a
+      regression rather than flakiness. The measured worst case sits at 77% of
+      the threshold.
+- [x] Registered as a `data_source` row, with the seed and configuration
       recorded, so a run is reproducible from its provenance alone.
-- [ ] **Gate:** bars and chains are produced for a configured universe · two
+
+      **This needed a column Phase 1 did not build.** `data_source` had name,
+      description and a flag, and nowhere to put a seed — so migration
+      `0002_data_source_config` adds a nullable `config` JSONB, arriving with
+      the phase that has something to write into it rather than with the phase
+      that would have guessed at its shape. `ensure_data_source()` is idempotent
+      by name, because every process that touches a provider registers at
+      startup and the second arrival must not be a unique-constraint failure or
+      a second row that half the data then points at. A test rebuilds the
+      provider from the recorded blob and asserts it produces the same bars,
+      which is the only honest test of "reproducible from its provenance alone".
+
+      **The second migration also broke the test that guards the first**, in the
+      silent direction: `tests/test_migrations.py` compared rendered `CREATE`
+      statements, an `ALTER TABLE ... ADD COLUMN` is not a `CREATE`, so the new
+      column was invisible to both sides of the comparison and the schemas
+      matched for the wrong reason. It now reduces the DDL to a schema — tables
+      as sets of column and constraint definitions, with the ALTERs folded in —
+      and *raises* on any statement form it was not taught, so the next person
+      to write an `ALTER COLUMN` is told to extend it rather than reassured by
+      it.
+- [x] **Gate:** bars and chains are produced for a configured universe · two
       identical requests return byte-identical data · a full simulated session
       generates in CI in seconds with no network · generated returns show no
       exploitable autocorrelation · the calendar refuses to generate a session
       on a market holiday.
-- [ ] **Commit:** "Trading: a market that does not exist"
+
+      All five pass, in `make trading-test`, with no cluster and no network —
+      which is the re-cut's whole thesis discharged. The third is measured
+      rather than asserted by inspection: a full session of minute bars for the
+      whole universe generates in 0.12 s, and the test's bound is 5 s, since it
+      exists to catch a change that makes the walk quadratic rather than to be
+      a benchmark. The fifth is checked at both levels — the calendar refuses to
+      index a holiday, and `quotes()` and `chain()` on one raise rather than
+      returning empty, because an empty answer is indistinguishable from a
+      market that was open and silent.
+- [x] **Commit:** "Trading: a market that does not exist"
 
 ### [ ] Phase 3 — The lake, and the collectors that fill it
 
