@@ -1,8 +1,9 @@
 # Hatch — the house project tracker
 
-Status: phases 0-4 complete 2026-09-02 — Hatch is shipped for the operator:
-the module, the API, the board, and `hatch.${DOMAIN}`. Phases 5 (the plans
-importer) and 6 (API keys) remain, and can land in either order.
+Status: phases 0-6 complete 2026-09-03 — Hatch is shipped for the operator and
+for Claude: the module, the API, the board, `hatch.${DOMAIN}`, the plans
+importer, and wall-level API keys. Phase 7 (migrate and dissipate) remains, and
+is operator-paced.
 
 Aerie's projects are currently managed by juggling markdown files in
 `docs/plans/`. **Hatch** replaces that with a self-hosted Jira/Trello-lite: a
@@ -345,7 +346,7 @@ Parse rules, per uploaded file: the first `#` H1 is the epic title (fallback:
 filename); everything before the first phase heading is the epic description.
 Every `##` H2 whose text starts with `Phase` (case-insensitive) opens a story
 titled with the H2 text; other H2 sections stay in the epic description. Inside
-a story's section, every top-level `- [ ]` / `- [x]` list item is a task
+a story's section, every top-level `- [x]` / `- [x]` list item is a task
 (nested checkboxes flatten, in order); non-checkbox lines become the story
 description. Checked tasks land in the terminal status (lowest `SortOrder`
 among `IsTerminal`, else the last status), unchecked in `todo`. A story with
@@ -355,21 +356,21 @@ story did. Every imported description ends with an `_Imported from
 `filename`_` line, and every created issue gets one `imported` event carrying
 the filename.
 
-- [ ] Create `src/Aerie.Api/Modules/Hatch/PlanImportParser.cs`: pure function
+- [x] Create `src/Aerie.Api/Modules/Hatch/PlanImportParser.cs`: pure function
       from `(filename, content)` to a `ParsedEpic` tree DTO implementing
       exactly the rules above — no DB access, registered in `AddHatchModule`.
-- [ ] Add `src/Aerie.Api.Tests/Hatch/PlanImportParserTests.cs` with inline
+- [x] Add `src/Aerie.Api.Tests/Hatch/PlanImportParserTests.cs` with inline
       markdown fixtures: a full doc with phases and mixed checkboxes, a doc
       with no phases (epic only), a doc with H2s that aren't phases, checked
       state mapping, and this plan file's own shape (H1 + `## Phase N — title`
       + checkboxes) parsing to the expected counts.
-- [ ] Create `ImportController.cs`: `preview` accepting multipart `.md`
+- [x] Create `ImportController.cs`: `preview` accepting multipart `.md`
       uploads (reject non-`.md`, cap 1 MB/file) returning the trees;
       `import` accepting `{ projectId, docs }` and creating epics, stories,
       and tasks with parents, statuses, ranks, and the numbering path from
       Phase 1 — plus `src/Aerie.Api.Tests/Hatch/ImportControllerTests.cs`
       asserting the created hierarchy, statuses, and `imported` events.
-- [ ] Build the Import page in `apps/hatch`: multi-file input, preview tree
+- [x] Build the Import page in `apps/hatch`: multi-file input, preview tree
       with per-file epic/story/task counts and statuses, project picker,
       import button, and a result list linking each created epic.
 
@@ -387,7 +388,7 @@ rest, scoped, revocable from the admin app. Read
 [`AdminGate.cs`](../../src/Aerie.Api/Services/Auth/AdminGate.cs) before
 touching any of them — the one-gate/one-allow-list property is the design.
 
-- [ ] Add `EfApiKey` to the core `public` schema (new `Ef/ApiKeys.cs`, DbSet
+- [x] Add `EfApiKey` to the core `public` schema (new `Ef/ApiKeys.cs`, DbSet
       on `AerieContext`, migration via
       `make ef-migration migration=ApiKeys`): `Id`, `Name` (unique), `Prefix`
       (first 12 chars of the secret, display only), `Hash` (SHA-256 of the
@@ -395,7 +396,7 @@ touching any of them — the one-gate/one-allow-list property is the design.
       `RevokedAt` (nullable). Secrets are `aerie_ak_` + 32 chars from
       `RandomNumberGenerator`, shown exactly once at mint. Core schema, not
       `hatch`: the wall reads it, and no module may own what the wall reads.
-- [ ] Teach the wall the bearer lane: `AuthMiddleware` and
+- [x] Teach the wall the bearer lane: `AuthMiddleware` and
       `AuthController.Verify` extract an `Authorization: Bearer aerie_ak_…`
       header (Verify reads it from the forwarded request, same as it treats
       cookies) and pass it to `AuthGate.EvaluateAsync` as a distinct
@@ -403,7 +404,7 @@ touching any of them — the one-gate/one-allow-list property is the design.
       new authenticated-as-key decision (`AuthDecision` gains an
       `EfApiKey? ApiKey`; new refusal reason `unknown_key`; no cookie
       re-issue on this lane; `LastUsedAt` updated at most once a minute).
-- [ ] Scope the admin gate: `RequireAdminAttribute` gains an optional
+- [x] Scope the admin gate: `RequireAdminAttribute` gains an optional
       `AcceptScope` string, `AdminGate.EvaluateAsync` allows a key-caller iff
       the attribute names a scope the key carries (person logic unchanged;
       key-callers hitting plain `[RequireAdmin]` get the 403); every Hatch
@@ -411,17 +412,17 @@ touching any of them — the one-gate/one-allow-list property is the design.
       the actor through `ICallerIdentity` (an `ActorName` that answers person
       name, else key name, else `"operator"`) and use it for Hatch's
       `CreatedBy`/`Actor`/`Author` fields.
-- [ ] Add key management to core auth: `GET/POST /api/auth/keys` and
+- [x] Add key management to core auth: `GET/POST /api/auth/keys` and
       `POST /api/auth/keys/{id}/revoke` on a controller carrying plain
       `[RequireAdmin]` (humans only mint keys), plus an **API Keys** page in
       `apps/admin` beside Sessions — list (name, prefix, created, last used,
       revoked), mint dialog (name; scopes fixed to `hatch` for now), revoke
       with confirm, and the show-once secret presentation.
-- [ ] Tests in `src/Aerie.Api.Tests/Auth/`: gate accepts a valid key, refuses
+- [x] Tests in `src/Aerie.Api.Tests/Auth/`: gate accepts a valid key, refuses
       revoked/unknown, scope mismatch 403s, plain `[RequireAdmin]` refuses
       key-callers, mint-then-use round-trips, and the hash — never the
       secret — is what the row stores.
-- [ ] Write the contract into `CLAUDE.md`: the key lives outside the repo (a
+- [x] Write the contract into `CLAUDE.md`: the key lives outside the repo (a
       local secrets file, never committed — Hatch ships to other operators);
       given a `hatch.${DOMAIN}/issues/AER-n` link or bare key, fetch
       `GET /api/hatch/issues/AER-n` with the bearer header and get to work; a
