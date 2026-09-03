@@ -3,12 +3,16 @@
 **Status:** Phases 0b and 1 built on 2026-09-02; Phase 0a is waiting on Schwab.
 What is left of Phase 1 is its gate — five checks that need the cluster — plus
 one line an operator adds to the site repository, both written out under that
-phase. Phases 0–3 are on a **wall-clock critical path** and should be kept
-deliberately lean: Schwab developer-app approval takes days, and
-option-chain history cannot be backfilled at any sane price, so every day the
-snapshotter is not running is a day of data that has to be bought later or done
-without. Everything from Phase 4 on is ordinary engineering that can take the
-time it takes.
+phase.
+
+**The plan was re-cut on 2026-09-02 to build on a synthetic data source first.**
+Schwab was the second phase and is now the eighth. Every phase between them is
+built and deployed against a source that needs no credential, no approval and no
+market hours, which turns the Schwab integration from a dependency the whole
+plan waits behind into one provider class dropped into machinery already proven.
+See [Why the first data source is synthetic](#why-the-first-data-source-is-synthetic)
+for why this *accelerates* option-chain collection rather than delaying it, and
+Phase 8 for the standing offer to promote it the day approval lands.
 
 ## The ask
 
@@ -40,7 +44,9 @@ Verbatim, from the owner:
 | What language? | **Python for the whole silo**, control plane included. Driven by options: pricing, implied-vol solving, greeks and the exchange calendar are solved, validated and free in Python and absent in .NET. See [Why Python, specifically](#why-python-specifically) |
 | Which markets? | **US equities and ETFs first, options as the actual target.** Equities validate the engine on free, simple data; the instrument model is options-shaped from day one so options are an addition rather than a rewrite |
 | Which option strategies eventually? | **All three families** — premium selling, directional/long premium, and volatility. That makes greeks, expiry/assignment and multi-leg positions non-negotiable design inputs even though they are not Phase 1 code |
-| Where does data come from? | **Schwab Trader API** — free real-time quotes and chains, from the same credential that eventually places orders. It requires a **Schwab retail brokerage account, which the owner does not have**; opening one is the first item of Phase 0a. Chosen over the account-free data vendors knowingly — see [Why Schwab, given it costs an account](#why-schwab-given-it-costs-an-account). The provider is an **interface**; Schwab is the first implementation, per [ethos.md](../ethos.md) |
+| Where does data come from? | **Schwab Trader API** — free real-time quotes and chains, from the same credential that eventually places orders. It requires a **Schwab retail brokerage account, which the owner does not have**; opening one is the first item of Phase 0a. Chosen over the account-free data vendors knowingly — see [Why Schwab, given it costs an account](#why-schwab-given-it-costs-an-account) |
+| What fills the lake *first*? | **A synthetic source** — seeded pseudo-random bars and structurally-valid noise chains, no credential and no network. It ships in Phase 2 and everything through Phase 7 is built on it. Schwab is the *second* implementation of the same interface, in Phase 8. See [Why the first data source is synthetic](#why-the-first-data-source-is-synthetic) |
+| How does a data source plug in? | **`MarketDataProvider` is an interface**, per [ethos.md](../ethos.md), and it gets two implementations before it hardens. A second operator with a different broker writes a class, not a fork |
 | Where does market data live? | **Parquet on disk, queried in-process by DuckDB** — not Postgres. See [Why the lake is not in Postgres](#why-the-lake-is-not-in-postgres) |
 | How big is the lake to start? | **A modest PVC on the default storage class**, sized for a handful of underlyings, with the lake root as a config parameter so relocating it is a value change. Not the reserved photos-extend space on node 2 |
 | Backtest only, or live too? | **One engine, two clocks**, from the start. Promoting a backtested parameter set to paper trading is inserting a row, not porting code |
@@ -60,7 +66,7 @@ needs building; all of it needs *consuming*.
 | Ingress + TLS + the auth wall | Traefik + middleware, [`charts/aerie/templates/`](../../charts/aerie/templates/) | `trading.${DOMAIN}` behind the same wall; the OAuth callback lands as an authenticated operator session |
 | Log shipping | Fluent Bit → OpenSearch, [`deploy/cluster/observability/`](../../deploy/cluster/observability/) | Emit structured JSON on stdout and it is indexed for free |
 | Metrics + dashboards | kube-prometheus-stack, same directory | `/metrics` endpoint; Grafana draws the equity curves |
-| Alerting | Grafana + Uptime Kuma | Carries the Schwab token-expiry alarm — see Phase 2 |
+| Alerting | Grafana + Uptime Kuma | Carries the Schwab token-expiry alarm — see Phase 8 |
 | Design system | `@aerie/ui`, [`src/Aerie.Web/packages/ui/`](../../src/Aerie.Web/packages/ui/) | The control panel looks like Aerie for free |
 | Commit binding | `aerie-revision`, [`version.md`](version.md) | Every run record stores the revision that produced it |
 
@@ -70,7 +76,7 @@ are the couplings that would make extraction a rewrite.
 
 ## Design commitments
 
-Five decisions that are cheap now and expensive later. Everything in the phases
+The decisions that are cheap now and expensive later. Everything in the phases
 below serves one of them.
 
 ### Why Python, specifically
@@ -143,16 +149,19 @@ Massive (formerly Polygon) sells unlimited calls on delayed options at $29/mo.
 Either would have the collector running this week for the price of a lunch.
 
 Schwab wins anyway on the strength of being **one credential for both roles**:
-free real-time data now and, at Phase 8, execution against the same
-authenticated session rather than a second vendor, a second integration and a
-second bill. The cost is accepted knowingly — an account opening, an approval
-wait, and the seven-day refresh token that Phase 2 exists to absorb.
+free real-time data at Phase 8 and, if real money ever arrives, execution
+against the same authenticated session rather than a second vendor, a second
+integration and a second bill. The cost is accepted knowingly — an account
+opening, an approval wait, and the seven-day refresh token that Phase 8 exists
+to absorb.
 
 **If approval stalls or is denied**, the fallback is already priced: implement
 the market-data interface against `marketdata.app` instead, and let the broker
-half stay unimplemented until Phase 8. The interface is what makes that a
+half stay unimplemented indefinitely. The interface is what makes that a
 configuration change rather than a rewrite, which is the whole reason it is an
-interface.
+interface — and re-cutting the plan onto a synthetic source makes the stall
+cheap in the first place, since nothing before Phase 8 is waiting on the
+answer.
 
 ### Why collection outranks the engine
 
@@ -161,9 +170,59 @@ not** — historical options data is expensive when it is for sale at all. The
 collector is the only component in this plan with a wall-clock dependency: its
 value is a function of how long it has been running, not of how good it is.
 
-So it ships before the engine that consumes it, and Phases 0–3 exist only to
-make it possible. Scope added to those phases is paid for in months of missing
-history.
+That fact set the original phase order, and it still sets the priority. What
+changed is the reading of what "ships the collector sooner" means in practice —
+see the next section.
+
+### Why the first data source is synthetic
+
+The first version of this plan put Schwab second, so that collection could start
+the moment approval landed. Working through it exposed the flaw: **approval
+lands on a repository that has none of the machinery collection needs.** The
+partition layout, the DuckDB reader, idempotent writes, calendar handling,
+scheduling and the health metrics were all *downstream* of the credential, so
+the clock would have kept running while they were written, debugged and
+deployed.
+
+Inverting it is strictly better on the metric that motivated the original order.
+Phase 3 builds and hardens all of that against a source that is available right
+now, and Phase 8 becomes a provider class dropped into a collector that already
+works. Real chains start accumulating within hours of approval instead of within
+weeks of it. **The synthetic source is not a delay to the wall clock; it is what
+gets the wall clock the shortest possible path.**
+
+Three further things fall out of it, none of which were the reason but all of
+which are worth having:
+
+- **The whole stack becomes testable in CI.** No network, no credentials, no
+  waiting for 9:30am. A collector run, a backtest and a sweep all execute in
+  seconds against generated data. The original plan could not test a collector
+  end to end without a live Schwab session.
+- **It is the null hypothesis.** The generator has **zero alpha by
+  construction** — a random walk has no exploitable structure. So any strategy
+  posting an attractive Sharpe against it is *provably* overfit, and Phase 6's
+  gate stops being a judgment call and starts being arithmetic. This is the one
+  place where a deliberately unrealistic source beats a realistic one.
+- **The interface gets two implementations before it hardens.** A protocol
+  written alongside Schwab alone would quietly encode Schwab's quirks as though
+  they were the shape of market data. Written against the trivial
+  implementation first and the real one second, it has to be honest.
+
+**What this deliberately gives up**, and the reason it is recorded here rather
+than discovered later: synthetic data is clean, and real market data is not.
+Gaps, halts, splits and corporate actions, bad prints, zero-bid contracts, stale
+quotes and DST seams are all pathologies the generator does not model, so none
+of them are exercised until Phase 8. Fault injection — a knob that makes the
+generator emit those deliberately — was considered and **deferred by the owner
+to Phase 8**, on the reasoning that real data should teach which faults actually
+occur rather than guessing at them. That decision stands; it is carried as a
+named, budgeted risk in Phase 8 rather than as an assumption that first contact
+will go smoothly.
+
+**Scope discipline still applies, and now applies to the synthetic source too.**
+It exists to unblock the phases after it, not to be interesting. It is pure
+noise on purpose, it never becomes a simulator, and the moment it starts
+acquiring realism features it has stopped paying for itself.
 
 ### One engine, two clocks
 
@@ -249,13 +308,26 @@ on the same day rather than while waiting. Keeping the manual list separate also
 keeps it honest — anything that turns out to be scriptable belongs in 0b, per
 [ethos.md](../ethos.md).
 
+**What the re-cut changed here:** starting these clocks early is still worth
+doing, and 0a is still first for that reason. What it no longer is, is
+load-bearing. Under the original order, everything from Phase 2 on was parked
+behind this approval; now nothing before Phase 8 waits on it, and 0a's only
+consequence is how early Phase 8 becomes available to promote.
+
 #### [ ] Phase 0a — The part only a person can do
 
 **Ships:** a Schwab brokerage account, a submitted developer application and a
-callback URL it will accept, plus a set of facts in this document that are
-verified rather than reported. Every item needs a human at a vendor's portal
+callback URL it will accept. Every item needs a human at a vendor's portal
 agreeing to terms on the owner's behalf. That is the entire membership rule for
 this list, and it is why the list is as short as it is.
+
+**Shortened by the 2026-09-02 re-cut.** Verifying Schwab's token lifetimes,
+rate limits and chain payload, and seeding the client id and secret, all used to
+live here — because Phase 2 was Schwab and needed them immediately. Nothing
+reads them until Phase 8 now, and a fact verified today against documentation
+that changes before it is built on is a fact verified twice. They moved to
+Phase 8, next to the code that depends on them. What is left is only what starts
+a clock.
 
 - [x] **Open a Schwab retail self-directed brokerage account.** The Trader API
       authenticates against one — its OAuth consent screen asks which of the
@@ -263,47 +335,30 @@ this list, and it is why the list is as short as it is.
       the developer portal says. Funding it is not required to hold it; whether
       an *unfunded* account satisfies the OAuth account-selection step is the
       first thing to find out, because it decides whether money has to move
-      before Phase 2 can work.
+      before Phase 8 can work.
 - [x] **Find out whether the two waits are serial or parallel** — specifically,
       whether the developer app can be submitted, and approved, while the
       brokerage account application is still pending. Serial is roughly two
-      weeks and parallel is roughly one, and the answer changes nothing about
-      what gets built, only when Phase 3 can start collecting. Try submitting
-      the app the same day the account application goes in; the cost of being
-      wrong is a resubmission.
+      weeks and parallel is roughly one. Under the re-cut this no longer
+      changes when anything gets built — Phases 1 through 7 do not wait on it —
+      only when Phase 8 can be promoted. Try submitting the app the same day the
+      account application goes in; the cost of being wrong is a resubmission.
 - [x] **Register the Schwab developer app** at the Schwab developer portal.
       Request **both** products — Market Data Production and Accounts and
       Trading Production. Approval is measured in business days and is the
-      gating item for Phases 2 and 3.
+      gating item for Phase 8, and for Phase 8 alone.
 - [ ] Register the callback URL as `https://trading.${DOMAIN}/api/trading/auth/schwab/callback`,
       supplied from the existing `DOMAIN` variable and never hardcoded.
       **Verify Schwab's current callback rules first** — HTTPS is required, and
       whether a non-loopback host is accepted needs confirming against their
       current documentation rather than assumed.
-- [ ] **Verify, and record in this document, the facts Phase 2 and 3 depend on.**
-      All of these are widely reported but none should be built against
-      unverified:
-      - Access-token lifetime (reported: 30 minutes) and refresh-token lifetime
-        (reported: 7 days, human re-auth required, not programmatically
-        renewable). The 7-day figure is the single most load-bearing unknown in
-        the plan — Phase 2's whole shape depends on it.
-      - Request rate limit (reported: ~120/minute per app).
-      - Minute-bar history depth available from `pricehistory`, and daily-bar
-        depth.
-      - Whether `/chains` returns greeks and implied volatility inline
-        (reported: yes) — this decides whether Phase 9 computes them or merely
-        validates them.
-- [ ] **Seed the client id and secret** into the parameter store under the two
-      paths 0b already added, per
-      [secrets-architecture.md](../secrets-architecture.md) — never in the repo,
-      not even encrypted, per [ethos.md](../ethos.md). This is the last item in
-      the phase because the values do not exist until approval lands, and it is
-      a paste rather than a decision because 0b settled the names first.
+- [ ] **Note the approval date when it lands**, in this document, and tell the
+      owner. It is the only signal Phase 8 waits for, and an approval nobody
+      noticed is an approval that buys nothing.
 - [ ] **Gate:** the brokerage account is open · the app is submitted with both
       products requested · the callback URL is registered and its rules
-      confirmed against current documentation · the verified facts above are
-      written into this document, replacing the reported ones.
-- [ ] **Commit:** "Trading: a clock that started, and what Schwab actually says"
+      confirmed against current documentation.
+- [ ] **Commit:** "Trading: a clock that started"
 
 #### [x] Phase 0b — The part that does not wait
 
@@ -325,7 +380,7 @@ nothing here waits on Schwab.
       both halves of the secret path read. `required: false` for now, so a seed
       run before approval skips them with a note instead of failing preflight,
       and no `kubernetes` block yet, so the generator writes no `ExternalSecret`
-      for a parameter nothing reads. Phase 2 flips both when it becomes the
+      for a parameter nothing reads. Phase 8 flips both when it becomes the
       thing that reads them.
 - [x] **Gate:** `make trading-test` green against an empty package · the new CI
       lane runs and passes on a pull request, with the .NET and web lanes
@@ -463,53 +518,91 @@ immutable and its name cannot carry the image tag.
       `<timestamp>-<sha>` on its first successful scan. Until then the pod is
       `ImagePullBackOff` rather than the whole layer failing its build, which
       is the better of the two failures.
-- [ ] **Commit:** "Trading: a silo with a floor"
+- [x] **Commit:** "Trading: a silo with a floor"
 
-### [ ] Phase 2 — Schwab, and the seven-day problem
+### [ ] Phase 2 — The synthetic market
 
-**Ships:** an authenticated connection to Schwab that survives token expiry
-gracefully and tells the operator when it needs a human. No data collection
-yet — this phase is entirely about the credential, because the credential is
-what makes Phase 3 possible and what will break Phase 3 in production.
+**Ships:** the `MarketDataProvider` interface and a generator that implements
+it, so that every phase after this one has data to work on without a credential,
+a network call or a market being open. This is the phase that decouples the rest
+of the plan from Schwab.
 
-The 7-day refresh token is a **design constraint, not a defect to engineer
-around.** Schwab requires periodic human re-authentication on purpose. A
-collector that treats it as an error crash-loops weekly; one that treats it as a
-scheduled event asks for thirty seconds of attention and keeps its history
-intact.
+It is deliberately trivial. The generator is **pure noise, permanently** — it
+never grows an implied-volatility surface, a jump model or a regime switch,
+because the moment it becomes interesting it stops being a control and starts
+being a thing whose own behavior has to be reasoned about. Its job is to have
+the right *shape*, not the right *statistics*.
 
-- [ ] `providers/base.py` — a `MarketDataProvider` protocol: `quotes()`,
-      `bars()`, `chain()`, `market_hours()`. Schwab is one implementation.
-      Per [ethos.md](../ethos.md), a second operator with a different broker
-      writes a class, not a fork.
-- [ ] `providers/schwab/` — the OAuth 2.0 three-legged flow, with token storage
-      in the secret store rather than a file in the pod.
-- [ ] An operator-only re-auth page: one button that begins the flow, and a
-      callback route that completes it. It sits behind the existing auth wall,
-      so only an authenticated operator can complete an authorization — which
-      is the correct security property and costs nothing to get.
-- [ ] Automatic access-token refresh (short-lived, silent). **Refresh-token
-      expiry is surfaced, not retried**: a `token_expires_at` gauge on
-      `/metrics`, a Grafana alert at T-24h, and a health endpoint that reports
-      degraded rather than dead.
-- [ ] Rate limiting client-side, below the verified ceiling, with backoff and
-      jitter. One shared limiter for the whole silo — two collectors racing to
-      the same quota is a Phase 3 outage.
-- [ ] Record every provider call in `ingest_run`: what was asked, what came
-      back, how long it took, what it cost against the quota.
-- [ ] **Gate:** a chain and a bar series are fetched from production Schwab and
-      logged · the access token refreshes across a 30-minute boundary without
-      intervention · the T-24h alert fires against a synthetic expiry · a
-      deliberately expired refresh token produces a degraded readiness state
-      and an alert, not a crash loop.
-- [ ] **Commit:** "Trading: a credential that expects to expire"
+- [ ] `providers/base.py` — the `MarketDataProvider` protocol: `quotes()`,
+      `bars()`, `chain()`, `market_hours()`. **Written here rather than
+      alongside Schwab on purpose.** A protocol whose only implementation is a
+      vendor API ends up encoding that vendor's quirks as though they were the
+      shape of market data; this one has to satisfy a second implementation
+      before it hardens, and the trivial one is the better first because it can
+      be bent to the interface rather than the reverse.
+- [ ] `providers/synthetic/` — the generator. **Stateless and deterministic:** a
+      bar is derived from a hash of `(seed, symbol, timestamp, interval)` rather
+      than from a stored path, so the same request returns the same bar forever,
+      no generated series has to be persisted, and a backfill and an incremental
+      collection of the same window agree by construction. That last property is
+      what Phase 3's idempotency gate is actually testing, and this makes it
+      testable without a network.
+- [ ] Bars: a random walk per symbol — open, high, low, close, volume, with the
+      OHLC relationships internally consistent, because a collector or an engine
+      that trips over `high < close` should trip over real data, not over the
+      fixture.
+- [ ] Chains: **structurally valid, numerically meaningless.** A plausible
+      strike ladder and expiry calendar, the full row shape Phase 3's partition
+      layout expects, and noise in every price, greek and IV field. This is
+      enough to exercise the collector, the partition scheme, the DuckDB reader
+      and the health metrics — the plumbing, which is all Phase 3 is about.
+
+      **The guardrail:** every row the lake stores already carries its
+      `data_source`, and an option backtest against a synthetic source is
+      **refused** — in code, the way Phase 6 refuses to serve an in-sample-only
+      figure, not by convention and not in the UI. Noise chains are fine for
+      moving bytes and meaningless for pricing anything, and the distance
+      between those two is exactly where a plausible-looking wrong answer would
+      come from. Phase 10 is unaffected: it lands after Phase 8, so real chain
+      history exists by the time anything wants to backtest against one.
+- [ ] **The calendar is real even though the prices are not.** The generator
+      honors `exchange_calendars` — same session boundaries, same holidays, same
+      early closes. A synthetic session that runs 24/7 would leave Phase 3's
+      calendar handling completely unexercised, which is the one piece of Phase
+      3 that fails silently rather than loudly.
+- [ ] Configuration: universe, seed, starting price level, drift and volatility,
+      all values rather than code. Drift defaults to zero.
+- [ ] **Zero alpha, asserted.** A test establishes that generated returns carry
+      no exploitable autocorrelation at the sample sizes the plan uses. Phase 6's
+      gate rests on this being true, so it is a test rather than a claim — if the
+      generator ever acquires structure, the phase that depends on it should
+      break loudly here rather than quietly there.
+- [ ] Registered as a `data_source` row, with the seed and configuration
+      recorded, so a run is reproducible from its provenance alone.
+- [ ] **Gate:** bars and chains are produced for a configured universe · two
+      identical requests return byte-identical data · a full simulated session
+      generates in CI in seconds with no network · generated returns show no
+      exploitable autocorrelation · the calendar refuses to generate a session
+      on a market holiday.
+- [ ] **Commit:** "Trading: a market that does not exist"
 
 ### [ ] Phase 3 — The lake, and the collectors that fill it
 
-**Ships:** the thing whose value compounds. From the day this merges, option
-chain history accumulates that cannot be bought back later. Everything before
-this phase existed to make it possible; everything after it is improved by
-having started it early.
+**Ships:** every piece of machinery that stands between a provider and a
+queryable history — the partition layout, the reader, idempotent writes,
+calendar handling, scheduling and collection health — built and hardened
+against the synthetic source.
+
+This is the phase the re-cut was for. Under the original order it sat *behind*
+the credential, so approval-day would have started a scramble to write all of
+this while the clock ran. Built here instead, Phase 8 is a provider class
+landing in a collector that already works, and real chain history starts
+accumulating within hours of approval rather than weeks.
+
+**Every bullet below is provider-agnostic**, and that is the acceptance
+criterion for the phase as much as any individual gate: if any of it needs
+changing when Schwab arrives, the interface from Phase 2 was drawn in the wrong
+place and the fix belongs there.
 
 - [ ] A PVC on the default storage class, modest to start. The **lake root is a
       config parameter**, so relocating it later is a value change and not a
@@ -531,12 +624,16 @@ having started it early.
       re-run; make that boring.
 - [ ] **Market calendar** via `exchange_calendars`, consulted before every
       collection. Do not collect through a holiday and record silence as data.
-- [ ] `collect/bars.py` — daily and minute bars: a backfill mode for the depth
-      Schwab offers, and an incremental mode after each close.
+- [ ] `collect/bars.py` — daily and minute bars: a backfill mode for whatever
+      depth the configured provider offers, and an incremental mode after each
+      close.
 - [ ] `collect/chains.py` — **the flagship.** Snapshot the full chain for a
       configured watchlist on an interval through the session. Start with a
       small watchlist and a conservative interval; both are configuration, and
       widening them later costs nothing while starting late costs everything.
+      It collects noise today and real chains the day Phase 8 lands, and the
+      code does not know the difference — which is the whole point of building
+      it now.
 - [ ] Scheduling: a `CronJob` per collector, or one scheduler process — chosen
       on which is easier to reason about when a collection is missed, not on
       elegance. The missed-collection case is the one that matters.
@@ -544,22 +641,37 @@ having started it early.
       run per collector, all on `/metrics`, with an alert for a session that
       collected nothing.
 - [ ] A backup path for `chains/` specifically — the one dataset here that
-      cannot be re-collected. Sized and scheduled now, while it is small.
-- [ ] **Gate:** a full trading session collected end to end with no gaps · a
+      cannot be re-collected. **Built now and left running against synthetic
+      data**, so that the first chain snapshot worth keeping is already inside a
+      backup path that has been exercised, rather than being the run that tests
+      it. Synthetic chains are worthless and backing them up is nearly free;
+      the point is that the mechanism is proven before the data is precious.
+- [ ] **Gate:** a full simulated session collected end to end with no gaps · a
       DuckDB query returns a chain snapshot as a polars frame in reasonable time
       · a deliberately killed mid-collection run leaves no duplicate rows on
-      re-run · lake size per session measured and extrapolated, so the PVC's
+      re-run · a collection attempt on a market holiday is refused rather than
+      recording silence as data · the whole session collects in CI without a
+      network · lake size per session measured and extrapolated **at the row
+      counts a real chain implies, not the synthetic watchlist's**, so the PVC's
       lifetime is a number rather than a hope.
-- [ ] **Commit:** "Trading: history starts accumulating"
+- [ ] **Commit:** "Trading: a lake, and the machinery to fill it"
 
 ### [ ] Phase 4 — The engine, proven on equities
 
-**Ships:** a backtest of one boring strategy over collected equity data,
+**Ships:** a backtest of two boring strategies over collected equity data,
 producing a result a person can check by hand. Options are not in this phase,
 but the model they need is.
 
+The two strategies are **shipped components, not test fixtures.** An earlier
+draft called the reference strategy "a test fixture for the engine, not a
+candidate"; the owner's requirement is that the vertical arrives in production
+demonstrating itself, which means the app boots with strategies registered and
+results already in the leaderboard. Phase 7 seeds them. This phase writes them,
+and writes them to the standard of something an operator will read first when
+authoring their own.
+
 - [ ] `engine/clock.py` — the `Clock` protocol and `ReplayClock`. `LiveClock` is
-      Phase 8 and must require no change here when it arrives.
+      Phase 9 and must require no change here when it arrives.
 - [ ] `engine/instruments.py` — `Equity` and `OptionContract` (underlying,
       expiry, strike, right, multiplier) behind one `Instrument` type.
       **Written in this phase even though only `Equity` is exercised**, because
@@ -575,19 +687,43 @@ but the model they need is.
 - [ ] `engine/strategy.py` — the `Strategy` protocol: a pydantic
       `Params` model declaring each tunable with its type, range and default,
       plus `on_bar(ctx)`. The declared ranges are what Phase 5 sweeps.
-- [ ] `strategies/` — one deliberately boring reference strategy (a moving
-      average crossover). It is a test fixture for the engine, not a candidate.
+- [ ] `strategies/` — **two shipped reference strategies**, which together are
+      the proof-of-concept the vertical deploys with:
+
+      *`buy_and_hold`* — buy at the first bar, hold to the last. Ten lines, no
+      parameters worth sweeping. It is the smallest honest example of the
+      `Strategy` protocol, so it is the file to read before writing one, and
+      Phase 6 needs it as a baseline regardless, so it costs nothing.
+
+      *`ma_crossover`* — a moving-average crossover with fast and slow windows
+      declared as swept parameters. It exists because it is the only one of the
+      two that can exercise a parameter schema, a sweep launcher and a
+      multi-run leaderboard. A UI with one unparameterized strategy in it does
+      not demonstrate the product.
+
+      Neither is a candidate for making money, and the plan says so in the
+      strategy's own description field so that the UI says so too.
+- [ ] **What the reference strategies are expected to do, written down before
+      they run.** Against a zero-drift random walk, `ma_crossover` should
+      **lose to `buy_and_hold` after costs** — it trades, trading costs money,
+      and there is no signal to pay for it. That is the theoretically correct
+      outcome, and it makes the seeded demo an assertion rather than a
+      decoration: if the shipped leaderboard ever shows the crossover beating
+      buy-and-hold on synthetic data, the cost model, the fill model or the
+      engine is wrong, and it is wrong on the app's own front page. Asserted as
+      a test here and visible as a result in Phase 7.
 - [ ] **Determinism:** the same inputs and seed produce byte-identical results.
       Asserted in a test, because a non-reproducible backtest cannot be
       debugged and a comparison between two of them means nothing.
 - [ ] A hand-checkable fixture: a tiny synthetic price series with known correct
       P&L, asserted to the cent. Every later engine change is measured against
       it.
-- [ ] **Gate:** the reference strategy backtests over collected data · the
+- [ ] **Gate:** both reference strategies backtest over collected data · the
       hand-checked fixture passes to the cent · two runs of identical inputs are
       identical · a lookahead test fails the build if a strategy can see a bar
-      it should not.
-- [ ] **Commit:** "Trading: an engine, and a fixture that proves it"
+      it should not · `ma_crossover` loses to `buy_and_hold` on synthetic data
+      after costs, as predicted above.
+- [ ] **Commit:** "Trading: an engine, a fixture that proves it, and two strategies to run"
 
 ### [ ] Phase 5 — Runs, sweeps, and the queue
 
@@ -610,6 +746,12 @@ This is the ask's "lots of strategies, lots of parameters" made operational.
       drawdown and its duration, exposure, turnover, win rate, trade count. All
       computed in one place; a metric defined twice will diverge.
 - [ ] Cancellation, and resumption after a worker dies mid-run.
+- [ ] **A named demo sweep**, defined here and enqueued by Phase 7's seed job:
+      `ma_crossover` over a small grid of its two windows, on one synthetic
+      symbol, over a fixed window. Small enough to finish on a cold cluster in
+      minutes, large enough that the leaderboard has something to sort. Sizing
+      it is a decision made once, in code, rather than a number an operator has
+      to guess at first boot.
 - [ ] **Gate:** a 1,000-run sweep completes · killing a worker mid-sweep loses
       no runs and duplicates none · metrics for a hand-checked run match a
       hand-computed answer · the cluster stays responsive under a full sweep,
@@ -648,12 +790,30 @@ mistaken for a finding.
 - [ ] **Gate:** a deliberately overfit strategy — parameters fit to noise —
       ranks poorly on the leaderboard, and its in-sample and walk-forward
       numbers visibly diverge. If it ranks well, this phase is not done.
+
+      **The synthetic source makes this gate exact rather than impressionistic.**
+      Phase 2's generator has zero alpha by construction and asserts it, so
+      *every* result over synthetic data is a false positive by definition, and
+      the best of a large sweep over it is the strongest false positive the
+      machinery can manufacture. Sweep it deliberately, take the winner, and
+      require that the walk-forward number and the selection-adjusted figure
+      both collapse toward nothing. This is a measurement with a known correct
+      answer, which is not a thing the honesty layer could otherwise have had.
 - [ ] **Commit:** "Trading: results that admit what they are"
 
 ### [ ] Phase 7 — The control panel
 
-**Ships:** the ask's top-level interaction. Strategies as the primary object,
-sweeps launchable from the UI, and one leaderboard.
+**Ships:** the ask's top-level interaction, and the point at which the vertical
+becomes a product someone can look at. Strategies as the primary object, sweeps
+launchable from the UI, one leaderboard — and, critically, **all of it populated
+on first boot.**
+
+That last part is the owner's requirement and it changes what this phase
+delivers. A control panel deployed against an empty database is a shipped
+*framework*: every screen renders an empty state and a button. What was asked
+for is to deploy this on autopilot, open it in production, and find a working
+product to react to. So the phase ships a seed job, and the strategies from
+Phase 4 are its payload.
 
 - [ ] `src/Aerie.Web/apps/trading/` — a Vite React app in the existing
       workspace, consuming `@aerie/ui` for tokens, day/night, and the shared top
@@ -675,18 +835,155 @@ sweeps launchable from the UI, and one leaderboard.
       Phase 6 are not optional columns; they ship visible by default.
 - [ ] **Run detail** — trades, the equity curve, the metrics, and the exact
       parameters and revision, so a result can be reproduced.
+- [ ] **Data provenance is visible on every result** — a run, a leaderboard row
+      and a strategy's headline number all show which source they came from,
+      synthetic or Schwab. Not a footnote on a settings page. For as long as the
+      app ships seeded with synthetic results, the difference between a number
+      that means something and a number that means nothing is exactly this
+      field, and a UI that hides it is a UI that lies by omission. It also stops
+      being decorative the moment both sources coexist, which is every day after
+      Phase 8.
+- [ ] **The seed job** — a Kubernetes `Job` run on deploy, alongside the
+      migration, that registers the two Phase 4 strategies and enqueues the
+      Phase 5 demo sweep.
+
+      **It computes the demo runs through the real engine and the real workers**
+      rather than inserting fixture rows. Committed result rows would be a
+      decoration that proves nothing and rots the first time a metric
+      definition changes; computed ones prove the whole pipeline — queue,
+      worker, engine, metrics, serializer — works in production, which is the
+      thing an autopilot deploy most needs demonstrated. A cold boot therefore
+      shows runs in flight for a minute or two before it shows results, which
+      is a better demonstration than instant answers would be.
+
+      **Idempotent, and namespaced to itself.** Seeded rows are marked as
+      seeded; re-running the job reconciles only those. It must never touch a
+      strategy, sweep or run the owner added, because the deploy that re-runs it
+      is every deploy.
 - [ ] Grafana carries deep-dive time series. Do not build a charting stack to
       compete with a tool already deployed and already good at this.
-- [ ] **Gate:** launch a sweep from the UI and watch it complete · the
+- [ ] **Gate:** deploy to a **clean production database**, open the control
+      panel without running anything, and find every screen populated —
+      strategies list, strategy detail with its parameter space, leaderboard
+      with completed runs, and run detail with an equity curve · the seeded
+      leaderboard shows `ma_crossover` losing to `buy_and_hold`, which is
+      Phase 4's prediction holding in production · every result is visibly
+      labelled synthetic · re-running the seed job changes nothing and destroys
+      nothing · launch a sweep from the UI and watch it complete · the
       leaderboard answers "what did best today" in one glance, which is the
       ask's own success criterion · the app is correct in day and night mode ·
       `make test-web` green.
-- [ ] **Commit:** "Trading: a control panel"
+- [ ] **Commit:** "Trading: a control panel that arrives with something in it"
 
-### [ ] Phase 8 — The live clock
+### [ ] Phase 8 — Schwab, and the seven-day problem
+
+**Ships:** real market data. The `MarketDataProvider` interface gets its second
+implementation, the collectors from Phase 3 are pointed at it, and option chain
+history that cannot be bought back later starts accumulating.
+
+**This phase may be promoted the moment approval lands.** It is placed eighth
+because the owner asked that Schwab not appear until the rest of the stack is
+deployed, and that ordering is the default. But it is written to be
+*insertable*: it depends on Phases 2 and 3 and on nothing after them, so once
+the lake and the collectors exist it can be pulled in ahead of any later phase
+without disturbing them. The wall clock is the reason to use that latitude —
+every day this waits is a day of option chains that has to be bought later or
+done without — and the re-cut is what makes taking it cheap. If approval arrives
+during Phase 4 or 5, promoting this is a judgment call the owner makes, not a
+replan.
+
+The 7-day refresh token is a **design constraint, not a defect to engineer
+around.** Schwab requires periodic human re-authentication on purpose. A
+collector that treats it as an error crash-loops weekly; one that treats it as a
+scheduled event asks for thirty seconds of attention and keeps its history
+intact.
+
+**Budget for first contact.** Everything upstream of this phase was built
+against clean generated data, so this is where the plan meets gaps, halted
+symbols, splits and corporate actions, bad prints, zero-bid contracts, stale
+quotes and DST seams — none of which the synthetic source models, by a decision
+recorded in [Why the first data source is synthetic](#why-the-first-data-source-is-synthetic).
+That decision was made knowingly and stands. What follows from it is that this
+phase should be *estimated* as integration work rather than as a provider class:
+assume the collectors need hardening they did not need before, and treat each
+pathology found here as a candidate to fold back into the synthetic source as a
+regression fixture, which is the cheapest moment to build the fault injection
+that was deferred to get here.
+
+- [ ] **First, verify and record in this document the facts this phase depends
+      on.** All are widely reported and none should be built against unverified.
+      Moved here from Phase 0a by the re-cut, because a fact verified months
+      before it is used is a fact that gets verified twice:
+      - Access-token lifetime (reported: 30 minutes) and refresh-token lifetime
+        (reported: 7 days, human re-auth required, not programmatically
+        renewable). The 7-day figure is the single most load-bearing unknown in
+        the plan — this phase's whole shape depends on it.
+      - Request rate limit (reported: ~120/minute per app).
+      - Minute-bar history depth available from `pricehistory`, and daily-bar
+        depth. This one now also sets how much history the engine has to work
+        with on day one, since the lake holds no real bars before this phase.
+      - Whether `/chains` returns greeks and implied volatility inline
+        (reported: yes) — this decides whether Phase 10 computes them or merely
+        validates them.
+- [ ] **Seed the client id and secret** into the parameter store under the two
+      paths Phase 0b already named, per
+      [secrets-architecture.md](../secrets-architecture.md) — never in the repo,
+      not even encrypted, per [ethos.md](../ethos.md). Flip `required` to true
+      and add the `kubernetes` block, which is what 0b left for this phase to
+      do.
+- [ ] `providers/schwab/` — the OAuth 2.0 three-legged flow, with token storage
+      in the secret store rather than a file in the pod. It implements the
+      Phase 2 protocol unchanged; **if the protocol needs widening to fit
+      Schwab, that is the finding**, and the change belongs in `base.py` with
+      the synthetic implementation updated alongside it, not in a Schwab-shaped
+      escape hatch.
+- [ ] An operator-only re-auth page: one button that begins the flow, and a
+      callback route that completes it. It sits behind the existing auth wall,
+      so only an authenticated operator can complete an authorization — which
+      is the correct security property and costs nothing to get. Phase 7 gives
+      it a real UI to live in, which is one of the things this phase gains by
+      running after the control panel rather than before it.
+- [ ] Automatic access-token refresh (short-lived, silent). **Refresh-token
+      expiry is surfaced, not retried**: a `token_expires_at` gauge on
+      `/metrics`, a Grafana alert at T-24h, and a health endpoint that reports
+      degraded rather than dead.
+- [ ] Rate limiting client-side, below the verified ceiling, with backoff and
+      jitter. One shared limiter for the whole silo — two collectors racing to
+      the same quota is an outage.
+- [ ] Record every provider call in `ingest_run`: what was asked, what came
+      back, how long it took, what it cost against the quota.
+- [ ] **The cutover.** Point the Phase 3 collectors at Schwab and set a real
+      watchlist. Small and conservative to start; both are configuration.
+      Synthetic and Schwab data coexist in the lake, distinguished by the
+      `data_source` every row already carries, and no synthetic data is deleted
+      — it is the reproducibility record for every run made before this day.
+- [ ] **Demote the synthetic provider to test-only**, per the owner's decision:
+      it stops being a deployable in-cluster provider and remains available to
+      `pytest` and to a local development run. **Triggered by the cutover being
+      stable, not by this phase starting** — the offline test loop and the
+      seeded demo are load-bearing right up until real data is flowing reliably,
+      and demoting it on day one of this phase would remove them mid-flight.
+      Phase 6's overfitting gate keeps using it forever; that is the one place
+      the generator is not a stand-in but the correct instrument.
+- [ ] **Gate:** a chain and a bar series are fetched from production Schwab and
+      written to the lake by the *unmodified* Phase 3 collectors · the access
+      token refreshes across a 30-minute boundary without intervention · the
+      T-24h alert fires against a simulated expiry · a deliberately expired
+      refresh token produces a degraded readiness state and an alert, not a
+      crash loop · a full real session collects end to end and its gaps are
+      explained rather than merely absent · the control panel shows real and
+      synthetic results side by side, correctly labelled.
+- [ ] **Commit:** "Trading: real data, and a credential that expects to expire"
+
+### [ ] Phase 9 — The live clock
 
 **Ships:** paper trading. Strategies run forward against live quotes, and the
 leaderboard gains a column that changes during the day.
+
+The live clock is provider-agnostic like everything else, so it can be developed
+and demonstrated against the synthetic source without waiting for a market to be
+open — but it is placed after Phase 8 because a paper session against noise is a
+curiosity, and against real quotes it is the point.
 
 - [ ] `LiveClock` — ticking on wall time as quotes arrive. If this requires any
       change to `Strategy`, Phase 4 got the abstraction wrong and the fix
@@ -707,7 +1004,7 @@ leaderboard gains a column that changes during the day.
       or the gap is explained in this document.
 - [ ] **Commit:** "Trading: the same engine, on a live clock"
 
-### [ ] Phase 9 — Options
+### [ ] Phase 10 — Options
 
 **Ships:** the actual target. Chain-aware strategies, multi-leg positions, and
 the three strategy families the owner named.
@@ -715,6 +1012,13 @@ the three strategy families the owner named.
 This is the largest phase and should be split into its own directory under
 [`docs/plans/`](README.md) when it starts, per the lifecycle in the plans
 README. What follows is its shape, not its detail.
+
+**This phase requires real chain data and is refused synthetic chains in code**,
+by the guardrail Phase 2 installs. Synthetic chains are structurally valid and
+numerically meaningless; an option backtest against them would produce a
+confident wrong number, which is the exact failure mode Phase 6 exists to
+prevent. Nothing here can start until Phase 8 has been collecting for a while,
+and that is the plan's one remaining irreducible wait.
 
 - [ ] Chain-aware context: `ctx.chain(underlying, expiry)` reading snapshots
       from the lake, with the selection helpers strategies actually need —
@@ -736,7 +1040,9 @@ README. What follows is its shape, not its detail.
       positions first; anything needing portfolio margin is out of scope until
       it is not.
 - [ ] Volatility surface fitting for the vol family — IV rank, term structure,
-      skew. Depends on chain history depth, which is why Phase 3 shipped first.
+      skew. Depends on chain history depth, which is why Phase 8 is promotable
+      the day approval lands: this phase is the one whose start date is set by
+      how long real chains have been accumulating.
 - [ ] **Gate:** a covered call and a vertical spread backtest, hand-checked
       through expiry including an assignment · greeks agree with the independent
       implementation within tolerance · the walk-forward and baseline machinery
@@ -759,20 +1065,40 @@ README. What follows is its shape, not its detail.
 - **Python strategies from published research.** The `Strategy` protocol is the
   contract; adapting an outside implementation to it is per-strategy work, not
   platform work. Revisit if it happens three times.
+- **Fault injection in the synthetic source.** Deliberately emitting gaps,
+  duplicates, out-of-order rows, halts and splits, so that the collectors meet
+  those pathologies before Schwab does. Considered and deferred by the owner to
+  Phase 8, on the reasoning that real data should say which faults actually
+  occur rather than guessing at them. The cost is carried as a named risk in
+  Phase 8's estimate; the cheapest time to build it is as each real pathology is
+  found there, as a regression fixture.
+- **A realistic synthetic source.** Implied-volatility surfaces, jumps, regime
+  switching, microstructure. The generator is pure noise permanently and on
+  purpose — as a control it is *more* useful for being unrealistic, and as a
+  stand-in for real data it stops being needed at Phase 8.
 
 ## Verification
 
 The plan is done when these are all true, in this order:
 
-1. Option chain history has been accumulating for long enough to backtest
+1. The vertical deploys on its own and arrives demonstrating itself: a clean
+   production database, a cold boot, and every screen of the control panel
+   populated without anyone launching anything.
+2. Option chain history has been accumulating for long enough to backtest
    against — the only item on this list that cannot be accelerated by working
-   harder, which is why Phase 3 is where it is.
-2. A strategy can be added by writing one file and deploying, exactly as the ask
-   assumes.
-3. A sweep over that strategy's declared parameters runs without the cluster
+   harder, which is why Phase 8 is written to be promoted the day approval
+   lands rather than waited for in order.
+3. A strategy can be added by writing one file and deploying, exactly as the ask
+   assumes — and the two shipped strategies are what an operator reads to learn
+   how.
+4. A sweep over that strategy's declared parameters runs without the cluster
    noticing.
-4. The leaderboard answers "what is doing best right now" in one glance, across
-   backtests and live paper sessions together.
-5. A deliberately overfit strategy is visibly ranked as such.
-6. Nothing under `src/Aerie.Trading/` imports from `Aerie.Api`, and CI proves it
+5. The leaderboard answers "what is doing best right now" in one glance, across
+   backtests and live paper sessions together, with the source of every number
+   visible on its face.
+6. A deliberately overfit strategy is visibly ranked as such — measured against
+   the synthetic source, where the correct answer is known.
+7. Swapping the data source is a class and a configuration value, demonstrated
+   by there being two of them and no collector code that knows which is running.
+8. Nothing under `src/Aerie.Trading/` imports from `Aerie.Api`, and CI proves it
    on every commit.
