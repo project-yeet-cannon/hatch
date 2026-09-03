@@ -131,6 +131,14 @@ export interface ParsedEpic {
   stories: ParsedStory[];
 }
 
+/** One plan typed straight into the page instead of uploaded. The title plays
+    the part a filename plays for an upload: the provenance every issue carries,
+    and the epic's title when the body has no `#` heading of its own. */
+export interface PastedPlan {
+  title: string;
+  body: string;
+}
+
 export interface ImportRequest {
   projectId: number;
   docs: ParsedEpic[];

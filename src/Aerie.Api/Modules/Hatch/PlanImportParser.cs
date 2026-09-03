@@ -212,9 +212,31 @@ public partial class PlanImportParser
         return (space > EfHatchIssue.MaxTitleLength / 2 ? cut[..space] : cut.TrimEnd()) + "…";
     }
 
-    /// <summary>The epic's title: its H1, or failing that the file it came in as.</summary>
+    /// <summary>The epic's title: its H1, or failing that the name it came in as.</summary>
     private static string Title(string? h1, string source) =>
-        h1 is { Length: > 0 } ? Clip(h1) : Clip(Path.GetFileNameWithoutExtension(source));
+        h1 is { Length: > 0 } ? Clip(h1) : Clip(WithoutMarkdownSuffix(source));
+
+    /// <summary>
+    /// The source name with its markdown extension taken off, and nothing else
+    /// touched.
+    ///
+    /// Specifically not <c>Path.GetFileNameWithoutExtension</c>, which drops
+    /// everything after the *last* dot whatever it is. That is the same answer
+    /// for every name this started with - the upload path refuses anything not
+    /// ending <c>.md</c> - but a pasted plan's name is a title somebody typed,
+    /// and "Phase 5.1 importer" is not a file with a ".1 importer" extension.
+    /// It would have been filed as "Phase 5".
+    /// </summary>
+    private static string WithoutMarkdownSuffix(string source)
+    {
+        foreach (var suffix in (string[])[".md", ".markdown"])
+        {
+            if (source.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                return source[..^suffix.Length];
+        }
+
+        return source;
+    }
 
     /// <summary>
     /// The name this document is remembered by. Reduced to its last segment so

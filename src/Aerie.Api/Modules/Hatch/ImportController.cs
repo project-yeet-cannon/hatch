@@ -78,6 +78,56 @@ public class ImportController(HatchContext db, PlanImportParser parser, RankServ
         return parsed;
     }
 
+    /// <summary>
+    /// The same look, for a plan that was pasted rather than uploaded: one
+    /// title, one body, the tree they would become.
+    ///
+    /// It exists because a plan does not have to be a file to be worth filing.
+    /// A page of notes in a chat window, a phase list somebody typed out - the
+    /// board wants those on it, and saving them to <c>docs/plans/scratch.md</c>
+    /// first only to upload them is a step that buys nothing.
+    /// </summary>
+    /// <remarks>
+    /// JSON rather than a second multipart route, and the same
+    /// <see cref="PlanImportParser"/> rather than a second reading of markdown.
+    /// The parser already treats the source name as the epic's fallback title
+    /// (<c>Title(h1, source)</c>), so a pasted title behaves exactly as a
+    /// filename does: the body's own <c>#</c> heading wins when there is one,
+    /// and the title stands in when there is not.
+    ///
+    /// One <see cref="ParsedEpic"/>, not a list: the operator is looking at one
+    /// document. The page wraps it in the same array the upload path produces,
+    /// so the preview, the count on the button, and <see cref="Import"/> itself
+    /// are all reached unchanged - what gets written is written by exactly one
+    /// code path, whichever way the text arrived.
+    /// </remarks>
+    [HttpPost("preview-text")]
+    public ActionResult<ParsedEpic> PreviewText(PastedPlan plan)
+    {
+        var title = plan.Title?.Trim() ?? string.Empty;
+
+        if (title.Length == 0)
+            return BadRequest("a pasted plan needs a title - it is the name every issue from it will carry");
+
+        // Bounded for the same reason an issue's title is, and not only for
+        // tidiness: the provenance footer the parser appends is built from this
+        // name, and a name longer than a description column would leave no room
+        // for the description it is a footer to.
+        if (title.Length > EfHatchIssue.MaxTitleLength)
+            return BadRequest($"that title is {title.Length} characters - {EfHatchIssue.MaxTitleLength} is the limit");
+
+        if (plan.Body is null || plan.Body.Trim().Length == 0)
+            return BadRequest("there is nothing to read - the body is where the plan goes");
+
+        // The same cap the upload path puts on one file, measured the same way,
+        // so pasting a plan and uploading it are refused at the same size
+        // rather than at two that happen to differ.
+        if (Encoding.UTF8.GetByteCount(plan.Body) > MaxFileBytes)
+            return BadRequest($"that is larger than {MaxFileBytes / 1024} KB");
+
+        return parser.Parse(title, plan.Body);
+    }
+
     // ---- Writing ----
 
     /// <summary>

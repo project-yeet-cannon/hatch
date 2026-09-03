@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Badge, Button, Card, EmptyState, Field, PageHeader, Text } from '@aerie/ui';
 import type { BadgeTone } from '@aerie/ui';
-import { getProjects, previewImport, runImport } from '../api/client';
+import { getProjects, previewImport, previewText, runImport } from '../api/client';
 import { message } from '../lib/errors';
 import type { ImportResult, ParsedEpic, PlanState, Project } from '../types';
 
@@ -40,6 +40,11 @@ export function ImportPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // The pasted plan, which is one document at a time by construction - the
+  // shape of the form is the shape of the thing.
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+
   useEffect(() => {
     getProjects().then(setProjects).catch((err: unknown) => setError(message(err)));
   }, []);
@@ -47,6 +52,10 @@ export function ImportPage() {
   // The first project, until somebody picks another - the same choice the New
   // issue dialog makes, and for the same reason.
   const chosen = projectId ?? projects[0]?.id ?? null;
+
+  // Both halves, because the server refuses either one missing and a button
+  // that reports that after a round trip is a button that wasted a click.
+  const pastable = title.trim() !== '' && body.trim() !== '';
 
   async function preview(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -64,6 +73,27 @@ export function ImportPage() {
     }
   }
 
+  /**
+   * The same look, for text that never was a file. Wrapped in an array on the
+   * way out so everything downstream - the preview cards, the count on the
+   * button, the import itself - is the upload path's, unchanged.
+   */
+  async function previewPasted() {
+    if (!pastable) return;
+
+    setBusy(true);
+    setResult(null);
+    try {
+      setDocs([await previewText({ title: title.trim(), body })]);
+      setError(null);
+    } catch (err) {
+      setDocs(null);
+      setError(message(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function importDocs() {
     if (!docs || chosen === null) return;
 
@@ -72,8 +102,12 @@ export function ImportPage() {
       setResult(await runImport({ projectId: chosen, docs }));
       // The tree is gone once it is written: leaving it on screen beside a
       // result invites a second click, and a second click is a second copy of
-      // every issue.
+      // every issue. The pasted text goes with it, for the same reason - it is
+      // the only one of the two inputs that would otherwise still be sitting
+      // there, filled in and one Preview away from a duplicate import.
       setDocs(null);
+      setTitle('');
+      setBody('');
       setError(null);
     } catch (err) {
       setError(message(err));
@@ -113,13 +147,61 @@ export function ImportPage() {
               accept=".md,text/markdown"
               multiple
               onChange={(e) => {
-                void preview(e.target.files);
                 // Cleared so choosing the same file twice still fires a change
                 // - a re-read after an edit is the ordinary second use of this.
-                e.target.value = '';
+                //
+                // After the upload, never beside it. `preview` starts the fetch
+                // synchronously - the FormData is built and the request issued
+                // before its first await - so clearing here without waiting
+                // pulls the input's FileList out from under a body that is
+                // still being streamed. The part arrives short, the closing
+                // multipart boundary never lands where the parser expects it,
+                // and the server reports the read as an unexpected end of
+                // stream: a 400 naming the form, from a page that looks like it
+                // sent one.
+                const input = e.target;
+                void preview(input.files).finally(() => {
+                  input.value = '';
+                });
               }}
             />
           </Field>
+        </div>
+      </Card>
+
+      {/* The other way in. A plan does not have to be a file to be worth
+          filing: a page of notes from a chat window, or a phase list somebody
+          typed out, would otherwise have to be saved to docs/plans first and
+          uploaded back - a round trip through the filesystem that buys nothing
+          and leaves a scratch file behind to retire. */}
+      <Card>
+        <h2 className="hatch-section-title">Or paste one</h2>
+
+        <div className="hatch-form">
+          <Field
+            label="Title"
+            hint="What this document is called. Every issue from it carries the name, and it titles the epic unless the body opens with its own # heading."
+          >
+            <input
+              type="text"
+              value={title}
+              maxLength={300}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </Field>
+
+          <Field
+            label="Body"
+            hint="Markdown, the same shape a plan file has: ## Phase opens a story, each checkbox under it is a task."
+          >
+            <textarea rows={16} value={body} onChange={(e) => setBody(e.target.value)} />
+          </Field>
+
+          <div className="hatch-form-actions">
+            <Button loading={busy} disabled={!pastable} onClick={() => void previewPasted()}>
+              Preview
+            </Button>
+          </div>
         </div>
       </Card>
 
@@ -165,8 +247,11 @@ export function ImportPage() {
   );
 }
 
-/** One file, as the tree it would become. Every phase is listed: the counts say
-    how much, and the phase titles are what says whether it was read correctly. */
+/** One document, as the tree it would become - every phase, and every task
+    under it. The counts say how much; the titles are what says whether it was
+    read correctly, and they are the whole reason this page exists: an import is
+    one button and forty issues, so the chop has to be checkable before it is
+    committed rather than after. */
 function DocPreview({ doc }: { doc: ParsedEpic }) {
   const tasks = doc.stories.reduce((total, story) => total + story.tasks.length, 0);
 
@@ -185,10 +270,25 @@ function DocPreview({ doc }: { doc: ParsedEpic }) {
 
       <ul className="hatch-child-list">
         {doc.stories.map((story) => (
-          <li key={story.title} className="hatch-import-row">
-            <span>{story.title}</span>
-            <Text tone="muted">{plural(story.tasks.length, 'task')}</Text>
-            <StateBadge state={story.state} />
+          <li key={story.title}>
+            <div className="hatch-import-row">
+              <span>{story.title}</span>
+              <Text tone="muted">{plural(story.tasks.length, 'task')}</Text>
+              <StateBadge state={story.state} />
+            </div>
+
+            {story.tasks.length > 0 && (
+              <ul className="hatch-import-tasks">
+                {story.tasks.map((task, i) => (
+                  // The index, because two checkboxes in one phase are allowed
+                  // to read the same and this list is never reordered.
+                  <li key={i} className="hatch-import-row">
+                    <span>{task.title}</span>
+                    <StateBadge state={task.state} />
+                  </li>
+                ))}
+              </ul>
+            )}
           </li>
         ))}
       </ul>

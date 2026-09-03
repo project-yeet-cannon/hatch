@@ -291,6 +291,123 @@ public class ImportControllerTests
         Assert.Contains("larger than", Reason(result.Result));
     }
 
+    // ---- Pasted plans ----
+
+    /// <summary>
+    /// The point of the second road: a plan that never was a file reaches the
+    /// board through the same parser, so the tree is the tree an upload of the
+    /// same text would have produced.
+    /// </summary>
+    [Fact]
+    public async Task PastedText_ReadsAsTheSameTreeAnUploadWould()
+    {
+        var h = await NewAsync();
+
+        // The same source name on both roads, so the two trees are comparable
+        // down to the provenance line every description carries.
+        var pasted = Value(h.Import.PreviewText(new PastedPlan("Hatch.md", Plan)));
+        var uploaded = Assert.Single(await h.PreviewAsync(("Hatch.md", Plan)));
+
+        // Serialized rather than compared as records: ParsedEpic holds lists,
+        // and a record's generated equality compares those by reference - two
+        // identical trees from two parses would never be equal.
+        Assert.Equal(JsonSerializer.Serialize(uploaded), JsonSerializer.Serialize(pasted));
+        Assert.Empty(h.Db.Issues);
+    }
+
+    [Fact]
+    public async Task APastedPlan_ImportsThroughTheOrdinaryPath()
+    {
+        var h = await NewAsync();
+
+        var doc = Value(h.Import.PreviewText(new PastedPlan("Trading terminal", Plan)));
+        var result = Value(await h.Import.Import(new ImportRequest(h.ProjectId, [doc]), default));
+
+        var epic = Assert.Single(result.Epics);
+        Assert.Equal("AER-1", epic.Key);
+        Assert.Equal(2, epic.StoryCount);
+        Assert.Equal(3, epic.TaskCount);
+        Assert.Equal(6, result.IssueCount);
+
+        // The title is what the provenance says, in place of a filename.
+        Assert.Equal("Trading terminal", epic.Filename);
+        Assert.EndsWith("_Imported from `Trading terminal`_", h.Issue("AER-1").Description);
+    }
+
+    /// <summary>
+    /// With no <c>#</c> heading in the body, the title names the epic - the same
+    /// fallback a filename gets, which is the whole reason the title is carried
+    /// as the source name rather than as a field of its own.
+    /// </summary>
+    [Fact]
+    public async Task APastedPlanWithNoHeading_IsTitledAfterItsTitle()
+    {
+        var h = await NewAsync();
+
+        var doc = Value(h.Import.PreviewText(new PastedPlan("Trading terminal", "Some prose.\n")));
+
+        Assert.Equal("Trading terminal", doc.Title);
+    }
+
+    /// <summary>
+    /// A title is text somebody typed, not a filename, so it keeps its dots.
+    /// Read through <c>Path.GetFileNameWithoutExtension</c> this filed as
+    /// "Phase 5".
+    /// </summary>
+    [Fact]
+    public async Task ATitleWithADotInIt_KeepsIt()
+    {
+        var h = await NewAsync();
+
+        var doc = Value(h.Import.PreviewText(new PastedPlan("Phase 5.1 importer", "Some prose.\n")));
+
+        Assert.Equal("Phase 5.1 importer", doc.Title);
+    }
+
+    [Fact]
+    public async Task APasteWithNoTitle_IsRefused()
+    {
+        var h = await NewAsync();
+
+        var result = h.Import.PreviewText(new PastedPlan("   ", Plan));
+
+        Assert.Contains("needs a title", Reason(result.Result));
+    }
+
+    [Fact]
+    public async Task APasteWithNoBody_IsRefused()
+    {
+        var h = await NewAsync();
+
+        var result = h.Import.PreviewText(new PastedPlan("Hatch", "\n  \n"));
+
+        Assert.Contains("nothing to read", Reason(result.Result));
+    }
+
+    [Fact]
+    public async Task APasteLargerThanTheCap_IsRefused()
+    {
+        var h = await NewAsync();
+
+        var result = h.Import.PreviewText(new PastedPlan("Hatch", new string('x', ImportController.MaxFileBytes + 1)));
+
+        Assert.Contains("larger than", Reason(result.Result));
+    }
+
+    /// <summary>
+    /// Bounded because the provenance footer is built from it: a title longer
+    /// than the description column would leave no room for the description.
+    /// </summary>
+    [Fact]
+    public async Task APasteWithAnOverlongTitle_IsRefused()
+    {
+        var h = await NewAsync();
+
+        var result = h.Import.PreviewText(new PastedPlan(new string('x', EfHatchIssue.MaxTitleLength + 1), Plan));
+
+        Assert.Contains("is the limit", Reason(result.Result));
+    }
+
     // ---- Harness ----
 
     private static readonly DateTimeOffset Now = new(2026, 9, 3, 12, 0, 0, TimeSpan.Zero);

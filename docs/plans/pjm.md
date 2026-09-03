@@ -138,7 +138,8 @@ that attribute for scoped keys). Issue routes take the display key (`AER-12`).
 | `/api/hatch/issues/{key}/comments` | GET, POST | POST writes `commented` |
 | `/api/hatch/issues/{key}/events` | GET | Newest first |
 | `/api/hatch/import/preview` | POST | Multipart `.md` files → parse tree, touches nothing |
-| `/api/hatch/import` | POST | `{ projectId, docs }` → creates the hierarchy |
+| `/api/hatch/import/preview-text` | POST | `{ title, body }` → one parse tree, touches nothing. The same parser as `preview`, for a plan that was pasted rather than uploaded; the title plays the filename's part — the provenance every issue carries, and the epic's title when the body has no `#` heading |
+| `/api/hatch/import` | POST | `{ projectId, docs }` → creates the hierarchy, whichever preview produced them |
 
 **Issue numbering** (the one concurrency-sensitive spot): inside the create
 request — read the project, take `NextIssueNumber`, increment it, save issue
@@ -355,8 +356,14 @@ The `docs/plans/` directory becomes uploadable. The importer is read-only: it
 copies plans in, and retiring the `.md` files stays a deliberate manual act per
 the [plans lifecycle](README.md). Parsing is server-side and deterministic.
 
-Parse rules, per uploaded file: the first `#` H1 is the epic title (fallback:
-filename); everything before the first phase heading is the epic description.
+A plan does not have to be a file to be worth filing, so there are two roads in
+and one parser at the end of both: an upload of `.md` files, and a title and a
+body typed into the page. Below, *source name* is the filename on the first road
+and the typed title on the second — it is the same argument to the same
+function, which is why the second road needed no second reading of markdown.
+
+Parse rules, per document: the first `#` H1 is the epic title (fallback: the
+source name); everything before the first phase heading is the epic description.
 Every `##` H2 whose text starts with `Phase` (case-insensitive) opens a story
 titled with the H2 text; other H2 sections stay in the epic description. Inside
 a story's section, every top-level `- [x]` / `- [x]` list item is a task
@@ -366,8 +373,8 @@ among `IsTerminal`, else the last status), unchecked in `todo`. A story with
 boxes lands `done` if all are checked, `in progress` if some are, `todo`
 otherwise; a boxless story lands `todo`; the epic lands `done` only if every
 story did. Every imported description ends with an `_Imported from
-`filename`_` line, and every created issue gets one `imported` event carrying
-the filename.
+`source`_` line, and every created issue gets one `imported` event carrying
+the source name.
 
 - [x] Create `src/Aerie.Api/Modules/Hatch/PlanImportParser.cs`: pure function
       from `(filename, content)` to a `ParsedEpic` tree DTO implementing
@@ -386,6 +393,12 @@ the filename.
 - [x] Build the Import page in `apps/hatch`: multi-file input, preview tree
       with per-file epic/story/task counts and statuses, project picker,
       import button, and a result list linking each created epic.
+- [x] Add the second road: `preview-text` taking `{ title, body }` through the
+      same parser, and a Title/Body form beside the file input. The preview
+      lists every task as well as every phase — the phase titles are the
+      document's own headings, but a task title is the parser's guess at where
+      a sentence ends, so the chop is the part that wants checking before forty
+      issues land on a board with no undo.
 
 Verify: `make test-api`, the `apps/hatch` lint/build pair, then a hands-on
 round trip: upload a copy of a small real plan, check the preview counts, and

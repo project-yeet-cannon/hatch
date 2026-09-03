@@ -11,6 +11,7 @@ import type {
   IssueMoveRequest,
   IssuePatchRequest,
   ParsedEpic,
+  PastedPlan,
   Project,
   ProjectCreateRequest,
   ProjectPatchRequest,
@@ -129,6 +130,13 @@ export const previewImport = (files: File[]) => {
   for (const file of files) form.append('files', file, file.name);
   return fetchJson<ParsedEpic[]>('/api/hatch/import/preview', { method: 'POST', body: form });
 };
+
+/** The same look for a plan that was pasted rather than uploaded. Plain JSON:
+    there is no file, so there is no multipart envelope to build. Comes back as
+    one epic, which the page wraps in the array the upload path returns so that
+    both roads meet at the same preview and the same import. */
+export const previewText = (request: PastedPlan) =>
+  fetchJson<ParsedEpic>('/api/hatch/import/preview-text', { method: 'POST', ...asJson(request) });
 
 export const runImport = (request: ImportRequest) =>
   fetchJson<ImportResult>('/api/hatch/import', { method: 'POST', ...asJson(request) });

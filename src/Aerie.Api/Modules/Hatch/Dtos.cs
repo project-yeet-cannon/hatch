@@ -185,6 +185,21 @@ public record ParsedEpic(
     PlanState State,
     IReadOnlyList<ParsedStory> Stories);
 
+/// <summary>
+/// One plan typed or pasted straight into the page, rather than uploaded as a
+/// file. The same document by the time the parser sees it - which is the point:
+/// a plan that only ever existed in somebody's clipboard should reach the board
+/// by the same road as one that lives in <c>docs/plans</c>, not by a second
+/// implementation of the same reading.
+/// </summary>
+/// <param name="Title">
+/// What this document is called. It plays the part a filename plays for an
+/// upload: the name every imported issue's provenance line carries, and the
+/// epic's own title when the body has no <c>#</c> heading of its own.
+/// </param>
+/// <param name="Body">The markdown, exactly as the file would have held it.</param>
+public record PastedPlan(string Title, string Body);
+
 /// <param name="Docs">The trees from <c>preview</c>, whichever of them the operator kept.</param>
 public record ImportRequest(int ProjectId, IReadOnlyList<ParsedEpic> Docs);
 

@@ -469,3 +469,19 @@
   flex: 1;
   min-width: 0;
 }
+
+/* The tasks under a phase. Indented behind a rule so a long phase reads as one
+   block rather than as a flat list of everything in the file - and listed at
+   all because the tasks are the part of the chop worth checking: a phase title
+   is the document's own heading, while a task title is this parser's guess at
+   where a sentence ends. */
+.hatch-import-tasks {
+  list-style: none;
+  margin: var(--sp-2) 0 0 var(--sp-2);
+  padding: 0 0 0 var(--sp-3);
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  color: var(--muted);
+}
