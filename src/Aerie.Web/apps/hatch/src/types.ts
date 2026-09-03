@@ -92,6 +92,55 @@ export interface Board {
   issues: IssueCard[];
 }
 
+// ---- The importer ----
+
+/** How far along an imported node is, before the board matches it to a column.
+    Mirrors PlanState in Dtos.cs; the names are the enum's, serialized as
+    strings by the API's JsonStringEnumConverter. */
+export type PlanState = 'Todo' | 'InProgress' | 'Done';
+
+export interface ParsedTask {
+  title: string;
+  description: string;
+  state: PlanState;
+}
+
+export interface ParsedStory {
+  title: string;
+  description: string;
+  state: PlanState;
+  tasks: ParsedTask[];
+}
+
+/** One uploaded plan, as the issues it would become. Handed back by the
+    preview and handed in again unchanged, so what was approved on screen is
+    what gets written. */
+export interface ParsedEpic {
+  filename: string;
+  title: string;
+  description: string;
+  state: PlanState;
+  stories: ParsedStory[];
+}
+
+export interface ImportRequest {
+  projectId: number;
+  docs: ParsedEpic[];
+}
+
+export interface ImportedEpic {
+  filename: string;
+  key: string;
+  title: string;
+  storyCount: number;
+  taskCount: number;
+}
+
+export interface ImportResult {
+  epics: ImportedEpic[];
+  issueCount: number;
+}
+
 // ---- Requests ----
 
 export interface ProjectCreateRequest {

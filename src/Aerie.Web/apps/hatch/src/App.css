@@ -346,3 +346,19 @@
 .hatch-markdown pre {
   overflow-x: auto;
 }
+
+/* ---- The importer ---- */
+
+/* A phase in the preview tree: its title, then its counts and its state pushed
+   to the right, so a file's worth of them reads as a column of states rather
+   than as a ragged list. */
+.hatch-import-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.hatch-import-row > :first-child {
+  flex: 1;
+  min-width: 0;
+}
