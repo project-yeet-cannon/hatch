@@ -221,7 +221,13 @@ public class EfHatchComment
     [Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]
     public long Id { get; set; }
 
-    public required long IssueId { get; set; }
+    /// <summary>
+    /// Not <c>required</c>, unlike most of what a row needs: a comment added
+    /// through <see cref="EfHatchIssue.Comments"/> has this filled in by EF's
+    /// fixup, which is what lets an issue and its first rows be written in one
+    /// <c>SaveChanges</c>.
+    /// </summary>
+    public long IssueId { get; set; }
     public EfHatchIssue? Issue { get; set; }
 
     [MaxLength(Common.PersonName.MaxChars)]
@@ -266,7 +272,8 @@ public class EfHatchIssueEvent
     [Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]
     public long Id { get; set; }
 
-    public required long IssueId { get; set; }
+    /// <summary>Set by EF fixup when the event is added through <see cref="EfHatchIssue.Events"/> - see <see cref="EfHatchComment.IssueId"/>.</summary>
+    public long IssueId { get; set; }
     public EfHatchIssue? Issue { get; set; }
 
     [MaxLength(Common.PersonName.MaxChars)]

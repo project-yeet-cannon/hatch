@@ -9,6 +9,12 @@ public static class HatchModule
     public static IServiceCollection AddHatchModule(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddModuleContext<HatchContext>(configuration, HatchContext.Schema);
+
+        // Scoped, because it reads and rewrites rows through the request's own
+        // context - a renumbered column and the card that caused it have to
+        // land in one SaveChanges.
+        services.AddScoped<RankService>();
+
         return services;
     }
 }

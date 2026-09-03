@@ -34,6 +34,14 @@ namespace Aerie.Api.Tests.Auth;
 ///   ownership, expressed as a WHERE clause in the module
 ///   (docs/auth-architecture.md, "A person is an authorization input"), and a
 ///   global role has nothing to say about them.
+/// - **Hatch is the exception, and it is not really one.** It lives under
+///   Modules/ for the schema and the migration history, but it is not a family
+///   app - it is the operator's own tooling wearing a module's clothes, like
+///   the admin app is the operator's own screen. Every one of its verbs is
+///   guarded, reads included, and its bundle 404s for non-admins the same way
+///   (AdminAppMiddleware). Phase 6 of docs/plans/pjm.md widens that to scoped
+///   API keys, which is a second credential through the same gate rather than
+///   a second gate.
 /// </summary>
 public class AdminSurfaceTests
 {
@@ -103,6 +111,27 @@ public class AdminSurfaceTests
         "DiscoveryController.GetUnmapped",
         "PhotosController.RefreshAlbums",
         "PhotosController.UpdateAlbum",
+
+        // Hatch, whole. Reads included, because the board is a list of what
+        // the operator is doing and every card title on it - not a fact about
+        // the house that a hallway tablet has any business rendering.
+        "BoardController.GetBoard",
+        "ProjectsController.GetProjects",
+        "ProjectsController.CreateProject",
+        "ProjectsController.PatchProject",
+        "ProjectsController.DeleteProject",
+        "StatusesController.GetStatuses",
+        "StatusesController.CreateStatus",
+        "StatusesController.PatchStatus",
+        "StatusesController.DeleteStatus",
+        "IssuesController.GetIssue",
+        "IssuesController.CreateIssue",
+        "IssuesController.PatchIssue",
+        "IssuesController.DeleteIssue",
+        "IssuesController.MoveIssue",
+        "IssueThreadController.GetComments",
+        "IssueThreadController.AddComment",
+        "IssueThreadController.GetEvents",
 
         // The whole controller, reads included. See SettingsController.
         "SettingsController.GetAll",
