@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   DndContext,
+  DragOverlay,
   KeyboardSensor,
   PointerSensor,
   closestCorners,
@@ -8,24 +9,38 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import type { DragEndEvent } from '@dnd-kit/core';
-import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import type { DragEndEvent, DragOverEvent, DragStartEvent } from '@dnd-kit/core';
+import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { Button, EmptyState, PageHeader } from '@aerie/ui';
 import { getBoard, getProjects, moveIssue } from '../api/client';
-import { BoardCard } from '../components/BoardCard';
+import { BoardCard, CardPreview } from '../components/BoardCard';
+import { BoardFilters } from '../components/BoardFilters';
+import { IssuePeek } from '../components/IssuePeek';
 import { NewIssueDialog } from '../components/NewIssueDialog';
+import { StatusDot } from '../components/StatusPill';
+import { statusVars } from '../lib/color';
 import { message } from '../lib/errors';
+import { NO_FILTER, filterCards, isFiltering } from '../lib/filter';
+import type { CardFilter } from '../lib/filter';
+import { columnDroppableId, place, targetStatusId } from '../lib/place';
 import { isWaiting } from '../lib/schedule';
 import { useLoaded } from '../lib/useLoaded';
 import type { Board, IssueCard, Project, Status } from '../types';
-
-/** Prefixes a column's droppable id, so an empty column is still a drop target. */
-const COLUMN = 'column:';
 
 export function BoardPage() {
   const { data: board, setData: setBoard, error, setError, reload } = useLoaded<Board>(getBoard);
   const [projects, setProjects] = useState<Project[]>([]);
   const [filing, setFiling] = useState(false);
+  const [filter, setFilter] = useState<CardFilter>(NO_FILTER);
+
+  // The card under the cursor and the column it is over, kept only for the
+  // duration of a drag: one paints the overlay, the other lights up the column
+  // the drop would land in.
+  const [dragging, setDragging] = useState<IssueCard | null>(null);
+  const [over, setOver] = useState<number | null>(null);
+
+  /** The card a click opened a summary for. Null when the dialog is closed. */
+  const [peeking, setPeeking] = useState<IssueCard | null>(null);
 
   useEffect(() => {
     getProjects().then(setProjects).catch(() => {
@@ -41,11 +56,16 @@ export function BoardPage() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
+  const cards = board?.issues;
+  const visible = useMemo(() => filterCards(cards ?? [], filter), [cards, filter]);
+
   const onDragEnd = useCallback(
     async (event: DragEndEvent) => {
+      setDragging(null);
+      setOver(null);
       if (!board) return;
 
-      const placed = place(board.issues, event);
+      const placed = place(board.issues, visible, String(event.active.id), event.over ? String(event.over.id) : null);
       if (!placed) return;
 
       // Applied before the request so the card does not spring back under the
@@ -65,11 +85,24 @@ export function BoardPage() {
         await reload();
       }
     },
-    [board, setBoard, setError, reload],
+    [board, visible, setBoard, setError, reload],
   );
 
   if (error && !board) return <p className="text-danger">{error}</p>;
   if (!board) return <p className="text-muted">Loading…</p>;
+
+  const onDragStart = ({ active }: DragStartEvent) => {
+    setDragging(board.issues.find((card) => card.key === String(active.id)) ?? null);
+  };
+
+  const onDragOver = ({ over: target }: DragOverEvent) => {
+    setOver(targetStatusId(target ? String(target.id) : null, board.issues));
+  };
+
+  const cancel = () => {
+    setDragging(null);
+    setOver(null);
+  };
 
   return (
     <div className="hatch-board-page">
@@ -82,17 +115,41 @@ export function BoardPage() {
         }
       />
 
+      <BoardFilters filter={filter} onChange={setFilter} showing={visible.length} total={board.issues.length} />
+
       {error && <p className="text-danger">{error}</p>}
 
       {board.statuses.length === 0 ? (
         <EmptyState message="This board has no columns yet." />
       ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={(e) => void onDragEnd(e)}>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCorners}
+          onDragStart={onDragStart}
+          onDragOver={onDragOver}
+          onDragCancel={cancel}
+          onDragEnd={(e) => void onDragEnd(e)}
+        >
           <div className="hatch-board">
             {board.statuses.map((status) => (
-              <Column key={status.id} status={status} cards={board.issues.filter((i) => i.statusId === status.id)} />
+              <Column
+                key={status.id}
+                status={status}
+                cards={visible.filter((i) => i.statusId === status.id)}
+                hidden={board.issues.filter((i) => i.statusId === status.id).length - visible.filter((i) => i.statusId === status.id).length}
+                filtering={isFiltering(filter)}
+                dropping={dragging !== null && over === status.id}
+                onPeek={setPeeking}
+              />
             ))}
           </div>
+
+          {/* The card that follows the cursor. dnd-kit's sortable leaves the
+              original in place and dims it, which by itself reads as a board
+              that did not notice the drag - this is the half that moves. */}
+          <DragOverlay dropAnimation={null}>
+            {dragging && <CardPreview card={dragging} terminal={terminalOf(board.statuses, dragging.statusId)} />}
+          </DragOverlay>
         </DndContext>
       )}
 
@@ -102,9 +159,18 @@ export function BoardPage() {
         onClose={() => setFiling(false)}
         onCreated={() => void reload()}
       />
+
+      <IssuePeek
+        card={peeking}
+        status={peeking ? board.statuses.find((s) => s.id === peeking.statusId) : undefined}
+        onClose={() => setPeeking(null)}
+      />
     </div>
   );
 }
+
+const terminalOf = (statuses: Status[], statusId: number) =>
+  statuses.find((s) => s.id === statusId)?.isTerminal ?? false;
 
 /**
  * One column, and the fold that keeps it honest.
@@ -118,13 +184,29 @@ export function BoardPage() {
  * The fold is the browser's alone. The API hands over every card (BoardDto), so
  * a script - or Claude - sees the whole board and does its own filtering.
  */
-function Column({ status, cards }: { status: Status; cards: IssueCard[] }) {
+function Column({
+  status,
+  cards,
+  hidden,
+  filtering,
+  dropping,
+  onPeek,
+}: {
+  status: Status;
+  cards: IssueCard[];
+  /** How many of this column's cards the filter is holding back. */
+  hidden: number;
+  filtering: boolean;
+  /** A drag is in progress and this is the column it would land in. */
+  dropping: boolean;
+  onPeek: (card: IssueCard) => void;
+}) {
   const [showWaiting, setShowWaiting] = useState(false);
 
   // Its own droppable as well as a sortable context: a column with nothing in
   // it has no card to drop onto, and "move this to done" is exactly the drag
   // where done is empty.
-  const { setNodeRef, isOver } = useDroppable({ id: `${COLUMN}${status.id}` });
+  const { setNodeRef } = useDroppable({ id: columnDroppableId(status.id) });
 
   // Read once per render rather than per card, so a column cannot straddle
   // midnight and draw two different todays.
@@ -138,8 +220,9 @@ function Column({ status, cards }: { status: Status; cards: IssueCard[] }) {
   const shown = showWaiting ? [...workable, ...waiting] : workable;
 
   return (
-    <section className={`hatch-column${isOver ? ' over' : ''}`}>
+    <section className={`hatch-column${dropping ? ' dropping' : ''}`} style={statusVars(status.color)}>
       <header className="hatch-column-head">
+        <StatusDot status={status} />
         <span className="hatch-column-name">{status.name}</span>
         <span className="hatch-column-count">{workable.length}</span>
       </header>
@@ -154,6 +237,7 @@ function Column({ status, cards }: { status: Status; cards: IssueCard[] }) {
               card={card}
               waiting={waiting.includes(card)}
               terminal={status.isTerminal}
+              onPeek={onPeek}
             />
           ))}
         </SortableContext>
@@ -163,56 +247,17 @@ function Column({ status, cards }: { status: Status; cards: IssueCard[] }) {
             {showWaiting ? 'Hide' : `+ ${waiting.length}`} waiting
           </button>
         )}
+
+        {/* Said out loud, because a short column and a filtered column look
+            identical otherwise - and a card that is not where it was left is
+            the fastest way to distrust a board. */}
+        {filtering && hidden > 0 && <p className="hatch-column-hidden">{hidden} hidden by the filter</p>}
       </div>
+
+      {/* The drop target, drawn in the column's own colour so the answer to
+          "what am I moving this into" is the same colour as the column heading
+          rather than a generic outline. */}
+      {dropping && <div className="hatch-column-drop">{status.name}</div>}
     </section>
   );
-}
-
-/**
- * Where the drop landed: the moving card's new column, its two neighbours, and
- * the reordered card list to paint immediately.
- *
- * The neighbours are what goes to the server - it owns the rank
- * (docs/plans/pjm.md, "Rank computation") - so this function's whole job is to
- * turn "dropped on that card" into "between these two".
- */
-function place(
-  issues: IssueCard[],
-  { active, over }: DragEndEvent,
-): { key: string; statusId: number; afterKey: string | null; beforeKey: string | null; issues: IssueCard[] } | null {
-  if (!over) return null;
-
-  const key = String(active.id);
-  const card = issues.find((i) => i.key === key);
-  if (!card) return null;
-
-  const overId = String(over.id);
-  const overCard = overId.startsWith(COLUMN) ? undefined : issues.find((i) => i.key === overId);
-  const statusId = overId.startsWith(COLUMN) ? Number(overId.slice(COLUMN.length)) : overCard?.statusId;
-  if (statusId === undefined || Number.isNaN(statusId)) return null;
-
-  const column = issues.filter((i) => i.statusId === statusId);
-
-  let next: IssueCard[];
-  if (statusId === card.statusId) {
-    const from = column.findIndex((i) => i.key === key);
-    const to = overCard ? column.findIndex((i) => i.key === overCard.key) : column.length - 1;
-    if (from < 0 || to < 0 || from === to) return null;
-    next = arrayMove(column, from, to);
-  } else {
-    const at = overCard ? column.findIndex((i) => i.key === overCard.key) : column.length;
-    const moved = { ...card, statusId };
-    next = [...column.slice(0, at < 0 ? column.length : at), moved, ...column.slice(at < 0 ? column.length : at)];
-  }
-
-  const at = next.findIndex((i) => i.key === key);
-  const rest = issues.filter((i) => i.statusId !== statusId && i.key !== key);
-
-  return {
-    key,
-    statusId,
-    afterKey: at > 0 ? next[at - 1].key : null,
-    beforeKey: at < next.length - 1 ? next[at + 1].key : null,
-    issues: [...rest, ...next],
-  };
 }

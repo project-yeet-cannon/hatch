@@ -94,48 +94,137 @@
 
 /* ---- The board ---- */
 
+/* Columns share the width rather than taking a fixed slice of it, so a board
+   with four statuses fits on the screen and a board with nine still fits until
+   the columns would stop being readable - at which point it scrolls sideways
+   again. `minmax` is what states that threshold in one place: equal shares
+   down to 10.5rem, then overflow.
+
+   Grid rather than flex because "every column the same width, whatever is in
+   it" is what grid tracks do and what flex-basis only approximates - a flex
+   column with one very long card would still win room from its neighbours. */
 .hatch-board {
   flex: 1;
   min-height: 0;
-  display: flex;
-  gap: var(--sp-4);
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(10.5rem, 1fr);
+  gap: var(--sp-3);
   overflow-x: auto;
   padding-bottom: var(--sp-5);
 }
 
+/* --status-color and --status-ink are set on the element by statusVars()
+   (lib/color.ts) from the colour the operator gave the column. Everything here
+   reads them; nothing here decides them. */
 .hatch-column {
-  flex: 0 0 18rem;
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   background: var(--card);
   border: 1px solid var(--line);
+  border-top: 3px solid var(--status-color, var(--line));
   border-radius: var(--r);
 }
 
-/* The only feedback a drop target gives. A column that lights up under the
-   cursor is the difference between "this will land here" and a guess. */
-.hatch-column.over {
-  border-color: var(--primary);
+/* The column a drop would land in. Its own colour rather than a generic
+   outline, so the answer to "where is this going" is the same colour as the
+   heading being aimed at. */
+.hatch-column.dropping {
+  border-color: var(--status-color, var(--primary));
+  box-shadow: inset 0 0 0 1px var(--status-color, var(--primary));
+}
+
+/* The name of the column being dropped into, said again in the middle of it -
+   at the bottom of a long column the heading is off screen, which is exactly
+   when somebody is least sure what they are about to do. */
+.hatch-column-drop {
+  position: absolute;
+  inset-inline: var(--sp-3);
+  bottom: var(--sp-3);
+  padding: var(--sp-2);
+  border-radius: var(--r-ctl);
+  background: var(--status-color);
+  color: var(--status-ink);
+  font-size: var(--t-label);
+  font-weight: 700;
+  text-align: center;
+  text-transform: lowercase;
+  pointer-events: none;
 }
 
 .hatch-column-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-2-5) var(--sp-3);
   border-bottom: 1px solid var(--line);
 }
 
 .hatch-column-name {
+  flex: 1;
+  min-width: 0;
   font-weight: 700;
-  font-size: var(--t-body);
+  font-size: var(--t-label);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hatch-column-count {
   color: var(--muted);
   font-size: var(--t-label);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The column's colour as a mark beside its name. Small, because the column
+   already wears the same colour along its top edge and two loud statements of
+   one fact is one too many. */
+.hatch-status-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--status-color);
+}
+
+/* A status, filled, with the ink computed to sit on it - see lib/color.ts for
+   why that cannot be a stylesheet's decision. */
+.hatch-status-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--r-pill);
+  background: var(--status-color);
+  color: var(--status-ink);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.hatch-status-pill-sm {
+  padding: 2px var(--sp-2);
+  font-size: var(--t-label);
+}
+
+/* The issue page's. Large enough to be the first thing read on the page, which
+   is the whole point of lifting status out of the row of pickers. */
+.hatch-status-pill-lg {
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--t-subhead);
+  letter-spacing: 0.01em;
+}
+
+/* Said quietly under a filtered column, because a short column and a filtered
+   one look identical and the difference matters. */
+.hatch-column-hidden {
+  margin: 0;
+  padding: var(--sp-1) 0;
+  font-size: var(--t-micro);
+  color: var(--muted);
+  text-align: center;
 }
 
 /* min-height so an empty column is still tall enough to drop onto - a
@@ -144,18 +233,18 @@
   flex: 1;
   min-height: 4rem;
   overflow-y: auto;
-  padding: var(--sp-3);
+  padding: var(--sp-2);
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
 }
 
 .hatch-card {
   display: block;
-  padding: var(--sp-3);
+  padding: var(--sp-2) var(--sp-2-5);
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: var(--r);
+  border-radius: var(--r-ctl);
   text-decoration: none;
   color: var(--ink);
   cursor: grab;
@@ -170,29 +259,140 @@
   opacity: 0.4;
 }
 
+/* The card under the cursor during a drag. Lifted off the board with a shadow
+   and tilted a degree or so, so it reads as picked up rather than as a second
+   card that appeared - and passing pointer events through it, because the
+   thing underneath it is the drop target being aimed at. */
+.hatch-card-preview {
+  width: 14rem;
+  cursor: grabbing;
+  background: var(--card);
+  border-color: var(--primary);
+  box-shadow: var(--shadow);
+  transform: rotate(1.5deg);
+  pointer-events: none;
+}
+
 .hatch-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
-  margin-bottom: var(--sp-2);
+  margin-bottom: var(--sp-1);
 }
 
 .hatch-card-key {
   font-family: var(--mono);
-  font-size: var(--t-label);
+  font-size: var(--t-micro);
   color: var(--muted);
 }
 
+/* Three lines, then an ellipsis. The clamp is what makes cards in a column the
+   same height whatever anybody pasted into a title; lib/text.ts cuts the string
+   itself, because a clamp only hides what is still in the document. */
 .hatch-card-title {
-  font-size: var(--t-body);
+  font-size: var(--t-label);
   line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .hatch-card-parent {
-  margin-top: var(--sp-2);
+  margin-top: var(--sp-1);
+  font-size: var(--t-micro);
+  color: var(--muted);
+}
+
+/* ---- The filter bar ----
+
+   Above the board and outside the scrolling area, because it is about the whole
+   board rather than about any column - and because a control that scrolls away
+   from the thing it controls is a control nobody finds twice. */
+.hatch-board-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.hatch-board-search {
+  flex: 0 1 22rem;
+  min-width: 12rem;
+}
+
+.hatch-type-toggles {
+  display: flex;
+  gap: var(--sp-1);
+}
+
+/* A toggle rather than a checkbox: four of these sit in a row and read as one
+   control, which is what they are. The pressed state is `aria-pressed` as well
+   as a class - the colour is the only thing a sighted reader gets, and it must
+   not be the only thing anybody gets. */
+.hatch-type-toggle {
+  padding: var(--sp-1) var(--sp-2-5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-label);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.hatch-type-toggle:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+.hatch-type-toggle.on {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-accent);
+}
+
+.hatch-filter-count {
   font-size: var(--t-label);
   color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.hatch-filter-clear {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--primary);
+  font: inherit;
+  font-size: var(--t-label);
+  cursor: pointer;
+}
+
+/* ---- The summary dialog ---- */
+
+.hatch-peek {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.hatch-peek-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.hatch-peek-title {
+  margin: 0;
+  font-size: var(--t-subhead);
+  font-weight: 600;
+  line-height: var(--lh-tight);
 }
 
 /* ---- Dates ----

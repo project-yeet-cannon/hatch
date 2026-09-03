@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { APP_BASENAME, routerBasename } from './basename';
+import { APP_BASENAME, hrefWithin, routerBasename } from './basename';
 
 describe('routerBasename', () => {
   it('is the prefix when served under it on the house hostname', () => {
@@ -17,5 +17,15 @@ describe('routerBasename', () => {
   it('matches by segment, so a neighbouring app is not mistaken for this one', () => {
     expect(routerBasename('/apps/hatchery/')).toBe('/');
     expect(routerBasename('/apps/admin/')).toBe('/');
+  });
+});
+
+describe('hrefWithin', () => {
+  it('names the prefix on the house hostname, where a raw anchor would otherwise miss it', () => {
+    expect(hrefWithin(APP_BASENAME, '/issues/AER-12')).toBe('/apps/hatch/issues/AER-12');
+  });
+
+  it('changes nothing on the hatch hostname', () => {
+    expect(hrefWithin('/', '/issues/AER-12')).toBe('/issues/AER-12');
   });
 });

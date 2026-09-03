@@ -32,6 +32,9 @@ export interface Status {
   name: string;
   sortOrder: number;
   isTerminal: boolean;
+  /** `#rrggbb`, lower case. What the column, the drag feedback and the issue
+      page's status pill are all painted from - see lib/color.ts. */
+  color: string;
 }
 
 /** A card on the board. No description and no comments - see IssueCardDto. */
@@ -164,20 +167,26 @@ export interface ProjectCreateRequest {
   name: string;
 }
 
+/** Both optional, and `key` is the expensive one: it rekeys every issue in the
+    project and leaves every AER-12 written elsewhere pointing at nothing. The
+    speed bump in front of it is ProjectsPage's, not the API's. */
 export interface ProjectPatchRequest {
-  name: string;
+  name?: string | null;
+  key?: string | null;
 }
 
 export interface StatusCreateRequest {
   name: string;
   sortOrder?: number | null;
   isTerminal?: boolean | null;
+  color?: string | null;
 }
 
 export interface StatusPatchRequest {
   name?: string | null;
   sortOrder?: number | null;
   isTerminal?: boolean | null;
+  color?: string | null;
 }
 
 export interface IssueCreateRequest {
@@ -201,6 +210,43 @@ export interface IssuePatchRequest {
   parentKey?: string | null;
   readyAt?: string | null;
   dueAt?: string | null;
+}
+
+/** A filter, as the search endpoint reads it. Every field is optional and they
+    combine with AND; `parentKey: ''` is the one that cannot be said any other
+    way - "no parent at all". */
+export interface IssueSearch {
+  projectId?: number | null;
+  type?: IssueType | null;
+  statusId?: number | null;
+  parentKey?: string | null;
+  ancestorKey?: string | null;
+  text?: string | null;
+}
+
+/** One edit for many issues. Null leaves a field alone and `''` clears it, the
+    same way a single-issue patch reads them. Title and description are
+    deliberately absent: they describe one issue. */
+export interface IssueBulkEditRequest {
+  keys: string[];
+  type?: IssueType | null;
+  statusId?: number | null;
+  parentKey?: string | null;
+  readyAt?: string | null;
+  dueAt?: string | null;
+}
+
+export interface IssueBulkFailure {
+  key: string;
+  reason: string;
+}
+
+export interface IssueBulkResult {
+  /** The keys that actually moved. */
+  changed: string[];
+  /** Keys that matched but already held every named value - re-applying an edit is not an edit. */
+  unchanged: string[];
+  failures: IssueBulkFailure[];
 }
 
 export interface IssueMoveRequest {
