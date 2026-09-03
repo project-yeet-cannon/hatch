@@ -32,6 +32,7 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
 
     public DbSet<EfAuthGrant> AuthGrants => Set<EfAuthGrant>();
     public DbSet<EfAuthInvite> AuthInvites => Set<EfAuthInvite>();
+    public DbSet<EfApiKey> ApiKeys => Set<EfApiKey>();
 
     public DbSet<EfPerson> People => Set<EfPerson>();
     public DbSet<EfPersonPhoto> PersonPhotos => Set<EfPersonPhoto>();
@@ -156,6 +157,13 @@ public class AerieContext(DbContextOptions options) : DbContext(options)
             .OnDelete(DeleteBehavior.SetNull);
 
         modelBuilder.Entity<EfAuthInvite>();
+
+        // A key has no relationships either, and for a sharper reason than an
+        // invite: it is not owned by anybody. A person is a member of the
+        // household; a key is a program the operator handed a credential to,
+        // and giving it an owner FK would invite the reading that deleting the
+        // operator revokes Claude's access to the board.
+        modelBuilder.Entity<EfApiKey>();
 
         // People sit beside auth for the same reason auth sits here: they are
         // infrastructure the whole install shares rather than one family app's
