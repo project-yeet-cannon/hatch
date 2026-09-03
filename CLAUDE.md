@@ -30,6 +30,15 @@ Every other operator endpoint — minting keys, revoking sessions, editing the
 house — refuses it, by design. If a request comes back `403`, the key is
 working and the route is not one a key may take; ask the operator.
 
+### From a terminal
+
+[`scripts/hatch.sh`](scripts/hatch.sh) wraps the calls a working session
+actually makes — `next`, `show`, `start`, `comment`, and `api` for everything
+else. It reads `AERIE_BASE` and `AERIE_HATCH_KEY` from the environment, finds
+the todo column by name rather than by id, and folds off the cards whose ready
+date has not arrived, exactly as the board does. Prefer it to raw `curl`; the
+raw calls below are what it is doing.
+
 ### Given a ticket
 
 A `hatch.${DOMAIN}/issues/AER-12` link, or a bare `AER-12`, means:
