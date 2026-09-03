@@ -195,6 +195,113 @@
   color: var(--muted);
 }
 
+/* ---- Dates ----
+
+   The two chips a card can carry: `Ready`, drawn only while an issue is still
+   waiting, and `Due`, which warms as its date approaches. The ladder is
+   neutral → --warn → --danger wash → --danger fill, and the escalation is
+   carried by weight as much as by hue: the last step is the only filled one,
+   so it reads as louder without depending on a viewer telling amber from red.
+
+   Colour on the chip rather than on the card. This board holds every issue in
+   the house, and a column of tinted cards is one nobody looks at twice. */
+.hatch-card-dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-top: var(--sp-2);
+}
+
+.hatch-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  padding: 2px var(--sp-1-5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-chip);
+  font-size: var(--t-label);
+  line-height: 1.4;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Which of the two dates this is. Quieter than the date itself, because the
+   date is what is being read and the label is only what disambiguates it. */
+.hatch-chip-kind {
+  font-size: var(--t-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+
+/* Far enough off to be information rather than a warning - and every `Ready`
+   chip, which has no ladder of its own. */
+.hatch-chip-later {
+  color: var(--muted);
+}
+
+.hatch-chip-soon {
+  border-color: var(--warn);
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+}
+
+.hatch-chip-today {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+  color: var(--danger-ink);
+}
+
+/* The only filled chip on the board. Nothing else competes with it. */
+.hatch-chip-overdue {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+/* A card only visible because its column's fold was opened. Held back rather
+   than hidden, and drawn as such. */
+.hatch-card.waiting {
+  border-style: dashed;
+  opacity: 0.75;
+}
+
+/* The fold itself: a full-width row under a column's cards, quiet enough that
+   an untouched column reads as finished rather than as truncated. */
+.hatch-column-fold {
+  width: 100%;
+  padding: var(--sp-2);
+  border: 1px dashed var(--line);
+  border-radius: var(--r-ctl);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-label);
+  cursor: pointer;
+}
+
+.hatch-column-fold:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+/* The date and its optional time, side by side. The date takes the room it
+   needs and the time takes what it needs, which is much less. */
+.hatch-moment-inputs {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.hatch-moment-inputs input[type='date'] {
+  flex: 1;
+  min-width: 0;
+}
+
+.hatch-moment-inputs input[type='time'] {
+  flex: 0 0 auto;
+}
+
 /* ---- Forms ---- */
 
 .hatch-form {

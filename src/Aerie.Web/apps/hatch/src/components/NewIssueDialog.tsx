@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Button, Field, Modal } from '@aerie/ui';
 import { createIssue } from '../api/client';
 import { message } from '../lib/errors';
+import { MomentField } from './MomentField';
 import { ISSUE_TYPES } from '../types';
 import type { IssueType, Project } from '../types';
 
@@ -25,6 +26,8 @@ export function NewIssueDialog({
   const [type, setType] = useState<IssueType>('task');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [readyAt, setReadyAt] = useState('');
+  const [dueAt, setDueAt] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -40,9 +43,11 @@ export function NewIssueDialog({
 
     setSaving(true);
     try {
-      await createIssue({ projectId: chosen, type, title, description });
+      await createIssue({ projectId: chosen, type, title, description, readyAt, dueAt });
       setTitle('');
       setDescription('');
+      setReadyAt('');
+      setDueAt('');
       setError(null);
       onCreated();
       onClose();
@@ -83,6 +88,13 @@ export function NewIssueDialog({
         <Field label="Description" hint="Markdown, rendered on the issue page.">
           <textarea rows={6} value={description} onChange={(e) => setDescription(e.target.value)} />
         </Field>
+
+        {/* Both optional, and both usually left empty. They are here rather than
+            behind a second visit because the moment worth setting a ready date
+            is the moment the thing is thought of - buy a certificate today,
+            file the renewal for next August before closing the tab. */}
+        <MomentField label="Ready" hint="Folded off the board until this day." value={readyAt} onChange={setReadyAt} />
+        <MomentField label="Due" value={dueAt} onChange={setDueAt} />
 
         {error && <p className="text-danger">{error}</p>}
 

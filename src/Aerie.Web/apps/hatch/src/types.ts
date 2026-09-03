@@ -43,6 +43,10 @@ export interface IssueCard {
   statusId: number;
   rank: number;
   parentKey: string | null;
+  /** When it becomes workable, or null if it always was. See `Moment` in lib/schedule.ts. */
+  readyAt: string | null;
+  /** When it is owed, or null. Same two forms as `readyAt`. */
+  dueAt: string | null;
 }
 
 export interface Issue {
@@ -56,6 +60,8 @@ export interface Issue {
   rank: number;
   parentKey: string | null;
   childKeys: string[];
+  readyAt: string | null;
+  dueAt: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -75,6 +81,8 @@ export type IssueEventKind =
   | 'retyped'
   | 'status_changed'
   | 'parent_changed'
+  | 'ready_changed'
+  | 'due_changed'
   | 'commented'
   | 'imported';
 
@@ -170,16 +178,21 @@ export interface IssueCreateRequest {
   title: string;
   description?: string | null;
   parentKey?: string | null;
+  readyAt?: string | null;
+  dueAt?: string | null;
 }
 
-/** Null leaves a field alone. An empty `parentKey` clears the parent - see
-    IssuePatchRequest in Dtos.cs for why the empty string carries that meaning. */
+/** Null leaves a field alone. An empty `parentKey`, `readyAt` or `dueAt` clears
+    it - see IssuePatchRequest in Dtos.cs for why the empty string carries that
+    meaning. */
 export interface IssuePatchRequest {
   title?: string | null;
   description?: string | null;
   type?: IssueType | null;
   statusId?: number | null;
   parentKey?: string | null;
+  readyAt?: string | null;
+  dueAt?: string | null;
 }
 
 export interface IssueMoveRequest {

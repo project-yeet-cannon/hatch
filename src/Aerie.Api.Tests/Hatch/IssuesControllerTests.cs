@@ -124,7 +124,7 @@ public class IssuesControllerTests
         await h.CreateAsync("epic", "ops plan", projectId: h.OtherProjectId);
 
         var result = await h.Issues.CreateIssue(
-            new IssueCreateRequest(h.ProjectId, "story", "phase 0", null, "OPS-1"), default);
+            new IssueCreateRequest(h.ProjectId, "story", "phase 0", null, "OPS-1", null, null), default);
 
         Assert.Contains("another project", Reason(result.Result));
     }
@@ -136,7 +136,7 @@ public class IssuesControllerTests
         await h.CreateAsync("task", "a chore");
 
         var result = await h.Issues.CreateIssue(
-            new IssueCreateRequest(h.ProjectId, "story", "phase 0", null, "AER-1"), default);
+            new IssueCreateRequest(h.ProjectId, "story", "phase 0", null, "AER-1", null, null), default);
 
         Assert.Contains("hangs under", Reason(result.Result));
     }
@@ -147,7 +147,7 @@ public class IssuesControllerTests
         var h = await NewAsync();
 
         var result = await h.Issues.CreateIssue(
-            new IssueCreateRequest(h.ProjectId, "story", "phase 0", null, "AER-99"), default);
+            new IssueCreateRequest(h.ProjectId, "story", "phase 0", null, "AER-99", null, null), default);
 
         Assert.Contains("no AER-99", Reason(result.Result));
     }
@@ -294,6 +294,210 @@ public class IssuesControllerTests
         Assert.Equal(3, kinds.Count(k => k != EfHatchIssueEvent.Created));
     }
 
+    // ---- Ready and due ----
+
+    [Fact]
+    public async Task AnIssue_CarriesBothDatesBack()
+    {
+        var h = await NewAsync();
+
+        var created = await h.CreateAsync("task", "renew the cert", readyAt: "2027-08-15", dueAt: "2027-09-01T17:00:00Z");
+
+        Assert.Equal("2027-08-15", created.ReadyAt);
+        Assert.Equal("2027-09-01T17:00:00Z", created.DueAt);
+    }
+
+    [Fact]
+    public async Task AnIssueWithNoDates_HasNeither()
+    {
+        var h = await NewAsync();
+
+        var created = await h.CreateAsync("task", "some day");
+
+        Assert.Null(created.ReadyAt);
+        Assert.Null(created.DueAt);
+    }
+
+    /// <summary>
+    /// Half of what a tracker is for is recording that something was due last
+    /// Tuesday. A form that argues about it is one people stop telling the
+    /// truth to.
+    /// </summary>
+    [Fact]
+    public async Task ADateInThePast_IsAccepted()
+    {
+        var h = await NewAsync();
+
+        var created = await h.CreateAsync("bug", "this was overdue", dueAt: "2020-01-01");
+
+        Assert.Equal("2020-01-01", created.DueAt);
+    }
+
+    /// <summary>
+    /// A ready date after a due date is a mix-up worth seeing on the card, not
+    /// one worth refusing an edit for. Nothing here checks one against the
+    /// other.
+    /// </summary>
+    [Fact]
+    public async Task AnIssueReadyAfterItIsDue_IsNotArguedWith()
+    {
+        var h = await NewAsync();
+
+        var created = await h.CreateAsync("task", "backwards", readyAt: "2027-09-01", dueAt: "2027-08-15");
+
+        Assert.Equal("2027-09-01", created.ReadyAt);
+        Assert.Equal("2027-08-15", created.DueAt);
+    }
+
+    [Theory]
+    [InlineData("tomorrow", "readyAt")]
+    [InlineData("2026-13-45", "readyAt")]
+    public async Task AReadyDateThatIsNotADate_IsRefusedWithAReason(string text, string field)
+    {
+        var h = await NewAsync();
+
+        var result = await h.Issues.CreateIssue(
+            new IssueCreateRequest(h.ProjectId, "task", "when?", null, null, text, null), default);
+
+        Assert.Contains(field, Reason(result.Result));
+        Assert.Contains("2026-09-12", Reason(result.Result));
+    }
+
+    [Fact]
+    public async Task ADueDateThatIsNotADate_IsRefusedAndNamesTheFieldItCameFrom()
+    {
+        var h = await NewAsync();
+
+        var result = await h.Issues.CreateIssue(
+            new IssueCreateRequest(h.ProjectId, "task", "when?", null, null, null, "soon"), default);
+
+        Assert.Contains("dueAt", Reason(result.Result));
+    }
+
+    [Fact]
+    public async Task SettingADate_WritesOneEventNamingBothEnds()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "renew the cert");
+
+        await h.Issues.PatchIssue("AER-1", Patch(dueAt: "2027-09-01"), default);
+
+        var events = await h.EventsAsync("AER-1");
+        Assert.Equal([EfHatchIssueEvent.DueChanged, EfHatchIssueEvent.Created], events.Select(e => e.Kind));
+
+        var payload = events[0].Payload!.Value;
+        Assert.Equal(JsonValueKind.Null, payload.GetProperty("from").ValueKind);
+        Assert.Equal("2027-09-01", payload.GetProperty("to").GetString());
+    }
+
+    [Fact]
+    public async Task MovingBothDatesAtOnce_WritesOneEventEach()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "renew the cert", readyAt: "2027-08-15", dueAt: "2027-09-01");
+
+        await h.Issues.PatchIssue("AER-1", Patch(readyAt: "2027-08-20", dueAt: "2027-09-05"), default);
+
+        var kinds = (await h.EventsAsync("AER-1")).Select(e => e.Kind).ToList();
+        Assert.Contains(EfHatchIssueEvent.ReadyChanged, kinds);
+        Assert.Contains(EfHatchIssueEvent.DueChanged, kinds);
+    }
+
+    /// <summary>
+    /// The empty string clears a date, the same way it clears a parent - and
+    /// the trail says so, because "this stopped being due" is exactly the line
+    /// somebody comes looking for.
+    /// </summary>
+    [Fact]
+    public async Task AnEmptyDate_ClearsItAndSaysSo()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "renew the cert", dueAt: "2027-09-01");
+
+        var patched = Value(await h.Issues.PatchIssue("AER-1", Patch(dueAt: ""), default));
+
+        Assert.Null(patched.DueAt);
+        var payload = (await h.EventsAsync("AER-1"))[0].Payload!.Value;
+        Assert.Equal("2027-09-01", payload.GetProperty("from").GetString());
+        Assert.Equal(JsonValueKind.Null, payload.GetProperty("to").ValueKind);
+    }
+
+    /// <summary>
+    /// Null is no opinion. A PATCH sent to rename an issue must not quietly
+    /// take its dates off it.
+    /// </summary>
+    [Fact]
+    public async Task ADateNotMentioned_IsLeftAlone()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "renew the cert", readyAt: "2027-08-15", dueAt: "2027-09-01");
+
+        var patched = Value(await h.Issues.PatchIssue("AER-1", Patch(title: "renew the wildcard cert"), default));
+
+        Assert.Equal("2027-08-15", patched.ReadyAt);
+        Assert.Equal("2027-09-01", patched.DueAt);
+    }
+
+    /// <summary>
+    /// The round trip a client actually makes: read an issue, change one field,
+    /// send the rest back untouched. Handing a date back exactly as it arrived
+    /// is not an edit and must not read as one.
+    /// </summary>
+    [Fact]
+    public async Task ADateResentUnchanged_WritesNothing()
+    {
+        var h = await NewAsync();
+        var created = await h.CreateAsync("task", "renew the cert", readyAt: "2027-08-15", dueAt: "2027-09-01T17:00:00Z");
+
+        await h.Issues.PatchIssue("AER-1", Patch(readyAt: created.ReadyAt, dueAt: created.DueAt), default);
+
+        Assert.Single(await h.EventsAsync("AER-1"));
+    }
+
+    /// <summary>
+    /// The same instant written with an offset is the same instant. It
+    /// normalises to UTC on the way in, so it is not an edit either.
+    /// </summary>
+    [Fact]
+    public async Task TheSameInstantInAnotherZone_IsNotAnEdit()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "renew the cert", dueAt: "2027-09-01T21:00:00Z");
+
+        await h.Issues.PatchIssue("AER-1", Patch(dueAt: "2027-09-01T17:00:00-04:00"), default);
+
+        Assert.Single(await h.EventsAsync("AER-1"));
+    }
+
+    /// <summary>
+    /// A date and an instant at that date's midnight are different promises -
+    /// "by the 12th" and "by the 12th at 00:00" - so swapping one for the other
+    /// is a change the trail records.
+    /// </summary>
+    [Fact]
+    public async Task AddingATimeOfDayToADate_IsAnEdit()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "renew the cert", dueAt: "2027-09-01");
+
+        var patched = Value(await h.Issues.PatchIssue("AER-1", Patch(dueAt: "2027-09-01T00:00:00Z"), default));
+
+        Assert.Equal("2027-09-01T00:00:00Z", patched.DueAt);
+        Assert.Equal(2, (await h.EventsAsync("AER-1")).Count);
+    }
+
+    [Fact]
+    public async Task ADateThatIsNotADate_IsRefusedWithoutTouchingTheIssue()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "renew the cert", dueAt: "2027-09-01");
+
+        var result = await h.Issues.PatchIssue("AER-1", Patch(title: "renamed", dueAt: "whenever"), default);
+
+        Assert.Contains("dueAt", Reason(result.Result));
+        Assert.Equal("renew the cert", Value(await h.Issues.GetIssue("AER-1", default)).Title);
+    }
+
     // ---- Moving ----
 
     [Fact]
@@ -419,7 +623,7 @@ public class IssuesControllerTests
     {
         var h = await NewAsync();
 
-        var result = await h.Issues.CreateIssue(new IssueCreateRequest(h.ProjectId, type, title, null, null), default);
+        var result = await h.Issues.CreateIssue(new IssueCreateRequest(h.ProjectId, type, title, null, null, null, null), default);
 
         Assert.Contains(expected, Reason(result.Result));
     }
@@ -429,7 +633,7 @@ public class IssuesControllerTests
     {
         var h = await NewAsync();
 
-        var result = await h.Issues.CreateIssue(new IssueCreateRequest(9999, "task", "orphan", null, null), default);
+        var result = await h.Issues.CreateIssue(new IssueCreateRequest(9999, "task", "orphan", null, null, null, null), default);
 
         Assert.IsType<NotFoundResult>(result.Result);
     }
@@ -451,6 +655,27 @@ public class IssuesControllerTests
         Assert.Equal(["AER-1", "OPS-1", "AER-2"], board.Issues.Select(i => i.Key));
         Assert.Equal("AER-1", board.Issues.Single(i => i.Key == "AER-2").ParentKey);
         Assert.Equal("OPS", board.Issues.Single(i => i.Key == "OPS-1").ProjectKey);
+    }
+
+    /// <summary>
+    /// Including the ones nobody can work on yet. The browser folds those away
+    /// and the server does not - a client that does not know about the fold has
+    /// to be able to tell an empty board from a filtered one.
+    /// </summary>
+    [Fact]
+    public async Task TheBoard_CarriesBothDatesAndHidesNothing()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "not yet", readyAt: "2027-08-15", dueAt: "2027-09-01");
+        await h.CreateAsync("task", "right now");
+
+        var board = Value(await h.Board.GetBoard(default));
+
+        Assert.Equal(["AER-1", "AER-2"], board.Issues.Select(i => i.Key));
+        var waiting = board.Issues.Single(i => i.Key == "AER-1");
+        Assert.Equal("2027-08-15", waiting.ReadyAt);
+        Assert.Equal("2027-09-01", waiting.DueAt);
+        Assert.Null(board.Issues.Single(i => i.Key == "AER-2").ReadyAt);
     }
 
     // ---- Delete guards ----
@@ -609,10 +834,16 @@ public class IssuesControllerTests
         public required int Todo { get; init; }
         public required int Done { get; init; }
 
-        public async Task<IssueDto> CreateAsync(string type, string title, string? parentKey = null, int? projectId = null)
+        public async Task<IssueDto> CreateAsync(
+            string type,
+            string title,
+            string? parentKey = null,
+            int? projectId = null,
+            string? readyAt = null,
+            string? dueAt = null)
         {
             var result = await Issues.CreateIssue(
-                new IssueCreateRequest(projectId ?? ProjectId, type, title, null, parentKey), default);
+                new IssueCreateRequest(projectId ?? ProjectId, type, title, null, parentKey, readyAt, dueAt), default);
 
             return Created(result);
         }
@@ -675,8 +906,14 @@ public class IssuesControllerTests
     }
 
     private static IssuePatchRequest Patch(
-        string? title = null, string? description = null, string? type = null, int? statusId = null, string? parentKey = null) =>
-        new(title, description, type, statusId, parentKey);
+        string? title = null,
+        string? description = null,
+        string? type = null,
+        int? statusId = null,
+        string? parentKey = null,
+        string? readyAt = null,
+        string? dueAt = null) =>
+        new(title, description, type, statusId, parentKey, readyAt, dueAt);
 
     private static T Value<T>(ActionResult<T> result) =>
         result.Value ?? throw new InvalidOperationException($"expected a value, got {Reason(result.Result)}");

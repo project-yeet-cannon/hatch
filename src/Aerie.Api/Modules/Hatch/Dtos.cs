@@ -39,6 +39,10 @@ public record StatusPatchRequest(string? Name, int? SortOrder, bool? IsTerminal)
 /// slowest one.
 /// </summary>
 /// <param name="Key">The display key, <c>AER-12</c>. Computed from the project and number, never stored.</param>
+/// <param name="ReadyAt">
+/// Carried on the card because the board decides what to fold away with it -
+/// see <see cref="BoardDto"/>.
+/// </param>
 public record IssueCardDto(
     string Key,
     string ProjectKey,
@@ -46,10 +50,18 @@ public record IssueCardDto(
     string Title,
     int StatusId,
     long Rank,
-    string? ParentKey);
+    string? ParentKey,
+    string? ReadyAt,
+    string? DueAt);
 
 /// <summary>One issue, whole - the detail page's payload.</summary>
 /// <param name="ChildKeys">Its stories, or its tasks. Keys rather than nested issues: the page links to them and does not draw them.</param>
+/// <param name="ReadyAt">
+/// When the issue becomes workable, or null if it always was. A bare date
+/// (<c>2026-09-12</c>) or an instant (<c>2026-09-12T17:00:00Z</c>) - the two
+/// forms mean different things and <see cref="IssueMoment"/> says how.
+/// </param>
+/// <param name="DueAt">When it is owed, in the same two forms, or null.</param>
 public record IssueDto(
     string Key,
     int ProjectId,
@@ -61,6 +73,8 @@ public record IssueDto(
     long Rank,
     string? ParentKey,
     IReadOnlyList<string> ChildKeys,
+    string? ReadyAt,
+    string? DueAt,
     string CreatedBy,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
@@ -70,7 +84,14 @@ public record IssueDto(
 /// column - the server decides both, so no client has to know what "the inbox"
 /// is called this week.
 /// </summary>
-public record IssueCreateRequest(int ProjectId, string Type, string Title, string? Description, string? ParentKey);
+public record IssueCreateRequest(
+    int ProjectId,
+    string Type,
+    string Title,
+    string? Description,
+    string? ParentKey,
+    string? ReadyAt,
+    string? DueAt);
 
 /// <summary>
 /// An edit. Every field is optional and null means "leave this alone", which
@@ -78,13 +99,18 @@ public record IssueCreateRequest(int ProjectId, string Type, string Title, strin
 /// <paramref name="ParentKey"/> - <c>""</c> - clears the parent. A JSON body
 /// cannot otherwise distinguish "no opinion" from "no parent", and the empty
 /// string is unambiguous because no issue key can ever be one.
+///
+/// <paramref name="ReadyAt"/> and <paramref name="DueAt"/> read the empty
+/// string the same way, and for the same reason: no date is written as "".
 /// </summary>
 public record IssuePatchRequest(
     string? Title,
     string? Description,
     string? Type,
     int? StatusId,
-    string? ParentKey);
+    string? ParentKey,
+    string? ReadyAt,
+    string? DueAt);
 
 /// <summary>
 /// A drop on the board: which column, and which cards it landed between. The
@@ -116,6 +142,13 @@ public record IssueEventDto(long Id, string Actor, string Kind, JsonElement? Pay
 /// house. Deliberately not paged - this is one household's work, and a board
 /// that arrives in pieces cannot answer "what is in progress" in one glance.
 /// </summary>
+/// <remarks>
+/// Every card, including the ones whose <see cref="IssueCardDto.ReadyAt"/> has
+/// not arrived. The browser folds those behind a per-column count and the
+/// server does not, because a default that silently drops rows leaves a client
+/// unable to tell an empty board from a filtered one - and an agent asking what
+/// it may work on has one comparison to make instead of a flag to know about.
+/// </remarks>
 public record BoardDto(IReadOnlyList<StatusDto> Statuses, IReadOnlyList<IssueCardDto> Issues);
 
 // ---- The importer ----

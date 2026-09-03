@@ -44,6 +44,10 @@ public class BoardController(HatchContext db) : ControllerBase
                 i.Rank,
                 ParentProjectKey = i.Parent == null ? null : i.Parent.Project!.Key,
                 ParentNumber = i.Parent == null ? (int?)null : i.Parent.Number,
+                i.ReadyAt,
+                i.ReadyAtHasTime,
+                i.DueAt,
+                i.DueAtHasTime,
             })
             .ToListAsync(ct);
 
@@ -54,7 +58,9 @@ public class BoardController(HatchContext db) : ControllerBase
             i.Title,
             i.StatusId,
             i.Rank,
-            i.ParentNumber is { } number ? IssueKey.Format(i.ParentProjectKey!, number) : null)).ToList();
+            i.ParentNumber is { } number ? IssueKey.Format(i.ParentProjectKey!, number) : null,
+            IssueMoment.Format(i.ReadyAt, i.ReadyAtHasTime),
+            IssueMoment.Format(i.DueAt, i.DueAtHasTime))).ToList();
 
         return new BoardDto(statuses, cards);
     }

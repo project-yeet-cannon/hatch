@@ -15,6 +15,7 @@ import { getBoard, getProjects, moveIssue } from '../api/client';
 import { BoardCard } from '../components/BoardCard';
 import { NewIssueDialog } from '../components/NewIssueDialog';
 import { message } from '../lib/errors';
+import { isWaiting } from '../lib/schedule';
 import { useLoaded } from '../lib/useLoaded';
 import type { Board, IssueCard, Project, Status } from '../types';
 
@@ -105,25 +106,63 @@ export function BoardPage() {
   );
 }
 
+/**
+ * One column, and the fold that keeps it honest.
+ *
+ * An issue whose ready date has not arrived is real work that cannot be started
+ * yet - next August's certificate renewal, filed the day the certificate was
+ * bought. Left in place it pushes this week's work off the screen; deleted from
+ * the view entirely it becomes a ticket nobody can find, which is a ticket
+ * somebody files twice. So it is folded: counted in the header, one click away.
+ *
+ * The fold is the browser's alone. The API hands over every card (BoardDto), so
+ * a script - or Claude - sees the whole board and does its own filtering.
+ */
 function Column({ status, cards }: { status: Status; cards: IssueCard[] }) {
+  const [showWaiting, setShowWaiting] = useState(false);
+
   // Its own droppable as well as a sortable context: a column with nothing in
   // it has no card to drop onto, and "move this to done" is exactly the drag
   // where done is empty.
   const { setNodeRef, isOver } = useDroppable({ id: `${COLUMN}${status.id}` });
 
+  // Read once per render rather than per card, so a column cannot straddle
+  // midnight and draw two different todays.
+  const now = new Date();
+
+  // Nothing is folded away in a terminal column. Work that shipped shipped,
+  // whatever date was once on it, and hiding a done card behind "not ready yet"
+  // would be the board arguing with what the operator just did.
+  const waiting = status.isTerminal ? [] : cards.filter((c) => isWaiting(c.readyAt, now));
+  const workable = cards.filter((c) => !waiting.includes(c));
+  const shown = showWaiting ? [...workable, ...waiting] : workable;
+
   return (
     <section className={`hatch-column${isOver ? ' over' : ''}`}>
       <header className="hatch-column-head">
         <span className="hatch-column-name">{status.name}</span>
-        <span className="hatch-column-count">{cards.length}</span>
+        <span className="hatch-column-count">{workable.length}</span>
       </header>
 
       <div className="hatch-column-cards" ref={setNodeRef}>
-        <SortableContext items={cards.map((c) => c.key)} strategy={verticalListSortingStrategy}>
-          {cards.map((card) => (
-            <BoardCard key={card.key} card={card} />
+        {/* Only the cards actually drawn: dnd-kit sorts the ids it is given, and
+            an id with nothing on screen behind it is a gap a drag falls into. */}
+        <SortableContext items={shown.map((c) => c.key)} strategy={verticalListSortingStrategy}>
+          {shown.map((card) => (
+            <BoardCard
+              key={card.key}
+              card={card}
+              waiting={waiting.includes(card)}
+              terminal={status.isTerminal}
+            />
           ))}
         </SortableContext>
+
+        {waiting.length > 0 && (
+          <button type="button" className="hatch-column-fold" onClick={() => setShowWaiting(!showWaiting)}>
+            {showWaiting ? 'Hide' : `+ ${waiting.length}`} waiting
+          </button>
+        )}
       </div>
     </section>
   );
