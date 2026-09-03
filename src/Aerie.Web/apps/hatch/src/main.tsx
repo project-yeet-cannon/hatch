@@ -6,6 +6,7 @@ import './theme.css';
 import { App } from './App';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { clientLogger } from './lib/clientLogger';
+import { routerBasename } from './lib/basename';
 
 // Importing clientLogger (above) has already registered the window error/
 // unhandledrejection listeners as a side effect - this is the earliest
@@ -16,7 +17,10 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
       <ThemeProvider>
-        <BrowserRouter basename="/apps/hatch">
+        {/* Read from the URL rather than fixed, because this bundle answers
+            at two addresses and only one of them names the prefix - see
+            lib/basename.ts. */}
+        <BrowserRouter basename={routerBasename(window.location.pathname)}>
           <App />
         </BrowserRouter>
       </ThemeProvider>
