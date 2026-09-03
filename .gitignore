@@ -44,6 +44,13 @@ bld/
 # BuildDashboard/BuildHome targets and Dockerfile.api).
 src/Aerie.Api/wwwroot/apps/
 
+# A developer's local lake (docs/plans/trading.md Phase 3). TRADING_LAKE_ROOT
+# defaults to this relative path, so running a collector - or the seed job - by
+# hand grows one at the silo root. The image build already excludes it
+# (src/Aerie.Trading/.dockerignore); this is the other half, and without it a
+# few gigabytes of Parquet show up in `git status` as untracked files.
+src/Aerie.Trading/.aerie-lake/
+
 # The trading control panel's bundle (docs/plans/trading.md Phase 7). The one
 # app in the Aerie.Web workspace that does not build into wwwroot/apps: the
 # trading service serves its own SPA, and the trading image's build context is
