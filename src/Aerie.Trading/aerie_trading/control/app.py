@@ -197,7 +197,10 @@ def create_app(
         async def sign_in(_path: str = "") -> Response:
             return RedirectResponse(sign_in_url, status_code=302)
 
-    registry = build_registry(resolved_revision)
+    # The database is the health source: `Database` requires `collection_health`
+    # exactly so this line is not a downcast. See
+    # aerie_trading/control/collection_health.py.
+    registry = build_registry(resolved_revision, resolved_database)
 
     @app.get("/metrics", include_in_schema=False)
     async def metrics() -> Response:

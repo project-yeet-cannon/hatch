@@ -1,0 +1,193 @@
+# The trading plan (docs/plans/trading.md) Phase 3 - the backup path for
+# `chains/`, and the reason it exists now rather than when the data is worth
+# something:
+#
+#   *"Built now and left running against synthetic data, so that the first
+#   chain snapshot worth keeping is already inside a backup path that has been
+#   exercised, rather than being the run that tests it. Synthetic chains are
+#   worthless and backing them up is nearly free; the point is that the
+#   mechanism is proven before the data is precious."*
+#
+# ---------------------------------------------------------------------------
+# `chains/` only, deliberately
+#
+# The lake holds two datasets and only one of them is irreplaceable. Bars can
+# be re-collected from any provider that keeps history; a chain snapshot is an
+# observation of an instant that will not come again, which is the asymmetry
+# the plan calls out and the reason `--path /lake/chains` is not `--path
+# /lake`. Backing up the bars as well would roughly double what this moves in
+# order to protect something a backfill already protects.
+#
+# ---------------------------------------------------------------------------
+# The same two repositories the house already has
+#
+# ../../data/backup/backup-cronjob.yaml writes to a local SMB repository and an
+# S3 one, in one run, so the two cannot be a different age. This job writes to
+# the same pair through the same image and the same generic script
+# (containers/backup/scripts/path-backup.sh) - a second pair of repositories
+# would be two more things to create, scope, pay for and rehearse restores
+# from, and one credential already reaches both, so it would buy no isolation
+# that matters.
+#
+# Sharing the repositories has one consequence worth naming rather than
+# discovering. **Retention for these snapshots is applied by that other job.**
+# `restic forget` groups by host and paths, and this job's snapshots carry
+# their own host (`trading`) and their own path, so they form their own group
+# and the aerie-backup job's `--keep-daily 7 --keep-weekly 4 --keep-monthly 12`
+# lands on them too. That is deliberate rather than tolerated: retention across
+# a repository must be owned by exactly one job (that script says so at
+# length - two `forget --prune` writers is how a snapshot disappears with both
+# jobs reporting success), and this policy is the right one for an *append-only*
+# tree. Nothing is ever deleted from `chains/`, so the newest snapshot always
+# contains every file; ageing out an old snapshot discards a view of the tree,
+# never the only copy of a file in it.
+#
+# The day something *does* delete from `chains/`, that reasoning stops holding
+# and this comment is where to notice it.
+#
+# ---------------------------------------------------------------------------
+# 23:30 UTC, and the stagger is the whole reason for that number
+#
+# Taken on these nodes already: 01:00 immich-pg's base backup, 01:30
+# trading-pg's, 02:00 aerie-pg's, 03:10 the restic backup with its
+# `forget --prune`, 04:00 Sundays the restic verify. This sits before all of
+# them, two and a half hours after the last US close in either DST offset, so
+# it never overlaps the `forget --prune` that holds an exclusive lock on the
+# repositories it writes to - and never runs while the collectors are writing.
+#
+# UTC, unlike the collectors next door, and for ../../data/backup's reason
+# rather than in spite of the collectors': this job is scheduled against *other
+# jobs on these nodes*, all of which are in UTC, and pinning it to a local zone
+# would slide it by the offset twice a year and could land it inside the prune
+# window.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: trading-chains-backup
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: trading
+    app.kubernetes.io/component: backup
+    app.kubernetes.io/part-of: aerie
+spec:
+  schedule: "30 23 * * *"
+  # Every day, not weekdays. A weekend run has nothing new to add and costs a
+  # deduplicated no-op; what it buys is that the *schedule* is exercised seven
+  # times a week rather than five, on a job whose whole purpose is to have been
+  # exercised before it matters.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # One retry, unlike the collectors. A failed backup is worth retrying
+      # because the thing it is protecting is still there to be read - which is
+      # the opposite of a missed snapshot, whose instant has passed.
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 259200
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: trading
+            app.kubernetes.io/component: backup
+            app.kubernetes.io/part-of: aerie
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          imagePullSecrets:
+            - name: ghcr-pull
+          containers:
+            - name: backup
+              # Aerie's backup image, not the trading one. This is the platform
+              # contract working as designed rather than a coupling: the plan's
+              # side of it is "hand me a kustomization", and Aerie's side is
+              # "you get Postgres-as-an-operator, backups, ingress behind the
+              # auth wall, log shipping, metrics and a deploy pipeline". The
+              # silo consumes that backup the same way it consumes CNPG and
+              # Traefik. The script it runs takes a path, a host and a tag and
+              # knows nothing about trading.
+              image: ${IMAGE_REGISTRY}/aerie-backup:latest
+              command: ["sh", "/app/scripts/path-backup.sh"]
+              # The image ends with `USER postgres` (uid 70), which is what the
+              # SMB PV's mount options present ownership as - see
+              # ./restic-local-volume.yaml. So no securityContext.runAsUser
+              # here, unlike every trading pod: overriding it to 1000 would
+              # make every write to the local repository a permission error
+              # that says nothing about mount options.
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: BACKUP_PATH
+                  value: /lake/chains
+                # The restic snapshot host. Fixed, and distinct from
+                # aerie-backup's `aerie`, which is what puts these snapshots in
+                # their own `forget` group - see this file's header. A pod name
+                # here would silently defeat retention entirely.
+                - name: BACKUP_HOST
+                  value: trading
+                - name: BACKUP_TAG
+                  value: trading-chains
+                # The `restic` Secret, synced into *this* namespace by the
+                # trading target block added to each of the three /aerie/backup/*
+                # parameters in scripts/secrets/parameters.json. An
+                # ExternalSecret is namespaced, so reaching the aerie
+                # namespace's copy is not a thing that exists - the value is
+                # re-synced here rather than referenced.
+                - name: RESTIC_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: restic
+                      key: password
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: restic
+                      key: access-key-id
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: restic
+                      key: secret-access-key
+                # restic takes its region from the regional endpoint inside
+                # RESTIC_REPOSITORY_S3, so this is not for restic - it is for
+                # the aws-cli in the image, which fails with "You must specify
+                # a region" if it is ever invoked in a debugging shell here.
+                - name: AWS_DEFAULT_REGION
+                  value: ${AWS_REGION}
+                - name: RESTIC_REPOSITORY_S3
+                  value: ${RESTIC_S3_REPOSITORY}
+                # The half that survives losing the AWS account. A path rather
+                # than a URL, because it is the mount below.
+                - name: RESTIC_REPOSITORY_LOCAL
+                  value: /mnt/restic-local
+              volumeMounts:
+                # Read-only. This job has no business writing to the lake, and
+                # the collectors have no business being blocked by it: a
+                # ReadWriteMany volume mounted read-only here is one fewer
+                # writer to reason about at 23:30 while nothing else should be
+                # writing either.
+                - name: lake
+                  mountPath: /lake
+                  readOnly: true
+                - name: restic-local
+                  mountPath: /mnt/restic-local
+              # The memory limit is loose for ../../data/backup/backup-cronjob.yaml's
+              # reason: restic holds the repository index in memory and it
+              # grows with the repository, and an OOMKill mid-write leaves a
+              # stale lock for the next run to trip over.
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+          volumes:
+            - name: lake
+              persistentVolumeClaim:
+                claimName: trading-lake
+                readOnly: true
+            - name: restic-local
+              persistentVolumeClaim:
+                claimName: trading-restic-local

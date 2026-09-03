@@ -23,3 +23,10 @@ aerie_trading/build.json
 # names it as the distribution's readme, so hatchling refuses to build the
 # project without it.
 tests
+
+# A developer's local lake (docs/plans/trading.md Phase 3). TRADING_LAKE_ROOT
+# defaults to this relative path, so running a collector by hand grows one at
+# the silo root - gigabytes of Parquet that would be uploaded as build context
+# on every image build. Nothing COPYs it either way; this is about the context,
+# not the image.
+.aerie-lake

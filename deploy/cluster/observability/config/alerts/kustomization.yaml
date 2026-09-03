@@ -12,3 +12,4 @@ resources:
   - flux.yaml
   - cluster.yaml
   - backup.yaml
+  - trading.yaml

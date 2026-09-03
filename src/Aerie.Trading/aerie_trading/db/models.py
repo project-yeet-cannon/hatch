@@ -233,7 +233,14 @@ class DataSource(Base):
 class IngestRun(Base):
     """One call out to a provider: what was asked, what came back, what it cost.
 
-    Written by Phase 2's provider layer and read by Phase 3's collection-health
+    **One row per collection run, not per provider call** - widened by Phase 3,
+    which is the phase that started writing to this table. A chain snapshot of a
+    four-name watchlist is four provider calls; recording each would be a
+    thousand rows a month at a granularity nobody asks a question at, and the
+    question that *is* asked - "did this collector run, and did it produce
+    anything" - is one row. ``aerie_trading/collect/runs.py`` writes them.
+
+    Written by Phase 3's collectors and read by its collection-health
     metrics. The columns that look like over-collection now are the ones the
     plan names as gates later: ``quota_cost`` is what keeps two collectors from
     racing each other into Schwab's rate limit unnoticed, and
@@ -283,6 +290,31 @@ class IngestRun(Base):
     # after the fact where the quota went.
     quota_cost: Mapped[int | None] = mapped_column(Integer)
 
+    # How many things the run expected to find and did not - a session with no
+    # bars, a watchlist entry with no board. A count rather than a boolean
+    # because "collected, with three sessions missing" and "collected, with one
+    # missing" are different mornings, and a column rather than a derivation
+    # from `result` below because it is the one thing about a gap that is
+    # aggregated: the collection-health gauge is a MAX over this per collector.
+    #
+    # Nullable, and null means "this run did not look" rather than zero. A run
+    # that failed before it could compare what it asked for against what it got
+    # has no honest gap count, and recording 0 for it would put a clean number
+    # on a run that never checked.
+    gap_count: Mapped[int | None] = mapped_column(Integer)
+
+    # What the run produced: the lake partitions it wrote, the gaps it found,
+    # and whatever else the collector thought worth keeping. The counterpart to
+    # `request` above - that column answers "what did we ask for", this one
+    # answers "what came back, and what was missing" - and the pair is what a
+    # person reading one row during an incident actually needs.
+    #
+    # JSONB for the same reason `request` is: the shape differs per collector,
+    # and nothing queries into it. The one field that *is* queried was promoted
+    # to `gap_count` above rather than left in here as a `jsonb_array_length`
+    # in a metrics query.
+    result: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+
     error: Mapped[str | None] = mapped_column(Text)
     aerie_revision: Mapped[str | None] = mapped_column(String(40))
 
@@ -294,6 +326,7 @@ class IngestRun(Base):
             name="status",
         ),
         CheckConstraint("rows_written >= 0", name="rows_written"),
+        CheckConstraint("gap_count IS NULL OR gap_count >= 0", name="gap_count"),
         # "When did this collector last succeed" is the query behind the
         # collection-health metrics Phase 3 gates on, and it is asked per
         # source and per kind.

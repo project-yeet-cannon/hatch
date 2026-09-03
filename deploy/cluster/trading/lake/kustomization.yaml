@@ -1,0 +1,28 @@
+# The trading plan (docs/plans/trading.md) Phase 3 - the Lake and everything
+# that fills or preserves it.
+#
+# Not its own Flux Kustomization. ../../trading.yaml's `trading` reaches this
+# directory as a base (`../lake` in ../app/kustomization.yaml), which is what
+# puts it behind that Kustomization's `dependsOn: trading-database` - a CronJob
+# whose PGHOST comes from a Secret CNPG has not created yet is the same failure
+# the cluster/app split exists to prevent. It also inherits that layer's
+# postBuild.substituteFrom, which is where ${IMAGE_REGISTRY},
+# ${TRADING_IMAGE_TAG}, ${AWS_REGION}, ${RESTIC_S3_REPOSITORY}, ${SHARE_HOST},
+# ${SHARE_NAME} and ${RESTIC_LOCAL_SUBPATH} all resolve. The same shape
+# ../../data/backup/ has relative to ../../data/schema/.
+#
+# It still carries its own kustomization.yaml because ci.yml's
+# deploy-manifests job discovers build roots by finding them, so everything
+# below is built standalone there as well as through ../app.
+#
+# Applied order is list order, and the order below is the order a person reads
+# them in when something is wrong: what holds the data, what fills it, what
+# preserves it, and what the preserving writes to.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - lake-pvc.yaml
+  - cronjob-bars.yaml
+  - cronjob-chains.yaml
+  - restic-local-volume.yaml
+  - chains-backup-cronjob.yaml

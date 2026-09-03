@@ -1,0 +1,190 @@
+# The trading plan (docs/plans/trading.md) Phase 3 - the after-the-close bar
+# collection.
+#
+# ---------------------------------------------------------------------------
+# Why a CronJob rather than one scheduler process
+#
+# The phase leaves the choice open and names the tie-breaker: *"chosen on which
+# is easier to reason about when a collection is missed, not on elegance. The
+# missed-collection case is the one that matters."* A CronJob wins that
+# comparison on three counts, none of which is about elegance:
+#
+#   - A missed run is a Job that does not exist, and `kube_cronjob_status_
+#     last_successful_time` is already scraped by kube-state-metrics. A
+#     scheduler process's missed tick is invisible unless it logged, and it did
+#     not log, because it was not running.
+#   - The schedule survives the process. A scheduler restarted at 15:59 has to
+#     decide for itself whether it already ran the 15:30 collection; the
+#     kubelet has that answer written down.
+#   - `concurrencyPolicy: Forbid` is a field rather than a lock. Two collectors
+#     writing the same partition is the failure that idempotent writes make
+#     survivable rather than impossible, and not having to survive it is
+#     better.
+#
+# What it costs is schedule expressiveness, and that cost is paid next door in
+# ./cronjob-chains.yaml, where cron cannot say "every thirty minutes from 09:30
+# to 15:59". This collector runs once a day and does not care.
+#
+# ---------------------------------------------------------------------------
+# 16:30 in the exchange's own timezone, not in UTC
+#
+# `timeZone` rather than a UTC expression, and this is the one place in
+# deploy/ that uses it. Everything else on these nodes is scheduled against
+# other things on these nodes - ../../data/backup/backup-cronjob.yaml writes
+# out at length why it stays in UTC to keep its stagger against a CNPG
+# ScheduledBackup that has no timezone field at all. This job is scheduled
+# against *the exchange*, whose close moves by an hour twice a year in UTC and
+# never moves in America/New_York. A UTC expression here would collect an hour
+# early for four months of the year - which for `--mode incremental` means
+# collecting a session that is still open.
+#
+# Half an hour after the bell, which is margin for a provider that publishes
+# the closing print on its own schedule rather than a claim about how long
+# anything takes.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: trading-collect-bars
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: trading
+    app.kubernetes.io/component: collector
+    app.kubernetes.io/part-of: aerie
+spec:
+  schedule: "30 16 * * 1-5"
+  timeZone: America/New_York
+  # Weekdays only in the expression, holidays refused by the collector. Cron
+  # cannot know that Good Friday is not a session and the market calendar can,
+  # so the schedule is deliberately a superset and
+  # aerie_trading/collect/bars.py is what narrows it. A refused run exits 2 -
+  # see aerie_trading/collect/__main__.py - which shows up as a failed Job
+  # saying "the market was shut", rather than as a successful one that wrote
+  # nothing and advanced the last-success metric over a day with no data in it.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  # A run that fires while the cluster is down should still run when it comes
+  # back, but only if it is still the same evening: collecting Tuesday's
+  # session on Thursday is what `--mode latest` is for, run by hand. Six hours.
+  startingDeadlineSeconds: 21600
+  jobTemplate:
+    spec:
+      # Zero retries on the collector's own failure, unlike a backup job. A
+      # bar collection is idempotent and re-runnable at any time, so the value
+      # of an immediate retry is small; and the failure that would exhaust a
+      # backoffLimit is a provider outage, where three rapid retries are three
+      # more requests against something already unhappy. The durable signal is
+      # the staleness alert on the collection-health metrics, which stays
+      # firing until a collection actually succeeds.
+      backoffLimit: 0
+      # Three days, so a Monday failure is still readable on Wednesday - the
+      # same reasoning ../../data/backup/backup-cronjob.yaml writes out about
+      # ttlSecondsAfterFinished fighting failedJobsHistoryLimit.
+      ttlSecondsAfterFinished: 259200
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: trading
+            app.kubernetes.io/component: collector
+            app.kubernetes.io/part-of: aerie
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          imagePullSecrets:
+            - name: ghcr-pull
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: collect
+              # The same image and the same tag as the control plane
+              # (../app/deployment.yaml). One substitution feeds both, so a
+              # collector can never be writing partitions in a format the
+              # service reading them was not built for.
+              image: "${IMAGE_REGISTRY}/aerie-trading:${TRADING_IMAGE_TAG}"
+              # The module, overriding the image's ENTRYPOINT. `--mode
+              # incremental` is today's session and a refusal if today was not
+              # one; the intervals come from TRADING_COLLECTION__BAR_INTERVALS,
+              # so widening what is collected is a value change.
+              command:
+                - python
+                - -m
+                - aerie_trading.collect
+                - bars
+                - --mode
+                - incremental
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                # The lake. A value rather than the settings default, which is
+                # a relative path chosen so that a pod whose volume failed to
+                # mount fails visibly instead of quietly writing onto its own
+                # ephemeral root filesystem.
+                - name: TRADING_LAKE_ROOT
+                  value: /lake
+                # libpq's own names, from the Secret CNPG generated - the same
+                # block ../app/deployment.yaml carries, duplicated rather than
+                # shared because kustomize has no named templates and a YAML
+                # anchor would not survive a strategic merge.
+                - name: PGHOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: host
+                - name: PGPORT
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: port
+                - name: PGDATABASE
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: dbname
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: username
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: password
+              volumeMounts:
+                - name: lake
+                  mountPath: /lake
+                - name: tmp
+                  mountPath: /tmp
+              # polars holds a frame per partition and a partition is a month
+              # of one symbol's bars - eight thousand rows at the minute
+              # interval. The request is a floor that lets the scheduler place
+              # it; the limit is where a backfill that tried to hold a decade
+              # in memory gets stopped rather than taking a node's page cache
+              # with it. No CPU limit, per the convention every workload in
+              # this tree follows.
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+          volumes:
+            - name: lake
+              persistentVolumeClaim:
+                claimName: trading-lake
+            # The image writes no bytecode and the root filesystem is
+            # read-only; this is for anything in the dependency tree that
+            # assumes a writable temporary directory. Note that the Parquet
+            # writer deliberately does *not* use it - it stages every write in
+            # the destination's own directory so that the rename onto the
+            # destination is within one filesystem, and therefore atomic.
+            - name: tmp
+              emptyDir: {}

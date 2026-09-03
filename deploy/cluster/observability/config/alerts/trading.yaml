@@ -1,0 +1,149 @@
+# The trading plan (docs/plans/trading.md) Phase 3 - collection health, and in
+# particular the phase's *"alert for a session that collected nothing"*.
+#
+# The fourth PrometheusRule beside ./cluster.yaml, ./flux.yaml and
+# ./backup.yaml, selected the same way and for the same reason
+# (../../controllers/kube-prometheus-stack.yaml's
+# ruleSelectorNilUsesHelmValues: false).
+#
+# ---------------------------------------------------------------------------
+# What these rules read, and what they deliberately do not
+#
+# Every series here comes from `trading_collection_*` on the trading control
+# plane's /metrics, which derives them at scrape time from the `ingest_run`
+# table (src/Aerie.Trading/aerie_trading/db/health.py). **Nothing here reads
+# `kube_cronjob_status_last_successful_time`**, which is the obvious thing to
+# reach for and is wrong in a way worth writing down:
+#
+#   - A collector's CronJob succeeding says the *process* exited zero. It says
+#     nothing about whether any rows were written, and "succeeded and wrote
+#     nothing" is the exact failure this phase is asked to alert on.
+#   - The chain collectors correctly refuse and exit non-zero on every market
+#     holiday - fourteen failed Jobs on Thanksgiving, by design
+#     (../../../trading/lake/cronjob-chains.yaml). A rule reading Job outcomes
+#     would page about the holiday calendar. These series know what a session
+#     is, because the rows behind them were written by something that consulted
+#     one.
+#
+# ---------------------------------------------------------------------------
+# Why the staleness thresholds are days rather than hours
+#
+# A weekend is 63 hours between the Friday close and the Monday one, and a
+# Thanksgiving or a Christmas that falls beside a weekend stretches that past
+# 90. So a threshold tight enough to catch "yesterday's collection did not
+# happen" would fire every long weekend, and one loose enough not to is
+# necessarily loose. The tight signal is the *rows* rule below, which fires
+# within an hour of a collection that produced nothing; these two are the
+# durable backstop for "collections stopped entirely", and that is a condition
+# whose cost is measured in days rather than hours.
+#
+# 100 hours: comfortably past the longest four-day weekend the US equity
+# calendar produces, comfortably inside a week.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: trading-alerts
+  namespace: observability
+spec:
+  groups:
+    - name: trading-collection
+      rules:
+        - alert: TradingCollectionEmpty
+          # The plan's "a session that collected nothing", stated exactly: the
+          # most recent *successful* run wrote zero rows. Invisible in every
+          # other series - the Job exited zero, the last-success timestamp is
+          # current, and the lake gained nothing.
+          expr: trading_collection_last_success_rows == 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: 'The last successful {{ $labels.kind }} collection from {{ $labels.source }} wrote no rows - the collector ran, reported success, and the lake gained nothing'
+        - alert: TradingCollectionGaps
+          # A run that succeeded and knew something was missing: a session with
+          # no bars, a watchlist entry with no board. Recorded per run by the
+          # collectors, so this is their own judgement rather than an inference.
+          expr: trading_collection_last_success_gaps > 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: '{{ $value }} gap(s) in the last {{ $labels.kind }} collection from {{ $labels.source }} - `select request, result from ingest_run where kind = ''{{ $labels.kind }}'' order by started_at desc limit 5` names them'
+        - alert: TradingCollectionStale
+          expr: time() - trading_collection_last_success_timestamp_seconds > 100 * 3600
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: 'No successful {{ $labels.kind }} collection from {{ $labels.source }} for {{ $value | humanizeDuration }} - longer than any weekend the exchange calendar produces'
+        - alert: TradingCollectionStuck
+          # A run still marked `running` long after it started. The collectors
+          # write that row before they do any work precisely so a killed pod
+          # leaves evidence; this is the rule that reads it. Two hours is
+          # longer than any collection except a first backfill, which is run by
+          # hand and can be silenced.
+          expr: trading_collection_runs_running > 0 and on (source, kind) (time() - trading_collection_last_attempt_timestamp_seconds > 2 * 3600)
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'A {{ $labels.kind }} collection from {{ $labels.source }} started and never finished - the pod was killed mid-run; the lake is consistent (writes are atomic) but that session may be short'
+        - alert: TradingCollectionHealthUnavailable
+          # The `up` gauge, which exists so that an unreachable Ledger reports
+          # itself rather than silently taking every rule above out of service.
+          # Without this, a trading database outage looks exactly like a silo
+          # that has never collected anything: no series, no alerts, no signal.
+          expr: trading_collection_up == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'The trading control plane cannot read collection health from its Ledger - every other rule in this group is blind until it can'
+        - alert: TradingCollectionMetricAbsent
+          # The absent() sibling this directory gives every staleness rule. It
+          # fires when nothing has ever collected *or* when the metric was
+          # renamed, and those are told apart by whether
+          # TradingCollectionHealthUnavailable is firing beside it.
+          expr: absent(trading_collection_up)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: 'trading_collection_up is missing - either the trading control plane is not being scraped (check the ServiceMonitor in ../scrape/trading.yaml) or the metric was renamed, and no collection alert can fire for any input'
+    - name: trading-lake
+      rules:
+        - alert: TradingLakeVolumeFilling
+          # The lake's own capacity, from kubelet's volume stats rather than
+          # from anything the silo exports - the application has no more
+          # authority about a filesystem's free space than the kubelet does,
+          # and one fewer metric to write is one fewer to be wrong.
+          #
+          # 80% on a volume that tests/test_lake_size.py sizes for five and a
+          # half years means several months of warning, which is the right
+          # amount for a fix (`allowVolumeExpansion` is on for longhorn-r2)
+          # that needs a person to choose a number.
+          expr: kubelet_volume_stats_used_bytes{namespace="trading", persistentvolumeclaim="trading-lake"} / kubelet_volume_stats_capacity_bytes{namespace="trading", persistentvolumeclaim="trading-lake"} > 0.8
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: 'The trading lake is {{ $value | humanizePercentage }} full - expand it in deploy/cluster/trading/lake/lake-pvc.yaml and update PVC_CAPACITY_BYTES in src/Aerie.Trading/tests/test_lake_size.py, which is what derived the current figure'
+        - alert: TradingChainsBackupTooOld
+          # The one dataset here that cannot be re-collected. Shaped like
+          # ./backup.yaml's ResticBackupTooOld and reading the same
+          # kube-state-metrics series - unlike the collection rules above,
+          # this one *is* a question about whether a CronJob ran, because a
+          # backup has no market calendar to disagree with.
+          expr: time() - kube_cronjob_status_last_successful_time{namespace="trading", cronjob="trading-chains-backup"} > 36 * 3600
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: 'No successful trading-chains-backup run for {{ $value | humanizeDuration }} - option chain snapshots are the one dataset in this silo that cannot be re-collected, and they are not reaching either restic repository'
+        - alert: TradingChainsBackupMetricAbsent
+          expr: absent(kube_cronjob_status_last_successful_time{namespace="trading", cronjob="trading-chains-backup"})
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: 'kube_cronjob_status_last_successful_time is missing for trading/trading-chains-backup - the CronJob was deleted or renamed, and TradingChainsBackupTooOld can no longer fire for any input'

@@ -15,6 +15,12 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  # The Lake and its collectors (docs/plans/trading.md Phase 3), reached as a
+  # base rather than given a Flux Kustomization of their own - see that
+  # directory's kustomization.yaml. It is first in the list because the PVC in
+  # it is what the CronJobs there mount, and last in reading order is not the
+  # same as last in apply order.
+  - ../lake
   - image-automation.yaml
   - deployment.yaml
   - service.yaml

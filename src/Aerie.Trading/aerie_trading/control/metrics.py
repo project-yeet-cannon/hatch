@@ -20,6 +20,7 @@ from prometheus_client.gc_collector import GCCollector
 from prometheus_client.platform_collector import PlatformCollector
 from prometheus_client.process_collector import ProcessCollector
 
+from aerie_trading.control.collection_health import CollectionHealthCollector, HealthSource
 from aerie_trading.revision import Revision
 
 __all__ = ["CONTENT_TYPE", "build_registry", "render_metrics"]
@@ -29,7 +30,7 @@ __all__ = ["CONTENT_TYPE", "build_registry", "render_metrics"]
 CONTENT_TYPE = CONTENT_TYPE_LATEST
 
 
-def build_registry(revision: Revision) -> CollectorRegistry:
+def build_registry(revision: Revision, health: HealthSource | None = None) -> CollectorRegistry:
     """A registry holding the process defaults and this build's identity.
 
     ``trading_build_info`` is a constant gauge whose labels carry the identity -
@@ -56,6 +57,14 @@ def build_registry(revision: Revision) -> CollectorRegistry:
         registry=registry,
     )
     build_info.labels(revision=revision.revision, sequence=str(revision.sequence)).set(1)
+
+    # Collection health (docs/plans/trading.md Phase 3), registered onto this
+    # registry rather than exposed by the collectors themselves - see
+    # aerie_trading/db/health.py for why a CronJob cannot own a counter.
+    # Optional so that a registry can be built without a database at all, which
+    # is what the build-info tests do.
+    if health is not None:
+        registry.register(CollectionHealthCollector(health))
 
     return registry
 

@@ -37,3 +37,4 @@ resources:
   - observability-home-assistant.yaml
   - trading-cnpg-wal-s3.yaml
   - trading-ghcr-pull.yaml
+  - trading-restic.yaml

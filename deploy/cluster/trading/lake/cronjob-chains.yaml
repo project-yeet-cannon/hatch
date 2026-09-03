@@ -1,0 +1,484 @@
+# The trading plan (docs/plans/trading.md) Phase 3 - **the flagship.** Option
+# boards snapshotted through the session, into the lake.
+#
+# ---------------------------------------------------------------------------
+# Three CronJobs for one collector, which is the price of cron
+#
+# The schedule wanted is "every thirty minutes from the open to the close,
+# inclusive of both". Cron cannot say that. `*/30 9-16` fires at 09:00, 16:00
+# and 16:30 as well - three refusals a day, every day - and still never
+# collects the closing board, because the session is half-open and the board
+# that matters is the one at 15:59. So the schedule is split into the three
+# expressions cron *can* say, each of which fires only inside a regular
+# session:
+#
+#     trading-chains-open      09:30            the opening board
+#     trading-chains-interval  10:00-15:30/30m  twelve through the day
+#     trading-chains-close     15:59            the closing board
+#
+# Thirteen snapshots a session, zero routine refusals. That last clause is the
+# point of doing it this way: a refusal should mean something, and a schedule
+# that produces three failed Jobs a day by construction is one whose failures
+# nobody reads. The exceptions are the three early closes a year, when the
+# afternoon firings correctly refuse - which is a rare event that says
+# something true, rather than a daily one that says nothing.
+#
+# **What this does cost, stated rather than discovered: a market holiday
+# produces fourteen failed Jobs.** Cron knows about weekdays and not about Good
+# Friday, so every firing that day refuses (exit 2) and the Job that carried it
+# fails. `failedJobsHistoryLimit: 5` bounds what is kept, and - importantly -
+# nothing alerts on these Jobs. The collection alerts in
+# ../../observability/config/alerts/trading.yaml read the Ledger-derived
+# collection-health series instead, which know what a session is. A schedule
+# that fired on holidays and a set of alerts that did not understand them would
+# be the wrong half of this to fix.
+#
+# The alternative, a scheduler process holding a loop, is priced in
+# ./cronjob-bars.yaml's header and loses on the case the plan says to optimise
+# for: a missed collection.
+#
+# **The interval is `*/30` here and 30 in the application config**, and the two
+# have to agree - `TRADING_COLLECTION__CHAIN_SNAPSHOT_MINUTES` is what
+# `snapshot_times()` uses when a whole session is collected in one go, and this
+# is what fires the individual snapshots. They are not derived from each other
+# because one lives in a manifest and one in an environment variable, so
+# changing the cadence means editing both. Widening the cadence is a
+# deliberate act (the plan: "a conservative interval; widening them later costs
+# nothing while starting late costs everything"), so a change that has to be
+# made in two places is an acceptable cost for one made rarely.
+#
+# The timezone argument is ./cronjob-bars.yaml's and applies with more force:
+# an hour's drift twice a year would put four months of "opening" snapshots
+# thirty minutes before the open.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: trading-chains-open
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: trading
+    app.kubernetes.io/component: collector
+    app.kubernetes.io/part-of: aerie
+spec:
+  # The opening board. 09:30 exactly - the session's first instant, which
+  # `MarketSession.contains` includes.
+  schedule: "30 9 * * 1-5"
+  timeZone: America/New_York
+  concurrencyPolicy: Forbid
+  # Thirteen firings a session against one a day next door, so the histories
+  # are shorter: keeping three days of successes here would be forty Job
+  # objects for a collector nobody is looking at.
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 5
+  # Ninety seconds. A snapshot that could not start within a minute and a half
+  # of its instant is not the snapshot that was scheduled - see backoffLimit
+  # below - so a late start is worth skipping rather than filing under a time
+  # it was not taken at.
+  startingDeadlineSeconds: 90
+  jobTemplate:
+    spec:
+      # Zero retries, and here the reason is sharper than next door: a
+      # snapshot is an observation of *an instant*, so a retry ninety seconds
+      # later is not the collection that was missed - it is a different one,
+      # filed under a different name. The 15:00 board is either collected at
+      # 15:00 or it is not collected. And a refusal (exit 2) cannot be retried
+      # into success, because retrying cannot make the market open.
+      backoffLimit: 0
+      # One day. Thirteen of these a session means a three-day TTL would keep
+      # two hundred Job objects around; a day is long enough that the morning's
+      # failures are still readable when the staleness alert is opened.
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: trading
+            app.kubernetes.io/component: collector
+            app.kubernetes.io/part-of: aerie
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          imagePullSecrets:
+            - name: ghcr-pull
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: collect
+              # The same image and the same tag as the control plane
+              # (../app/deployment.yaml). One substitution feeds both, so a
+              # collector can never be writing partitions in a format the
+              # service reading them was not built for.
+              image: "${IMAGE_REGISTRY}/aerie-trading:${TRADING_IMAGE_TAG}"
+              # The module, overriding the image's ENTRYPOINT. No `--at`: the
+              # collector snapshots the instant it runs, which is what a live
+              # provider will be able to answer for at Phase 8 and is the whole
+              # reason the schedule is out here rather than inside a loop.
+              command:
+                - python
+                - -m
+                - aerie_trading.collect
+                - chains
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                # The lake. A value rather than the settings default, which is
+                # a relative path chosen so that a pod whose volume failed to
+                # mount fails visibly instead of quietly writing onto its own
+                # ephemeral root filesystem.
+                - name: TRADING_LAKE_ROOT
+                  value: /lake
+                # libpq's own names, from the Secret CNPG generated - the same
+                # block ../app/deployment.yaml carries, duplicated rather than
+                # shared because kustomize has no named templates and a YAML
+                # anchor would not survive a strategic merge.
+                - name: PGHOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: host
+                - name: PGPORT
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: port
+                - name: PGDATABASE
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: dbname
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: username
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: password
+              volumeMounts:
+                - name: lake
+                  mountPath: /lake
+                - name: tmp
+                  mountPath: /tmp
+              # One board at a time - a few thousand rows - held as a frame
+              # and written straight out. Sized the same as the bar collector
+              # next door rather than measured separately: the difference is
+              # noise against a 256Mi floor, and two different numbers would
+              # imply a distinction that has not been measured. No CPU limit,
+              # per the convention every workload in this tree follows.
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+          volumes:
+            - name: lake
+              persistentVolumeClaim:
+                claimName: trading-lake
+            # The image writes no bytecode and the root filesystem is
+            # read-only; this is for anything in the dependency tree that
+            # assumes a writable temporary directory. Note that the Parquet
+            # writer deliberately does *not* use it - it stages every write in
+            # the destination's own directory so that the rename onto the
+            # destination is within one filesystem, and therefore atomic.
+            - name: tmp
+              emptyDir: {}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: trading-chains-interval
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: trading
+    app.kubernetes.io/component: collector
+    app.kubernetes.io/part-of: aerie
+spec:
+  # Twelve snapshots through the day, 10:00 to 15:30. Both ends are inside
+  # a regular session, which is why the range stops at 15 rather than 16.
+  schedule: "*/30 10-15 * * 1-5"
+  timeZone: America/New_York
+  concurrencyPolicy: Forbid
+  # Thirteen firings a session against one a day next door, so the histories
+  # are shorter: keeping three days of successes here would be forty Job
+  # objects for a collector nobody is looking at.
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 5
+  # Ninety seconds. A snapshot that could not start within a minute and a half
+  # of its instant is not the snapshot that was scheduled - see backoffLimit
+  # below - so a late start is worth skipping rather than filing under a time
+  # it was not taken at.
+  startingDeadlineSeconds: 90
+  jobTemplate:
+    spec:
+      # Zero retries, and here the reason is sharper than next door: a
+      # snapshot is an observation of *an instant*, so a retry ninety seconds
+      # later is not the collection that was missed - it is a different one,
+      # filed under a different name. The 15:00 board is either collected at
+      # 15:00 or it is not collected. And a refusal (exit 2) cannot be retried
+      # into success, because retrying cannot make the market open.
+      backoffLimit: 0
+      # One day. Thirteen of these a session means a three-day TTL would keep
+      # two hundred Job objects around; a day is long enough that the morning's
+      # failures are still readable when the staleness alert is opened.
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: trading
+            app.kubernetes.io/component: collector
+            app.kubernetes.io/part-of: aerie
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          imagePullSecrets:
+            - name: ghcr-pull
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: collect
+              # The same image and the same tag as the control plane
+              # (../app/deployment.yaml). One substitution feeds both, so a
+              # collector can never be writing partitions in a format the
+              # service reading them was not built for.
+              image: "${IMAGE_REGISTRY}/aerie-trading:${TRADING_IMAGE_TAG}"
+              # The module, overriding the image's ENTRYPOINT. No `--at`: the
+              # collector snapshots the instant it runs, which is what a live
+              # provider will be able to answer for at Phase 8 and is the whole
+              # reason the schedule is out here rather than inside a loop.
+              command:
+                - python
+                - -m
+                - aerie_trading.collect
+                - chains
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                # The lake. A value rather than the settings default, which is
+                # a relative path chosen so that a pod whose volume failed to
+                # mount fails visibly instead of quietly writing onto its own
+                # ephemeral root filesystem.
+                - name: TRADING_LAKE_ROOT
+                  value: /lake
+                # libpq's own names, from the Secret CNPG generated - the same
+                # block ../app/deployment.yaml carries, duplicated rather than
+                # shared because kustomize has no named templates and a YAML
+                # anchor would not survive a strategic merge.
+                - name: PGHOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: host
+                - name: PGPORT
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: port
+                - name: PGDATABASE
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: dbname
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: username
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: password
+              volumeMounts:
+                - name: lake
+                  mountPath: /lake
+                - name: tmp
+                  mountPath: /tmp
+              # One board at a time - a few thousand rows - held as a frame
+              # and written straight out. Sized the same as the bar collector
+              # next door rather than measured separately: the difference is
+              # noise against a 256Mi floor, and two different numbers would
+              # imply a distinction that has not been measured. No CPU limit,
+              # per the convention every workload in this tree follows.
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+          volumes:
+            - name: lake
+              persistentVolumeClaim:
+                claimName: trading-lake
+            # The image writes no bytecode and the root filesystem is
+            # read-only; this is for anything in the dependency tree that
+            # assumes a writable temporary directory. Note that the Parquet
+            # writer deliberately does *not* use it - it stages every write in
+            # the destination's own directory so that the rename onto the
+            # destination is within one filesystem, and therefore atomic.
+            - name: tmp
+              emptyDir: {}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: trading-chains-close
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: trading
+    app.kubernetes.io/component: collector
+    app.kubernetes.io/part-of: aerie
+spec:
+  # The closing board, at the session's last minute rather than at its
+  # close. 16:00 is outside the session - `contains` is half-open - and
+  # 15:59 is the instant the session's last minute bar opens at, so the
+  # closing board and the closing bar describe the same minute. The same
+  # arithmetic `snapshot_times()` does, expressed in cron.
+  schedule: "59 15 * * 1-5"
+  timeZone: America/New_York
+  concurrencyPolicy: Forbid
+  # Thirteen firings a session against one a day next door, so the histories
+  # are shorter: keeping three days of successes here would be forty Job
+  # objects for a collector nobody is looking at.
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 5
+  # Ninety seconds. A snapshot that could not start within a minute and a half
+  # of its instant is not the snapshot that was scheduled - see backoffLimit
+  # below - so a late start is worth skipping rather than filing under a time
+  # it was not taken at.
+  startingDeadlineSeconds: 90
+  jobTemplate:
+    spec:
+      # Zero retries, and here the reason is sharper than next door: a
+      # snapshot is an observation of *an instant*, so a retry ninety seconds
+      # later is not the collection that was missed - it is a different one,
+      # filed under a different name. The 15:00 board is either collected at
+      # 15:00 or it is not collected. And a refusal (exit 2) cannot be retried
+      # into success, because retrying cannot make the market open.
+      backoffLimit: 0
+      # One day. Thirteen of these a session means a three-day TTL would keep
+      # two hundred Job objects around; a day is long enough that the morning's
+      # failures are still readable when the staleness alert is opened.
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: trading
+            app.kubernetes.io/component: collector
+            app.kubernetes.io/part-of: aerie
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          imagePullSecrets:
+            - name: ghcr-pull
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: collect
+              # The same image and the same tag as the control plane
+              # (../app/deployment.yaml). One substitution feeds both, so a
+              # collector can never be writing partitions in a format the
+              # service reading them was not built for.
+              image: "${IMAGE_REGISTRY}/aerie-trading:${TRADING_IMAGE_TAG}"
+              # The module, overriding the image's ENTRYPOINT. No `--at`: the
+              # collector snapshots the instant it runs, which is what a live
+              # provider will be able to answer for at Phase 8 and is the whole
+              # reason the schedule is out here rather than inside a loop.
+              command:
+                - python
+                - -m
+                - aerie_trading.collect
+                - chains
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                # The lake. A value rather than the settings default, which is
+                # a relative path chosen so that a pod whose volume failed to
+                # mount fails visibly instead of quietly writing onto its own
+                # ephemeral root filesystem.
+                - name: TRADING_LAKE_ROOT
+                  value: /lake
+                # libpq's own names, from the Secret CNPG generated - the same
+                # block ../app/deployment.yaml carries, duplicated rather than
+                # shared because kustomize has no named templates and a YAML
+                # anchor would not survive a strategic merge.
+                - name: PGHOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: host
+                - name: PGPORT
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: port
+                - name: PGDATABASE
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: dbname
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: username
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: trading-pg-app
+                      key: password
+              volumeMounts:
+                - name: lake
+                  mountPath: /lake
+                - name: tmp
+                  mountPath: /tmp
+              # One board at a time - a few thousand rows - held as a frame
+              # and written straight out. Sized the same as the bar collector
+              # next door rather than measured separately: the difference is
+              # noise against a 256Mi floor, and two different numbers would
+              # imply a distinction that has not been measured. No CPU limit,
+              # per the convention every workload in this tree follows.
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+          volumes:
+            - name: lake
+              persistentVolumeClaim:
+                claimName: trading-lake
+            # The image writes no bytecode and the root filesystem is
+            # read-only; this is for anything in the dependency tree that
+            # assumes a writable temporary directory. Note that the Parquet
+            # writer deliberately does *not* use it - it stages every write in
+            # the destination's own directory so that the rename onto the
+            # destination is within one filesystem, and therefore atomic.
+            - name: tmp
+              emptyDir: {}

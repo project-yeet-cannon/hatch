@@ -21,6 +21,7 @@ connecting to something wrong.
 """
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field
@@ -30,6 +31,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # `aerie_trading.providers.synthetic` itself is free, and is kept that way on
 # purpose - see that package's docstring. Every process in the silo reaches
 # this file, and not all of them can afford pandas.
+from aerie_trading.collect.config import CollectionConfig
 from aerie_trading.providers.synthetic.config import SyntheticConfig
 
 __all__ = ["Settings", "get_settings"]
@@ -87,6 +89,26 @@ class Settings(BaseSettings):
     # *process* is running under, which is the only one a run can honestly
     # claim to be reproducible from.
     synthetic: SyntheticConfig = SyntheticConfig()
+
+    # -- The Lake -----------------------------------------------------------
+    # Where the Parquet tree lives (docs/plans/trading.md Phase 3: "the lake
+    # root is a config parameter, so relocating it later is a value change and
+    # not a code change"). The default is a developer's working directory
+    # rather than a cluster path, on the same principle as the Postgres
+    # defaults above: a pod whose volume failed to mount should fail visibly
+    # rather than quietly start writing onto its own ephemeral root filesystem
+    # and report success for a week.
+    #
+    # In the cluster this is /lake, the mount point in
+    # deploy/cluster/trading/lake/. A `Path` rather than a string so that every
+    # consumer joins onto it with `/` and nobody concatenates a separator.
+    lake_root: Path = Path(".aerie-lake")
+
+    # What the collectors collect, and how often. See
+    # aerie_trading/collect/config.py - the whole model is replaceable with
+    # JSON in TRADING_COLLECTION, which is how a watchlist widens without a
+    # rebuild.
+    collection: CollectionConfig = CollectionConfig()
 
     @property
     def database_url(self) -> str:

@@ -532,3 +532,16 @@ $RECYCLE.BIN/
 # that file exists to prevent. Its absence in a working tree is what makes
 # `uv run` report a development build.
 src/Aerie.Trading/aerie_trading/build.json
+
+# The Lake, when it is written outside a cluster (docs/plans/trading.md Phase 3).
+# `TRADING_LAKE_ROOT` defaults to this relative path deliberately - a pod whose
+# volume failed to mount must fail visibly rather than write onto its own
+# ephemeral filesystem - so a developer running a collector by hand grows one of
+# these wherever they ran it. Parquet, and megabytes of it after one session.
+#
+# Anchored to the repository root with a leading slash rather than left as a
+# bare `.aerie-lake/`: this pattern is meant to catch the working directory a
+# `uv run` is launched from, not to silently swallow a directory of that name
+# anywhere in the tree.
+/.aerie-lake/
+/src/Aerie.Trading/.aerie-lake/

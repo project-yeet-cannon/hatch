@@ -4,12 +4,15 @@ A strategy laboratory that rides Aerie as a platform. The plan is
 [`docs/plans/trading.md`](../../docs/plans/trading.md); this file is only the
 part you need to run it.
 
-At Phase 2 this is a control plane with nothing to control and a market that
-does not exist. The service can say whether it is alive, whether it can reach
-its database, what commit it was built from and what its metrics are; beside it
-is a `MarketDataProvider` interface and a generator that implements it, so every
+At Phase 3 this is a control plane, a market that does not exist, and a lake
+filling up with it. The service can say whether it is alive, whether it can
+reach its database, what commit it was built from and what its metrics are -
+including, now, how every collector is doing. Beside it is a
+`MarketDataProvider` interface and a generator that implements it, so every
 phase after this one has bars and option chains to work on without a credential,
-a network call or a market being open.
+a network call or a market being open; and beside *that* is the machinery that
+turns a provider into a queryable history: a partition layout, idempotent
+writes, a DuckDB reader, two collectors and the CronJobs that run them.
 
 Nothing here waits on Schwab. That is the plan's re-cut: the collector, the
 lake, the engine and the sweeps are all built and hardened against the synthetic
@@ -106,11 +109,20 @@ repository root — which is the extraction seam expressed in the build, since
 Docker refuses a `COPY` that escapes its context.
 
 The manifests are [`deploy/cluster/trading/`](../../deploy/cluster/trading/):
-a CNPG `Cluster` with its own WAL destination and nightly base backup, and a
+a CNPG `Cluster` with its own WAL destination and nightly base backup, a
 `Deployment` whose init container runs `alembic upgrade head` before the
-service starts. `deploy/cluster/trading.yaml` splits those into two Flux
-Kustomizations so the migration never runs against a database that is not up
-yet.
+service starts, and — from Phase 3 — a `lake/` directory holding the volume,
+the collector CronJobs and a nightly restic backup of the option chains.
+`deploy/cluster/trading.yaml` splits those into two Flux Kustomizations so the
+migration never runs against a database that is not up yet.
+
+The collectors are `CronJob`s rather than a scheduler process, and the reason
+is in `deploy/cluster/trading/lake/cronjob-bars.yaml`: a missed run is a Job
+that does not exist, which kube-state-metrics already reports, where a
+scheduler's missed tick is invisible because the thing that would have logged
+it was not running. The chain collector is *three* CronJobs, because cron
+cannot say "every thirty minutes from 09:30 to 15:59" — that file has the
+argument.
 
 **One step lives outside this repository, and it is done.** The image tag
 reaches the cluster as `${TRADING_IMAGE_TAG}`, from the site repo's
@@ -205,6 +217,64 @@ get wrong, and everything that reads this value is trusting it to describe the
 code that is actually running. A working tree has no `build.json`, so `uv run`
 reports `dev`.
 
+## The Lake
+
+Parquet on a volume, read by DuckDB. Why it is not in Postgres is the plan's
+own section; what you need to run it is that **the root is a config
+parameter** — `TRADING_LAKE_ROOT`, which is `/lake` in the cluster and a
+relative `.aerie-lake` outside it, so a pod whose volume failed to mount fails
+visibly instead of quietly writing onto its own ephemeral filesystem.
+
+The layout is fixed and is documented in `aerie_trading/lake/layout.py`,
+because rewriting a partition scheme is a migration:
+
+```
+bars/{interval}/{symbol}/{year}/{month}.parquet
+chains/{underlying}/{date}/{hhmm}.parquet
+```
+
+Two properties are worth knowing before you touch any of it:
+
+**Writes are idempotent and crash-safe, by two different mechanisms.** A
+re-collection replaces exactly the rows it names — an anti-join, not a
+truncate, because a bar partition is a month and a collection is a session.
+And every write goes to a temporary file in the destination's own directory
+and is then renamed onto it, so a killed process leaves either the old file or
+the new one and never a truncated Parquet footer.
+
+**No caller learns the directory structure.** `lake/reader.py` takes a symbol
+and a time range and hands back a polars frame; it names the files it will
+open rather than globbing, which is what keeps "nothing was collected" an
+empty frame instead of an IO error.
+
+## Collecting
+
+```sh
+# One session, refusing a day the market was shut. What the CronJob runs.
+uv run python -m aerie_trading.collect bars --mode incremental
+
+# The most recent session, whenever it was. Catching up by hand.
+uv run python -m aerie_trading.collect bars --mode latest
+
+# A range, or the configured backfill depth from today.
+uv run python -m aerie_trading.collect bars --mode backfill --start 2026-01-02
+
+# The board, right now. Or a whole session's worth of snapshots at once,
+# which only a provider that can answer for the past can satisfy.
+uv run python -m aerie_trading.collect chains
+uv run python -m aerie_trading.collect chains --session 2026-03-04
+```
+
+Every one of these writes an `ingest_run` row before it does any work, so they
+need the Ledger. Exit codes are the interface with Kubernetes: `0` collected,
+`1` failed, **`2` refused** — a holiday, a closed market. The third is distinct
+because a run that exited `0` on Thanksgiving would advance the last-success
+metric over a day nothing was collected.
+
+What is collected is configuration, not code: `TRADING_COLLECTION__*` (or the
+whole model as JSON in `TRADING_COLLECTION`) carries the watchlists, the bar
+intervals, the snapshot cadence and the backfill depth.
+
 ## Layout
 
 Directories arrive with the phase that needs them, so most of this is a map of
@@ -220,7 +290,8 @@ where things will go rather than of what is here:
 | `aerie_trading/migrations/` | Alembic, run from an init container on deploy |
 | `tests/` | pytest, mirroring the package |
 | `aerie_trading/providers/` | `MarketDataProvider`, the market calendar, and the synthetic source |
-| `aerie_trading/collect/` | Phase 3 — the bar and option-chain collectors |
+| `aerie_trading/lake/` | the Parquet lake — layout, schemas, idempotent writes, the DuckDB reader |
+| `aerie_trading/collect/` | the bar and option-chain collectors, and the CLI a CronJob runs |
 | `aerie_trading/engine/` | Phase 4 — clock, instruments, portfolio, broker, strategy |
 | `aerie_trading/strategies/` | Phase 4 on — one strategy per module |
 

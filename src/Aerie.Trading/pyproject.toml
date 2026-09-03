@@ -43,10 +43,12 @@ dependencies = [
     # and `providers/synthetic/__init__.py` re-exports nothing so that the
     # migration init container, which runs under a 256 Mi limit, never pays for
     # it.
+    "duckdb>=1.4",
     "exchange-calendars>=4.13.2",
     "fastapi>=0.141.1",
     # The /metrics endpoint. The client library, not an exporter framework -
     # kube-prometheus-stack is already deployed and does the scraping.
+    "polars>=1.35",
     "prometheus-client>=0.26.0",
     # psycopg 3, and `binary` for the wheel: the alternative builds libpq from
     # source in the image, which needs a compiler in a runtime layer that has

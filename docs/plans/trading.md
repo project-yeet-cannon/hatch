@@ -1,10 +1,11 @@
 # Trading — a strategy laboratory that rides Aerie as a platform
 
-**Status:** Phases 0b, 1 and 2 built on 2026-09-02; Phase 0a is waiting on
+**Status:** Phases 0b, 1, 2 and 3 built on 2026-09-02; Phase 0a is waiting on
 Schwab. What is left of Phase 1 is its gate — five checks that need the cluster
 — plus one line an operator adds to the site repository, both written out under
-that phase. Phase 2's gate passed in full: it needs no cluster, which is the
-whole argument for having built it.
+that phase. Phase 2's gate passed in full, and Phase 3's passed in full but for
+the two checks that need a running cluster to observe; both are cases of the
+same argument for having built them without one.
 
 **The plan was re-cut on 2026-09-02 to build on a synthetic data source first.**
 Schwab was the second phase and is now the eighth. Every phase between them is
@@ -117,10 +118,17 @@ faster than Postgres serves this access pattern, and Parquet passes the test in
 `purpose.md`: *if every tool here disappeared tomorrow, what is still readable?*
 
 The trade the lake accepts: it is **not** in the CNPG backup, so its durability
-story is its own — a restic target or an object-store sync, sized when it is big
-enough to matter. Raw market data is also the one dataset here that is, in
+story is its own. Raw market data is also the one dataset here that is, in
 principle, re-collectable from the source. Option chains are the exception, and
 that exception is what makes their backup worth doing before the lake is large.
+
+**Built at Phase 3, and only for `chains/`.** A nightly restic job writes that
+subtree to the same two repositories the rest of the house uses — off-site S3
+and the local share — through a generic
+`containers/backup/scripts/path-backup.sh` that takes a path and knows nothing
+about trading. `bars/` is deliberately outside it: a backfill already protects
+them, and including them would roughly double what the job moves to protect
+something that is re-derivable.
 
 ### Why Schwab, given it costs an account
 
@@ -745,7 +753,7 @@ container (below).
       market that was open and silent.
 - [x] **Commit:** "Trading: a market that does not exist"
 
-### [ ] Phase 3 — The lake, and the collectors that fill it
+### [x] Phase 3 — The lake, and the collectors that fill it
 
 **Ships:** every piece of machinery that stands between a provider and a
 queryable history — the partition layout, the reader, idempotent writes,
@@ -763,10 +771,43 @@ criterion for the phase as much as any individual gate: if any of it needs
 changing when Schwab arrives, the interface from Phase 2 was drawn in the wrong
 place and the fix belongs there.
 
-- [ ] A PVC on the default storage class, modest to start. The **lake root is a
+**Built 2026-09-02.** The acceptance criterion holds: nothing under
+`aerie_trading/collect/` or `aerie_trading/lake/` names a provider, and the one
+place that constructs one is `collect/__main__.py`'s `build_provider`, which
+Phase 8 extends by a branch. Six things came out of building it and are
+recorded in place rather than as a footnote: the default storage class is the
+wrong volume for this data (below), DuckDB renders timestamps in the *host's*
+timezone (below), cron cannot express the chain schedule (below), the closing
+board was being asked for at an instant the market was shut (below),
+`ingest_run` had to widen from a provider call to a collection run (below), and
+the chain backup rides the house's existing restic pair rather than a second
+one (below).
+
+- [x] A PVC on the default storage class, modest to start. The **lake root is a
       config parameter**, so relocating it later is a value change and not a
       code change.
-- [ ] Lake layout, written down before it has data in it, because rewriting a
+
+      `TRADING_LAKE_ROOT`, `/lake` in the cluster and a relative `.aerie-lake`
+      outside it — defaulted to something *wrong* for a pod on purpose, so a
+      volume that failed to mount fails visibly instead of quietly writing onto
+      an ephemeral root filesystem and reporting success for a week.
+
+      **Not the default storage class, and the deviation is the point.**
+      Longhorn's chart sets `defaultClass: false`, so an unqualified claim on
+      this cluster gets k3s' `local-path`: a directory on one node's disk, no
+      replica, ReadWriteOnce *and* node-pinned. That is wrong for this data
+      twice over — losing the node loses the lake, and the collectors could
+      only ever run on whichever node the volume first bound to, which is the
+      "special case a node" shape this house does not build. It is
+      `longhorn-r2` and **ReadWriteMany** instead: three workloads mount it
+      (two collector CronJobs, and Phase 4's engine), Longhorn serves RWX
+      through a share-manager over NFS, and `nfs-common` is already on every
+      node because `Initialize-NodeStorage.ps1` installs it for exactly this.
+      RWO would have worked by accident until the scheduler put the chain
+      collector somewhere else, at 15:00 on a weekday.
+
+      **32Gi, which is a measurement.** See the sizing gate below.
+- [x] Lake layout, written down before it has data in it, because rewriting a
       partition scheme is a migration:
       - `bars/{interval}/{symbol}/{year}/{month}.parquet` — OHLCV, UTC
         timestamps, adjusted and unadjusted close both stored.
@@ -775,37 +816,254 @@ place and the fix belongs there.
         and the greeks/IV as the provider reported them.
       - Every file carries the provider, the collection timestamp, and the
         `aerie-revision` of the collector that wrote it.
-- [ ] `lake.py` — a DuckDB reader with one job: turn a symbol and a time range
+
+      Exactly as written, in `lake/layout.py`, with two things the writing
+      decided. **The provenance is per row, not per file** — Parquet
+      dictionary-encodes a column holding one repeated value down to almost
+      nothing, and a file-level key/value carries no further than the file: the
+      moment the reader concatenates twelve partitions into one frame, "which
+      build wrote this row" would be a filesystem question again, which is the
+      one thing the reader exists to prevent. It is also what makes the
+      re-collection case legible — a month partition can legitimately hold rows
+      from two builds, and per-row stamps are the only way to tell which is
+      which. **And the column is `option_right`, never `right`**, matching the
+      Ledger: `RIGHT` opens a `RIGHT JOIN` in DuckDB exactly as it does in
+      Postgres, and one name across both means neither needs quoting in a
+      hand-written query during an incident.
+
+      A symbol is refused rather than sanitised if it could name a path outside
+      the root. It arrives from a configured watchlist or a provider response,
+      so it is not this process's own string; stripping the offending
+      characters would turn a typo into a partition that looks legitimate and
+      holds another instrument's data.
+- [x] `lake.py` — a DuckDB reader with one job: turn a symbol and a time range
       into a polars frame, hiding the partition layout from every caller. The
       engine must never learn the directory structure.
-- [ ] Idempotent writes. A re-run over the same window overwrites its own
+
+      A package, `lake/`, rather than one module — `layout.py`, `schema.py`,
+      `writer.py`, `reader.py` — split on how expensive each is to import
+      rather than on taste. `layout.py` is stdlib only, which is what lets the
+      *migration init container* reach `Settings` without paying for polars;
+      the same containment argument `providers/synthetic/__init__.py` makes,
+      and measured: the control plane loads neither polars nor duckdb, and only
+      the collector CLI loads polars.
+
+      **The finding worth the phase's time: DuckDB renders `TIMESTAMP WITH TIME
+      ZONE` in its *session* timezone, which defaults to the host's.** The same
+      query returns `datetime[us, America/New_York]` on a laptop and
+      `datetime[us, UTC]` on a cluster node. The instants agree and the dtypes
+      do not — which is a schema mismatch in a test that passes in CI, or a
+      comparison against a naive datetime that silently shifts by five hours.
+      `SET TimeZone='UTC'` at construction, and a test that sets `TZ` to a
+      third zone so a runner that happens to be UTC cannot hide it.
+
+      **The file list is computed, never globbed.** `layout.py` can name every
+      partition a request could touch, so the reader asks the filesystem only
+      whether those exist and hands DuckDB the survivors. That is what keeps
+      "nothing was collected here" an empty frame with the right columns rather
+      than the `IO Error: No files found` DuckDB raises for an empty glob —
+      which would make an un-collected range and a mistyped symbol the same
+      exception. It also means a writer's leftover temporary file can never be
+      swept into a read.
+
+      DuckDB hands rows to polars over the Arrow C stream PyCapsule interface,
+      so the two convert with no copy and **without pyarrow** — `relation.pl()`
+      goes through `pyarrow.Table` and would have put a 45 MB wheel in the
+      image to do a conversion both libraries already do natively.
+
+      **The cost that is not contained: polars and duckdb took the image from
+      356 MB to 617 MB.** Same shape as Phase 2's `exchange_calendars` finding
+      and the same answer — the containment is on which *processes* pay for it,
+      not on the image. Verified in the built image: the migration init
+      container imports `Settings` under its 256 Mi limit and loads none of
+      polars, duckdb, pandas or numpy; the control plane loads none of them
+      either, because collection health is a Postgres query rather than a lake
+      read. Only the collector CLI loads polars, and only the reader loads
+      duckdb. A second, smaller image for the migration would trade that
+      against two images to build, tag, scan and keep in step, which is the
+      worse side of the trade at this size.
+- [x] Idempotent writes. A re-run over the same window overwrites its own
       partition and does not append duplicates. Assume the collector will be
       re-run; make that boring.
-- [ ] **Market calendar** via `exchange_calendars`, consulted before every
+
+      **Two properties, two mechanisms, and conflating them would have got one
+      of them wrong.** Idempotency is an *anti-join*, not an overwrite: a bar
+      partition is a month and a collection is a session, so "overwrite the
+      partition" would delete twenty sessions to rewrite one, every weekday.
+      The rows the incoming frame names are replaced and everything else is
+      left alone, which makes the backfill and the incremental collector the
+      same code path with different arguments — and that is what the gate's
+      agreement test actually checks.
+
+      Crash-safety is an *atomic rename*: every write goes to a temporary file
+      in the destination's own directory, is fsynced, and is moved onto the
+      destination with `os.replace`. A process killed at any point leaves
+      either the previous file or the new one, never a truncated Parquet
+      footer — which matters more than it sounds, because a truncated footer
+      would take the partition out *permanently* rather than for one run: the
+      re-run would fail reading it.
+- [x] **Market calendar** via `exchange_calendars`, consulted before every
       collection. Do not collect through a holiday and record silence as data.
-- [ ] `collect/bars.py` — daily and minute bars: a backfill mode for whatever
+
+      And the distinction that rule needs to be useful: a *range* with no
+      sessions in it is not an error — a backfill over a holiday week is a
+      legitimate request with a legitimate empty answer — but a session inside
+      the range that produced no bars **is a gap** and is recorded as one.
+      "There was no market" and "there was a market and we have nothing from
+      it" are different mornings.
+- [x] `collect/bars.py` — daily and minute bars: a backfill mode for whatever
       depth the configured provider offers, and an incremental mode after each
       close.
-- [ ] `collect/chains.py` — **the flagship.** Snapshot the full chain for a
+
+      Three modes, not two. `incremental` is *today's* session and refuses a
+      day the market was shut; `latest` is the most recent session whenever it
+      was, which is catching up by hand; `backfill` is a range. The CronJob
+      runs `incremental` deliberately — a holiday run that quietly re-collected
+      yesterday would exit 0 and advance the last-success metric over a day
+      nothing was collected, which is the same failure the calendar rule exists
+      to prevent, wearing a different hat.
+
+      The provider is asked for **one month of one symbol at a time**, which is
+      the lake's own partition granularity: one call fills exactly one file, so
+      an interruption lands between whole partitions rather than inside one.
+- [x] `collect/chains.py` — **the flagship.** Snapshot the full chain for a
       configured watchlist on an interval through the session. Start with a
       small watchlist and a conservative interval; both are configuration, and
       widening them later costs nothing while starting late costs everything.
       It collects noise today and real chains the day Phase 8 lands, and the
       code does not know the difference — which is the whole point of building
       it now.
-- [ ] Scheduling: a `CronJob` per collector, or one scheduler process — chosen
+
+      Thirty minutes and the four option-bearing test tickers, both
+      configuration (`TRADING_COLLECTION__*`). Two decisions the writing
+      forced:
+
+      **A watchlist entry with no board is a gap, not a failure.** The other
+      three names are still snapshotted and the missing one is recorded on the
+      run. Raising would mean one stale watchlist entry stops collecting
+      everything else for the rest of the session, which is a far larger loss
+      than the thing it reports. Phase 2 put a symbol with no options board in
+      the default universe precisely so this path is met here rather than on a
+      Schwab-approval morning — and it is met, in a test.
+
+      **The closing board is taken at 15:59, not at 16:00, and that was a
+      defect before it was a decision.** `MarketSession.contains` is half-open,
+      so the schedule's closing snapshot was asking the provider for an instant
+      the market was not open for: every session's last board was a refusal
+      recorded as a gap. Caught by the full-session gate test rather than by
+      inspection. 15:59 is also the right answer rather than merely a working
+      one — it is the instant the session's last minute bar opens at, so the
+      closing board and the closing bar describe the same minute, which is what
+      makes an as-of join between them mean anything at Phase 10.
+- [x] Scheduling: a `CronJob` per collector, or one scheduler process — chosen
       on which is easier to reason about when a collection is missed, not on
       elegance. The missed-collection case is the one that matters.
-- [ ] Collection health is visible: rows written, gaps detected, last successful
+
+      **CronJobs**, on that tie-breaker and no other. A missed run is a Job
+      that does not exist, and `kube_cronjob_status_last_successful_time` is
+      already scraped; a scheduler process's missed tick is invisible, because
+      the thing that would have logged it was not running. The schedule also
+      survives the process — a scheduler restarted at 15:59 has to decide for
+      itself whether it already ran the 15:30 collection, and the kubelet has
+      that written down — and `concurrencyPolicy: Forbid` is a field rather
+      than a lock.
+
+      **What it costs is schedule expressiveness, and the bill came due
+      immediately: cron cannot say "every thirty minutes from 09:30 to
+      15:59".** `*/30 9-16` fires three times a day outside the session and
+      still never captures the closing board. So the chain collector is *three*
+      CronJobs — open, interval, close — each firing only inside a regular
+      session, for thirteen snapshots a day and zero routine refusals. A
+      refusal should mean something, and a schedule producing three failed Jobs
+      a day by construction is one whose failures nobody reads.
+
+      `timeZone: America/New_York`, which is the only use of that field in
+      `deploy/`. Everything else in the tree is scheduled against other things
+      on these nodes and stays in UTC for the stagger; these are scheduled
+      against *the exchange*, whose close moves an hour in UTC twice a year and
+      never moves in its own zone. A UTC expression would have collected an
+      hour early for four months of the year — which for `--mode incremental`
+      means collecting a session that is still open.
+
+      A market holiday still produces fourteen failed Jobs, because cron knows
+      about weekdays and not about Good Friday. That is stated in the manifest
+      rather than left to be discovered, and nothing alerts on it: the alerts
+      read the Ledger-derived series, which know what a session is.
+- [x] Collection health is visible: rows written, gaps detected, last successful
       run per collector, all on `/metrics`, with an alert for a session that
       collected nothing.
-- [ ] A backup path for `chains/` specifically — the one dataset here that
+
+      **Derived at scrape time from `ingest_run`, not pushed by the
+      collectors**, and the obvious implementation cannot work: a collector is
+      a CronJob pod that runs for thirty seconds and exits, so there is nothing
+      alive to scrape, and a push gateway would be a second piece of
+      infrastructure to run and to reason about staleness in. The Ledger
+      already has a durable row per run, the control plane is already scraped,
+      and the join between them is one query. Nothing new is deployed to make
+      collection health visible.
+
+      The consequence is that these series are exactly as available as the
+      trading database — so there is a `trading_collection_up` gauge beside
+      them, and a scrape that cannot reach the Ledger answers `0` rather than
+      failing. A failed scrape looks identical to a dead pod, and every
+      staleness alert would fire at once saying the wrong thing.
+
+      The alert the phase asks for is `TradingCollectionEmpty`, on
+      `trading_collection_last_success_rows == 0`: a run that *succeeded* and
+      wrote nothing is invisible in every other series — the Job exited zero,
+      the Job history is green, the last-success timestamp is current, and the
+      lake gained nothing.
+
+      **`ingest_run` widened, and the plan should say so.** Phase 1 described
+      it as "one call out to a provider". A row is now one *collection run*,
+      which may make many provider calls: a chain snapshot of a four-name
+      watchlist is four calls, thirteen times a session, five days a week —
+      a thousand rows a month recording something nobody asks a question at
+      that granularity about. Migration `0003_ingest_run_result` adds
+      `gap_count` (the one fact that is aggregated, so a plain integer rather
+      than a `jsonb_array_length`) and `result` (the counterpart to `request`:
+      that column says what was asked for, this one says what came back and
+      what was missing).
+- [x] A backup path for `chains/` specifically — the one dataset here that
       cannot be re-collected. **Built now and left running against synthetic
       data**, so that the first chain snapshot worth keeping is already inside a
       backup path that has been exercised, rather than being the run that tests
       it. Synthetic chains are worthless and backing them up is nearly free;
       the point is that the mechanism is proven before the data is precious.
-- [ ] **Gate:** a full simulated session collected end to end with no gaps · a
+
+      A nightly CronJob at 23:30 UTC running **Aerie's own backup image**
+      against a new generic script, `containers/backup/scripts/path-backup.sh`,
+      which takes a path, a snapshot host and a tag and knows nothing about
+      trading. That is the platform contract working rather than a coupling —
+      the silo consumes Aerie's backups the same way it consumes CNPG and
+      Traefik — and it is the productization story: "I have a PVC holding
+      something that cannot be regenerated, put it in the backup path" now has
+      an answer that is not trading-specific.
+
+      **The same two restic repositories the house already has**, not a new
+      pair. A second pair would be two more things to create, scope, pay for
+      and rehearse restores from, and one credential already reaches both.
+      Reaching the local SMB repository from a second namespace needs a second
+      `PersistentVolume` object with its own `volumeHandle` — two PVs sharing a
+      handle are one volume to the CSI layer, and the second mount silently
+      inherits the first one's options.
+
+      **Retention is applied by the aerie-backup job, deliberately.** `restic
+      forget` groups by host and paths; these snapshots carry their own host
+      (`trading`) and path, so they form their own group and that job's
+      7/4/12 policy lands on them. Retention across a repository must be owned
+      by exactly one job — two `forget --prune` writers is how a snapshot
+      disappears with both jobs reporting success — and 7/4/12 is the right
+      policy for an *append-only* tree: nothing is ever deleted from `chains/`,
+      so the newest snapshot always contains every file, and ageing out an old
+      one discards a view of the tree rather than the only copy of anything in
+      it. The day something does delete from `chains/`, that reasoning stops
+      holding, and it is written in the manifest so it can be noticed.
+
+      The credential arrives as a `trading` target block on each of the three
+      `/aerie/backup/*` parameters in `scripts/secrets/parameters.json`;
+      `New-ExternalSecrets.ps1 -Check` is in sync.
+- [x] **Gate:** a full simulated session collected end to end with no gaps · a
       DuckDB query returns a chain snapshot as a polars frame in reasonable time
       · a deliberately killed mid-collection run leaves no duplicate rows on
       re-run · a collection attempt on a market holiday is refused rather than
@@ -813,7 +1071,54 @@ place and the fix belongs there.
       network · lake size per session measured and extrapolated **at the row
       counts a real chain implies, not the synthetic watchlist's**, so the PVC's
       lifetime is a number rather than a hope.
-- [ ] **Commit:** "Trading: a lake, and the machinery to fill it"
+
+      All six pass in `make trading-test`, with no cluster and no network. Each
+      is a named test rather than an inspection:
+
+      - *A full session, no gaps.* Bars and chains both, end to end into the
+        lake and back out through the reader. This is the test that caught the
+        closing-board defect above.
+      - *A chain snapshot in reasonable time.* Measured at roughly 5 ms; the
+        bound is 1 s, because what it exists to catch is a change that turns a
+        named-file read into a directory walk — orders of magnitude, not
+        percentages.
+      - *Killed mid-collection.* A four-symbol collection is interrupted while
+        writing the third partition and then re-run from the start; afterwards
+        every partition holds exactly one copy of every bar. Two narrower tests
+        beside it assert the previous file is still readable and that no
+        `.tmp` files are left in the tree.
+      - *A holiday is refused.* Checked at both collectors and on both Good
+        Friday and Christmas, and the assertion is that **no run was recorded
+        at all** — a refusal is not a collection that failed.
+      - *No network.* Asserted rather than assumed from CI's environment: every
+        socket constructor is replaced with one that raises. This is the test
+        that will fail the day somebody wires an HTTP client into the chain
+        collector without noticing the suite is meant to be offline.
+      - *Lake size.* `tests/test_lake_size.py` measures bytes-per-row against a
+        board of ~6,500 contracts — a real board's size, not the default
+        universe's 204, because Parquet's fixed footer dominates a small file
+        and would flatter the figure threefold. **34.6 bytes per contract row**,
+        extrapolated to a reference watchlist of two index-scale boards and
+        eight large-cap ones at fourteen snapshots a session, 252 sessions a
+        year: **5.75 GiB a year, so the 32Gi volume holds 5.6 years.** The test
+        asserts that figure clears three years, so widening the watchlist far
+        enough fails CI rather than filling a volume quietly, and it prints the
+        number under `pytest -s` so the manifest can be re-derived.
+
+      **Two things need the cluster and are not claimed here:** that the RWX
+      volume actually binds and that all four CronJobs fire on their schedules.
+      What was verified in their place: every kustomization under `deploy/`
+      builds, every substitution token resolves against `cluster-config.json`,
+      the five `trading-boundary` guards pass, `New-ExternalSecrets.ps1 -Check`
+      is in sync, and the collector CLI's argument grammar — the contract
+      between the manifests and the package — is tested including the refusal
+      exit code. The image was built and exercised with `--network none`: it
+      collects a session of bars and a chain snapshot into a lake and reads
+      both back with the right dtypes, `alembic upgrade head --sql` renders the
+      new migration from inside it under a 256 Mi limit, and
+      `python -m aerie_trading.collect chains --session <a holiday>` exits 2
+      with a correctly-shaped JSON log line.
+- [x] **Commit:** "Trading: a lake, and the machinery to fill it"
 
 ### [ ] Phase 4 — The engine, proven on equities
 

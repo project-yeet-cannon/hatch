@@ -1,0 +1,68 @@
+# The trading plan (docs/plans/trading.md) Phase 3 - the Lake itself.
+#
+# What lives here and why it is not in Postgres is that plan's *Why the lake is
+# not in Postgres* section: Parquet on a volume, read by DuckDB, holding the
+# one dataset in this silo that cannot be regenerated. The Ledger next door
+# (../database/) holds what a query needs to be transactional about; this holds
+# what a scan needs to be fast over.
+#
+# ---------------------------------------------------------------------------
+# Two deviations from the phase's bullet, both deliberate
+#
+# *"A PVC on the default storage class."* The default class on this cluster is
+# `local-path` - Longhorn's chart sets `defaultClass: false`
+# (../../infrastructure/controllers/longhorn.yaml), so k3s' own provisioner is
+# what an unqualified claim gets. That is the wrong volume for this data twice
+# over: it is a directory on one node's disk with no replica, so losing that
+# node loses the lake outright; and it is ReadWriteOnce *and* node-pinned, so
+# the collectors could only ever run on the node the volume was first bound to.
+# `longhorn-r2` is the class the storage split
+# (../../infrastructure/config/longhorn-storageclasses.yaml) already defines
+# for "bulk data, two replicas, loss is recoverable but not free", which is
+# exactly this.
+#
+# *ReadWriteMany.* Three workloads mount this: the two collector CronJobs next
+# door, and - from Phase 4 - whatever runs a backtest. Longhorn serves RWX
+# through a share-manager pod over NFS, which is why
+# scripts/k3s/Initialize-NodeStorage.ps1 installs `nfs-common` on every node
+# alongside `open-iscsi`. RWO would work today, by accident, only while every
+# pod that mounts it lands on one node - and the first time the scheduler put
+# the chain collector somewhere else, it would sit in ContainerCreating with a
+# multi-attach error at 15:00 on a weekday.
+#
+# ---------------------------------------------------------------------------
+# 32Gi, which is a measurement rather than a round number
+#
+# tests/test_lake_size.py measures bytes-per-row against a chain snapshot of
+# ~6,500 contracts - a board the size a liquid underlying actually carries,
+# not the four-name synthetic universe's 204 - and extrapolates to a reference
+# watchlist of two index-scale boards and eight large-cap ones, snapshotted
+# fourteen times a session, 252 sessions a year. That comes to **5.75 GiB a
+# year**, so this volume holds **5.6 years** of it. Run `pytest -s
+# tests/test_lake_size.py` to re-derive the figure; that test also asserts the
+# capacity below clears three years, so widening the watchlist far enough will
+# fail CI rather than fill a volume quietly.
+#
+# The synthetic period between now and Phase 8 costs well under a gigabyte a
+# year, which the same test asserts - nobody has to hurry to turn the
+# collectors off.
+#
+# A Longhorn volume is sparse, so this is a ceiling and not an allocation, and
+# `longhorn-r2` carries allowVolumeExpansion - growing it is an edit to the
+# number below plus the one in that test.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: trading-lake
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: trading
+    app.kubernetes.io/component: lake
+    app.kubernetes.io/part-of: aerie
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: longhorn-r2
+  resources:
+    requests:
+      storage: 32Gi

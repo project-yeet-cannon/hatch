@@ -14,9 +14,11 @@
 # already reaches all of them, so the blast radius is identical either way.
 #
 # Note what this covers and what it does not. The Ledger is in the backup path;
-# the Lake (Phase 3 - Parquet on a PVC) deliberately is not, and gets its own
-# durability story sized when it is big enough to matter. That asymmetry is the
-# whole argument of "Why the lake is not in Postgres" in the plan.
+# the Lake (Phase 3 - Parquet on a PVC) deliberately is not, and has its own
+# durability story: ../lake/chains-backup-cronjob.yaml writes the option-chain
+# subtree to the house's restic repositories nightly, and leaves `bars/` out
+# because a backfill already protects those. That asymmetry is the whole
+# argument of "Why the lake is not in Postgres" in the plan.
 apiVersion: barmancloud.cnpg.io/v1
 kind: ObjectStore
 metadata:
