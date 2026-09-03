@@ -371,6 +371,30 @@ class RunStatus(enum.StrEnum):
         return self in (RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED)
 
 
+class RunKind(enum.StrEnum):
+    """What sort of work a ``run`` row is, and therefore how a worker executes it.
+
+    Two kinds on one queue rather than two queues, and the argument is the one
+    ``runs/queue.py`` already makes about not splitting the ``run`` table: a
+    second queue would need its own claim, its own lease, its own reaper and
+    its own depth metric, and every one of those is a mechanism that can be
+    wrong in a way the first one is not.
+
+    ``BACKTEST``
+        one strategy at one parameter set over one window. What Phase 5 built,
+        and what every row in a sweep's grid is.
+    ``WALK_FORWARD``
+        Phase 6's evaluation of a *sweep*: the whole grid, walked over rolling
+        folds, parameters chosen on each train window and one account carried
+        through the tests. It has no ``param_set_id`` because it does not have
+        one parameter set - it has the sequence it chose, which lands in
+        ``walk_forward_fold``.
+    """
+
+    BACKTEST = "backtest"
+    WALK_FORWARD = "walk_forward"
+
+
 class Strategy(Base):
     """One trading rule this build ships - the Ledger's side of ``StrategySpec``.
 
@@ -475,14 +499,28 @@ class Sweep(Base):
     # it is read one row at a time by a person asking "what exactly did we ask
     # for", and nothing queries into it.
     spec: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
-    # How many runs were enqueued. The denominator of every progress bar, and
-    # Phase 6's selection-accounting divisor. Written once, at enqueue.
+    # How many runs were enqueued. The denominator of every progress bar.
+    # Written once, at enqueue, and it counts Phase 6's walk-forward row as
+    # well as the grid - a progress bar whose denominator omitted a run that
+    # is on the queue would sit at 19/19 with work outstanding.
     total_runs: Mapped[int] = mapped_column(Integer, nullable=False)
+    # How many parameter sets the grid expanded to. Phase 6's
+    # selection-accounting divisor, and deliberately *not* `total_runs`: the
+    # walk-forward row is not a trial, and counting it would deflate every
+    # sibling Sharpe by the amount one extra draw is worth. Carried on the
+    # sweep rather than counted at scoring time because a worker that had to
+    # count its siblings would be reading a table its peers are still writing.
+    trials: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
     aerie_revision: Mapped[str | None] = mapped_column(String(40))
     created_at: Mapped[datetime] = _utcnow()
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    __table_args__ = (CheckConstraint("total_runs >= 0", name="total_runs"),)
+    __table_args__ = (
+        CheckConstraint("total_runs >= 0", name="total_runs"),
+        CheckConstraint("trials >= 0", name="trials"),
+    )
 
 
 class Run(Base):
@@ -518,6 +556,16 @@ class Run(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
 
     # -- what to run --------------------------------------------------------
+    # `backtest` or `walk_forward`; see RunKind. Defaulted in the database as
+    # well as in Python, because the migration that added it had to give every
+    # existing row an answer and "the kind everything was before Phase 6" is
+    # the only correct one.
+    kind: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=RunKind.BACKTEST.value,
+        server_default=text("'backtest'"),
+    )
     sweep_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("sweep.id", ondelete="RESTRICT"),
@@ -527,10 +575,14 @@ class Run(Base):
         ForeignKey("strategy.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    param_set_id: Mapped[int] = mapped_column(
+    # Nullable from Phase 6, and the CHECK below is what keeps that from
+    # weakening the ordinary case: a backtest must have one and a walk-forward
+    # must not, which is stronger than the NOT NULL it replaced because it also
+    # refuses the row that would otherwise be silently meaningless - a
+    # walk-forward pretending to be a single parameter set.
+    param_set_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("param_set.id", ondelete="RESTRICT"),
-        nullable=False,
     )
     # Which lake rows this reads, in the only durable form there is: the source
     # that wrote them. RESTRICT for the reason `ingest_run` uses it - deleting
@@ -554,6 +606,14 @@ class Run(Base):
     # rather than referenced because Phase 6 re-scores a run at a higher cost
     # assumption, and the two rows differ in nothing else.
     costs: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+
+    # Which part of [window_start, window_end) this run's parameters were not
+    # chosen on. Both null - the ordinary sweep run - means none of it, which
+    # is a valid run that can never be a headline number
+    # (`honesty/presentation.py` is where that is enforced rather than
+    # asserted). A walk-forward sets them to the span its test folds covered.
+    oos_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    oos_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # -- where it is -------------------------------------------------------
     status: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -614,6 +674,33 @@ class Run(Base):
         CheckConstraint("starting_cash > 0", name="starting_cash"),
         CheckConstraint("window_end > window_start", name="window"),
         CheckConstraint("cardinality(symbols) > 0", name="symbols"),
+        CheckConstraint("kind IN ('backtest', 'walk_forward')", name="kind"),
+        # The two kinds, told apart by the one column that distinguishes them.
+        # Written as an equivalence rather than as two implications so that
+        # neither direction can be added without the other.
+        CheckConstraint(
+            "(kind = 'walk_forward') = (param_set_id IS NULL)",
+            name="param_set_by_kind",
+        ),
+        # A walk-forward evaluates a *sweep's* grid, so it cannot exist without
+        # one. An ordinary backtest can: an operator running a single set of
+        # parameters by hand is a run with no sweep.
+        CheckConstraint(
+            "kind <> 'walk_forward' OR sweep_id IS NOT NULL",
+            name="walk_forward_has_a_sweep",
+        ),
+        CheckConstraint(
+            "(oos_start IS NULL) = (oos_end IS NULL)",
+            name="oos_window",
+        ),
+        # Inside the run's own window, and a window rather than an instant. A
+        # held-out span that reached outside what the run actually read would
+        # be a claim about data the run never saw.
+        CheckConstraint(
+            "oos_start IS NULL OR ("
+            " oos_start >= window_start AND oos_end <= window_end AND oos_end > oos_start)",
+            name="oos_within_window",
+        ),
         # The claim query, and the reason this queue needs no second table.
         # Partial, because the queued rows are a shrinking minority of a table
         # that grows forever: a full index on `status` would be almost entirely
@@ -740,3 +827,77 @@ class RunMetric(Base):
     )
     name: Mapped[str] = mapped_column(String(48), primary_key=True)
     value: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+
+
+class WalkForwardFold(Base):
+    """What one fold of one walk-forward chose, and what the choice then did.
+
+    docs/plans/trading.md Phase 6 asks for a walk-forward number and Phase 7
+    asks for a run detail *"so a result can be reproduced"*. This table is
+    where those two meet: the stitched figure lives in ``run_metric`` like
+    every other number, and the sequence of parameter sets that produced it -
+    which is the actual content of a walk-forward - lives here, one row per
+    fold, pointing at real ``param_set`` rows.
+
+    **``param_set_id`` rather than a JSONB copy of the parameters.** A fold's
+    winner is a point in the same space every sibling run occupies, and the
+    interesting query is exactly the join that makes possible: *did the fold
+    that chose these parameters also run them as an ordinary backtest, and did
+    the two agree*. A copied blob answers it with a comparison of two
+    renderings of the same numbers.
+
+    **``train_objective`` beside ``ending_equity`` is the diagnosis.** High
+    objectives on every train window and returns that scatter around nothing on
+    every test window is what overfitting looks like when you can see both
+    columns, and it is invisible when you can only see the stitched total.
+    """
+
+    __tablename__ = "walk_forward_fold"
+
+    run_id: Mapped[int] = mapped_column(
+        BigInteger,
+        # CASCADE, like `trade` and for the same reason: a fold is part of one
+        # run's output rather than an observation of the world, and orphaned
+        # folds would be rows nothing can interpret.
+        ForeignKey("run.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    #: Position in the schedule, from zero. Fold order is chronological and
+    #: meaningful - the account is carried forward through it - so this is part
+    #: of the key rather than an ordering hint.
+    fold: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    train_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    train_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    test_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    test_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    param_set_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("param_set.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    #: How many candidates produced a score on this fold's train window. Fewer
+    #: than the grid means some were skipped - a lookback longer than the train
+    #: window, a run with no variance to take a Sharpe of - and a fold that
+    #: chose from three of twenty candidates is a fold whose winner means much
+    #: less than the count on the sweep suggests.
+    candidates: Mapped[int] = mapped_column(Integer, nullable=False)
+    train_objective: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    #: Unconstrained NUMERIC for the reason ``trade`` gives: this is money the
+    #: engine accounted for exactly, and a scale here would round it on the way
+    #: into the one table a person reconciles a walk-forward against by hand.
+    starting_cash: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    ending_equity: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("fold >= 0", name="fold"),
+        CheckConstraint("candidates > 0", name="candidates"),
+        CheckConstraint("train_end > train_start", name="train_window"),
+        CheckConstraint("test_end > test_start", name="test_window"),
+        # A fold trains on history that ends where its test begins. Stated as a
+        # constraint because the one bug this table can hide is a schedule that
+        # leaked a test bar into its own train window, and a leak of one bar is
+        # invisible in every number downstream.
+        CheckConstraint("test_start >= train_end", name="train_precedes_test"),
+    )

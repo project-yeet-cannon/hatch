@@ -1,13 +1,20 @@
 # Trading — a strategy laboratory that rides Aerie as a platform
 
-**Status:** Phases 0b through 5 built on 2026-09-02; Phase 0a is waiting on
-Schwab. What is left of Phase 1 is its gate — five checks that need the cluster
-— plus one line an operator adds to the site repository, both written out under
-that phase. Phase 2's and Phase 4's gates passed in full. Phase 3's passed but
-for the two checks that need a running cluster to observe, and Phase 5's but for
-the one that does; all three are cases of the same argument for having built
-them without one, and Phase 5 records what was measured in place of the check it
-could not make.
+**Status:** Phases 0b through 5 built on 2026-09-02 and Phase 6 on 2026-09-03;
+Phase 0a is waiting on Schwab. What is left of Phase 1 is its gate — five checks
+that need the cluster — plus one line an operator adds to the site repository,
+both written out under that phase. Phase 2's, Phase 4's and Phase 6's gates
+passed in full. Phase 3's passed but for the two checks that need a running
+cluster to observe, and Phase 5's but for the one that does; both are cases of
+the same argument for having built them without one, and Phase 5 records what
+was measured in place of the check it could not make.
+
+Phase 6's gate passed in a form its own bullet had not anticipated, and the
+difference is written out there: the sweep over zero-alpha data does not
+manufacture a *positive* Sharpe to be deflated, it manufactures a **relative**
+one — best-of-fifty-seven beating the median of the same sweep by 0.39 — and
+the gate is asserted against that gap rather than against a sign, which is the
+stronger form of the same claim.
 
 Phase 5 is also where the suite stopped being able to run with no database at
 all: the run queue is a Postgres queue, so `ci.yml`'s trading lane now carries a
@@ -1586,7 +1593,7 @@ needed a real Postgres for the first time in the silo's life (below).
       time Prometheus arrives, so the durable row is the metric.
 - [x] **Commit:** "Trading: sweeps, and a queue that survives a lost worker"
 
-### [ ] Phase 6 — The honesty layer
+### [x] Phase 6 — The honesty layer
 
 **Ships:** results that can be trusted, or at least whose untrustworthiness is
 visible. This phase adds no capability and is the most valuable one in the plan.
@@ -1595,39 +1602,97 @@ By this point Phase 5 can produce ten thousand results, some of which will look
 excellent for no reason at all. Everything here exists to keep that from being
 mistaken for a finding.
 
-- [ ] Every run declares **in-sample and out-of-sample windows** in its record.
+- [x] Every run declares **in-sample and out-of-sample windows** in its record.
       A run with no out-of-sample window is a valid object that can never be a
-      headline number.
-- [ ] **Walk-forward:** rolling train/test windows, parameters chosen on each
+      headline number. · `run.oos_start` / `run.oos_end`, both null on an
+      ordinary sweep run.
+- [x] **Walk-forward:** rolling train/test windows, parameters chosen on each
       train window, results stitched from the test windows only. This is the
       number the leaderboard sorts on.
-- [ ] **Selection accounting:** a run knows how many siblings its sweep
-      produced. Report an adjusted figure alongside the raw Sharpe — a
-      deflated Sharpe or an equivalent multiple-testing correction — so
-      "best of 10,000" is visibly different from "best of 3."
-- [ ] **Baselines**, computed over the identical window and shown next to every
-      result: buy-and-hold on the underlying, and buy-and-hold on a broad index.
-      A strategy that loses to buying the index has told you something, and it
-      should not take arithmetic to notice.
-- [ ] Transaction-cost sensitivity: every result re-scored at a higher cost
-      assumption. A strategy that only works at zero slippage is identified as
-      such automatically.
-- [ ] The API **refuses** to serve an in-sample-only figure in a field labeled
-      as performance. The guard is in the serializer, not in a convention, and
-      not in the UI.
-- [ ] **Gate:** a deliberately overfit strategy — parameters fit to noise —
-      ranks poorly on the leaderboard, and its in-sample and walk-forward
-      numbers visibly diverge. If it ranks well, this phase is not done.
 
-      **The synthetic source makes this gate exact rather than impressionistic.**
-      Phase 2's generator has zero alpha by construction and asserts it, so
-      *every* result over synthetic data is a false positive by definition, and
-      the best of a large sweep over it is the strongest false positive the
-      machinery can manufacture. Sweep it deliberately, take the winner, and
-      require that the walk-forward number and the selection-adjusted figure
-      both collapse toward nothing. This is a measurement with a known correct
-      answer, which is not a thing the honesty layer could otherwise have had.
-- [ ] **Commit:** "Trading: results that admit what they are"
+      **It is one item of work on the existing queue, not a coordinated
+      batch**, and that decided the shape of the whole phase. The obvious
+      design enqueues each train fold as a sweep, waits for it, picks a winner
+      and enqueues the test run — which needs a coordinator that knows when a
+      fold finished, retries the wait, and survives its own restart. All of
+      that machinery would exist to arrange backtests that are pure functions
+      of a history already in memory. So every sweep enqueues **one extra
+      row**, `kind = 'walk_forward'`, which claims a lease like anything else
+      and does the whole evaluation in process. It scales by there being more
+      workers and fails by its lease expiring, which is to say it has no
+      failure modes of its own.
+
+      **The account is carried rather than stitched.** Each fold's test picks
+      up with the cash the previous one ended with, so the result is one
+      continuous equity curve and `compute_metrics` reads it with no special
+      case — the plan's "stitched from the test windows only" falls out of the
+      arithmetic instead of being performed on it. What that costs is written
+      out in `honesty/walkforward.py`: the fold boundary is a liquidation and
+      re-entry charged nothing, four times in a five-fold run.
+- [x] **Selection accounting:** a run knows how many siblings its sweep
+      produced (`sweep.trials`, carried on the claim rather than counted, since
+      a worker counting its siblings would be reading a table its peers are
+      still writing). Reported as three metrics — the trial count, the Sharpe
+      the best of that many trials earns by luck alone over that many bars, and
+      the difference.
+
+      **It is the haircut form, not the full deflated Sharpe, and the file says
+      why at length.** The full Bailey/López de Prado figure needs the variance
+      of the Sharpes *across* trials, which a worker recording one run does not
+      have — its siblings may be unfinished or cancelled — so the metric could
+      only be written after a sweep completed, which is exactly the leaderboard
+      it needs to be visible on by default. The null used instead (independent
+      trials, iid returns) is optimistic on both counts, so the haircut
+      understates rather than flatters.
+- [x] **Baselines**, computed over the identical window and shown next to every
+      result: buy-and-hold on the underlying, and buy-and-hold on a broad
+      index. Computed per run and stored on the row rather than joined to a
+      sibling baseline run — the join is cheaper and is the wrong trade, since
+      a baseline living on another row is one a failed sibling can remove from
+      a leaderboard, and *"it should not take arithmetic to notice"* is a claim
+      about the row. Memoized per history, so a thousand-run sweep pays for its
+      baselines once.
+
+      **"A broad index" resolves to every symbol this installation collects**
+      when none is named, which is the broadest thing a lake with no index in
+      it actually has. A run whose universe is already that whole set sees its
+      two baselines agree — honest and visible, rather than a second number
+      invented to look like an independent check.
+- [x] Transaction-cost sensitivity: every result re-scored at a higher cost
+      assumption (every rate multiplied, not just slippage — a commission
+      schedule is as much of an assumption as a spread is). It roughly doubles
+      a sweep's compute and is on by default anyway, because an opt-in check is
+      one nobody opts into.
+- [x] The API **refuses** to serve an in-sample-only figure in a field labeled
+      as performance. The guard is in the serializer, not in a convention, and
+      not in the UI. · `honesty/presentation.py`. `InSampleFigure` deliberately
+      does not derive from `ValueError`, so pydantic cannot fold the refusal
+      into an ordinary validation error that a route wrapping itself in
+      `except ValidationError` would silently switch off.
+- [x] **Gate:** a deliberately overfit strategy — parameters fit to noise —
+      ranks poorly on the leaderboard, and its in-sample and walk-forward
+      numbers visibly diverge. · `tests/test_honesty_walk_forward.py`.
+
+      **The synthetic source made this gate exact, as predicted — but the false
+      positive it manufactures is a *relative* one, which was measured rather
+      than assumed.** The gate was first written expecting the winner of a wide
+      sweep over zero-alpha data to post a *positive* Sharpe. It does not: all
+      fifty-seven surviving crossovers score between −0.90 and −0.18, because a
+      trend follower on a driftless walk is out of the market half the time and
+      pays for every whipsaw, and no amount of parameter search rescues that.
+
+      The selection effect is nonetheless exactly where the plan said it would
+      be. The best of the sweep beats the **median of the same sweep** by about
+      0.39 of a Sharpe, and every point of that gap is selection rather than
+      skill. So the gate is written against the gap rather than the sign, which
+      is the stronger form of the same claim — machinery that only noticed
+      inflated figures when they were above zero would be blind to a
+      leaderboard sorted within one strategy, which is the common case. Three
+      assertions carry it: the winner beats the typical member of its own
+      sweep, the walk-forward figure does not inherit that gap and lands
+      **below that median**, and the selection-adjusted figure lands at or
+      below zero.
+- [x] **Commit:** "Trading: results that admit what they are"
 
 ### [ ] Phase 7 — The control panel
 

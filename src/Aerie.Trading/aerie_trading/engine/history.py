@@ -116,6 +116,36 @@ class BarHistory:
             _cutoffs=cutoffs,
         )
 
+    def between(self, start: datetime, end: datetime) -> BarHistory:
+        """The same bars, restricted to ``[start, end)``.
+
+        Phase 6's walk-forward is what this exists for: a fold is the identical
+        history over a shorter span, and re-reading the lake once per fold
+        would turn a five-fold evaluation of a grid into five times the DuckDB
+        work over Parquet that has not changed. Slicing an object already in
+        memory is the same answer at a fraction of the cost, and - the part
+        that matters more - it is provably the same *data*, because the bars
+        are the ones already loaded rather than a second read that a
+        re-collected partition could have moved underneath.
+
+        Half-open on purpose, matching ``load_history``: a fold boundary is a
+        date that belongs to exactly one of the two folds it separates, and a
+        closed interval would put the boundary bar in both - which is a
+        lookahead leak of exactly one bar, in the one place the whole phase
+        exists to prevent one.
+        """
+        kept = [
+            bar
+            for series in self._series.values()
+            for bar in series
+            if start <= bar.timestamp < end
+        ]
+        if not kept:
+            raise LookupError(
+                f"this history holds no bars in [{start.isoformat()}, {end.isoformat()})"
+            )
+        return BarHistory.from_bars(kept)
+
     # -- reading, always sliced to the cursor --------------------------------
 
     def __len__(self) -> int:

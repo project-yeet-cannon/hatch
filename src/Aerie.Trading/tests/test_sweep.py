@@ -14,6 +14,7 @@ from typing import cast
 import pytest
 from sqlalchemy.orm import Session
 
+from aerie_trading.honesty.config import WalkForwardSpec
 from aerie_trading.providers.base import Interval
 from aerie_trading.runs.costs import CostSpec
 from aerie_trading.runs.demo import DEMO_SWEEPS, DEMO_SYMBOLS, DEMO_WINDOW, demo_sweeps
@@ -270,3 +271,37 @@ def _no_session() -> Session:
     # Session, and telling the checker it is one is how a test asserts that
     # nothing calls it.
     return cast(Session, _Explodes())
+
+
+# -- Phase 6's extra row ----------------------------------------------------
+
+
+def test_a_sweep_puts_one_more_row_on_the_queue_than_it_has_trials() -> None:
+    plan = plan_sweep(spec())
+
+    # The grid is what an operator confirms; the walk-forward beside it is
+    # machinery. Asking someone to confirm 5 for a grid they can see is four
+    # points would make the handshake a number to copy rather than to read.
+    assert plan.total == 4
+    assert plan.rows == 5
+
+
+def test_a_sweep_that_declines_to_be_evaluated_says_so_in_its_row_count() -> None:
+    plan = plan_sweep(spec(walk_forward=None))
+
+    assert plan.rows == plan.total
+
+
+def test_the_plan_line_names_the_walk_forward_an_operator_is_about_to_launch() -> None:
+    assert "5-fold walk-forward" in plan_sweep(spec()).describe()
+    assert "walk-forward" not in plan_sweep(spec(walk_forward=None)).describe()
+
+
+def test_the_demo_carries_the_installations_walk_forward_schedule() -> None:
+    # The seeded leaderboard's honest number has to be computed the same way as
+    # every sweep an operator launches afterwards, or the top row and the rows
+    # beneath it are not comparable.
+    schedule = WalkForwardSpec(folds=4, train_multiple=2)
+    for demo in demo_sweeps(("ZVZZT",), schedule):
+        assert demo.walk_forward == schedule
+        assert demo.symbols == ("ZVZZT",)

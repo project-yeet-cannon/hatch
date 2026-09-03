@@ -133,6 +133,8 @@ def _apply_alter(schema: Schema, statement: str) -> None:
         )
     elif action.startswith("ADD CONSTRAINT "):
         definitions.add("CONSTRAINT " + action[len("ADD CONSTRAINT ") :])
+    elif action.startswith("ALTER COLUMN "):
+        _apply_alter_column(definitions, action[len("ALTER COLUMN ") :], statement)
     elif action.startswith("DROP CONSTRAINT "):
         name = action[len("DROP CONSTRAINT ") :]
         definitions.difference_update(
@@ -147,6 +149,33 @@ def _apply_alter(schema: Schema, statement: str) -> None:
             f"this test does not know how to fold {statement!r} into a schema."
             " Teach it rather than letting it pass by ignoring the statement."
         )
+
+
+def _apply_alter_column(definitions: set[str], action: str, statement: str) -> None:
+    """Fold a nullability change into the column definition it edits.
+
+    The only ``ALTER COLUMN`` this schema has needed so far, and it is taught
+    here rather than skipped because a column that lost its NOT NULL in a
+    migration and kept it in the models is exactly the divergence this file
+    exists to see - and the divergence would be invisible if the statement
+    were ignored, since every other statement about that column agrees.
+    """
+    column, _, change = action.partition(" ")
+    matching = [definition for definition in definitions if definition.split(" ")[0] == column]
+    if len(matching) != 1:
+        raise AssertionError(f"{statement!r} alters a column this run never created")
+    current = matching[0]
+    if change == "DROP NOT NULL":
+        replacement = current.removesuffix(" NOT NULL")
+    elif change == "SET NOT NULL":
+        replacement = current if current.endswith(" NOT NULL") else f"{current} NOT NULL"
+    else:
+        raise AssertionError(
+            f"this test does not know how to fold {statement!r} into a schema."
+            " Teach it rather than letting it pass by ignoring the statement."
+        )
+    definitions.discard(current)
+    definitions.add(replacement)
 
 
 def schema_from(statements: list[str]) -> Schema:
@@ -192,7 +221,7 @@ def test_the_reducer_refuses_ddl_it_was_not_taught() -> None:
         schema_from(
             [
                 "CREATE TABLE data_source ( id BIGSERIAL NOT NULL )",
-                "ALTER TABLE data_source ALTER COLUMN config SET NOT NULL",
+                "ALTER TABLE data_source ALTER COLUMN id TYPE TEXT",
             ]
         )
 
@@ -205,10 +234,11 @@ def test_the_reducer_applies_the_alters_it_does_know() -> None:
             "CREATE TABLE data_source ( id BIGSERIAL NOT NULL, name VARCHAR(64) NOT NULL )",
             "ALTER TABLE data_source ADD COLUMN config JSONB",
             "ALTER TABLE data_source DROP COLUMN name",
+            "ALTER TABLE data_source ALTER COLUMN id DROP NOT NULL",
         ]
     )
 
-    assert schema["data_source"] == {"id BIGSERIAL NOT NULL", "config JSONB"}
+    assert schema["data_source"] == {"id BIGSERIAL", "config JSONB"}
 
 
 def test_every_migration_can_be_undone() -> None:

@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from aerie_trading.db.models import DataSource
+from aerie_trading.db.upsert import insert_or_find
 from aerie_trading.providers.base import MarketDataProvider
 
 __all__ = ["ensure_data_source"]
@@ -33,6 +34,11 @@ def ensure_data_source(session: Session, provider: MarketDataProvider) -> DataSo
     this at startup - a collector, a worker, a backfill - and the second one
     to arrive must not fail on a unique constraint or, worse, insert a second
     row that half the data then points at.
+
+    Idempotent **against a process arriving at the same moment**, too, which
+    looking-then-inserting cannot promise on its own: the bar collector and the
+    chain collector are separate CronJobs whose schedules overlap on the hour,
+    and this is the first thing both of them do. See ``db/upsert.py``.
 
     **The config is overwritten, not merged, and not left alone.** A row whose
     provenance describes an older configuration is worse than no provenance:
@@ -47,16 +53,22 @@ def ensure_data_source(session: Session, provider: MarketDataProvider) -> DataSo
     transaction as the run it is registering for.
     """
     provenance = dict(provider.provenance)
-    existing = session.scalar(select(DataSource).where(DataSource.name == provider.name))
+
+    def look() -> DataSource | None:
+        return session.scalar(select(DataSource).where(DataSource.name == provider.name))
+
+    existing = look()
 
     if existing is None:
-        created = DataSource(
-            name=provider.name,
-            description=provider.description,
-            config=provenance,
+        return insert_or_find(
+            session,
+            DataSource(
+                name=provider.name,
+                description=provider.description,
+                config=provenance,
+            ),
+            look,
         )
-        session.add(created)
-        return created
 
     # Assigned unconditionally rather than behind an equality check: SQLAlchemy
     # already suppresses an UPDATE for an unchanged attribute, so a guard here

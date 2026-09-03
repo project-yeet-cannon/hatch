@@ -32,6 +32,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # purpose - see that package's docstring. Every process in the silo reaches
 # this file, and not all of them can afford pandas.
 from aerie_trading.collect.config import CollectionConfig
+from aerie_trading.honesty.config import HonestyConfig
 from aerie_trading.providers.synthetic.config import SyntheticConfig
 from aerie_trading.runs.config import RunnerConfig
 
@@ -121,6 +122,15 @@ class Settings(BaseSettings):
     # launcher enforces the ceiling and a worker takes the lease, and all three
     # must be reading one answer.
     runs: RunnerConfig = RunnerConfig()
+
+    # -- The honesty layer --------------------------------------------------
+    # How a sweep is evaluated out of sample, how hard the cost re-score
+    # presses, and what "a broad index" resolves to here. See
+    # aerie_trading/honesty/config.py, and note that the walk-forward block is
+    # a *default a launcher bakes into a sweep* rather than a value the worker
+    # reads back - a fold count that changed under a finished result would
+    # relabel every historical number on the leaderboard.
+    honesty: HonestyConfig = HonestyConfig()
 
     @property
     def database_url(self) -> str:

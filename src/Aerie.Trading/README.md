@@ -360,6 +360,58 @@ metric is an absent row** — never zero and never `NaN`, because `NUMERIC` will
 store `NaN` happily and Postgres sorts it above every number, which would put
 one degenerate run at the top of a leaderboard sorted by Sharpe.
 
+## The honesty layer
+
+`aerie_trading/honesty/` adds no capability. Everything in it exists to keep a
+number produced by the machinery above from being mistaken for a finding.
+
+**Every sweep enqueues one extra run.** Beside the grid goes a
+`kind = 'walk_forward'` row: the same grid, walked over rolling train/test
+folds, with parameters chosen on each train window and one account carried
+through the tests. It is one item of work on the same queue, so it leases,
+retries and scales exactly like a backtest. Its window is out-of-sample by
+construction, which is what makes it the only row in a sweep whose figures may
+be labelled performance.
+
+**A run with no out-of-sample window can never be a headline number**, and that
+is enforced in the serializer rather than by convention: `figures_for` sorts a
+run's metrics into `headline`, `in_sample` and `descriptive` by reading
+`run.oos_start`, and constructing a `Figures` with anything in `headline` for a
+run that has none raises `InSampleFigure` — which deliberately does not derive
+from `ValueError`, so pydantic cannot fold it into an ordinary validation error
+that a tidy `except` would swallow.
+
+**Every result carries what it would have to beat.** The worker computes, and
+stores beside each run:
+
+| | |
+|---|---|
+| `baseline_return`, `excess_return` | buy-and-hold on the run's own universe, same window, same cash, same costs |
+| `index_return`, `excess_return_index` | buy-and-hold on the broad universe — `TRADING_HONESTY__INDEX_SYMBOLS`, defaulting to everything this installation collects |
+| `stressed_total_return`, `cost_sensitivity` | the same run re-scored with every cost rate multiplied by `TRADING_HONESTY__COST_STRESS_MULTIPLE` (5 by default) |
+| `selection_trials`, `expected_max_sharpe`, `deflated_sharpe` | how many parameter sets were searched to find this one, what the best of that many earns by luck alone over this many bars, and the difference |
+
+The baselines are memoized per history, so a thousand-run sweep pays for them
+once rather than a thousand times. The cost re-score cannot be shared and
+roughly doubles a sweep's compute; that is the price of *"a strategy that only
+works at zero slippage is identified as such automatically"* being on by
+default rather than opt-in.
+
+**The gate is arithmetic rather than judgement**, because the synthetic source
+has zero alpha by construction and asserts it. Sweeping it deliberately
+produces the strongest false positive this machinery can manufacture, and
+`tests/test_honesty_walk_forward.py` requires the honesty layer to catch it:
+the best of fifty-seven crossovers beats the median of the same sweep by about
+0.39 of a Sharpe — every point of which is selection — while the walk-forward
+figure lands *below* that median and the selection-adjusted figure lands at or
+below zero.
+
+Worth knowing before reading those numbers: on this universe no crossover
+posts a positive Sharpe at all, so the false positive is a *relative* one. The
+gate is written against the gap rather than the sign deliberately — machinery
+that only noticed inflated figures above zero would be blind to a leaderboard
+sorted within one strategy, which is the common case.
+
 ## Layout
 
 Directories arrive with the phase that needs them, so most of this is a map of
@@ -380,6 +432,7 @@ where things will go rather than of what is here:
 | `aerie_trading/engine/` | the backtester — clock, instruments, portfolio, broker, strategy, and the one place run metrics are computed |
 | `aerie_trading/strategies/` | one strategy per module, plus the explicit registry |
 | `aerie_trading/runs/` | sweeps, the Postgres work queue, and the worker loop |
+| `aerie_trading/honesty/` | walk-forward folds, selection accounting, baselines and cost stress, and the serializer that refuses a fitted headline |
 
 Type checking is `pyright` in **strict** mode, deliberately: the owner does not
 write Python, and pydantic models under a strict checker read much like C#. If

@@ -78,6 +78,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Final
 
+from aerie_trading.honesty.config import WalkForwardSpec
 from aerie_trading.providers.base import Interval
 
 # The module rather than the package: `providers.synthetic` re-exports nothing
@@ -150,11 +151,14 @@ DEMO_SWEEPS: Final[tuple[SweepSpec, ...]] = (
 )
 
 
-def demo_sweeps(symbols: Sequence[str] | None = None) -> tuple[SweepSpec, ...]:
+def demo_sweeps(
+    symbols: Sequence[str] | None = None,
+    walk_forward: WalkForwardSpec | None = None,
+) -> tuple[SweepSpec, ...]:
     """The demo, as specs, optionally over a universe this installation collects.
 
-    ``None`` means the generator's default universe, which is what a fresh
-    clone has. An installation that replaced its universe wholesale
+    ``None`` symbols means the generator's default universe, which is what a
+    fresh clone has. An installation that replaced its universe wholesale
     (``TRADING_SYNTHETIC``) has a lake full of symbols these constants do not
     name, and a seeded demo whose every run failed with "collect before
     backtesting" would be a worse first impression than no demo - so the CLI
@@ -162,7 +166,18 @@ def demo_sweeps(symbols: Sequence[str] | None = None) -> tuple[SweepSpec, ...]:
 
     The two sweeps are re-pointed together or not at all. A baseline over a
     different universe from the grid it sits beside is not a baseline.
+
+    ``walk_forward`` of ``None`` leaves the constants' own schedule in place.
+    The CLI passes the installation's, so that the demo's honest number is
+    computed the same way as every sweep an operator launches afterwards - a
+    seeded leaderboard whose top row was measured differently from the rows
+    beneath it would be a comparison nobody could make.
     """
-    if symbols is None:
+    updates: dict[str, object] = {}
+    if symbols is not None:
+        updates["symbols"] = tuple(symbols)
+    if walk_forward is not None:
+        updates["walk_forward"] = walk_forward
+    if not updates:
         return DEMO_SWEEPS
-    return tuple(spec.model_copy(update={"symbols": tuple(symbols)}) for spec in DEMO_SWEEPS)
+    return tuple(spec.model_copy(update=updates) for spec in DEMO_SWEEPS)

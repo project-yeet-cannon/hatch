@@ -81,6 +81,13 @@ def sweep_of(strategy: str = "ma_crossover", **overrides: object) -> SweepSpec:
         "interval": Interval.ONE_DAY,
         "window_start": WINDOW[0],
         "window_end": WINDOW[1],
+        # No walk-forward row. Phase 6 adds one to every sweep by default, and
+        # these tests are about the queue rather than about it: a run count
+        # that silently gained one would make every assertion below off by one
+        # for a reason that has nothing to do with SKIP LOCKED. The
+        # walk-forward's own trip through this queue is asserted in
+        # tests/test_worker.py, which has a lake long enough to fold.
+        "walk_forward": None,
     }
     values.update(overrides)
     return SweepSpec.model_validate(values)
