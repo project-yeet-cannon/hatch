@@ -85,6 +85,45 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
+  name: hatch
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hatch
+  annotations:
+    # Composed exactly like the kiosk annotation above, and every word of that
+    # warning applies here: the <namespace>-<name>@kubernetescrd form is
+    # required and unforgiving, a bare name is silently not found, and a route
+    # that lost its auth middleware serves unauthenticated while looking
+    # perfectly healthy from outside. `prune` is live, so a missing annotation
+    # is not a diff anyone sees - a 302 from an un-enrolled browser is the only
+    # proof this is attached.
+    #
+    # Auth first, rewrite second: rewriting a request that is about to be
+    # refused wastes the work and puts the rewritten path into the return-to
+    # the sign-in shell sends the browser back with.
+    #
+    # The wall is only half of Hatch's gate. Behind it, AdminAppMiddleware
+    # 404s the bundle for anyone who is not an administrator and every endpoint
+    # carries [RequireAdmin] - so an enrolled family member reaching this host
+    # gets a page that does not exist rather than the operator's board.
+    traefik.ingress.kubernetes.io/router.middlewares: "{{ if eq .Values.auth.mode "full" }}{{ .Release.Namespace }}-aerie-auth@kubernetescrd,{{ end }}{{ .Release.Namespace }}-hatch-root-rewrite@kubernetescrd"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: "hatch.{{ .Values.domain }}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
   name: files
   labels:
     {{- include "aerie.labels" . | nindent 4 }}

@@ -39,6 +39,7 @@ full of active work, which is how a plan directory stops being read.
 | [`2026-09-01-verification.md`](2026-09-01-verification.md) | Two dated checks left behind by the node-storage work. Run on or after that date, then delete |
 | [`design-system-mvp.md`](design-system-mvp.md) | A shared component library for admin and home: one token vocabulary, day/night, a gallery app, and a gated manual design pass |
 | [`trading.md`](trading.md) | A trading strategy laboratory sideloaded onto the cluster: its own Python silo, a market-data lake, one engine on two clocks, and an honesty layer |
+| [`pjm.md`](pjm.md) | **Hatch** — the house project tracker at `hatch.${DOMAIN}`: a kanban board, issues with Jira-style keys, and an API for Claude. Phases 0-4 complete |
 | [`offsite-chrome.md`](offsite-chrome.md) | A way back to the app picker on `status.`, `metrics.` and `logs.` — what each vendor natively allows, and why the bar itself cannot go there |
 | [`pjm.md`](pjm.md) | Hatch — a self-hosted Jira/Trello-lite on the existing pod: kanban board, Jira-style issue keys, audit trails, a plans importer, and API keys so Claude can work tickets |
 

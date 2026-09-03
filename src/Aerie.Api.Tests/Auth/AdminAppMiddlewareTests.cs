@@ -7,12 +7,12 @@ using System.Net;
 namespace Aerie.Api.Tests.Auth;
 
 /// <summary>
-/// Who gets handed the admin app's bundle. Three things have to hold, and each
-/// is a different kind of bug if it does not: the deep links are covered as
-/// well as the assets (or /apps/admin/devices serves index.html to anyone), the
-/// refusal is a 404 rather than a 403 (or it advertises what it is withholding),
-/// and every other app is untouched (or a family member loses the dashboard to
-/// a boundary that was never about them).
+/// Who gets handed an operator app's bundle - admin's, and Hatch's. Three
+/// things have to hold, and each is a different kind of bug if it does not: the
+/// deep links are covered as well as the assets (or /apps/admin/devices serves
+/// index.html to anyone), the refusal is a 404 rather than a 403 (or it
+/// advertises what it is withholding), and every other app is untouched (or a
+/// family member loses the dashboard to a boundary that was never about them).
 /// </summary>
 public class AdminAppMiddlewareTests
 {
@@ -27,6 +27,14 @@ public class AdminAppMiddlewareTests
     // Case, because a path is not case sensitive to the file system this is
     // served from and a guard that is would be trivially stepped around.
     [InlineData("/APPS/Admin/")]
+    // Hatch, the second operator app behind the same boundary. Its deep links
+    // matter more than most - /apps/hatch/issues/AER-12 is what gets pasted
+    // into a chat window - so a gate that covered only the root would be a
+    // gate that leaked every ticket in the house.
+    [InlineData("/apps/hatch")]
+    [InlineData("/apps/hatch/")]
+    [InlineData("/apps/hatch/issues/AER-12")]
+    [InlineData("/apps/hatch/assets/index-CO5Z7yjM.js")]
     public async Task WithholdsTheBundleFromEveryoneElse(string path)
     {
         var (context, served) = await Run(path, isAdmin: false);
@@ -55,10 +63,12 @@ public class AdminAppMiddlewareTests
         Assert.Equal(0, context.Response.ContentLength ?? 0);
     }
 
-    [Fact]
-    public async Task ServesItToAnAdministrator()
+    [Theory]
+    [InlineData("/apps/admin/devices")]
+    [InlineData("/apps/hatch/issues/AER-12")]
+    public async Task ServesItToAnAdministrator(string path)
     {
-        var (context, served) = await Run("/apps/admin/devices", isAdmin: true);
+        var (context, served) = await Run(path, isAdmin: true);
 
         Assert.True(served);
         Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
@@ -77,6 +87,8 @@ public class AdminAppMiddlewareTests
     // merely starts with the same characters is a different app.
     [InlineData("/apps/administration/")]
     [InlineData("/apps/adminfoo")]
+    [InlineData("/apps/hatchery/")]
+    [InlineData("/apps/hatchfoo")]
     public async Task LeavesEverythingElseAlone(string path)
     {
         var (_, served) = await Run(path, isAdmin: false);

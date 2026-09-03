@@ -1,0 +1,348 @@
+/* Hatch's chrome. Values come from @aerie/ui's tokens (imported by theme.css);
+   a literal here is a bug.
+
+   The page idioms - header, table, field, badge, button - are components in
+   @aerie/ui. What is stated here is Hatch's own shell: the nav strip under the
+   bar and the content area, which unlike admin's is not a centred column,
+   because the board wants every pixel of width it can have. */
+
+.hatch-app {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.hatch-nav {
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+}
+
+.hatch-nav-content {
+  display: flex;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-5);
+}
+
+.hatch-nav-link {
+  padding: var(--sp-3) var(--sp-4);
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: var(--t-body);
+  border-bottom: 2px solid transparent;
+  transition: color var(--transition), border-color var(--transition);
+}
+
+.hatch-nav-link:hover {
+  color: var(--ink);
+}
+
+.hatch-nav-link.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+/* min-height: 0 so a board that overflows scrolls inside this box rather than
+   stretching the flex column and taking the nav off the top of the screen. */
+.hatch-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.hatch-crash-note {
+  font-size: var(--t-body);
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--muted);
+  padding: var(--sp-6) var(--sp-5);
+}
+
+/* ---- Pages ---- */
+
+/* The board takes the full width and scrolls sideways; every other page is a
+   readable column like admin's. Two different frames because they want
+   different things - a board is wide by nature and a form is not. */
+.hatch-page,
+.hatch-issue-page {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-6) var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.hatch-page > *,
+.hatch-issue-page > * {
+  max-width: var(--measure);
+  width: 100%;
+  margin: 0 auto;
+}
+
+.hatch-board-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-6) var(--sp-5) 0;
+}
+
+/* ---- The board ---- */
+
+.hatch-board {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: var(--sp-4);
+  overflow-x: auto;
+  padding-bottom: var(--sp-5);
+}
+
+.hatch-column {
+  flex: 0 0 18rem;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+/* The only feedback a drop target gives. A column that lights up under the
+   cursor is the difference between "this will land here" and a guess. */
+.hatch-column.over {
+  border-color: var(--primary);
+}
+
+.hatch-column-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.hatch-column-name {
+  font-weight: 700;
+  font-size: var(--t-body);
+}
+
+.hatch-column-count {
+  color: var(--muted);
+  font-size: var(--t-small);
+}
+
+/* min-height so an empty column is still tall enough to drop onto - a
+   zero-height target is a column nothing can ever be moved into. */
+.hatch-column-cards {
+  flex: 1;
+  min-height: 4rem;
+  overflow-y: auto;
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.hatch-card {
+  display: block;
+  padding: var(--sp-3);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: var(--ink);
+  cursor: grab;
+  touch-action: none;
+}
+
+.hatch-card:hover {
+  border-color: var(--primary);
+}
+
+.hatch-card.dragging {
+  opacity: 0.4;
+}
+
+.hatch-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.hatch-card-key {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--t-small);
+  color: var(--muted);
+}
+
+.hatch-card-title {
+  font-size: var(--t-body);
+  line-height: 1.35;
+}
+
+.hatch-card-parent {
+  margin-top: var(--sp-2);
+  font-size: var(--t-small);
+  color: var(--muted);
+}
+
+/* ---- Forms ---- */
+
+.hatch-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.hatch-form-actions,
+.hatch-section-actions,
+.hatch-reorder {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.hatch-form-actions {
+  justify-content: flex-end;
+}
+
+/* align-items: end so the button sits on the controls' baseline rather than
+   floating level with their labels. */
+.hatch-inline-form {
+  display: flex;
+  align-items: end;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+
+/* ---- The issue page ---- */
+
+.hatch-issue-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.hatch-issue-key {
+  font-family: var(--font-mono, monospace);
+}
+
+.hatch-issue-controls {
+  display: flex;
+  gap: var(--sp-5);
+  flex-wrap: wrap;
+}
+
+/* A heading that is also a button: it has to look like the heading, not like
+   a control, until somebody puts a cursor on it. */
+.hatch-inline-title {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: text;
+}
+
+.hatch-inline-title-input {
+  font: inherit;
+  width: 100%;
+}
+
+.hatch-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.hatch-section-title {
+  font-size: var(--t-body);
+  font-weight: 700;
+  margin: 0;
+}
+
+.hatch-description-editor {
+  width: 100%;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--t-small);
+}
+
+.hatch-child-list,
+.hatch-comments {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.hatch-comment {
+  border-top: 1px solid var(--line);
+  padding-top: var(--sp-3);
+}
+
+.hatch-comment-head {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: baseline;
+  font-size: var(--t-small);
+  margin-bottom: var(--sp-2);
+}
+
+.hatch-comment-box {
+  margin-top: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--sp-2);
+}
+
+.hatch-comment-box textarea {
+  width: 100%;
+}
+
+.hatch-events summary {
+  cursor: pointer;
+}
+
+.hatch-events ul {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+}
+
+.hatch-event {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  font-size: var(--t-small);
+  border-top: 1px solid var(--line);
+}
+
+/* Rendered markdown - descriptions and comments. Only the spacing is stated:
+   base.css already dresses headings, lists, code and links. */
+.hatch-markdown > :first-child {
+  margin-top: 0;
+}
+
+.hatch-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.hatch-markdown pre {
+  overflow-x: auto;
+}

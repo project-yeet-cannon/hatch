@@ -1,0 +1,22 @@
+# Hatch's root rewrite (docs/plans/pjm.md Phase 4). The same shape as
+# middleware-kiosk.yaml, for the same reason and with the same caveat.
+#
+# replacePathRegex, not redirectRegex: the rewrite happens server-side, so
+# hatch.${DOMAIN} stays hatch.${DOMAIN} in the address bar. A redirect would
+# turn every bookmark and every pasted link into a two-hop trip through
+# /apps/hatch/, which is the path an issue link should never have to name.
+#
+# Only "^/$" - the bare root. Everything under it (/apps/hatch/..., /api/...)
+# already resolves against the api pod as-is, and a broader regex would rewrite
+# the API calls the app itself makes.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: hatch-root-rewrite
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hatch
+spec:
+  replacePathRegex:
+    regex: "^/$"
+    replacement: "/apps/hatch/"

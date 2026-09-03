@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Asserts the cluster plan Phase 7b.6: the seven hostnames resolve to
+    Asserts the cluster plan Phase 7b.6: the asserted hostnames resolve to
     ${INGRESS_VIP} through the house's own resolver, and answer from it -
     with no --resolve, no /etc/hosts, and no answer supplied by this script.
 
@@ -57,13 +57,13 @@
        address proves it was the cluster.
 
     Plus one negative check that keeps (1) and (3) honest: **no hosts-file
-    entry names any of the seven**. Without it, a stale line left over from a
+    entry names any of them**. Without it, a stale line left over from a
     Phase 5 spot-check would make every other check in this script pass while
     proving nothing about DNS at all.
 
     Stages:
       1. Preflight  - the two expectations parse, the hosts file names none
-                      of the seven, and this client says where it is standing.
+                      of them, and this client says where it is standing.
       2. Resolvers  - which resolver addresses stage 3 will ask directly.
       3. Resolution - per name: this client's own answer, then each
                       resolver's, both asserted as an exact set.
@@ -358,7 +358,7 @@ function Resolve-ViaServer {
         function having to understand CNAMEs.
 
         UDP only, and truncation is reported rather than retried over TCP:
-        seven names with one address each never approach 512 bytes, so a TC
+        a handful of names with one address each never approach 512 bytes, so a TC
         bit here means something is answering that this script should not
         quietly paper over.
     #>
@@ -397,7 +397,7 @@ function Resolve-ViaServer {
             $result.Error = "the resolver answered $meaning"
             return $result
         }
-        if (($response[2] -band 0x02) -ne 0) { $result.Error = 'the reply was truncated (TC set), which seven A records should never be'; return $result }
+        if (($response[2] -band 0x02) -ne 0) { $result.Error = 'the reply was truncated (TC set), which a handful of A records should never be'; return $result }
 
         $answerCount = (([int]$response[6]) -shl 8) -bor $response[7]
         $offset = 12
@@ -555,7 +555,7 @@ function Invoke-HttpsHead {
 
         Only the status line and the headers are read; the body is never
         touched, so chunked encoding never has to be understood here. That is
-        also why the request is cheap enough to run against all seven names
+        also why the request is cheap enough to run against every name
         in a couple of seconds.
 
         Certificate validation is accepted unconditionally - the certificate
@@ -663,10 +663,10 @@ if ($IngressVip -notmatch '^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}
 Write-Host "  Domain      : $Domain"
 Write-Host "  Ingress VIP : $IngressVip"
 
-# The seven, in the order 7b.6's own loop names them, each with the path that
+# The eight, in the order 7b.6's own loop names them, each with the path that
 # gives a deterministic answer and the codes that count as "the cluster
 # answered". Where more than one code is listed the reason is in the note:
-# these are session-less GETs, and three of the seven are applications that
+# these are session-less GETs, and four of the eight are applications that
 # bounce an anonymous caller to their own login page. The status code is the
 # weaker half of every row anyway - the address is what is being proven, and
 # the code is only here so that a 502 from a healthy-looking Traefik is not
@@ -674,6 +674,7 @@ Write-Host "  Ingress VIP : $IngressVip"
 $sites = @(
     [pscustomobject]@{ Name = "home.$Domain";    Path = '/health/ready'; Expect = @(200);      Note = 'the API readiness probe' }
     [pscustomobject]@{ Name = "kiosk.$Domain";   Path = '/';             Expect = @(200);      Note = 'the dashboard SPA, root-rewritten by middleware-kiosk.yaml' }
+    [pscustomobject]@{ Name = "hatch.$Domain";   Path = '/';             Expect = @(200, 302); Note = 'the project tracker; 302 to sign-in once the wall is up, 200 without it' }
     [pscustomobject]@{ Name = "files.$Domain";   Path = '/version.json'; Expect = @(200);      Note = 'the published app manifest' }
     [pscustomobject]@{ Name = "share.$Domain";   Path = '/';             Expect = @(401);      Note = 'dufs gates the path, not just writes - a 200 here would be the finding' }
     [pscustomobject]@{ Name = "status.$Domain";  Path = '/';             Expect = @(200, 302); Note = 'Uptime Kuma serves its SPA, or redirects to it' }
@@ -693,7 +694,7 @@ Write-Host "  This client : $($vantageSummary -join ', ')"
 # is a precondition of the run rather than one finding among several.
 $hostsPath = Get-HostsFilePath
 if (-not (Test-Path $hostsPath)) {
-    Add-Check -Step '7b.6' -Name 'No hosts-file entry supplies any of the seven' -Status 'Pass' -Detail "$hostsPath does not exist"
+    Add-Check -Step '7b.6' -Name 'No hosts-file entry supplies any asserted host' -Status 'Pass' -Detail "$hostsPath does not exist"
 }
 else {
     $overrides = New-Object Collections.Generic.List[string]
@@ -707,10 +708,10 @@ else {
         }
     }
     if ($overrides.Count -eq 0) {
-        Add-Check -Step '7b.6' -Name 'No hosts-file entry supplies any of the seven' -Status 'Pass' -Detail "$hostsPath names none of them"
+        Add-Check -Step '7b.6' -Name 'No hosts-file entry supplies any asserted host' -Status 'Pass' -Detail "$hostsPath names none of them"
     }
     else {
-        Add-Check -Step '7b.6' -Name 'No hosts-file entry supplies any of the seven' -Status 'Fail' -Detail "$hostsPath answers locally for $($overrides -join '; ') - remove the line and re-run; every check below is meaningless while it is there"
+        Add-Check -Step '7b.6' -Name 'No hosts-file entry supplies any asserted host' -Status 'Fail' -Detail "$hostsPath answers locally for $($overrides -join '; ') - remove the line and re-run; every check below is meaningless while it is there"
     }
 }
 

@@ -1,7 +1,8 @@
 # Hatch — the house project tracker
 
-Status: not started — spec digested and decisions locked 2026-09-02; Phase 0 is
-next.
+Status: phases 0-4 complete 2026-09-02 — Hatch is shipped for the operator:
+the module, the API, the board, and `hatch.${DOMAIN}`. Phases 5 (the plans
+importer) and 6 (API keys) remain, and can land in either order.
 
 Aerie's projects are currently managed by juggling markdown files in
 `docs/plans/`. **Hatch** replaces that with a self-hosted Jira/Trello-lite: a
@@ -145,7 +146,7 @@ to read first: [`Modules/README.md`](../../src/Aerie.Api/Modules/README.md)
 end to end, then the [`Quill`](../../src/Aerie.Api/Modules/Quill) module as the
 worked example (it is the newest and smallest).
 
-- [ ] Create `src/Aerie.Api/Modules/Hatch/Entities.cs` with the five entities
+- [x] Create `src/Aerie.Api/Modules/Hatch/Entities.cs` with the five entities
       exactly as the Domain model section above specifies, and
       `src/Aerie.Api/Modules/Hatch/HatchContext.cs` with
       `public const string Schema = "hatch"`, a `DbSet` per entity, the
@@ -154,19 +155,19 @@ worked example (it is the newest and smallest).
       `(EfHatchIssue.ProjectId, Number)`, unique index on `EfHatchStatus.Name`,
       cascade deletes from issue to comments/events, restrict on
       issue→status and issue→project, and `Payload` mapped as `jsonb`.
-- [ ] Create `src/Aerie.Api/Modules/Hatch/HatchDesignTimeFactory.cs`
+- [x] Create `src/Aerie.Api/Modules/Hatch/HatchDesignTimeFactory.cs`
       (three lines, mirror `QuillDesignTimeFactory.cs`).
-- [ ] Create `src/Aerie.Api/Modules/Hatch/HatchModule.cs` with
+- [x] Create `src/Aerie.Api/Modules/Hatch/HatchModule.cs` with
       `AddHatchModule(...)` registering the context (mirror `QuillModule.cs`),
       and add the one `services.AddHatchModule(configuration);` line to
       `AddAerieModules` in
       [`ModuleRegistration.cs`](../../src/Aerie.Api/Modules/ModuleRegistration.cs).
-- [ ] Scaffold the Init migration into the module folder:
+- [x] Scaffold the Init migration into the module folder:
       `dotnet ef migrations add Init --context HatchContext --project ./src/Aerie.Api/Aerie.Api.csproj -o Modules/Hatch/Migrations`,
       then hand-add four `migrationBuilder.InsertData` calls seeding the
       statuses (inbox/10, todo/20, in progress/30, done/40 with
       `IsTerminal = true`) so every install starts with a working board.
-- [ ] Add `src/Aerie.Api.Tests/Hatch/HatchContextTests.cs` mirroring
+- [x] Add `src/Aerie.Api.Tests/Hatch/HatchContextTests.cs` mirroring
       `Quill/QuillContextTests.cs` (in-memory database): entities round-trip,
       and the model's default schema is `"hatch"`.
 
@@ -187,29 +188,29 @@ and resolve the actor name for `CreatedBy`/`Actor`/`Author` fields through
 person's name when a person is linked, otherwise the literal `"operator"`
 (local dev and unlinked devices). Never read the cookie directly.
 
-- [ ] Create `Dtos.cs`: records for project/status/issue/comment/event
+- [x] Create `Dtos.cs`: records for project/status/issue/comment/event
       responses and the create/patch/move request bodies from the API table.
       Issue DTOs carry the computed `key` and `parentKey`, never raw ids alone.
-- [ ] Create `RankService.cs` implementing the Rank spec (bottom / between /
+- [x] Create `RankService.cs` implementing the Rank spec (bottom / between /
       renumber-on-exhaustion), plus
       `src/Aerie.Api.Tests/Hatch/RankServiceTests.cs`: bottom-of-empty is 0,
       between(0, 1024) is 512, between(5, 6) triggers renumber, order is
       preserved after renumber. Register it scoped in `AddHatchModule`.
-- [ ] Create `ProjectsController.cs` and `StatusesController.cs` with the CRUD
+- [x] Create `ProjectsController.cs` and `StatusesController.cs` with the CRUD
       rules from the API table (key regex `^[A-Z][A-Z0-9]{1,5}$`, key
       immutability, 409s with a plain-text reason for the delete guards).
-- [ ] Create `IssuesController.cs`: POST create with the retry-loop numbering
+- [x] Create `IssuesController.cs`: POST create with the retry-loop numbering
       exactly as specified under **Issue numbering**; GET by key (split on the
       last `-`, look up project by key, then `(ProjectId, Number)` — unknown
       key is 404); PATCH writing one event per changed field; DELETE.
       Parent validation per the Domain model rules — walk ancestors to refuse
       cycles, 400 with a reason.
-- [ ] Add the `move` endpoint to `IssuesController.cs` calling `RankService`,
+- [x] Add the `move` endpoint to `IssuesController.cs` calling `RankService`,
       and `BoardController.cs` returning statuses + issues ordered by
       `(StatusId, Rank, Id)`.
-- [ ] Add comments GET/POST and events GET to `IssuesController.cs` (or a
+- [x] Add comments GET/POST and events GET to `IssuesController.cs` (or a
       sibling controller if it crowds past ~300 lines).
-- [ ] Add `src/Aerie.Api.Tests/Hatch/IssuesControllerTests.cs` mirroring
+- [x] Add `src/Aerie.Api.Tests/Hatch/IssuesControllerTests.cs` mirroring
       `Quill/QuillControllerTests.cs`: numbers increment per project and are
       independent across projects; `AER-1` resolves and `AER-999`/`ZZZ-1` 404;
       cycle parenting and cross-project parenting are refused; each PATCH field
@@ -227,7 +228,7 @@ non-admins — empty pages, real plumbing. Patterns: [`apps/docs`](../../src/Aer
 for scaffolding (newest small app), [`apps/admin`](../../src/Aerie.Web/apps/admin)
 for `App.tsx`/TopBar/clientLogger shape.
 
-- [ ] Scaffold `src/Aerie.Web/apps/hatch/` by copying `apps/docs`'s
+- [x] Scaffold `src/Aerie.Web/apps/hatch/` by copying `apps/docs`'s
       `package.json` (name `aerie-hatch`, keep `marked` + `dompurify` +
       `react-router-dom`, drop `marked-gfm-heading-id`), `tsconfig*.json`,
       `.oxlintrc.json`, `index.html` (title **Hatch**, 🐣 favicon following the
@@ -235,16 +236,16 @@ for `App.tsx`/TopBar/clientLogger shape.
       `base: '/apps/hatch/'`, `aerieRevision({ app: 'hatch' })`, and
       `outDir: .../wwwroot/apps/hatch`. Run `npm install` at the
       `src/Aerie.Web` workspace root to update the one lockfile.
-- [ ] Create `src/App.tsx` mirroring admin's: `<TopBar appName="Hatch">` from
+- [x] Create `src/App.tsx` mirroring admin's: `<TopBar appName="Hatch">` from
       `@aerie/ui`, router with routes `/` (Board), `/projects`, `/statuses`,
       `/issues/:key`, `/import` — each a stub component in `src/pages/`. Copy
       admin's `clientLogger` wiring and `ErrorBoundary` pattern.
-- [ ] In [`Program.cs`](../../src/Aerie.Api/Program.cs): add
+- [x] In [`Program.cs`](../../src/Aerie.Api/Program.cs): add
       `app.MapFallbackToFile("/apps/hatch/{*path:nonfile}", "apps/hatch/index.html");`
       beside the admin fallback (~line 549) and an
       `opt.AddRedirect("^apps/hatch$", "apps/hatch/");` beside admin's
       (~line 586).
-- [ ] Generalize
+- [x] Generalize
       [`AdminAppMiddleware`](../../src/Aerie.Api/Common/AdminAppMiddleware.cs):
       the single `AdminApp` PathString becomes a
       `static readonly PathString[] GatedApps = { "/apps/admin", "/apps/hatch" }`
@@ -252,7 +253,7 @@ for `App.tsx`/TopBar/clientLogger shape.
       covers every operator-only bundle. Extend the existing middleware tests
       under `src/Aerie.Api.Tests/Common/` with the `/apps/hatch` refusal case
       (404, `no-store`) and the pass-through case.
-- [ ] Register the app everywhere the house enumerates apps to build: add
+- [x] Register the app everywhere the house enumerates apps to build: add
       `hatch` to the `for app in ...` list in the [`Makefile`](../../Makefile)
       `test-web` target, and to the `matrix.app` list in
       [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) (~line 33).
@@ -270,28 +271,28 @@ and status management. All data via a thin same-origin client; the operator
 does the visual pass — the implementer's definition of done is lint + build +
 tests green.
 
-- [ ] Create `src/api/client.ts`: typed fetch wrappers for every Phase 1
+- [x] Create `src/api/client.ts`: typed fetch wrappers for every Phase 1
       endpoint, DTO types matching `Dtos.cs`, non-2xx responses throw with the
       server's reason text.
-- [ ] Build the Board page: one column per status in `SortOrder` order, cards
+- [x] Build the Board page: one column per status in `SortOrder` order, cards
       ordered by rank showing key, a type badge, and title; card click
       navigates to `/issues/:key`. Data refetches after every action and on
       window focus.
-- [ ] Add drag with `@dnd-kit/core` + `@dnd-kit/sortable` (workspace-installed
+- [x] Add drag with `@dnd-kit/core` + `@dnd-kit/sortable` (workspace-installed
       in `apps/hatch` only): dropping calls the `move` endpoint with `statusId`
       and the neighbor-derived `afterKey`/`beforeKey`, applies optimistically,
       and refetches on error.
-- [ ] Add issue creation: a "New issue" button on the board opening a dialog —
+- [x] Add issue creation: a "New issue" button on the board opening a dialog —
       project select, type select, title input, description textarea — POSTs
       and refetches.
-- [ ] Build the issue detail page: title (inline edit), type/status selects,
+- [x] Build the issue detail page: title (inline edit), type/status selects,
       parent picker (issues of the same project filtered to the legal parent
       types, clearable — the sheet asks for the epic to be easily mutable),
       description as a raw-markdown textarea with a preview toggle rendered
       via `marked` + `dompurify` (mirror how `apps/docs` sanitizes), comments
       list with an add box, and the event trail collapsed at the bottom.
       Delete lives here, behind a confirm.
-- [ ] Build the Projects page (list, create with key+name, rename, delete with
+- [x] Build the Projects page (list, create with key+name, rename, delete with
       the 409 reason surfaced) and the Statuses page (list in `SortOrder`
       order, rename, up/down reorder writing `SortOrder`, add, terminal
       toggle, delete with the 409 reason surfaced).
@@ -309,21 +310,21 @@ new hostname") and the kiosk pair in
 is live and a missing middleware annotation fails silently as an ungated route
 — the 302 check below is the only proof.
 
-- [ ] Create `charts/aerie/templates/middleware-hatch.yaml`: a
+- [x] Create `charts/aerie/templates/middleware-hatch.yaml`: a
       `replacePathRegex` middleware `hatch-root-rewrite` mapping `^/$` to
       `/apps/hatch/` (copy `middleware-kiosk.yaml`, comment included).
-- [ ] Add a `hatch` Ingress to `charts/aerie/templates/ingress.yaml`: host
+- [x] Add a `hatch` Ingress to `charts/aerie/templates/ingress.yaml`: host
       `hatch.{{ .Values.domain }}`, backend `api:8080`, and the same composed
       middleware annotation the `kiosk` Ingress uses — auth first when
       `auth.mode` is `full`, then `hatch-root-rewrite` — with the
       `<namespace>-<name>@kubernetescrd` form.
-- [ ] Add the picker tile in
+- [x] Add the picker tile in
       [`apps/home/src/apps.ts`](../../src/Aerie.Web/apps/home/src/apps.ts):
       operator tier, icon 🐣, `subdomain: 'hatch'`, `withheldIf404: true` —
       and generalize `lib/useWithheldApps.ts` so a subdomain entry can name the
       same-origin probe path (`/apps/hatch/`) it HEADs, updating the "only
       admin sets this" comments in both files.
-- [ ] Update the hostname table in
+- [x] Update the hostname table in
       [`reverse-proxy-architecture.md`](../reverse-proxy-architecture.md) and
       add `hatch` to the asserted list in
       [`scripts/k3s/Test-NameResolution.ps1`](../../scripts/k3s/Test-NameResolution.ps1).

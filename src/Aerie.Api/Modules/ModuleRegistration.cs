@@ -1,5 +1,6 @@
 using Aerie.Api.Modules.Gather;
 using Aerie.Api.Modules.Game;
+using Aerie.Api.Modules.Hatch;
 using Aerie.Api.Modules.Photos;
 using Aerie.Api.Modules.Quill;
 using Aerie.Api.Modules.Storage;
@@ -31,6 +32,7 @@ public static class ModuleRegistration
         services.AddGameModule(configuration);
         services.AddPhotosModule(configuration);
         services.AddQuillModule(configuration);
+        services.AddHatchModule(configuration);
 
         return services;
     }
