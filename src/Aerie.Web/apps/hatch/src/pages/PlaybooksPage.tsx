@@ -12,9 +12,12 @@ import { useLoaded } from '../lib/useLoaded';
 import {
   ISSUE_TYPES,
   PLAYBOOK_EFFORTS,
+  PLAYBOOK_EFFORT_DEFAULT,
   PLAYBOOK_MODELS,
+  PLAYBOOK_MODEL_DEFAULT,
   type IssueType,
   type Playbook,
+  type PlaybookCreateRequest,
   type Status,
 } from '../types';
 
@@ -207,7 +210,9 @@ function Choice({
   options,
   onChange,
 }: {
-  label: string;
+  /** Left off where a <Field> already wraps the select in a <label>: a second
+      name on the control would replace the visible one rather than add to it. */
+  label?: string;
   value: string;
   options: readonly string[];
   onChange: (value: string) => void;
@@ -237,12 +242,18 @@ function NewPlaybook({
   onCreate,
 }: {
   statuses: Status[];
-  onCreate: (request: { fromStatusId: number; toStatusId: number; types?: IssueType[]; prompt: string }) => void;
+  onCreate: (request: PlaybookCreateRequest) => void;
 }) {
   const [from, setFrom] = useState(statuses[0]?.id ?? 0);
   const [to, setTo] = useState(statuses[1]?.id ?? 0);
   const [types, setTypes] = useState<IssueType[]>([]);
   const [prompt, setPrompt] = useState('');
+  // Chosen here rather than left to the server's default and corrected in the
+  // table afterwards: the model and the effort are what a transition costs,
+  // and a row created at the default is a row that quietly runs at the default
+  // until somebody notices.
+  const [model, setModel] = useState<string>(PLAYBOOK_MODEL_DEFAULT);
+  const [effort, setEffort] = useState<string>(PLAYBOOK_EFFORT_DEFAULT);
 
   return (
     <Card>
@@ -266,8 +277,14 @@ function NewPlaybook({
             ))}
           </select>
         </Field>
-        <Field label="Types" hint="Leave all unticked for every type.">
+        <Field label="Types" hint="Leave all unticked for every type." as="div">
           <TypesCell types={types} onChange={setTypes} />
+        </Field>
+        <Field label="Model" hint="Which model the dispatched session runs on.">
+          <Choice value={model} options={PLAYBOOK_MODELS} onChange={setModel} />
+        </Field>
+        <Field label="Effort" hint="How much thought it may spend on the move.">
+          <Choice value={effort} options={PLAYBOOK_EFFORTS} onChange={setEffort} />
         </Field>
       </div>
       <Field label="Prompt" hint="What the agent is told before it is shown the ticket.">
@@ -278,7 +295,7 @@ function NewPlaybook({
           variant="primary"
           disabled={!prompt.trim() || from === to}
           onClick={() => {
-            onCreate({ fromStatusId: from, toStatusId: to, types, prompt });
+            onCreate({ fromStatusId: from, toStatusId: to, types, prompt, model, effort });
             setPrompt('');
             setTypes([]);
           }}

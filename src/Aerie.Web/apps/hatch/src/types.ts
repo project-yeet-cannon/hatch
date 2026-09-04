@@ -267,10 +267,18 @@ export type PlaybookModel = 'haiku' | 'sonnet' | 'opus' | 'fable';
 
 export const PLAYBOOK_MODELS: PlaybookModel[] = ['haiku', 'sonnet', 'opus', 'fable'];
 
+/** What a playbook gets when it is created without one said. Mirrors
+    EfHatchPlaybook.DefaultModel, so the form shows what the server would have
+    chosen rather than a different guess of its own. */
+export const PLAYBOOK_MODEL_DEFAULT: PlaybookModel = 'sonnet';
+
 /** What the CLI's `--effort` takes, cheapest first. */
 export type PlaybookEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export const PLAYBOOK_EFFORTS: PlaybookEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+/** Mirrors EfHatchPlaybook.DefaultEffort - see PLAYBOOK_MODEL_DEFAULT. */
+export const PLAYBOOK_EFFORT_DEFAULT: PlaybookEffort = 'medium';
 
 /** One row of the matrix: a transition, the types it speaks for, and what an
     agent making that move is told and spent on. Mirrors PlaybookDto. */

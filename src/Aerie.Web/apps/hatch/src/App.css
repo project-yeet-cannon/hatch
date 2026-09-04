@@ -76,8 +76,15 @@
   gap: var(--sp-5);
 }
 
+/* flex: none because the page is a column flex box with the viewport's height:
+   without it every child is a shrinkable flex item, and a page taller than the
+   screen squeezes its cards down to fit instead of overflowing into the scroll
+   box above. A flush card, being a clipping box, shrinks all the way and takes
+   the bottom of its own table with it - which is why the Playbooks page could
+   unfold a prompt and appear to do nothing at all. */
 .hatch-page > *,
 .hatch-issue-page > * {
+  flex: none;
   max-width: var(--measure);
   width: 100%;
   margin: 0 auto;
