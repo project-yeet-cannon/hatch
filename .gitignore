@@ -10,6 +10,10 @@
 *.userosscache
 *.sln.docstates
 *.env.json
+# ...and `.env` at any depth, which is what keeps scripts/.env out - the file
+# `scripts/hatch.sh config` writes, holding an aerie_ak_ key. A key in the
+# artifact is one operator's key inherited by everyone who clones it, so verify
+# with `git check-ignore -v` before trusting `git status` about it.
 .env
 
 # User-specific files (MonoDevelop/Xamarin Studio)

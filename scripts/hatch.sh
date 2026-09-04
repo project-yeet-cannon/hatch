@@ -10,7 +10,7 @@
 # and which card is at the top of it (rank order, minus the ones whose ready
 # date has not arrived - the board folds those away and so does this).
 #
-# Two environment variables, both required, neither in this repo:
+# Two settings, both required, neither in this repo:
 #
 #   AERIE_BASE       https://hatch.<your domain>   - or a local dev origin
 #   AERIE_HATCH_KEY  aerie_ak_...                  - minted on the admin app's
@@ -20,11 +20,18 @@
 #
 #   HATCH_CLAUDE_BIN path to the claude CLI, if it is not on PATH
 #
-# Put them in your shell profile or a secrets file you source. Never here:
-# Aerie ships to other operators, and a key in the artifact is one operator's
-# key inherited by everybody who clones it.
+# `./hatch.sh config` asks for them and writes scripts/.env, mode 600 and
+# ignored by git. Every command reads that file, and anything already exported
+# wins over it - so a one-off origin is a prefix on the command line and not an
+# edit. A shell profile still works; the file exists so that a key does not
+# have to live in one, readable by everything you run all day.
+#
+# Never in this repo, either way: Aerie ships to other operators, and a key in
+# the artifact is one operator's key inherited by everybody who clones it.
 #
 # Usage:
+#   ./hatch.sh config                 # ask for the settings, write scripts/.env
+#   ./hatch.sh config --show          # what is set, and where it came from
 #   ./hatch.sh board                  # the columns, and how many cards in each
 #   ./hatch.sh next                   # top workable card of "todo"
 #   ./hatch.sh next "in progress"     # ...or of any column
@@ -45,10 +52,167 @@ set -euo pipefail
 
 command -v jq >/dev/null || { echo "hatch: needs jq" >&2; exit 1; }
 
-: "${AERIE_BASE:?set AERIE_BASE to your Hatch origin - see the header of this file}"
-: "${AERIE_HATCH_KEY:?set AERIE_HATCH_KEY to an aerie_ak_ key - see the header of this file}"
+# ---- Settings ----
 
-base="${AERIE_BASE%/}"
+script_dir() { CDPATH= cd -- "$(dirname -- "$0")" && pwd; }
+
+# The file `config` writes and every other command reads. Beside the script
+# rather than in the repository root: it belongs to this tool, not to the
+# build. Already ignored by .gitignore's `.env`, and written 600 regardless -
+# the point of it is that a credential need not be exported into every shell
+# and every process the day starts with.
+env_file() { echo "$(script_dir)/.env"; }
+
+# What the file may carry. An allowlist and a parser rather than a `source`,
+# because a credential file that is also a shell script is a larger promise
+# than "two values and a path", and a stray line in it should be ignored
+# instead of run.
+ENV_NAMES="AERIE_BASE AERIE_HATCH_KEY HATCH_CLAUDE_BIN"
+
+# KEY=value a line, blanks and # comments skipped, one layer of surrounding
+# quotes stripped. An exported value wins over the file, which is what makes
+# `AERIE_BASE=http://localhost:5227 ./hatch.sh board` work without an edit.
+load_env() {
+  local file line name value current
+  file=$(env_file)
+  [ -f "$file" ] || return 0
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue ;; esac
+    name="${line%%=*}"
+    [ "$name" != "$line" ] || continue
+    value="${line#*=}"
+    name=$(printf '%s' "$name" | tr -d '[:space:]')
+
+    case " $ENV_NAMES " in
+      *" $name "*) ;;
+      *) echo "hatch: ignoring \"$name\" in ${file} - not one of: ${ENV_NAMES}" >&2; continue ;;
+    esac
+
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    case "$value" in
+      \"*\") value="${value#\"}"; value="${value%\"}" ;;
+      \'*\') value="${value#\'}"; value="${value%\'}" ;;
+    esac
+
+    eval "current=\${${name}:-}"
+    if [ -z "$current" ]; then
+      # Exported, not just set: `work` spawns a session that will make these
+      # same calls, and it should not have to find the file a second time.
+      eval "export ${name}=\$value"
+    fi
+  done < "$file"
+}
+
+# Called by every command that talks to Hatch, and by none of the ones that do
+# not - `config` has to be able to run before there is anything to require.
+require_env() {
+  if [ -z "${AERIE_BASE:-}" ] || [ -z "${AERIE_HATCH_KEY:-}" ]; then
+    cat >&2 <<MISSING
+hatch: not configured.
+
+  ./scripts/hatch.sh config
+
+  asks for the Hatch origin and an aerie_ak_ key and writes them to
+  $(env_file), which git ignores. Exporting AERIE_BASE and
+  AERIE_HATCH_KEY yourself works too, and wins over the file.
+MISSING
+    exit 1
+  fi
+  base="${AERIE_BASE%/}"
+}
+
+# Enough of a key to recognise which one it is, and not enough to use.
+mask_key() {
+  local k="$1"
+  if [ "${#k}" -le 16 ]; then echo "(set)"; else echo "${k:0:12}...${k: -4}"; fi
+}
+
+cmd_config() {
+  local file cur_base cur_key cur_bin ans tmp board
+  file=$(env_file)
+
+  if [ "${1:-}" = "--show" ]; then
+    echo "file:             ${file}$([ -f "$file" ] || echo ' (does not exist yet)')"
+    echo "AERIE_BASE:       ${AERIE_BASE:-<unset>}"
+    echo "AERIE_HATCH_KEY:  $([ -n "${AERIE_HATCH_KEY:-}" ] && mask_key "$AERIE_HATCH_KEY" || echo '<unset>')"
+    echo "HATCH_CLAUDE_BIN: ${HATCH_CLAUDE_BIN:-<unset, using PATH>}"
+    return
+  fi
+  [ $# -eq 0 ] || { echo "hatch: config takes nothing, or --show" >&2; exit 1; }
+
+  [ -t 0 ] || { echo "hatch: config asks questions and needs a terminal" >&2; exit 1; }
+
+  # Whatever is loaded already is the default, so changing one setting is not
+  # an excuse to retype the other.
+  cur_base="${AERIE_BASE:-}"
+  cur_key="${AERIE_HATCH_KEY:-}"
+  cur_bin="${HATCH_CLAUDE_BIN:-}"
+
+  echo "Writing ${file}. Enter keeps what is shown in brackets."
+  echo
+
+  printf 'Hatch origin [%s]: ' "${cur_base:-https://hatch.<your domain>}"
+  IFS= read -r ans || ans=""
+  if [ -n "$ans" ]; then cur_base="$ans"; fi
+  case "$cur_base" in
+    http://*|https://*) ;;
+    '') echo "hatch: an origin is required" >&2; exit 1 ;;
+    *)  echo "hatch: \"$cur_base\" has no scheme - every call will fail. Write it as https://..." >&2; exit 1 ;;
+  esac
+
+  # Read without echo: this is the one value on the screen that a screenshot,
+  # a shoulder or a scrollback should not be able to keep.
+  printf 'API key [%s]: ' "$([ -n "$cur_key" ] && mask_key "$cur_key" || echo 'aerie_ak_...')"
+  IFS= read -rs ans || ans=""
+  echo
+  if [ -n "$ans" ]; then cur_key="$ans"; fi
+  [ -n "$cur_key" ] || { echo "hatch: a key is required - mint one on the admin app's API keys page" >&2; exit 1; }
+  case "$cur_key" in
+    aerie_ak_*) ;;
+    *) echo "hatch: warning - that does not start with aerie_ak_. Carrying on; the call below will say." >&2 ;;
+  esac
+
+  printf 'claude CLI path, for `work` [%s]: ' "${cur_bin:-on PATH}"
+  IFS= read -r ans || ans=""
+  if [ -n "$ans" ]; then cur_bin="$ans"; fi
+
+  # 077 covers the window between creating the temp file and chmod'ing it; the
+  # rename is what makes a half-written file impossible to read as a whole one.
+  tmp="${file}.$$"
+  ( umask 077; : > "$tmp" )
+  chmod 600 "$tmp"
+  {
+    echo "# Hatch's settings, written by \`scripts/hatch.sh config\`."
+    echo "#"
+    echo "# Ignored by git and mode 600. The key does not belong in a commit, a"
+    echo "# plan, an issue or a paste - Aerie ships to other operators, and the"
+    echo "# aerie_ak_ prefix exists so that one which slips into a diff is"
+    echo "# recognisable on sight. Re-run \`config\` to change any of this."
+    echo
+    printf 'AERIE_BASE=%s\n' "$cur_base"
+    printf 'AERIE_HATCH_KEY=%s\n' "$cur_key"
+    if [ -n "$cur_bin" ]; then printf 'HATCH_CLAUDE_BIN=%s\n' "$cur_bin"; fi
+  } >> "$tmp"
+  mv "$tmp" "$file"
+
+  export AERIE_BASE="$cur_base" AERIE_HATCH_KEY="$cur_key"
+  [ -z "$cur_bin" ] || export HATCH_CLAUDE_BIN="$cur_bin"
+  require_env
+
+  echo
+  echo "wrote ${file}"
+
+  # Written before it is proven, on purpose: a key that is refused is worth
+  # keeping on disk to fix, and the message below says what to fix.
+  if board=$(api GET /api/hatch/board); then
+    echo "reached ${base} - columns: $(columns_named "$board")"
+  else
+    echo "hatch: the file is written but that call did not go through - fix it and run config again." >&2
+    exit 1
+  fi
+}
 
 # ---- The wire ----
 
@@ -376,7 +540,18 @@ usage() {
   exit "${1:-0}"
 }
 
+load_env
+
+# Every command that talks to Hatch wants an origin and a key before it starts
+# doing anything; `config` and `usage` are the two that have to work on a
+# machine which has neither yet. Named rather than defaulted, so that a typo
+# still comes back as a typo below.
 case "${1:-}" in
+  board|next|show|start|move|comment|work|api) require_env ;;
+esac
+
+case "${1:-}" in
+  config)  shift; cmd_config "$@" ;;
   board)   shift; cmd_board "$@" ;;
   next)    shift; cmd_next "$@" ;;
   show)    shift; cmd_show "$@" ;;

@@ -17,13 +17,25 @@ ticket is where the answer goes back.
 Access is an API key: `Authorization: Bearer aerie_ak_…`, minted by the
 operator on the admin app's **API keys** page and shown exactly once.
 
-**The key lives outside this repo** — a local secrets file, an environment
-variable, a password manager entry. Never a file in the working tree, never a
-value in a commit, and never pasted into a plan or an issue. That is not
-ordinary secret hygiene: Aerie is headed for release to other operators, and a
+**The key lives outside the artifact** — never a tracked file, never a value
+in a commit, and never pasted into a plan or an issue. That is not ordinary
+secret hygiene: Aerie is headed for release to other operators, and a
 credential in the artifact is one operator's credential inherited by everyone
 who clones it. The `aerie_ak_` prefix exists so that a key which slips into a
 diff is recognisable on sight.
+
+Where it does live is one command:
+
+```
+./scripts/hatch.sh config       # asks for the origin and the key
+./scripts/hatch.sh config --show
+```
+
+That writes `scripts/.env` — mode 600, ignored by git, read by every `hatch.sh`
+command. An exported `AERIE_BASE` or `AERIE_HATCH_KEY` still wins over the
+file, so a one-off origin is a prefix on the command line. A shell profile or a
+password manager works too; the file exists so that a credential does not have
+to sit in the environment of everything you run all day.
 
 The key carries the `hatch` scope and reaches `/api/hatch/*` and nothing else.
 Every other operator endpoint — minting keys, revoking sessions, editing the
@@ -34,9 +46,9 @@ working and the route is not one a key may take; ask the operator.
 
 [`scripts/hatch.sh`](scripts/hatch.sh) wraps the calls a working session
 actually makes — `next`, `show`, `start`, `comment`, and `api` for everything
-else. It reads `AERIE_BASE` and `AERIE_HATCH_KEY` from the environment, finds
-the todo column by name rather than by id, and folds off the cards whose ready
-date has not arrived, exactly as the board does. Prefer it to raw `curl`; the
+else. It reads its settings from `scripts/.env` or the environment, finds the
+todo column by name rather than by id, and folds off the cards whose ready date
+has not arrived, exactly as the board does. Prefer it to raw `curl`; the
 raw calls below are what it is doing.
 
 ### One increment, unattended
