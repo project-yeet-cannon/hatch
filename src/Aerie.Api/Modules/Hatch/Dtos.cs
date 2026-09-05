@@ -411,3 +411,52 @@ public record WorkDto(
     IReadOnlyList<IssueCardDto> Children,
     IReadOnlyList<QuestionDto> Questions,
     string? Blocked);
+
+// ---- Rollups ----
+
+/// <summary>
+/// One column's share of a subtree: how many of its leaves are sitting there.
+/// </summary>
+/// <remarks>
+/// A status no leaf is in is absent rather than present with a zero - the
+/// client already holds the column list and does not need a row that draws
+/// nothing.
+/// </remarks>
+public record RollupSliceDto(int StatusId, int Count);
+
+/// <summary>
+/// What a subtree adds up to: the arithmetic every meter is drawn from, done
+/// once on the server so the Plan page, the issue page and anything holding an
+/// API key all read the same number. See <see cref="Rollup"/> for what a leaf
+/// is and why it is the unit.
+/// </summary>
+/// <param name="Leaves">
+/// The total the slices sum to - the number of issues with no children beneath
+/// this one, or one when this issue is a leaf itself.
+/// </param>
+/// <param name="Done">Leaves sitting in a terminal column. The numerator of "how far along is this".</param>
+/// <param name="Waiting">
+/// Open questions on this issue and every descendant, at any depth. What says
+/// an epic is blocked on a person rather than on an agent, counted through
+/// <see cref="Questions.OpenCountsAsync"/> so there is still one definition of
+/// "open".
+/// </param>
+/// <param name="Slices">In board order (<c>sortOrder</c>, then id), empty columns absent.</param>
+public record RollupDto(int Leaves, int Done, int Waiting, IReadOnlyList<RollupSliceDto> Slices);
+
+/// <summary>One direct child of the issue asked about, with its own rollup.</summary>
+/// <param name="IsLeaf">
+/// Whether it has children of its own - the flag that tells a client to draw a
+/// status pill rather than a bar. A field rather than something inferred from
+/// <see cref="RollupDto.Leaves"/> being one, because a story with a single task
+/// and a task with none must not look alike on the wire.
+/// </param>
+public record ChildRollupDto(IssueCardDto Issue, bool IsLeaf, RollupDto Rollup);
+
+/// <summary>
+/// One subtree and the row under it: what the issue page draws beneath an epic
+/// or a story. The children are the direct ones, in rank order, each carrying
+/// the rollup of everything beneath <em>it</em> - so a stack of meters agrees
+/// with the one above it by construction.
+/// </summary>
+public record IssueRollupDto(string Key, RollupDto Rollup, IReadOnlyList<ChildRollupDto> Children);

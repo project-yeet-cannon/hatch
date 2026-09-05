@@ -13,6 +13,7 @@ import type {
   IssueEvent,
   IssueMoveRequest,
   IssuePatchRequest,
+  IssueRollup,
   IssueSearch,
   ParsedEpic,
   PastedPlan,
@@ -149,6 +150,13 @@ export const deleteIssue = (key: string) =>
   fetchJson<void>(`/api/hatch/issues/${seg(key)}`, { method: 'DELETE' });
 export const moveIssue = (key: string, request: IssueMoveRequest) =>
   fetchJson<Issue>(`/api/hatch/issues/${seg(key)}/move`, { method: 'POST', ...asJson(request) });
+
+// ---- Progress ----
+
+/** What one subtree adds up to, and what each of its direct children adds up
+    to. Server-side arithmetic on purpose: a meter re-derived here would
+    disagree with the CLI the first time a column was added. See Rollup.cs. */
+export const getIssuePlan = (key: string) => fetchJson<IssueRollup>(`/api/hatch/plan/${seg(key)}`);
 
 // ---- Comments and events ----
 

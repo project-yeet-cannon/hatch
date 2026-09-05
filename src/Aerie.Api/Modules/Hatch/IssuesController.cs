@@ -111,7 +111,10 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
             var ancestor = await LoadAsync(ancestorKey, ct);
             if (ancestor is null) return BadRequest($"there is no {ancestorKey}");
 
-            var descendants = await DescendantIdsAsync(ancestor.Id, ct);
+            // The shared walk, not a second one - a filter and a meter that
+            // disagreed about what is under an epic would be a bug nobody
+            // notices until the two are on the same screen.
+            var descendants = await Rollup.DescendantIdsAsync(db, ancestor.Id, ct);
             query = query.Where(i => descendants.Contains(i.Id));
         }
 
@@ -160,38 +163,6 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
             i.ParentNumber is { } n ? IssueKey.Format(i.ParentProjectKey!, n) : null,
             IssueMoment.Format(i.ReadyAt, i.ReadyAtHasTime),
             IssueMoment.Format(i.DueAt, i.DueAtHasTime))).ToList();
-    }
-
-    /// <summary>
-    /// Every issue below this one, at any depth. Walked a level at a time -
-    /// one query per generation rather than one per issue - because the tree
-    /// here is three deep by design (epic, story, task) and a recursive CTE
-    /// would be Postgres-specific in a module whose tests run in memory.
-    /// </summary>
-    /// <remarks>
-    /// The <c>seen</c> set is not decoration. Parenting refuses to close a
-    /// loop, but this walk is the one place where a loop that got in some other
-    /// way - a restored backup, a hand-written UPDATE - would hang a request
-    /// forever rather than return a wrong answer.
-    /// </remarks>
-    private async Task<List<long>> DescendantIdsAsync(long rootId, CancellationToken ct)
-    {
-        var seen = new HashSet<long> { rootId };
-        var found = new List<long>();
-        var generation = new List<long> { rootId };
-
-        while (generation.Count > 0)
-        {
-            var children = await db.Issues.AsNoTracking()
-                .Where(i => i.ParentId != null && generation.Contains(i.ParentId.Value))
-                .Select(i => i.Id)
-                .ToListAsync(ct);
-
-            generation = children.Where(seen.Add).ToList();
-            found.AddRange(generation);
-        }
-
-        return found;
     }
 
     // ---- Creating ----
