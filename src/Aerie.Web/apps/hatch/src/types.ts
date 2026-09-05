@@ -400,3 +400,29 @@ export interface IssueRollup {
   rollup: Rollup;
   children: ChildRollup[];
 }
+
+/** One epic on the Plan page: the card, what everything beneath it adds up to,
+    and the epics beneath it drawn the same way. Mirrors PlanEntryDto. */
+export interface PlanEntry {
+  issue: IssueCard;
+  isLeaf: boolean;
+  /** The whole subtree, not only the epics in `children` - every story, task
+      and bug under it at any depth. */
+  rollup: Rollup;
+  /** The epics below this one, each appearing exactly here and not again at the
+      top level, so the tree is drawn once. Ordered by key. */
+  children: PlanEntry[];
+}
+
+/** The landscape in one request: every epic and what it adds up to. Mirrors
+    PlanDto. */
+export interface Plan {
+  /** The epics with no parent, each carrying the epics beneath it. Ordered by
+      key; whichever order the page wants is the page's to apply. */
+  epics: PlanEntry[];
+  /** The work hanging under no epic at all - the leaves below every root issue
+      that is not an epic, and `leaves: 0` when there is none. It is here so the
+      Plan page cannot quietly hide half the tracker from an operator who filed
+      a story without a parent. */
+  loose: Rollup;
+}
