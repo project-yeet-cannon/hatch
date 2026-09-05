@@ -1,5 +1,5 @@
 import { ISSUE_TYPES } from '../types';
-import { isFiltering, toggleType } from '../lib/filter';
+import { isFiltering, toggleType, toggleWaiting } from '../lib/filter';
 import type { CardFilter } from '../lib/filter';
 import { NO_FILTER } from '../lib/filter';
 
@@ -56,6 +56,19 @@ export function BoardFilters({
           );
         })}
       </div>
+
+      {/* Its own switch beside the type toggles rather than a fifth type: a
+          card waiting on an answer is not a kind of work, it is work that has
+          stopped, and it is the first thing to look for when the board has. */}
+      <button
+        type="button"
+        className={`hatch-type-toggle hatch-waiting-toggle${filter.waiting ? ' on' : ''}`}
+        aria-pressed={filter.waiting}
+        title="Cards holding a question nobody has answered"
+        onClick={() => onChange(toggleWaiting(filter))}
+      >
+        waiting on me
+      </button>
 
       {filtering && (
         <>

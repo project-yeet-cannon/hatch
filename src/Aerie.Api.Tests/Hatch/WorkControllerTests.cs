@@ -123,6 +123,63 @@ public class WorkControllerTests
         Assert.NotNull(work.Blocked);
     }
 
+    [Fact]
+    public async Task Work_RefusesAnIssueHoldingAnUnansweredQuestion()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync("task", "asked and waiting", h.Todo);
+        await h.AskAsync(issue, "per-node or global?");
+
+        var work = Value(await h.Work.GetWork(Key(issue), default));
+
+        // Not a missing playbook and not a terminal column: this one is waiting
+        // on a person, and dispatching at it would produce a second session
+        // asking the same thing or guessing at the answer.
+        Assert.Contains("unanswered question", work.Blocked);
+        Assert.NotNull(work.Playbook);
+    }
+
+    [Fact]
+    public async Task NextWork_PassesOverAnIssueWaitingOnAnAnswer()
+    {
+        var h = await NewAsync();
+        var asked = await h.FileAsync("task", "waiting on a decision", h.Todo, rank: 1024);
+        var workable = await h.FileAsync("task", "nothing in its way", h.Todo, rank: 2048);
+        await h.AskAsync(asked, "per-node or global?");
+
+        // Folded past exactly as a card whose ready date has not arrived is,
+        // and for the same reason: it is not workable yet.
+        Assert.Equal(Key(workable), Value(await h.Work.GetNextWork(0, default)).Issue.Key);
+    }
+
+    [Fact]
+    public async Task Work_DispatchesOnceTheQuestionHasBeenAnswered()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync("task", "asked and answered", h.Todo);
+        var question = await h.AskAsync(issue, "per-node or global?");
+        await h.AnswerAsync(issue, question, "per-node");
+
+        var work = Value(await h.Work.GetWork(Key(issue), default));
+
+        Assert.Null(work.Blocked);
+    }
+
+    [Fact]
+    public async Task Work_CarriesTheAnsweredQuestionsSoTheNextSessionDoesNotReopenThem()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync("task", "decided", h.Todo);
+        var question = await h.AskAsync(issue, "per-node or global?");
+        await h.AnswerAsync(issue, question, "per-node");
+
+        var work = Value(await h.Work.GetWork(Key(issue), default));
+
+        var carried = Assert.Single(work.Questions);
+        Assert.Equal("per-node or global?", carried.Body);
+        Assert.Equal("per-node", Assert.Single(carried.Answers).Body);
+    }
+
     // ---- Matching ----
 
     [Fact]
@@ -242,6 +299,42 @@ public class WorkControllerTests
             Db.Issues.Add(issue);
             await Db.SaveChangesAsync();
             return issue;
+        }
+
+        /// <summary>
+        /// A question on an issue, written straight to the table - these tests
+        /// are about what a question does to a dispatch, and the endpoint that
+        /// writes one is covered where the rest of the comment rules are.
+        /// </summary>
+        public async Task<EfHatchComment> AskAsync(EfHatchIssue issue, string body)
+        {
+            var comment = new EfHatchComment
+            {
+                IssueId = issue.Id,
+                Author = "hatch-agent",
+                Body = body,
+                Kind = EfHatchComment.Question,
+                CreatedAt = Now,
+            };
+
+            Db.Comments.Add(comment);
+            await Db.SaveChangesAsync();
+            return comment;
+        }
+
+        public async Task AnswerAsync(EfHatchIssue issue, EfHatchComment question, string body)
+        {
+            Db.Comments.Add(new EfHatchComment
+            {
+                IssueId = issue.Id,
+                Author = "operator",
+                Body = body,
+                Kind = EfHatchComment.Answer,
+                AnswersId = question.Id,
+                CreatedAt = Now,
+            });
+
+            await Db.SaveChangesAsync();
         }
     }
 

@@ -50,11 +50,27 @@ public class HatchContext(DbContextOptions<HatchContext> options) : DbContext(op
         // Comments and events, on the other hand, have no meaning without their
         // issue - and this is the accepted MVP gap written down in the plan: a
         // deleted issue takes its audit trail with it.
-        modelBuilder.Entity<EfHatchComment>()
-            .HasOne(c => c.Issue)
-            .WithMany(i => i.Comments)
-            .HasForeignKey(c => c.IssueId)
-            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<EfHatchComment>(e =>
+        {
+            e.HasOne(c => c.Issue)
+                .WithMany(i => i.Comments)
+                .HasForeignKey(c => c.IssueId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // An answer points at the question it settles, on the same issue.
+            //
+            // NoAction rather than the Restrict used everywhere else, and the
+            // difference is load-bearing here: deleting an issue cascades to
+            // every comment on it, question and answer together, and PostgreSQL
+            // checks a RESTRICT immediately - the answer row would be seen
+            // pointing at a question mid-delete and the whole delete would fail.
+            // NO ACTION is checked once the statement is finished, by which
+            // point both rows have gone and there is nothing to complain about.
+            e.HasOne(c => c.Answers)
+                .WithMany(c => c.AnsweredBy)
+                .HasForeignKey(c => c.AnswersId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
 
         modelBuilder.Entity<EfHatchIssueEvent>(e =>
         {

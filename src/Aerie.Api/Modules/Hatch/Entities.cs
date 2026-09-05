@@ -287,12 +287,42 @@ public class EfHatchIssue
     public static bool IsValidType(string? type) => type is not null && Types.Contains(type);
 }
 
-/// <summary>A comment on an issue. Markdown, like the description, and rendered the same way.</summary>
+/// <summary>
+/// A comment on an issue. Markdown, like the description, and rendered the same
+/// way.
+///
+/// Most comments are notes - a commit sha, a summary for a reviewer, a change
+/// of mind. Two of them are not, and those two carry a <see cref="Kind"/>: a
+/// <see cref="Question"/> is an agent saying it cannot proceed without a
+/// decision only the operator can make, and an <see cref="Answer"/> is that
+/// decision, bound to the question it settles by <see cref="AnswersId"/>.
+/// </summary>
+/// <remarks>
+/// A question is a row rather than a heading in a comment body for the same
+/// reason a ready date is a column rather than a line saying "not until March":
+/// something has to be able to act on it. An unanswered question is why a
+/// ticket cannot move, so <see cref="WorkController"/> reads these to refuse a
+/// run and the board reads them to say which cards are waiting on a person.
+/// Prose in a thread can be searched; it cannot be counted.
+/// </remarks>
 [Table("Comments")]
 [Index(nameof(IssueId), nameof(CreatedAt))]
+[Index(nameof(AnswersId))]
 public class EfHatchComment
 {
     public const int MaxBodyLength = 100_000;
+    public const int MaxKindLength = 16;
+
+    /// <summary>An ordinary comment. The empty string rather than null, so the column never has two ways to say "nothing special".</summary>
+    public const string Note = "";
+
+    /// <summary>A decision being asked for. Open until some comment answers it.</summary>
+    public const string Question = "question";
+
+    /// <summary>A decision being given, pointing at the question it settles.</summary>
+    public const string Answer = "answer";
+
+    public static bool IsValidKind(string kind) => kind is Note or Question or Answer;
 
     [Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]
     public long Id { get; set; }
@@ -310,6 +340,31 @@ public class EfHatchComment
     public required string Author { get; set; }
 
     public required string Body { get; set; }
+
+    /// <summary>
+    /// <see cref="Note"/>, <see cref="Question"/> or <see cref="Answer"/>.
+    /// Defaulted rather than required: every comment written before this column
+    /// existed is a note, and so is every comment written by a client that does
+    /// not know about the other two.
+    /// </summary>
+    [MaxLength(MaxKindLength)]
+    public string Kind { get; set; } = Note;
+
+    /// <summary>
+    /// The question this answers, on the same issue. Null on everything else.
+    /// </summary>
+    /// <remarks>
+    /// The link points from the answer to the question and not the other way
+    /// round, which is what lets a question be answered twice without an edit -
+    /// somebody refining a decision writes a second answer, and the first stays
+    /// where it was said. "Open" is therefore a question with no answers
+    /// pointing at it, computed and never stored, so the two can never disagree.
+    /// </remarks>
+    public long? AnswersId { get; set; }
+    public EfHatchComment? Answers { get; set; }
+
+    /// <summary>The answers to this question, if it is one.</summary>
+    public ICollection<EfHatchComment> AnsweredBy { get; set; } = [];
 
     public required DateTimeOffset CreatedAt { get; set; }
 }
@@ -345,6 +400,13 @@ public class EfHatchIssueEvent
     public const string ReadyChanged = "ready_changed";
     public const string DueChanged = "due_changed";
     public const string Commented = "commented";
+
+    /// <summary>A question was asked, and the issue is waiting on a person until it is answered.</summary>
+    public const string Asked = "asked";
+
+    /// <summary>A question was answered. The payload names which one.</summary>
+    public const string Answered = "answered";
+
     public const string Imported = "imported";
 
     [Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]

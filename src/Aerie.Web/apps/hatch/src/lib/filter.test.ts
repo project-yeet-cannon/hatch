@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NO_FILTER, filterCards, isFiltering, matchesQuery, toggleType } from './filter';
+import { NO_FILTER, filterCards, isFiltering, matchesQuery, toggleType, toggleWaiting } from './filter';
 import type { IssueCard, IssueType } from '../types';
 
 const card = (over: Partial<IssueCard> = {}): IssueCard => ({
@@ -12,8 +12,13 @@ const card = (over: Partial<IssueCard> = {}): IssueCard => ({
   parentKey: null,
   readyAt: null,
   dueAt: null,
+  openQuestions: 0,
   ...over,
 });
+
+/* Every literal filter below is spread onto this rather than written whole, so
+   that adding a switch to CardFilter is one edit here and not one per case. */
+const filter = (over: Partial<typeof NO_FILTER> = {}) => ({ ...NO_FILTER, ...over });
 
 describe('matchesQuery', () => {
   it('matches nothing in particular when nothing was typed', () => {
@@ -59,30 +64,62 @@ describe('filterCards', () => {
   });
 
   it('keeps only the chosen types', () => {
-    expect(filterCards(cards, { types: ['bug'], query: '' }).map((c) => c.key)).toEqual(['AER-2']);
+    expect(filterCards(cards, filter({ types: ['bug'] })).map((c) => c.key)).toEqual(['AER-2']);
   });
 
   it('takes more than one type at a time', () => {
-    expect(filterCards(cards, { types: ['bug', 'epic'], query: '' }).map((c) => c.key)).toEqual(['AER-1', 'AER-2']);
+    expect(filterCards(cards, filter({ types: ['bug', 'epic'] })).map((c) => c.key)).toEqual(['AER-1', 'AER-2']);
   });
 
   /* An empty type list is "every type", not "no types". A board that goes blank
      when the last chip is switched off reads as broken. */
   it('treats no chosen types as every type', () => {
-    expect(filterCards(cards, { types: [], query: '' })).toHaveLength(3);
+    expect(filterCards(cards, filter())).toHaveLength(3);
   });
 
   it('applies the type filter and the search together', () => {
-    expect(filterCards(cards, { types: ['task'], query: 'certificate' }).map((c) => c.key)).toEqual(['AER-3']);
+    expect(filterCards(cards, filter({ types: ['task'], query: 'certificate' })).map((c) => c.key)).toEqual(['AER-3']);
+  });
+
+  it('keeps only the cards holding an unanswered question', () => {
+    const asked = [...cards, card({ key: 'AER-4', title: 'Retry policy', openQuestions: 2 })];
+
+    expect(filterCards(asked, filter({ waiting: true })).map((c) => c.key)).toEqual(['AER-4']);
+  });
+
+  /* The switch narrows alongside everything else rather than replacing it, so
+     "the bugs that are waiting on me" is one board and not two passes. */
+  it('narrows with the type filter rather than instead of it', () => {
+    const asked = [
+      card({ key: 'AER-4', type: 'bug', openQuestions: 1 }),
+      card({ key: 'AER-5', type: 'task', openQuestions: 1 }),
+    ];
+
+    expect(filterCards(asked, filter({ waiting: true, types: ['bug'] })).map((c) => c.key)).toEqual(['AER-4']);
   });
 });
 
 describe('isFiltering', () => {
   it('is false only when the board is showing everything', () => {
     expect(isFiltering(NO_FILTER)).toBe(false);
-    expect(isFiltering({ types: [], query: '  ' })).toBe(false);
-    expect(isFiltering({ types: ['bug'], query: '' })).toBe(true);
-    expect(isFiltering({ types: [], query: 'cert' })).toBe(true);
+    expect(isFiltering(filter({ query: '  ' }))).toBe(false);
+    expect(isFiltering(filter({ types: ['bug'] }))).toBe(true);
+    expect(isFiltering(filter({ query: 'cert' }))).toBe(true);
+    expect(isFiltering(filter({ waiting: true }))).toBe(true);
+  });
+});
+
+describe('toggleWaiting', () => {
+  it('turns the switch on and off again', () => {
+    const on = toggleWaiting(NO_FILTER);
+    expect(on.waiting).toBe(true);
+    expect(toggleWaiting(on).waiting).toBe(false);
+  });
+
+  it('leaves the rest of the filter alone', () => {
+    const narrowed = toggleWaiting(filter({ types: ['bug'], query: 'cert' }));
+    expect(narrowed.types).toEqual(['bug']);
+    expect(narrowed.query).toBe('cert');
   });
 });
 
@@ -94,6 +131,6 @@ describe('toggleType', () => {
   });
 
   it('leaves the query alone', () => {
-    expect(toggleType({ types: [], query: 'cert' }, 'epic' as IssueType).query).toBe('cert');
+    expect(toggleType(filter({ query: 'cert' }), 'epic' as IssueType).query).toBe('cert');
   });
 });

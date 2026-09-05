@@ -612,6 +612,210 @@ public class IssuesControllerTests
         Assert.IsType<NotFoundResult>((await h.Thread.AddComment("AER-9", new CommentCreateRequest("hi"), default)).Result);
     }
 
+    // ---- Questions ----
+
+    /* A question is the one comment that something acts on: it stops the issue
+       being dispatched (WorkController) and it puts a badge on the card. So
+       these pin the two things that would quietly break that - what counts as
+       an answer, and what counts as still open. */
+
+    [Fact]
+    public async Task AQuestion_IsAskedAndLeavesItsOwnEvent()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+
+        var asked = Created(await h.Thread.AddComment(
+            "AER-1", new CommentCreateRequest("per-node or global?", "question"), default));
+
+        Assert.Equal(EfHatchComment.Question, asked.Kind);
+        Assert.Null(asked.AnswersId);
+
+        // Its own kind, not "commented": the trail is asked when somebody wants
+        // to know when this stopped moving and why.
+        Assert.Contains(EfHatchIssueEvent.Asked, (await h.EventsAsync("AER-1")).Select(e => e.Kind));
+    }
+
+    [Fact]
+    public async Task AnAnswer_ClosesTheQuestionItNames()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+        var asked = await h.AskAsync("AER-1", "per-node or global?");
+
+        Assert.Single(Value(await h.Questions.GetIssueQuestions("AER-1", open: true, default)));
+
+        await h.AnswerAsync("AER-1", asked.Id, "per-node");
+
+        Assert.Empty(Value(await h.Questions.GetIssueQuestions("AER-1", open: true, default)));
+
+        var all = Value(await h.Questions.GetIssueQuestions("AER-1", open: false, default));
+        Assert.Equal("per-node", Assert.Single(Assert.Single(all).Answers).Body);
+    }
+
+    [Fact]
+    public async Task AnsweringTwice_LeavesBothAnswersAndTheQuestionClosed()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+        var asked = await h.AskAsync("AER-1", "which disk?");
+
+        await h.AnswerAsync("AER-1", asked.Id, "the bulk one");
+        await h.AnswerAsync("AER-1", asked.Id, "on reflection, the reserved one");
+
+        // The link points from the answer to the question, so a second answer
+        // is a refinement rather than an edit - and the first stays where it
+        // was said.
+        Assert.Empty(Value(await h.Questions.GetIssueQuestions("AER-1", open: true, default)));
+
+        var answers = Assert.Single(Value(await h.Questions.GetIssueQuestions("AER-1", open: false, default))).Answers;
+        Assert.Equal(["the bulk one", "on reflection, the reserved one"], answers.Select(a => a.Body));
+    }
+
+    [Fact]
+    public async Task AnAnswerWithNoQuestion_IsRefused()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+
+        var result = await h.Thread.AddComment("AER-1", new CommentCreateRequest("yes", "answer"), default);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task AnAnswerToACommentThatIsNotAQuestion_IsRefused()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+        var note = Created(await h.Thread.AddComment("AER-1", new CommentCreateRequest("sha abc123"), default));
+
+        var result = await h.Thread.AddComment(
+            "AER-1", new CommentCreateRequest("yes", "answer", note.Id), default);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task AnAnswerToAQuestionOnAnotherIssue_IsRefused()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+        await h.CreateAsync("story", "the other thing");
+        var asked = await h.AskAsync("AER-1", "per-node or global?");
+
+        // A cross-issue link would put the answer on a thread nobody reading
+        // the question can see, and would leave AER-1 blocked forever.
+        var result = await h.Thread.AddComment(
+            "AER-2", new CommentCreateRequest("per-node", "answer", asked.Id), default);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Single(Value(await h.Questions.GetIssueQuestions("AER-1", open: true, default)));
+    }
+
+    [Fact]
+    public async Task ANoteThatNamesAQuestion_IsRefused()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+        var asked = await h.AskAsync("AER-1", "per-node or global?");
+
+        // Sent by a client that has misunderstood something. Dropping the half
+        // it got wrong is how it stays misunderstood.
+        var result = await h.Thread.AddComment(
+            "AER-1", new CommentCreateRequest("thinking about it", null, asked.Id), default);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task AKindNobodyDefined_IsRefused()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+
+        var result = await h.Thread.AddComment("AER-1", new CommentCreateRequest("hm", "musing"), default);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task ACommentWithNoKind_IsStillJustAComment()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+
+        await h.Thread.AddComment("AER-1", new CommentCreateRequest("sha abc123"), default);
+
+        // The whole thread predating questions has to keep reading as notes,
+        // and so does every client that has never heard of a kind.
+        var comment = Assert.Single(Value(await h.Thread.GetComments("AER-1", default)));
+        Assert.Equal(EfHatchComment.Note, comment.Kind);
+        Assert.Empty(Value(await h.Questions.GetQuestions(open: true, default)));
+    }
+
+    [Fact]
+    public async Task TheHouseWideList_IsEveryOpenQuestionOldestFirst()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+        await h.CreateAsync("story", "the other thing");
+
+        var first = await h.AskAsync("AER-1", "asked first");
+        await h.AskAsync("AER-2", "asked second");
+        await h.AskAsync("AER-1", "asked third");
+        await h.AnswerAsync("AER-1", first.Id, "settled");
+
+        var open = Value(await h.Questions.GetQuestions(open: true, default));
+
+        // Oldest first is answering order: the question that has waited longest
+        // is holding something up longest.
+        Assert.Equal(["asked second", "asked third"], open.Select(q => q.Body));
+        Assert.Equal(["AER-2", "AER-1"], open.Select(q => q.IssueKey));
+    }
+
+    [Fact]
+    public async Task TheBoard_CountsWhatEachCardIsWaitingOn()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+        await h.CreateAsync("story", "the quiet one");
+
+        var answered = await h.AskAsync("AER-1", "already settled");
+        await h.AnswerAsync("AER-1", answered.Id, "yes");
+        await h.AskAsync("AER-1", "still open");
+        await h.AskAsync("AER-1", "also open");
+
+        var board = Value(await h.Board.GetBoard(default));
+
+        Assert.Equal(2, board.Issues.Single(i => i.Key == "AER-1").OpenQuestions);
+        Assert.Equal(0, board.Issues.Single(i => i.Key == "AER-2").OpenQuestions);
+    }
+
+    [Fact]
+    public async Task DeletingAnIssue_TakesItsQuestionsAndAnswersWithIt()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+        var asked = await h.AskAsync("AER-1", "per-node or global?");
+        await h.AnswerAsync("AER-1", asked.Id, "per-node");
+
+        // The answer points at the question, so this is the delete that a
+        // RESTRICT on that link would have refused - see the CommentQuestions
+        // migration.
+        await h.Issues.DeleteIssue("AER-1", default);
+
+        Assert.Empty(await h.Db.Comments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task QuestionsOnAnUnknownIssue_Are404()
+    {
+        var h = await NewAsync();
+
+        Assert.IsType<NotFoundResult>((await h.Questions.GetIssueQuestions("AER-9", open: true, default)).Result);
+    }
+
     // ---- Validation ----
 
     [Theory]
@@ -1407,6 +1611,7 @@ public class IssuesControllerTests
         public required HatchContext Db { get; init; }
         public required IssuesController Issues { get; init; }
         public required IssueThreadController Thread { get; init; }
+        public required QuestionsController Questions { get; init; }
         public required BoardController Board { get; init; }
         public required ProjectsController Projects { get; init; }
         public required StatusesController Statuses { get; init; }
@@ -1432,6 +1637,14 @@ public class IssuesControllerTests
 
         public async Task<IReadOnlyList<IssueEventDto>> EventsAsync(string key) =>
             Value(await Thread.GetEvents(key, default));
+
+        /// <summary>A question on an issue, as an agent would ask one.</summary>
+        public async Task<CommentDto> AskAsync(string key, string body) =>
+            Created(await Thread.AddComment(key, new CommentCreateRequest(body, EfHatchComment.Question), default));
+
+        /// <summary>The answer to one, as a person would give it.</summary>
+        public async Task<CommentDto> AnswerAsync(string key, long questionId, string body) =>
+            Created(await Thread.AddComment(key, new CommentCreateRequest(body, EfHatchComment.Answer, questionId), default));
 
         /// <summary>The keys a filter finds, in the order the endpoint returns them.</summary>
         public async Task<IReadOnlyList<string>> SearchAsync(
@@ -1469,6 +1682,7 @@ public class IssuesControllerTests
             Db = db,
             Issues = new IssuesController(db, ranks, caller, time),
             Thread = new IssueThreadController(db, caller, time),
+            Questions = new QuestionsController(db),
             Board = new BoardController(db),
             Projects = new ProjectsController(db, time),
             Statuses = new StatusesController(db),

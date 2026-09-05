@@ -17,6 +17,7 @@ import { TypeBadge } from '../components/TypeBadge';
 import { statusVars } from '../lib/color';
 import { message } from '../lib/errors';
 import { renderMarkdown } from '../lib/markdown';
+import { openQuestions } from '../lib/questions';
 import { ISSUE_TYPES, LEGAL_PARENT_TYPES } from '../types';
 import type { Board, Comment, Issue, IssueEvent, IssueType, Status } from '../types';
 
@@ -116,6 +117,12 @@ export function IssuePage() {
       />
 
       {error && <p className="text-danger">{error}</p>}
+
+      {/* Above everything the page lets you change, because it is the one thing
+          on it that something else is waiting for. An issue holding an
+          unanswered question is not dispatched at all - see WorkController - so
+          until this card is empty the ticket does not move. */}
+      <Waiting issueKey={key} comments={comments} onAnswered={() => void load()} onError={setError} />
 
       <StatusBar
         statuses={board.statuses}
@@ -329,6 +336,101 @@ function Description({ issue, onSave }: { issue: Issue; onSave: (description: st
   );
 }
 
+/**
+ * The questions on this issue that nobody has answered, each with a box to
+ * answer it in.
+ *
+ * A box per question rather than one for the lot: an answer is bound to the
+ * question it settles (CommentCreateRequest.answersId), which is what lets two
+ * questions on one ticket be decided a day apart, and what makes "is this still
+ * waiting" a fact rather than a reading of the thread.
+ *
+ * Threaded from the comments the page already has - see lib/questions.ts for
+ * why this is not a second request.
+ */
+function Waiting({
+  issueKey,
+  comments,
+  onAnswered,
+  onError,
+}: {
+  issueKey: string;
+  comments: Comment[];
+  onAnswered: () => void;
+  onError: (message: string) => void;
+}) {
+  const open = openQuestions(comments);
+  if (open.length === 0) return null;
+
+  return (
+    <Card as="section" className="hatch-waiting">
+      <h2 className="hatch-section-title">
+        Waiting on you ({open.length})
+      </h2>
+      <p className="text-muted">
+        {issueKey} will not be picked up again until these are answered.
+      </p>
+
+      <ul className="hatch-question-list">
+        {open.map((thread) => (
+          <Asked key={thread.question.id} issueKey={issueKey} question={thread.question} onAnswered={onAnswered} onError={onError} />
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+/** One question, and the answer being typed to it. */
+function Asked({
+  issueKey,
+  question,
+  onAnswered,
+  onError,
+}: {
+  issueKey: string;
+  question: Comment;
+  onAnswered: () => void;
+  onError: (message: string) => void;
+}) {
+  const [body, setBody] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function submit() {
+    setSaving(true);
+    try {
+      await addComment(issueKey, { body, kind: 'answer', answersId: question.id });
+      setBody('');
+      onAnswered();
+    } catch (err) {
+      onError(message(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <li className="hatch-question">
+      <div className="hatch-comment-head">
+        <strong>{question.author}</strong>
+        <span className="text-muted">asked {new Date(question.createdAt).toLocaleString()}</span>
+      </div>
+      <div className="hatch-markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(question.body) }} />
+
+      <div className="hatch-comment-box">
+        <textarea
+          rows={2}
+          value={body}
+          placeholder="The decision, in a sentence."
+          onChange={(e) => setBody(e.target.value)}
+        />
+        <Button variant="primary" loading={saving} disabled={!body.trim()} onClick={() => void submit()}>
+          Answer
+        </Button>
+      </div>
+    </li>
+  );
+}
+
 function Comments({
   issueKey,
   comments,
@@ -364,9 +466,14 @@ function Comments({
 
       <ul className="hatch-comments">
         {comments.map((comment) => (
-          <li key={comment.id} className="hatch-comment">
+          <li key={comment.id} className={`hatch-comment${comment.kind ? ` hatch-comment-${comment.kind}` : ''}`}>
             <div className="hatch-comment-head">
               <strong>{comment.author}</strong>
+              {/* The thread still shows everything in the order it was said -
+                  the card above is for acting, this is for reading back what
+                  was decided and when. */}
+              {comment.kind === 'question' && <Badge>asked</Badge>}
+              {comment.kind === 'answer' && <Badge>answered</Badge>}
               <span className="text-muted">{new Date(comment.createdAt).toLocaleString()}</span>
             </div>
             <div className="hatch-markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(comment.body) }} />

@@ -143,6 +143,16 @@ public class AdminSurfaceTests
         "IssueThreadController.GetComments",
         "IssueThreadController.AddComment",
         "IssueThreadController.GetEvents",
+
+        // Hatch-scoped like the rest of the module, including the answering.
+        // A key is what `hatch.sh answer` types with, and a key is also what a
+        // spawned agent inherits - the server cannot tell those apart, so it
+        // does not pretend to. What keeps an agent from answering itself out of
+        // a block is that the dispatch is refused while a question is open, and
+        // the dispatch is a command the operator types. See
+        // IssueThreadController.AddComment.
+        "QuestionsController.GetQuestions",
+        "QuestionsController.GetIssueQuestions",
         "ImportController.Preview",
         "ImportController.PreviewText",
         "ImportController.Import",
