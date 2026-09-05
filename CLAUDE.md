@@ -60,7 +60,24 @@ raw calls below are what it is doing.
 ```
 
 `work` asks the server what to do next and how, then spawns a headless session
-to do it. What that session is told, which model it runs on, and how much
+to do it. It streams what that session is doing as it happens — every tool call,
+a thinking-token pulse, and a line every twenty seconds of silence saying what
+it is still waiting on — because a print-mode run that says nothing for four
+minutes is indistinguishable from a hung one. `--quiet` restores the old
+behaviour; `HATCH_HEARTBEAT` sets the silence before it speaks up, and `0` turns
+that off.
+
+The first line it prints is the session id:
+
+```
+hatch: session 764ca76a-…
+hatch:   join it with  claude --resume 764ca76a-…
+```
+
+That is how you prod a run without throwing it away — `claude --resume <id>`
+opens the same conversation, with everything it has done in context, so you can
+redirect it instead of starting over.
+ What that session is told, which model it runs on, and how much
 effort it spends are a **playbook**: a row per (status transition, issue types)
 that the operator edits on Hatch's Playbooks page. Turning a paragraph in the
 inbox into an epic with stories under it is not the same job as implementing an

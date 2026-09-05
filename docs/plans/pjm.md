@@ -590,6 +590,23 @@ that the board and the dispatcher can act on.
   list nobody kept, and the sentence the next agent's prompt carries is the same
   sentence a person reads six months later. A second column saying it in numbers
   is a second thing that can come to disagree with the first.
+- **`work` streams what the run is doing.** `--output-format stream-json`
+  rendered to a log: every tool call, a thinking-token pulse, failures only from
+  tool results, and a heartbeat naming what it is still waiting on. The default
+  text output prints nothing until the run ends, so a four-minute increment was
+  four minutes of blank terminal that looked exactly like a hang — and the fix
+  for "is it working" is showing the work, not a spinner. `--quiet` keeps the
+  old behaviour.
+- **The session id is printed first and last**, with the `claude --resume`
+  command beside it. Reaching an unattended run without killing it was the other
+  half of the same complaint, and the CLI already had the answer: the session
+  persists, so joining it is a command rather than a feature.
+- **The heartbeat times its own read rather than reading an exit code.** bash
+  documents a status over 128 for an expired `read -t`; macOS ships bash 3.2,
+  which predates that and answers 1 for a timeout and 1 for end-of-stream alike.
+  Reading the code would have ended the log at the first quiet moment on the one
+  platform this file promises to run on. How long the read blocked says the same
+  thing on every version.
 - **Nothing stops an API key answering its own question**, and that is stated
   rather than papered over. A key is what `hatch.sh answer` types with and it is
   also what a spawned agent inherits; the server cannot tell them apart, and a
