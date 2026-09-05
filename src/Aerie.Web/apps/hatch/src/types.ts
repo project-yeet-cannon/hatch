@@ -77,6 +77,16 @@ export interface Issue {
     Mirrors EfHatchComment.Kind; the empty string is a note. */
 export type CommentKind = '' | 'question' | 'answer';
 
+/** One answer a question offers up front. Mirrors QuestionOptionDto. */
+export interface QuestionOption {
+  /** The choice as it will be said, and what an answer's body becomes when it is taken. */
+  label: string;
+  /** What taking it means and what it costs. Absent on a choice that explains itself. */
+  detail: string | null;
+  /** The one the asker would take. At most one per question. */
+  recommended: boolean;
+}
+
 export interface Comment {
   id: number;
   author: string;
@@ -84,6 +94,8 @@ export interface Comment {
   kind: CommentKind;
   /** The question this answers, on the same issue. Null on everything else. */
   answersId: number | null;
+  /** The answers a question offers, or null on one asked in prose. */
+  options: QuestionOption[] | null;
   createdAt: string;
 }
 
@@ -96,6 +108,7 @@ export interface Question {
   body: string;
   askedBy: string;
   askedAt: string;
+  options: QuestionOption[] | null;
   answers: Comment[];
 }
 
@@ -285,6 +298,8 @@ export interface CommentCreateRequest {
   kind?: CommentKind;
   /** Required on an answer, and refused on anything else. */
   answersId?: number;
+  /** Offered answers, on a question only. */
+  options?: QuestionOption[];
 }
 
 // ---- Playbooks ----

@@ -192,14 +192,62 @@ public record IssueBulkEditRequest(
 /// <see cref="EfHatchComment.Kind"/> for why those two are a column.
 /// </param>
 /// <param name="AnswersId">The question this answers, on the same issue. Null on everything else.</param>
-public record CommentDto(long Id, string Author, string Body, string Kind, long? AnswersId, DateTimeOffset CreatedAt);
+/// <param name="Options">
+/// The answers a question offers, or null on one asked in prose. See
+/// <see cref="EfHatchComment.Options"/>.
+/// </param>
+public record CommentDto(
+    long Id,
+    string Author,
+    string Body,
+    string Kind,
+    long? AnswersId,
+    IReadOnlyList<QuestionOptionDto>? Options,
+    DateTimeOffset CreatedAt);
+
+/// <summary>
+/// One answer a question offers up front.
+///
+/// A label and a detail rather than one string, because they are read at
+/// different moments: the label is what is scanned down a list and what becomes
+/// the answer's own text, and the detail is what is read once, by somebody
+/// deciding between two of them.
+/// </summary>
+/// <param name="Label">
+/// The choice, as it will be said. Short enough to press and to read back in a
+/// thread six months later - "child-weighted", not a sentence about weighting.
+/// </param>
+/// <param name="Detail">What taking it means, and what it costs. Optional; a self-evident choice does not need one.</param>
+/// <param name="Recommended">
+/// The one the asker would take. At most one per question - a recommendation
+/// that covers two options is not a recommendation.
+/// </param>
+public record QuestionOptionDto(string Label, string? Detail = null, bool Recommended = false)
+{
+    public const int MaxLabelLength = 120;
+    public const int MaxDetailLength = 2_000;
+
+    /// <summary>
+    /// Enough to cover a decision and few enough to read without scrolling. A
+    /// question with nine answers is two questions.
+    /// </summary>
+    public const int MaxPerQuestion = 8;
+}
 
 /// <summary>
 /// A new comment. <paramref name="Kind"/> is omitted by everything that just
 /// wants to say something, which is most callers and every caller that predates
 /// questions.
 /// </summary>
-public record CommentCreateRequest(string Body, string? Kind = null, long? AnswersId = null);
+/// <param name="Options">
+/// Offered answers, on a question only. Omitted asks in prose, which stays
+/// legal - not every decision is a menu.
+/// </param>
+public record CommentCreateRequest(
+    string Body,
+    string? Kind = null,
+    long? AnswersId = null,
+    IReadOnlyList<QuestionOptionDto>? Options = null);
 
 /// <summary>
 /// A question and whatever has been said back to it - what the CLI walks
@@ -211,6 +259,7 @@ public record CommentCreateRequest(string Body, string? Kind = null, long? Answe
 /// without its ticket is unanswerable.
 /// </param>
 /// <param name="Answers">Oldest first. Empty is what "open" means; there is no second flag saying so.</param>
+/// <param name="Options">The answers it offers, or null if it was asked in prose.</param>
 public record QuestionDto(
     long Id,
     string IssueKey,
@@ -218,6 +267,7 @@ public record QuestionDto(
     string Body,
     string AskedBy,
     DateTimeOffset AskedAt,
+    IReadOnlyList<QuestionOptionDto>? Options,
     IReadOnlyList<CommentDto> Answers);
 
 /// <param name="Payload">

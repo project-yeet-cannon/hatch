@@ -575,6 +575,21 @@ that the board and the dispatcher can act on.
   operator sits in - no `bypassPermissions`, because that grant only exists
   because a print-mode run has nobody to answer a prompt. Where `ask` is how an
   unattended run raises a decision, this is how a watched one does.
+- **A question can offer its answers.** `EfHatchComment.Options`, a jsonb list
+  of label / detail / recommended, written by `ask --option` and
+  `ask --recommend`. This is the round's actual lesson: the first cut let an
+  agent ask, and what came back were three dense paragraphs, each fusing the
+  question, two named alternatives and a recommendation into one block a person
+  had to parse by eye before they could reply in prose. A choice between named
+  things is not an essay — it is a menu, and a menu the reader can press is a
+  decision made in one gesture. Options are a column for the same reason the
+  kind is: prose can be read, but it cannot be clicked, numbered, or counted.
+  Prose questions stay legal, because not every decision is a menu.
+- **Which option was taken is deliberately not stored.** An answer's body *is*
+  the label, so the thread reads as a decision rather than as an index into a
+  list nobody kept, and the sentence the next agent's prompt carries is the same
+  sentence a person reads six months later. A second column saying it in numbers
+  is a second thing that can come to disagree with the first.
 - **Nothing stops an API key answering its own question**, and that is stated
   rather than papered over. A key is what `hatch.sh answer` types with and it is
   also what a spawned agent inherits; the server cannot tell them apart, and a

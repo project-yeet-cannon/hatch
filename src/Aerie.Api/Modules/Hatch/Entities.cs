@@ -366,6 +366,32 @@ public class EfHatchComment
     /// <summary>The answers to this question, if it is one.</summary>
     public ICollection<EfHatchComment> AnsweredBy { get; set; } = [];
 
+    /// <summary>
+    /// The answers a question offers, as <c>jsonb</c>: a small ordered list of
+    /// <see cref="QuestionOptionDto"/>. Null on a question asked in prose, and
+    /// on everything that is not a question.
+    /// </summary>
+    /// <remarks>
+    /// A column rather than a convention in the body, for the reason the kind
+    /// is a column: something has to be able to act on it. An agent asking
+    /// "leaf-weighted or child-weighted?" is not writing an essay, it is
+    /// offering a choice - and a choice the reader can press is a decision made
+    /// in one gesture instead of a paragraph parsed by eye. Prose in a body can
+    /// be read; it cannot be clicked.
+    ///
+    /// <c>jsonb</c> and not a table of its own, on the same grounds as
+    /// <see cref="EfHatchIssueEvent.Payload"/>: this is a closed list read whole
+    /// with the row that owns it and never queried across, so a table would buy
+    /// a join and a cascade in exchange for nothing.
+    ///
+    /// Which option was taken is deliberately not stored. An answer's body is
+    /// the option's label, which is the sentence a person reads six months
+    /// later and the sentence the next agent's prompt carries - and a second
+    /// column saying the same thing in numbers is a second thing that can come
+    /// to disagree with the first.
+    /// </remarks>
+    public string? Options { get; set; }
+
     public required DateTimeOffset CreatedAt { get; set; }
 }
 

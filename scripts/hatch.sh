@@ -39,7 +39,9 @@
 #   ./hatch.sh start AER-12           # move it to "in progress"
 #   ./hatch.sh move AER-12 todo       # ...or to any non-terminal column
 #   ./hatch.sh comment AER-12 "sha abc123 on branch aer-12-thing"
-#   ./hatch.sh ask AER-12 "per-node or global?"   # a decision that is not ours
+#   ./hatch.sh ask AER-12 "how should retries be scoped?" \
+#       --recommend "Per-node: one budget per node, so a slow node cannot starve" \
+#       --option "Global: one budget for the drain, simpler to reason about"
 #   ./hatch.sh questions              # everything waiting on an answer
 #   ./hatch.sh questions AER-12       # ...or just this ticket's
 #   ./hatch.sh answer                 # answer them, one at a time, here
@@ -402,26 +404,86 @@ questions_json() {
   fi
 }
 
-# A question the way it is read: where it came from, who asked, and the body
-# indented so a question that runs to a paragraph stays one block.
+# A question the way it is read: where it came from, who asked, the body, and
+# the answers it offers - numbered, because a number is what `answer` takes.
 print_questions() {
   jq -r '.[]
     | "\(.issueKey)  #\(.id)  \(.issueTitle)",
       "  asked by \(.askedBy), \(.askedAt)",
       "",
       "  " + (.body | gsub("\n"; "\n  ")),
+      "",
+      (if (.options // []) | length > 0 then
+        (.options | to_entries[]
+          | "  [\(.key + 1)] \(.value.label)\(if .value.recommended then "  (recommended)" else "" end)",
+            (if .value.detail then "      " + (.value.detail | gsub("\n"; "\n      ")) else empty end))
+       else empty end),
       ""' <<<"$1"
 }
 
-# What an agent calls when it hits a decision that is not its to make. One
-# question a call: a question is a row, and two of them in one body cannot be
-# answered separately or counted apart.
-cmd_ask() {
-  local key="${1:?usage: hatch.sh ask AER-12 \"question\"}" body="${2:?usage: hatch.sh ask AER-12 \"question\"}"
+# One `--option "Label: what taking it means"` folded onto a JSON array.
+#
+# Split on the first ": " so that a detail may contain colons, which prose does
+# constantly. A spec with no separator at all is a bare label - fine for a
+# choice that explains itself, and the only shape short enough to type twice.
+add_option() {
+  local options="$1" spec="$2" recommended="$3" label detail
 
-  api POST "/api/hatch/issues/${key}/comments" \
-    "$(jq -nc --arg body "$body" '{body: $body, kind: "question"}')" \
-    | jq -r '"asked question #\(.id) on '"$key"' as \(.author)"'
+  case "$spec" in
+    *": "*) label="${spec%%: *}"; detail="${spec#*: }" ;;
+    *)      label="$spec"; detail="" ;;
+  esac
+
+  jq -c --arg label "$label" --arg detail "$detail" --argjson recommended "$recommended" \
+    '. + [{
+      label: $label,
+      detail: (if $detail == "" then null else $detail end),
+      recommended: $recommended
+    }]' <<<"$options"
+}
+
+# What an agent calls when it hits a decision that is not its to make.
+#
+# One question a call: a question is a row, and two of them in one body cannot
+# be answered separately or counted apart. Where the decision is a choice
+# between named things, name them - an option is something the operator presses,
+# and a paragraph is something they have to read twice and then compose a reply
+# to. Prose still works, for the decisions that are not a menu.
+cmd_ask() {
+  local key="" body="" options="[]" payload
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --option)    options=$(add_option "$options" "${2:?--option needs \"Label: what it means\"}" false); shift 2 ;;
+      --recommend) options=$(add_option "$options" "${2:?--recommend needs \"Label: what it means\"}" true); shift 2 ;;
+      -*)          echo "hatch: ask does not take $1" >&2; exit 1 ;;
+      *)
+        if [ -z "$key" ]; then key="$1"
+        elif [ -z "$body" ]; then body="$1"
+        else echo "hatch: ask takes one issue and one question - put the choices in --option" >&2; exit 1
+        fi
+        shift ;;
+    esac
+  done
+
+  [ -n "$key" ] && [ -n "$body" ] || {
+    cat >&2 <<'USAGE'
+usage: hatch.sh ask AER-12 "the question" [--option "Label: what it means"]...
+                                          [--recommend "Label: what it means"]
+
+  A question that is a choice between named things should name them: each
+  --option becomes something the operator can press, in the web UI and here.
+  --recommend is an option you would take, and there may be one of those.
+USAGE
+    exit 1
+  }
+
+  payload=$(jq -nc --arg body "$body" --argjson options "$options" \
+    '{body: $body, kind: "question"} + (if ($options | length) > 0 then {options: $options} else {} end)')
+
+  api POST "/api/hatch/issues/${key}/comments" "$payload" \
+    | jq -r '"asked question #\(.id) on '"$key"' as \(.author)" +
+             (if (.options // []) | length > 0 then " with \(.options | length) options" else "" end)'
 
   echo
   echo "${key} will not be dispatched again until it is answered:"
@@ -445,6 +507,31 @@ cmd_questions() {
   echo "answer them: ./scripts/hatch.sh answer${key:+ ${key}}"
 }
 
+# What a typed reply actually means, given what was offered.
+#
+# A bare number in range is the option at that position, and what comes back is
+# its label - the answer on the ticket should read as the decision it was, not
+# as "2". Anything else comes back untouched, including a number when nothing
+# was offered and a number out of range: those are somebody typing an answer
+# that happens to be numeric, and second-guessing them would be worse than
+# taking them literally.
+chosen_option() {
+  local options="$1" reply="$2" count
+
+  count=$(jq 'length' <<<"$options")
+  [ "$count" -gt 0 ] || { printf '%s' "$reply"; return; }
+
+  case "$reply" in
+    ''|*[!0-9]*) printf '%s' "$reply"; return ;;
+  esac
+
+  if [ "$reply" -ge 1 ] && [ "$reply" -le "$count" ]; then
+    jq -r --argjson n "$reply" '.[$n - 1].label' <<<"$options"
+  else
+    printf '%s' "$reply"
+  fi
+}
+
 # Every open question, one at a time, on this terminal.
 #
 # The serial loop is the point rather than a convenience. A question is a
@@ -457,7 +544,7 @@ cmd_questions() {
 # of it. Every answer that is given goes to the ticket as it is typed, so a loop
 # interrupted at question four keeps the first three.
 cmd_answer() {
-  local key="${1:-}" questions count i id issue title body reply line answered
+  local key="${1:-}" questions count i id issue title body options reply line answered
 
   [ -t 0 ] || { echo "hatch: answer reads your replies and needs a terminal" >&2; exit 1; }
 
@@ -465,7 +552,8 @@ cmd_answer() {
   count=$(jq 'length' <<<"$questions")
   [ "$count" -gt 0 ] || { echo "hatch: nothing is waiting on an answer${key:+ on $key}"; return; }
 
-  echo "${count} open question(s). Enter alone leaves one open, \\ at the end of a line keeps typing, ^D stops."
+  echo "${count} open question(s). A number takes that option, Enter alone leaves one open,"
+  echo "\\ at the end of a line keeps typing, ^D stops."
   echo
 
   answered=0
@@ -475,12 +563,22 @@ cmd_answer() {
     issue=$(jq -r --argjson i "$i" '.[$i].issueKey' <<<"$questions")
     title=$(jq -r --argjson i "$i" '.[$i].issueTitle' <<<"$questions")
     body=$(jq -r --argjson i "$i" '.[$i].body' <<<"$questions")
+    options=$(jq -c --argjson i "$i" '.[$i].options // []' <<<"$questions")
 
     echo "$((i + 1))/${count}  ${issue}  ${title}"
     echo "$(jq -r --argjson i "$i" '"        asked by \(.[$i].askedBy), \(.[$i].askedAt)"' <<<"$questions")"
     echo
     printf '%s\n' "$body" | sed 's/^/  /'
     echo
+
+    # The offered answers, numbered from one - typing that number is the whole
+    # interaction for a question that is a choice, which is most of them.
+    if [ "$(jq 'length' <<<"$options")" -gt 0 ]; then
+      jq -r 'to_entries[]
+        | "  [\(.key + 1)] \(.value.label)\(if .value.recommended then "  (recommended)" else "" end)",
+          (if .value.detail then "      " + (.value.detail | gsub("\n"; "\n      ")) else empty end)' <<<"$options"
+      echo
+    fi
 
     reply=""
     while :; do
@@ -495,6 +593,11 @@ cmd_answer() {
       esac
     done
 
+    # A bare number that names one of the offered answers is that answer, and
+    # what gets written is its label - so the thread reads as a decision rather
+    # than as an index into a list nobody kept.
+    reply=$(chosen_option "$options" "$reply")
+
     if [ -z "$(printf '%s' "$reply" | tr -d '[:space:]')" ]; then
       echo "  left open"
     else
@@ -502,7 +605,7 @@ cmd_answer() {
         "$(jq -nc --arg body "$reply" --argjson answers "$id" \
           '{body: $body, kind: "answer", answersId: $answers}')" >/dev/null
       answered=$((answered + 1))
-      echo "  answered"
+      echo "  answered: ${reply%%$'\n'*}"
     fi
     echo
 
@@ -619,15 +722,28 @@ compose() {
     "to build.",
     "",
     "```",
-    "./scripts/hatch.sh ask \(.issue.key) \"the question, in full\"",
+    "./scripts/hatch.sh ask \(.issue.key) \"the question, in one sentence\" \\",
+    "    --recommend \"The one you would take: what it means, and what it costs\" \\",
+    "    --option \"The alternative: what it means, and what it costs\"",
     "```",
     "",
-    "One call per question, so each can be answered on its own. Ask it so that a",
-    "sentence settles it: say what you would do either way and what each costs,",
-    "not merely that you are unsure. Then stop. An open question blocks this",
-    "ticket from being dispatched at all, so nothing further will be spawned at",
-    "it until somebody answers - and anything built past an unanswered question",
-    "is built on a guess.",
+    "**Name the choices.** Nearly every decision worth asking about is a choice",
+    "between two or three things you can already name, and each `--option` becomes",
+    "something the operator presses - in the browser and at a terminal - rather",
+    "than a paragraph they have to read twice and then compose a reply to. So the",
+    "body is the question alone, in a sentence; the tradeoffs go inside the options",
+    "they belong to; and `--recommend` is the one you would take, of which there",
+    "may be one. Ask in prose only when the answer is genuinely open-ended.",
+    "",
+    "A label is short enough to press and reads as a decision on its own -",
+    "\"child-weighted\", not \"we should weight each direct child equally\". It",
+    "becomes the answer text itself, and that is what somebody reads six months",
+    "later.",
+    "",
+    "One call per question, so each can be answered on its own. Then stop. An open",
+    "question blocks this ticket from being dispatched at all, so nothing further",
+    "will be spawned at it until somebody answers - and anything built past an",
+    "unanswered question is built on a guess.",
     "",
     "What the repository can answer, answer by reading the repository. A question",
     "the code already settles is a round trip through a person for nothing.",
