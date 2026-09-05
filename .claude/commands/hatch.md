@@ -86,10 +86,17 @@ correct side — not yours to choose, and not to be guessed at either. You are i
 a session with somebody in it, so ask them. Put it on the ticket as well:
 
 ```
-./scripts/hatch.sh ask <KEY> "the question, in full"
+./scripts/hatch.sh ask <KEY> "the question, in one sentence" \
+    --recommend "The one you would take: what it means, and what it costs" \
+    --option    "The alternative: what it means, and what it costs"
 # ...ask me the same thing here, then record what I say
 ./scripts/hatch.sh answer <KEY>
 ```
+
+Name the choices with `--option` wherever the decision is a choice between
+things you can already name — they become pressable in the web UI and numbered
+at a terminal, and the label becomes the answer text. Prose is for the
+genuinely open-ended.
 
 Recording it is not ceremony. An unanswered question blocks the ticket from
 being dispatched at all, so a question filed and left unanswered strands it —

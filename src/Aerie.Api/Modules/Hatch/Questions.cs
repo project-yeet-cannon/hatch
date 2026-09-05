@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aerie.Api.Modules.Hatch;
@@ -28,6 +29,42 @@ public static class Questions
             .Select(g => new { IssueId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.IssueId, x => x.Count, ct);
 
+    /// <summary>
+    /// The stored options as a list, or null for a question asked in prose.
+    /// </summary>
+    /// <remarks>
+    /// A row that will not parse reads as absent rather than throwing the
+    /// question away - the same rule the event trail follows for its payload.
+    /// The body is the question; the options are how it is offered, and a
+    /// question that loses its menu is still answerable in the box below it.
+    /// </remarks>
+    public static IReadOnlyList<QuestionOptionDto>? ReadOptions(string? stored)
+    {
+        if (string.IsNullOrWhiteSpace(stored)) return null;
+
+        try
+        {
+            var options = JsonSerializer.Deserialize<List<QuestionOptionDto>>(stored, Json);
+            return options is { Count: > 0 } ? options : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>What goes in the column, or null when nothing was offered.</summary>
+    public static string? WriteOptions(IReadOnlyList<QuestionOptionDto>? options) =>
+        options is { Count: > 0 } ? JsonSerializer.Serialize(options, Json) : null;
+
+    /// <summary>
+    /// camelCase, matching the wire. The column is read by the browser through
+    /// the same DTO it is written from, and a jsonb column whose casing
+    /// disagreed with its own API would be a trap laid for whoever queries it
+    /// in SQL one day.
+    /// </summary>
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
     /// <summary>Every question ever asked about one issue, answers attached, oldest first.</summary>
     public static Task<List<QuestionDto>> ForIssueAsync(HatchContext db, long issueId, CancellationToken ct) =>
         ProjectAsync(db, db.Comments.AsNoTracking()
@@ -52,6 +89,7 @@ public static class Questions
                 c.Id,
                 c.Body,
                 c.Author,
+                c.Options,
                 c.CreatedAt,
                 IssueProjectKey = c.Issue!.Project!.Key,
                 IssueNumber = c.Issue!.Number,
@@ -66,10 +104,11 @@ public static class Questions
             .Where(c => c.AnswersId != null && ids.Contains(c.AnswersId.Value))
             .OrderBy(c => c.CreatedAt)
             .ThenBy(c => c.Id)
-            .Select(c => new CommentDto(c.Id, c.Author, c.Body, c.Kind, c.AnswersId, c.CreatedAt))
+            .Select(c => new { c.Id, c.Author, c.Body, c.Kind, c.AnswersId, c.Options, c.CreatedAt })
             .ToListAsync(ct);
 
         var byQuestion = answers
+            .Select(a => new CommentDto(a.Id, a.Author, a.Body, a.Kind, a.AnswersId, ReadOptions(a.Options), a.CreatedAt))
             .GroupBy(a => a.AnswersId!.Value)
             .ToDictionary(g => g.Key, g => (IReadOnlyList<CommentDto>)g.ToList());
 
@@ -80,6 +119,7 @@ public static class Questions
             r.Body,
             r.Author,
             r.CreatedAt,
+            ReadOptions(r.Options),
             byQuestion.TryGetValue(r.Id, out var found) ? found : [])).ToList();
     }
 }

@@ -10,6 +10,7 @@ const comment = (kind: CommentKind, body: string, answersId: number | null = nul
   body,
   kind,
   answersId,
+  options: null,
   createdAt: '2026-09-05T00:00:00Z',
 });
 

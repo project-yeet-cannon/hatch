@@ -792,6 +792,192 @@ public class IssuesControllerTests
         Assert.Equal(0, board.Issues.Single(i => i.Key == "AER-2").OpenQuestions);
     }
 
+    // ---- Options on a question ----
+
+    /* Options are what turn a question from a paragraph into something the
+       operator presses. Every rule pinned here is about the menu arriving
+       readable - a question nobody can act on strands the ticket that carries
+       it, and the dispatch stays refused until somebody does. */
+
+    [Fact]
+    public async Task AQuestionCarriesTheAnswersItOffers()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+
+        var asked = Created(await h.Thread.AddComment("AER-1", new CommentCreateRequest(
+            "How should the epic meter weight its children?",
+            EfHatchComment.Question,
+            Options:
+            [
+                new QuestionOptionDto("Child-weighted", "Each story is 1/n of its epic whatever its size", Recommended: true),
+                new QuestionOptionDto("Leaf-weighted", "Every task counts equally, so the bar tracks work remaining"),
+            ]), default));
+
+        Assert.NotNull(asked.Options);
+        Assert.Equal(["Child-weighted", "Leaf-weighted"], asked.Options.Select(o => o.Label));
+        Assert.True(asked.Options[0].Recommended);
+        Assert.False(asked.Options[1].Recommended);
+
+        // And they survive the round trip through jsonb, which is the half that
+        // a hand-rolled serializer would get wrong.
+        var question = Assert.Single(Value(await h.Questions.GetIssueQuestions("AER-1", open: true, default)));
+        Assert.Equal("Each story is 1/n of its epic whatever its size", question.Options![0].Detail);
+    }
+
+    [Fact]
+    public async Task AQuestionAskedInProse_OffersNothingRatherThanAnEmptyMenu()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+
+        await h.AskAsync("AER-1", "What should this be called?");
+
+        // Null, not []. "Asked in prose" and "offered a menu with nothing on
+        // it" are different things, and only the first one ever happens.
+        var question = Assert.Single(Value(await h.Questions.GetIssueQuestions("AER-1", open: true, default)));
+        Assert.Null(question.Options);
+    }
+
+    [Fact]
+    public async Task AnswersAndNotes_MayNotOfferOptions()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+        var asked = await h.AskAsync("AER-1", "which way?");
+
+        var option = new QuestionOptionDto[] { new("this way"), new("that way") };
+
+        Assert.IsType<BadRequestObjectResult>(
+            (await h.Thread.AddComment("AER-1", new CommentCreateRequest("a note", Options: option), default)).Result);
+
+        Assert.IsType<BadRequestObjectResult>(
+            (await h.Thread.AddComment("AER-1", new CommentCreateRequest(
+                "this way", EfHatchComment.Answer, asked.Id, option), default)).Result);
+    }
+
+    [Theory]
+    [InlineData(1, "not a question")]
+    [InlineData(QuestionOptionDto.MaxPerQuestion + 1, "at most")]
+    public async Task AMenuOfTheWrongSize_IsRefused(int count, string because)
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+
+        var options = Enumerable.Range(1, count).Select(n => new QuestionOptionDto($"option {n}")).ToList();
+
+        var result = await h.Thread.AddComment(
+            "AER-1", new CommentCreateRequest("which?", EfHatchComment.Question, Options: options), default);
+
+        Assert.Contains(because, Assert.IsType<BadRequestObjectResult>(result.Result).Value?.ToString());
+    }
+
+    [Fact]
+    public async Task TwoOptionsWithTheSameLabel_AreRefused()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+
+        // Case-insensitively the same, because the label becomes the answer's
+        // own body - two that differ only by case leave a thread nobody can
+        // read back to find out which was taken.
+        var result = await h.Thread.AddComment("AER-1", new CommentCreateRequest(
+            "which?", EfHatchComment.Question,
+            Options: [new QuestionOptionDto("Per-node"), new QuestionOptionDto("per-node")]), default);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task TwoRecommendations_AreRefused()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+
+        var result = await h.Thread.AddComment("AER-1", new CommentCreateRequest(
+            "which?", EfHatchComment.Question,
+            Options:
+            [
+                new QuestionOptionDto("this way", Recommended: true),
+                new QuestionOptionDto("that way", Recommended: true),
+            ]), default);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task AnOptionWithNoLabel_IsRefused()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+
+        var result = await h.Thread.AddComment("AER-1", new CommentCreateRequest(
+            "which?", EfHatchComment.Question,
+            Options: [new QuestionOptionDto("   "), new QuestionOptionDto("that way")]), default);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task AnOptionLabelLongEnoughToBeAParagraph_IsRefused()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+
+        // A label is pressed and read back; the reasoning belongs in the detail
+        // beside it, which is allowed to run long.
+        var result = await h.Thread.AddComment("AER-1", new CommentCreateRequest(
+            "which?", EfHatchComment.Question,
+            Options:
+            [
+                new QuestionOptionDto(new string('x', QuestionOptionDto.MaxLabelLength + 1)),
+                new QuestionOptionDto("that way"),
+            ]), default);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task OptionsAreStoredTrimmed()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+
+        var asked = Created(await h.Thread.AddComment("AER-1", new CommentCreateRequest(
+            "which?", EfHatchComment.Question,
+            Options:
+            [
+                new QuestionOptionDto("  Per-node  ", "  one budget a node  "),
+                new QuestionOptionDto("Global", "   "),
+            ]), default));
+
+        Assert.Equal("Per-node", asked.Options![0].Label);
+        Assert.Equal("one budget a node", asked.Options[0].Detail);
+
+        // Whitespace is not a detail. Blank comes back absent, so the UI has one
+        // thing to test rather than two.
+        Assert.Null(asked.Options[1].Detail);
+    }
+
+    [Fact]
+    public async Task AnOptionsColumnThatWillNotParse_ReadsAsAskedInProse()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("story", "the thing");
+        var asked = await h.AskAsync("AER-1", "which?");
+
+        // Hand-edited, or written by a shape this build does not know. The
+        // question is still a question and is still answerable in the box; only
+        // the menu is gone. Throwing here would strand the ticket instead.
+        var row = await h.Db.Comments.SingleAsync(c => c.Id == asked.Id);
+        row.Options = "{ this is not a list";
+        await h.Db.SaveChangesAsync();
+
+        var question = Assert.Single(Value(await h.Questions.GetIssueQuestions("AER-1", open: true, default)));
+        Assert.Null(question.Options);
+        Assert.Equal("which?", question.Body);
+    }
+
     [Fact]
     public async Task DeletingAnIssue_TakesItsQuestionsAndAnswersWithIt()
     {

@@ -19,7 +19,7 @@ import { message } from '../lib/errors';
 import { renderMarkdown } from '../lib/markdown';
 import { openQuestions } from '../lib/questions';
 import { ISSUE_TYPES, LEGAL_PARENT_TYPES } from '../types';
-import type { Board, Comment, Issue, IssueEvent, IssueType, Status } from '../types';
+import type { Board, Comment, Issue, IssueEvent, IssueType, QuestionOption, Status } from '../types';
 
 export function IssuePage() {
   const { key = '' } = useParams();
@@ -380,7 +380,15 @@ function Waiting({
   );
 }
 
-/** One question, and the answer being typed to it. */
+/**
+ * One question, and the answer being typed to it.
+ *
+ * Where the question offered choices, they are the interface: pressing one puts
+ * its label in the box, and the box is still there for the case the asker did
+ * not anticipate. That ordering is the whole point - a decision between named
+ * things should cost one press, and the free text should be the escape hatch
+ * rather than the only door.
+ */
 function Asked({
   issueKey,
   question,
@@ -394,6 +402,11 @@ function Asked({
 }) {
   const [body, setBody] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // Derived rather than held beside `body`: the highlight is "the box says
+  // exactly this option", and a second piece of state saying the same thing is
+  // a second thing that can come to disagree with the first.
+  const chosen = question.options?.find((o) => o.label === body)?.label ?? null;
 
   async function submit() {
     setSaving(true);
@@ -414,20 +427,87 @@ function Asked({
         <strong>{question.author}</strong>
         <span className="text-muted">asked {new Date(question.createdAt).toLocaleString()}</span>
       </div>
-      <div className="hatch-markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(question.body) }} />
+
+      <div
+        className="hatch-markdown hatch-question-body"
+        dangerouslySetInnerHTML={{ __html: renderMarkdown(question.body) }}
+      />
+
+      {question.options && (
+        <QuestionOptions options={question.options} chosen={chosen} onChoose={(o) => setBody(o.label)} />
+      )}
 
       <div className="hatch-comment-box">
         <textarea
           rows={2}
           value={body}
-          placeholder="The decision, in a sentence."
+          placeholder={question.options ? 'Or say something else.' : 'The decision, in a sentence.'}
           onChange={(e) => setBody(e.target.value)}
+          // Meta/Ctrl+Enter sends, the convention every comment box in the
+          // world shares. A bare Enter has to stay a newline - an answer with a
+          // caveat under it is a good answer.
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && body.trim() && !saving) void submit();
+          }}
         />
         <Button variant="primary" loading={saving} disabled={!body.trim()} onClick={() => void submit()}>
           Answer
         </Button>
       </div>
     </li>
+  );
+}
+
+/**
+ * The answers a question offers.
+ *
+ * One component for both places they appear, because they are the same list
+ * read for different reasons. With `onChoose` they are buttons, in the card
+ * that is asking for a decision. Without it they are the record of what the
+ * alternatives were, under the question in the thread - which is half of what
+ * makes a decision legible later, and would be lost if the options were only
+ * ever drawn while somebody could still press them.
+ */
+function QuestionOptions({
+  options,
+  chosen,
+  onChoose,
+}: {
+  options: QuestionOption[];
+  chosen?: string | null;
+  onChoose?: (option: QuestionOption) => void;
+}) {
+  return (
+    <ul className={`hatch-options${onChoose ? '' : ' static'}`}>
+      {options.map((option) => {
+        const face = (
+          <>
+            <span className="hatch-option-label">
+              {option.label}
+              {option.recommended && <span className="hatch-option-recommended">recommended</span>}
+            </span>
+            {option.detail && <span className="hatch-option-detail">{option.detail}</span>}
+          </>
+        );
+
+        return (
+          <li key={option.label}>
+            {onChoose ? (
+              <button
+                type="button"
+                className={`hatch-option${chosen === option.label ? ' chosen' : ''}`}
+                aria-pressed={chosen === option.label}
+                onClick={() => onChoose(option)}
+              >
+                {face}
+              </button>
+            ) : (
+              <div className="hatch-option">{face}</div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -476,7 +556,11 @@ function Comments({
               {comment.kind === 'answer' && <Badge>answered</Badge>}
               <span className="text-muted">{new Date(comment.createdAt).toLocaleString()}</span>
             </div>
-            <div className="hatch-markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(comment.body) }} />
+            <div
+              className={`hatch-markdown${comment.kind === 'question' ? ' hatch-question-body' : ''}`}
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(comment.body) }}
+            />
+            {comment.options && <QuestionOptions options={comment.options} />}
           </li>
         ))}
       </ul>

@@ -575,6 +575,38 @@ that the board and the dispatcher can act on.
   operator sits in - no `bypassPermissions`, because that grant only exists
   because a print-mode run has nobody to answer a prompt. Where `ask` is how an
   unattended run raises a decision, this is how a watched one does.
+- **A question can offer its answers.** `EfHatchComment.Options`, a jsonb list
+  of label / detail / recommended, written by `ask --option` and
+  `ask --recommend`. This is the round's actual lesson: the first cut let an
+  agent ask, and what came back were three dense paragraphs, each fusing the
+  question, two named alternatives and a recommendation into one block a person
+  had to parse by eye before they could reply in prose. A choice between named
+  things is not an essay — it is a menu, and a menu the reader can press is a
+  decision made in one gesture. Options are a column for the same reason the
+  kind is: prose can be read, but it cannot be clicked, numbered, or counted.
+  Prose questions stay legal, because not every decision is a menu.
+- **Which option was taken is deliberately not stored.** An answer's body *is*
+  the label, so the thread reads as a decision rather than as an index into a
+  list nobody kept, and the sentence the next agent's prompt carries is the same
+  sentence a person reads six months later. A second column saying it in numbers
+  is a second thing that can come to disagree with the first.
+- **`work` streams what the run is doing.** `--output-format stream-json`
+  rendered to a log: every tool call, a thinking-token pulse, failures only from
+  tool results, and a heartbeat naming what it is still waiting on. The default
+  text output prints nothing until the run ends, so a four-minute increment was
+  four minutes of blank terminal that looked exactly like a hang — and the fix
+  for "is it working" is showing the work, not a spinner. `--quiet` keeps the
+  old behaviour.
+- **The session id is printed first and last**, with the `claude --resume`
+  command beside it. Reaching an unattended run without killing it was the other
+  half of the same complaint, and the CLI already had the answer: the session
+  persists, so joining it is a command rather than a feature.
+- **The heartbeat times its own read rather than reading an exit code.** bash
+  documents a status over 128 for an expired `read -t`; macOS ships bash 3.2,
+  which predates that and answers 1 for a timeout and 1 for end-of-stream alike.
+  Reading the code would have ended the log at the first quiet moment on the one
+  platform this file promises to run on. How long the read blocked says the same
+  thing on every version.
 - **Nothing stops an API key answering its own question**, and that is stated
   rather than papered over. A key is what `hatch.sh answer` types with and it is
   also what a spawned agent inherits; the server cannot tell them apart, and a

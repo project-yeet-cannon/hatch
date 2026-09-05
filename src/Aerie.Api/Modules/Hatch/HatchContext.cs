@@ -70,6 +70,10 @@ public class HatchContext(DbContextOptions<HatchContext> options) : DbContext(op
                 .WithMany(c => c.AnsweredBy)
                 .HasForeignKey(c => c.AnswersId)
                 .OnDelete(DeleteBehavior.NoAction);
+
+            // jsonb for the reason the event payload is - see
+            // EfHatchComment.Options.
+            e.Property(c => c.Options).HasColumnType("jsonb");
         });
 
         modelBuilder.Entity<EfHatchIssueEvent>(e =>

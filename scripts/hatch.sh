@@ -39,7 +39,9 @@
 #   ./hatch.sh start AER-12           # move it to "in progress"
 #   ./hatch.sh move AER-12 todo       # ...or to any non-terminal column
 #   ./hatch.sh comment AER-12 "sha abc123 on branch aer-12-thing"
-#   ./hatch.sh ask AER-12 "per-node or global?"   # a decision that is not ours
+#   ./hatch.sh ask AER-12 "how should retries be scoped?" \
+#       --recommend "Per-node: one budget per node, so a slow node cannot starve" \
+#       --option "Global: one budget for the drain, simpler to reason about"
 #   ./hatch.sh questions              # everything waiting on an answer
 #   ./hatch.sh questions AER-12       # ...or just this ticket's
 #   ./hatch.sh answer                 # answer them, one at a time, here
@@ -47,6 +49,7 @@
 #   ./hatch.sh work                   # one increment on the next thing due
 #   ./hatch.sh work AER-12            # ...or on this one
 #   ./hatch.sh work -i AER-12         # ...in a session you sit in
+#   ./hatch.sh work --quiet           # ...saying nothing until it is finished
 #   ./hatch.sh work --model opus --effort xhigh AER-12
 #   ./hatch.sh work --dry-run         # print the prompt, spawn nothing
 #   ./hatch.sh api GET /api/hatch/issues?statusId=2
@@ -402,26 +405,86 @@ questions_json() {
   fi
 }
 
-# A question the way it is read: where it came from, who asked, and the body
-# indented so a question that runs to a paragraph stays one block.
+# A question the way it is read: where it came from, who asked, the body, and
+# the answers it offers - numbered, because a number is what `answer` takes.
 print_questions() {
   jq -r '.[]
     | "\(.issueKey)  #\(.id)  \(.issueTitle)",
       "  asked by \(.askedBy), \(.askedAt)",
       "",
       "  " + (.body | gsub("\n"; "\n  ")),
+      "",
+      (if (.options // []) | length > 0 then
+        (.options | to_entries[]
+          | "  [\(.key + 1)] \(.value.label)\(if .value.recommended then "  (recommended)" else "" end)",
+            (if .value.detail then "      " + (.value.detail | gsub("\n"; "\n      ")) else empty end))
+       else empty end),
       ""' <<<"$1"
 }
 
-# What an agent calls when it hits a decision that is not its to make. One
-# question a call: a question is a row, and two of them in one body cannot be
-# answered separately or counted apart.
-cmd_ask() {
-  local key="${1:?usage: hatch.sh ask AER-12 \"question\"}" body="${2:?usage: hatch.sh ask AER-12 \"question\"}"
+# One `--option "Label: what taking it means"` folded onto a JSON array.
+#
+# Split on the first ": " so that a detail may contain colons, which prose does
+# constantly. A spec with no separator at all is a bare label - fine for a
+# choice that explains itself, and the only shape short enough to type twice.
+add_option() {
+  local options="$1" spec="$2" recommended="$3" label detail
 
-  api POST "/api/hatch/issues/${key}/comments" \
-    "$(jq -nc --arg body "$body" '{body: $body, kind: "question"}')" \
-    | jq -r '"asked question #\(.id) on '"$key"' as \(.author)"'
+  case "$spec" in
+    *": "*) label="${spec%%: *}"; detail="${spec#*: }" ;;
+    *)      label="$spec"; detail="" ;;
+  esac
+
+  jq -c --arg label "$label" --arg detail "$detail" --argjson recommended "$recommended" \
+    '. + [{
+      label: $label,
+      detail: (if $detail == "" then null else $detail end),
+      recommended: $recommended
+    }]' <<<"$options"
+}
+
+# What an agent calls when it hits a decision that is not its to make.
+#
+# One question a call: a question is a row, and two of them in one body cannot
+# be answered separately or counted apart. Where the decision is a choice
+# between named things, name them - an option is something the operator presses,
+# and a paragraph is something they have to read twice and then compose a reply
+# to. Prose still works, for the decisions that are not a menu.
+cmd_ask() {
+  local key="" body="" options="[]" payload
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --option)    options=$(add_option "$options" "${2:?--option needs \"Label: what it means\"}" false); shift 2 ;;
+      --recommend) options=$(add_option "$options" "${2:?--recommend needs \"Label: what it means\"}" true); shift 2 ;;
+      -*)          echo "hatch: ask does not take $1" >&2; exit 1 ;;
+      *)
+        if [ -z "$key" ]; then key="$1"
+        elif [ -z "$body" ]; then body="$1"
+        else echo "hatch: ask takes one issue and one question - put the choices in --option" >&2; exit 1
+        fi
+        shift ;;
+    esac
+  done
+
+  [ -n "$key" ] && [ -n "$body" ] || {
+    cat >&2 <<'USAGE'
+usage: hatch.sh ask AER-12 "the question" [--option "Label: what it means"]...
+                                          [--recommend "Label: what it means"]
+
+  A question that is a choice between named things should name them: each
+  --option becomes something the operator can press, in the web UI and here.
+  --recommend is an option you would take, and there may be one of those.
+USAGE
+    exit 1
+  }
+
+  payload=$(jq -nc --arg body "$body" --argjson options "$options" \
+    '{body: $body, kind: "question"} + (if ($options | length) > 0 then {options: $options} else {} end)')
+
+  api POST "/api/hatch/issues/${key}/comments" "$payload" \
+    | jq -r '"asked question #\(.id) on '"$key"' as \(.author)" +
+             (if (.options // []) | length > 0 then " with \(.options | length) options" else "" end)'
 
   echo
   echo "${key} will not be dispatched again until it is answered:"
@@ -445,6 +508,31 @@ cmd_questions() {
   echo "answer them: ./scripts/hatch.sh answer${key:+ ${key}}"
 }
 
+# What a typed reply actually means, given what was offered.
+#
+# A bare number in range is the option at that position, and what comes back is
+# its label - the answer on the ticket should read as the decision it was, not
+# as "2". Anything else comes back untouched, including a number when nothing
+# was offered and a number out of range: those are somebody typing an answer
+# that happens to be numeric, and second-guessing them would be worse than
+# taking them literally.
+chosen_option() {
+  local options="$1" reply="$2" count
+
+  count=$(jq 'length' <<<"$options")
+  [ "$count" -gt 0 ] || { printf '%s' "$reply"; return; }
+
+  case "$reply" in
+    ''|*[!0-9]*) printf '%s' "$reply"; return ;;
+  esac
+
+  if [ "$reply" -ge 1 ] && [ "$reply" -le "$count" ]; then
+    jq -r --argjson n "$reply" '.[$n - 1].label' <<<"$options"
+  else
+    printf '%s' "$reply"
+  fi
+}
+
 # Every open question, one at a time, on this terminal.
 #
 # The serial loop is the point rather than a convenience. A question is a
@@ -457,7 +545,7 @@ cmd_questions() {
 # of it. Every answer that is given goes to the ticket as it is typed, so a loop
 # interrupted at question four keeps the first three.
 cmd_answer() {
-  local key="${1:-}" questions count i id issue title body reply line answered
+  local key="${1:-}" questions count i id issue title body options reply line answered
 
   [ -t 0 ] || { echo "hatch: answer reads your replies and needs a terminal" >&2; exit 1; }
 
@@ -465,7 +553,8 @@ cmd_answer() {
   count=$(jq 'length' <<<"$questions")
   [ "$count" -gt 0 ] || { echo "hatch: nothing is waiting on an answer${key:+ on $key}"; return; }
 
-  echo "${count} open question(s). Enter alone leaves one open, \\ at the end of a line keeps typing, ^D stops."
+  echo "${count} open question(s). A number takes that option, Enter alone leaves one open,"
+  echo "\\ at the end of a line keeps typing, ^D stops."
   echo
 
   answered=0
@@ -475,12 +564,22 @@ cmd_answer() {
     issue=$(jq -r --argjson i "$i" '.[$i].issueKey' <<<"$questions")
     title=$(jq -r --argjson i "$i" '.[$i].issueTitle' <<<"$questions")
     body=$(jq -r --argjson i "$i" '.[$i].body' <<<"$questions")
+    options=$(jq -c --argjson i "$i" '.[$i].options // []' <<<"$questions")
 
     echo "$((i + 1))/${count}  ${issue}  ${title}"
     echo "$(jq -r --argjson i "$i" '"        asked by \(.[$i].askedBy), \(.[$i].askedAt)"' <<<"$questions")"
     echo
     printf '%s\n' "$body" | sed 's/^/  /'
     echo
+
+    # The offered answers, numbered from one - typing that number is the whole
+    # interaction for a question that is a choice, which is most of them.
+    if [ "$(jq 'length' <<<"$options")" -gt 0 ]; then
+      jq -r 'to_entries[]
+        | "  [\(.key + 1)] \(.value.label)\(if .value.recommended then "  (recommended)" else "" end)",
+          (if .value.detail then "      " + (.value.detail | gsub("\n"; "\n      ")) else empty end)' <<<"$options"
+      echo
+    fi
 
     reply=""
     while :; do
@@ -495,6 +594,11 @@ cmd_answer() {
       esac
     done
 
+    # A bare number that names one of the offered answers is that answer, and
+    # what gets written is its label - so the thread reads as a decision rather
+    # than as an index into a list nobody kept.
+    reply=$(chosen_option "$options" "$reply")
+
     if [ -z "$(printf '%s' "$reply" | tr -d '[:space:]')" ]; then
       echo "  left open"
     else
@@ -502,7 +606,7 @@ cmd_answer() {
         "$(jq -nc --arg body "$reply" --argjson answers "$id" \
           '{body: $body, kind: "answer", answersId: $answers}')" >/dev/null
       answered=$((answered + 1))
-      echo "  answered"
+      echo "  answered: ${reply%%$'\n'*}"
     fi
     echo
 
@@ -518,6 +622,150 @@ cmd_answer() {
   fi
 }
 
+
+# ---- Watching a run ----
+
+# How long the terminal may stay silent before it says it is still alive.
+# Overridable because the right number depends on what the ticket has the agent
+# doing: twenty seconds is right for editing, and irritating while a test suite
+# runs. Zero switches the heartbeat off.
+HATCH_HEARTBEAT="${HATCH_HEARTBEAT:-20}"
+
+# The event stream, as lines a person can read.
+#
+# `claude -p` with the default text output prints nothing at all until it is
+# finished, which for a ticket-sized increment is minutes of a blank terminal
+# that looks exactly like a hang. The JSON stream carries what the chat window
+# shows - every tool call, every result, and a running count of thinking tokens
+# - so this turns that into a log and the run stops being a black box.
+#
+# One jq process rather than a call per line: a long run emits thousands of
+# events, most of them thinking-token ticks, and a process each would cost more
+# than the agent. `foreach` carries the little state that needs carrying, which
+# is how the thinking counter reports every few thousand tokens instead of every
+# hundred.
+#
+# --include-partial-messages is deliberately not asked for. It streams assistant
+# prose token by token, which is the one thing here that reads fine arriving
+# whole, and it multiplies the event count by an order of magnitude to do it.
+render_stream() {
+  # Only the events. The CLI is entitled to say something on stdout that is not
+  # one - a warning, an update notice - and jq exits on the first thing it
+  # cannot parse, which would take the whole log down with it for a line nobody
+  # needed. Line-buffered so the filter does not become the stall it exists to
+  # prevent.
+  grep --line-buffered '^{' | jq -n -r --unbuffered --arg root "${1:-}" '
+    def clip($n): if length > $n then .[0:$n - 1] + "…" else . end;
+
+    # Paths as the repository says them. An absolute path to a file in this
+    # tree is most of a terminal line spent on the part that never changes.
+    def here: if $root != "" then sub("^" + ($root | sub("/$"; "")) + "/"; "") else . end;
+    def flat: gsub("\\s+"; " ") | sub("^ +"; "") | sub(" +$"; "");
+    def pad2: tostring | if length == 1 then "0" + . else . end;
+    def clock: (. / 60 | floor) as $m | "\($m)m\((. % 60) | pad2)s";
+
+    # The one field of a tool call worth a line of terminal. Ordered by how much
+    # it says about what is happening: a command, then a path, then whatever the
+    # call was actually about.
+    def summarise:
+      .input as $i
+      | ($i.command // $i.file_path // $i.pattern // $i.description
+         // $i.url // $i.path // $i.key // ($i | tostring))
+      | tostring | here | flat | clip(96);
+
+    def resume($id): "hatch:   join it with  claude --resume \($id)";
+
+    foreach inputs as $e ({ think: 0, mark: 0, out: null };
+      if $e.type == "system" and $e.subtype == "init" then
+        .out = "hatch: session \($e.session_id)\n" + resume($e.session_id) + "\n"
+
+      # Thinking is the longest silence a run produces and the one most often
+      # mistaken for a hang. Reported every few thousand tokens: often enough to
+      # be a pulse, rarely enough not to become the transcript.
+      elif $e.type == "system" and $e.subtype == "thinking_tokens" then
+        (.think = ($e.estimated_tokens // .think))
+        | if .think >= .mark + 3000
+          then (.mark = .think) | (.out = "  ✻ thinking… \(.think / 1000 | floor)k tokens")
+          else .out = null end
+
+      elif $e.type == "assistant" then
+        .out = ([ $e.message.content[]?
+                  | if .type == "tool_use" then "  ⏺ \(.name)  \(summarise)"
+                    elif .type == "text" and ((.text // "") | flat) != "" then "\n" + .text
+                    else empty end ] | join("\n"))
+
+      # Only failures. A tool that worked is told by the next line happening at
+      # all, and echoing every result would bury the calls under their own output.
+      elif $e.type == "user" then
+        .out = ([ $e.message.content[]?
+                  | select(.type == "tool_result" and .is_error == true)
+                  | "  ✗ " + ((.content
+                      | if type == "array" then (map(.text // "") | join(" ")) else tostring end)
+                      | flat | clip(96)) ] | join("\n"))
+
+      elif $e.type == "result" then
+        .out = "\nhatch: "
+          + (if $e.is_error then "ended with an error" else "done" end)
+          + " in \(($e.duration_ms / 1000 | floor) | clock), \($e.num_turns) turns"
+          + (if $e.total_cost_usd then ", $\(($e.total_cost_usd * 100 | round) / 100)" else "" end)
+          + "\n" + resume($e.session_id)
+
+      else .out = null end;
+
+      select(.out != null and .out != "") | .out)
+  '
+}
+
+# The rendered lines, plus a pulse when there are none.
+#
+# The renderer covers everything the agent says; this covers the gaps between,
+# which is where the doubt actually lives - a three-minute `make test-api`
+# produces no events at all, and silence is indistinguishable from a crash. So
+# the last thing seen is held onto and said back: "still working - Bash make
+# test-api (2m14s)" is the difference between waiting and wondering.
+watch_stream() {
+  local line last="starting up" waited
+
+  [ "$HATCH_HEARTBEAT" -gt 0 ] 2>/dev/null || { cat; return; }
+
+  # SECONDS rather than date(1), in both places it is read below. This loop runs
+  # once per line of a stream that can be thousands long, and a fork per line to
+  # ask the time would cost more than the rendering does.
+  SECONDS=0
+
+  while :; do
+    line=""
+    waited=$SECONDS
+
+    if IFS= read -r -t "$HATCH_HEARTBEAT" line; then
+      printf '%s\n' "$line"
+
+      # Tool calls, and nothing else - the thinking counter is already a pulse,
+      # and prose is not a thing the run can be stuck inside of.
+      case "$line" in
+        *"⏺ "*) last=$(printf '%s' "$line" | sed 's/^ *⏺ *//') ;;
+      esac
+      continue
+    fi
+
+    # Which failure that was, decided by the clock rather than by the exit code.
+    #
+    # bash documents a status over 128 for an expired -t, and macOS ships 3.2,
+    # which predates that and answers 1 for a timeout and 1 for end of stream
+    # alike. Reading the code would therefore end the log at the first quiet
+    # moment on the one platform this file promises to run on. How long the read
+    # actually blocked says the same thing and says it the same way everywhere:
+    # it sat out the whole timeout, or it came back early because there is
+    # nothing more coming.
+    if [ $(( SECONDS - waited )) -lt "$HATCH_HEARTBEAT" ]; then
+      # A last line with no newline after it is still a line somebody wants.
+      [ -z "$line" ] || printf '%s\n' "$line"
+      break
+    fi
+
+    printf '  · still working - %s (%dm%02ds)\n' "$last" "$((SECONDS / 60))" "$((SECONDS % 60))"
+  done
+}
 
 # ---- Working ----
 
@@ -619,15 +867,28 @@ compose() {
     "to build.",
     "",
     "```",
-    "./scripts/hatch.sh ask \(.issue.key) \"the question, in full\"",
+    "./scripts/hatch.sh ask \(.issue.key) \"the question, in one sentence\" \\",
+    "    --recommend \"The one you would take: what it means, and what it costs\" \\",
+    "    --option \"The alternative: what it means, and what it costs\"",
     "```",
     "",
-    "One call per question, so each can be answered on its own. Ask it so that a",
-    "sentence settles it: say what you would do either way and what each costs,",
-    "not merely that you are unsure. Then stop. An open question blocks this",
-    "ticket from being dispatched at all, so nothing further will be spawned at",
-    "it until somebody answers - and anything built past an unanswered question",
-    "is built on a guess.",
+    "**Name the choices.** Nearly every decision worth asking about is a choice",
+    "between two or three things you can already name, and each `--option` becomes",
+    "something the operator presses - in the browser and at a terminal - rather",
+    "than a paragraph they have to read twice and then compose a reply to. So the",
+    "body is the question alone, in a sentence; the tradeoffs go inside the options",
+    "they belong to; and `--recommend` is the one you would take, of which there",
+    "may be one. Ask in prose only when the answer is genuinely open-ended.",
+    "",
+    "A label is short enough to press and reads as a decision on its own -",
+    "\"child-weighted\", not \"we should weight each direct child equally\". It",
+    "becomes the answer text itself, and that is what somebody reads six months",
+    "later.",
+    "",
+    "One call per question, so each can be answered on its own. Then stop. An open",
+    "question blocks this ticket from being dispatched at all, so nothing further",
+    "will be spawned at it until somebody answers - and anything built past an",
+    "unanswered question is built on a guess.",
     "",
     "What the repository can answer, answer by reading the repository. A question",
     "the code already settles is a round trip through a person for nothing.",
@@ -644,13 +905,14 @@ compose() {
 }
 
 cmd_work() {
-  local key="" model="" effort="" dry=0 attach=0
+  local key="" model="" effort="" dry=0 attach=0 quiet=0
 
   while [ $# -gt 0 ]; do
     case "$1" in
       --model)   model="${2:?--model needs a value}"; shift 2 ;;
       --effort)  effort="${2:?--effort needs a value}"; shift 2 ;;
       --dry-run) dry=1; shift ;;
+      --quiet)   quiet=1; shift ;;
       -i|--interactive) attach=1; shift ;;
       -*)        echo "hatch: work does not take $1" >&2; exit 1 ;;
       *)         key="$1"; shift ;;
@@ -756,11 +1018,27 @@ cmd_work() {
   #
   # The prompt goes in on stdin rather than as an argument - it is long, and an
   # argument list is the one place where "long" has a limit worth avoiding.
-  printf '%s' "$prompt" | (cd "$root" && "$bin" -p \
-    --model "$model" \
-    --effort "$effort" \
-    --permission-mode bypassPermissions \
-    --add-dir "$root")
+  #
+  # The exit code is let go of deliberately. A run that ends badly has already
+  # said so through the stream, in a sentence, and the two things worth knowing
+  # afterwards - what it asked, and where the ticket ended up - are worth
+  # printing either way. Losing them to `set -e` on a non-zero exit would throw
+  # away the part of the output somebody has to act on.
+  if [ "$quiet" = 1 ]; then
+    printf '%s' "$prompt" | (cd "$root" && "$bin" -p \
+      --model "$model" \
+      --effort "$effort" \
+      --permission-mode bypassPermissions \
+      --add-dir "$root") || true
+  else
+    printf '%s' "$prompt" | (cd "$root" && "$bin" -p \
+      --model "$model" \
+      --effort "$effort" \
+      --permission-mode bypassPermissions \
+      --add-dir "$root" \
+      --output-format stream-json \
+      --verbose) | render_stream "$root" | watch_stream || true
+  fi
 
   # Whatever the session asked for on its way out. This is the half of the loop
   # that makes asking worth doing: an unattended run's questions are the one

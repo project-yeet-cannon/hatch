@@ -60,7 +60,24 @@ raw calls below are what it is doing.
 ```
 
 `work` asks the server what to do next and how, then spawns a headless session
-to do it. What that session is told, which model it runs on, and how much
+to do it. It streams what that session is doing as it happens — every tool call,
+a thinking-token pulse, and a line every twenty seconds of silence saying what
+it is still waiting on — because a print-mode run that says nothing for four
+minutes is indistinguishable from a hung one. `--quiet` restores the old
+behaviour; `HATCH_HEARTBEAT` sets the silence before it speaks up, and `0` turns
+that off.
+
+The first line it prints is the session id:
+
+```
+hatch: session 764ca76a-…
+hatch:   join it with  claude --resume 764ca76a-…
+```
+
+That is how you prod a run without throwing it away — `claude --resume <id>`
+opens the same conversation, with everything it has done in context, so you can
+redirect it instead of starting over.
+ What that session is told, which model it runs on, and how much
 effort it spends are a **playbook**: a row per (status transition, issue types)
 that the operator edits on Hatch's Playbooks page. Turning a paragraph in the
 inbox into an epic with stories under it is not the same job as implementing an
@@ -80,14 +97,26 @@ Two things about it are worth knowing before working on this repo:
 Some things a ticket needs are not an implementer's to choose: a product call, a
 name that will be lived with for years, a tradeoff with no technically correct
 side. Do not guess, and do not quietly take whichever branch is cheapest to
-build. Ask on the ticket:
+build. Ask on the ticket, and **name the choices**:
 
 ```
-./scripts/hatch.sh ask AER-12 "per-node or global retries?"
+./scripts/hatch.sh ask AER-12 "How should drain retries be scoped?" \
+    --recommend "Per-node: one budget each, so a slow node cannot starve the rest" \
+    --option   "Global: one budget for the drain, simpler to reason about"
 ```
 
-One call per question, phrased so that a sentence settles it — what you would do
-either way and what each costs, not merely that you are unsure. Then **stop**.
+Each `--option` becomes something the operator presses — a card in the web UI, a
+number at a terminal — instead of a paragraph they have to read twice and then
+compose a reply to. So the body is the question alone, in a sentence; the
+tradeoffs go inside the options they belong to; and `--recommend` marks the one
+you would take, of which there may be one. A label is short enough to press and
+reads as a decision on its own — `per-node`, not `we should scope them per
+node` — because the label becomes the answer's own text.
+
+Ask in prose (`ask AER-12 "…"` with no options) only when the answer is
+genuinely open-ended — a name, a description, a direction.
+
+One call per question, so each can be answered on its own. Then **stop**.
 An unanswered question blocks the ticket from being dispatched at all, so
 nothing further will be spawned at it until somebody answers, and anything built
 past the question is built on a guess.
