@@ -358,3 +358,45 @@ export interface PlaybookPatchRequest {
   model?: string;
   effort?: string;
 }
+
+/** One column's share of a subtree: how many of its leaves sit there. A status
+    no leaf is in is absent, not zero - the column list is already held here.
+    Mirrors RollupSliceDto. */
+export interface RollupSlice {
+  statusId: number;
+  count: number;
+}
+
+/** What a subtree adds up to, computed on the server so this page, the CLI and
+    anything holding an API key read the same number. The unit is the leaf - an
+    issue with no children - and a childless issue counts as one leaf in its own
+    column. Mirrors RollupDto. */
+export interface Rollup {
+  /** What `slices` sums to. */
+  leaves: number;
+  /** Leaves in a terminal column: the numerator of "how far along is this". */
+  done: number;
+  /** Open questions on this issue and everything below it, at any depth.
+      Non-zero means it is blocked on a person rather than on an agent. */
+  waiting: number;
+  /** Board order (`sortOrder`, then id), empty columns absent. */
+  slices: RollupSlice[];
+}
+
+/** One direct child, with its own rollup. Mirrors ChildRollupDto. */
+export interface ChildRollup {
+  issue: IssueCard;
+  /** No children of its own - draw a status pill rather than a bar. Carried
+      rather than inferred from `leaves === 1`, because a story with a single
+      task and a task with none are not the same thing. */
+  isLeaf: boolean;
+  rollup: Rollup;
+}
+
+/** One subtree and the row under it: the issue page's Progress card. Mirrors
+    IssueRollupDto. */
+export interface IssueRollup {
+  key: string;
+  rollup: Rollup;
+  children: ChildRollup[];
+}
