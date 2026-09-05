@@ -460,3 +460,32 @@ public record ChildRollupDto(IssueCardDto Issue, bool IsLeaf, RollupDto Rollup);
 /// with the one above it by construction.
 /// </summary>
 public record IssueRollupDto(string Key, RollupDto Rollup, IReadOnlyList<ChildRollupDto> Children);
+
+/// <summary>
+/// One epic on the Plan page: the card, what everything beneath it adds up to,
+/// and the epics beneath it drawn the same way.
+/// </summary>
+/// <param name="Rollup">
+/// The whole subtree, not only the epics in <paramref name="Children"/> - every
+/// story, task and bug under it at any depth. An epic's meter would otherwise
+/// read as empty until somebody filed an epic inside it.
+/// </param>
+/// <param name="Children">
+/// The epics below this one, each appearing exactly here and not again at the
+/// top level, so the page draws the tree once. Ordered by key.
+/// </param>
+public record PlanEntryDto(IssueCardDto Issue, bool IsLeaf, RollupDto Rollup, IReadOnlyList<PlanEntryDto> Children);
+
+/// <summary>
+/// The landscape in one request: every epic in the tracker with what it adds up
+/// to, so the Plan page is a list of meters rather than a question per bar.
+/// </summary>
+/// <param name="Epics">The epics with no parent, each carrying the epics beneath it. Ordered by key.</param>
+/// <param name="Loose">
+/// The work that hangs under no epic at all - the leaves below every root issue
+/// that is not an epic, and <c>leaves: 0</c> when there is none. It is here so
+/// that the Plan page cannot quietly become a view that hides half the tracker:
+/// an operator who files a story without a parent should be able to see that
+/// they did.
+/// </param>
+public record PlanDto(IReadOnlyList<PlanEntryDto> Epics, RollupDto Loose);

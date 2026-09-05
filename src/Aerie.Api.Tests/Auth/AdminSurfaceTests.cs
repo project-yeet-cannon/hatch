@@ -163,6 +163,7 @@ public class AdminSurfaceTests
         // module: it says how far along a subtree is, which is exactly what a
         // key holder asking "what is left under this epic" is entitled to.
         "PlanController.GetIssuePlan",
+        "PlanController.GetPlan",
 
         // Playbooks are guarded twice over. Reading one is Hatch-scoped like
         // the rest; writing one names no scope at all, so an API key is
