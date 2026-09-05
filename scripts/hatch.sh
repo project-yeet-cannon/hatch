@@ -39,8 +39,14 @@
 #   ./hatch.sh start AER-12           # move it to "in progress"
 #   ./hatch.sh move AER-12 todo       # ...or to any non-terminal column
 #   ./hatch.sh comment AER-12 "sha abc123 on branch aer-12-thing"
+#   ./hatch.sh ask AER-12 "per-node or global?"   # a decision that is not ours
+#   ./hatch.sh questions              # everything waiting on an answer
+#   ./hatch.sh questions AER-12       # ...or just this ticket's
+#   ./hatch.sh answer                 # answer them, one at a time, here
+#   ./hatch.sh answer AER-12
 #   ./hatch.sh work                   # one increment on the next thing due
 #   ./hatch.sh work AER-12            # ...or on this one
+#   ./hatch.sh work -i AER-12         # ...in a session you sit in
 #   ./hatch.sh work --model opus --effort xhigh AER-12
 #   ./hatch.sh work --dry-run         # print the prompt, spawn nothing
 #   ./hatch.sh api GET /api/hatch/issues?statusId=2
@@ -376,6 +382,142 @@ cmd_comment() {
     | jq -r '"commented on '"$key"' as \(.author)"'
 }
 
+# ---- Questions ----
+
+# Where a question is read and answered in a browser. Hatch's own origin, where
+# "/" is the board - so a question printed here is a link somebody can follow,
+# which is the whole point of putting it on the ticket instead of leaving it in
+# this scrollback.
+issue_url() { echo "${base}/issues/${1}"; }
+
+# Questions for one issue, or for the whole house. The house-wide list is the
+# one an operator sitting down to unblock the board wants; a key narrows it to
+# the ticket in hand.
+questions_json() {
+  local key="${1:-}" open="${2:-true}"
+  if [ -n "$key" ]; then
+    _get "/api/hatch/issues/${key}/questions?open=${open}"
+  else
+    _get "/api/hatch/questions?open=${open}"
+  fi
+}
+
+# A question the way it is read: where it came from, who asked, and the body
+# indented so a question that runs to a paragraph stays one block.
+print_questions() {
+  jq -r '.[]
+    | "\(.issueKey)  #\(.id)  \(.issueTitle)",
+      "  asked by \(.askedBy), \(.askedAt)",
+      "",
+      "  " + (.body | gsub("\n"; "\n  ")),
+      ""' <<<"$1"
+}
+
+# What an agent calls when it hits a decision that is not its to make. One
+# question a call: a question is a row, and two of them in one body cannot be
+# answered separately or counted apart.
+cmd_ask() {
+  local key="${1:?usage: hatch.sh ask AER-12 \"question\"}" body="${2:?usage: hatch.sh ask AER-12 \"question\"}"
+
+  api POST "/api/hatch/issues/${key}/comments" \
+    "$(jq -nc --arg body "$body" '{body: $body, kind: "question"}')" \
+    | jq -r '"asked question #\(.id) on '"$key"' as \(.author)"'
+
+  echo
+  echo "${key} will not be dispatched again until it is answered:"
+  echo "  ./scripts/hatch.sh answer ${key}"
+  echo "  $(issue_url "$key")"
+}
+
+cmd_questions() {
+  local key="${1:-}" questions count
+  questions=$(questions_json "$key" true)
+  count=$(jq 'length' <<<"$questions")
+
+  if [ "$count" -eq 0 ]; then
+    echo "hatch: nothing is waiting on an answer${key:+ on $key}"
+    return
+  fi
+
+  echo "--- ${count} open question(s) ---"
+  echo
+  print_questions "$questions"
+  echo "answer them: ./scripts/hatch.sh answer${key:+ ${key}}"
+}
+
+# Every open question, one at a time, on this terminal.
+#
+# The serial loop is the point rather than a convenience. A question is a
+# decision somebody owes, and the way to get a decision out of a person is to
+# ask them one thing and wait for it - a list of six printed at once gets
+# skimmed and answered in aggregate, which is how a wrong assumption gets in.
+#
+# An empty reply leaves that question open and moves on, so a session can be
+# abandoned halfway without anybody having to answer something badly to get out
+# of it. Every answer that is given goes to the ticket as it is typed, so a loop
+# interrupted at question four keeps the first three.
+cmd_answer() {
+  local key="${1:-}" questions count i id issue title body reply line answered
+
+  [ -t 0 ] || { echo "hatch: answer reads your replies and needs a terminal" >&2; exit 1; }
+
+  questions=$(questions_json "$key" true)
+  count=$(jq 'length' <<<"$questions")
+  [ "$count" -gt 0 ] || { echo "hatch: nothing is waiting on an answer${key:+ on $key}"; return; }
+
+  echo "${count} open question(s). Enter alone leaves one open, \\ at the end of a line keeps typing, ^D stops."
+  echo
+
+  answered=0
+  i=0
+  while [ "$i" -lt "$count" ]; do
+    id=$(jq -r --argjson i "$i" '.[$i].id' <<<"$questions")
+    issue=$(jq -r --argjson i "$i" '.[$i].issueKey' <<<"$questions")
+    title=$(jq -r --argjson i "$i" '.[$i].issueTitle' <<<"$questions")
+    body=$(jq -r --argjson i "$i" '.[$i].body' <<<"$questions")
+
+    echo "$((i + 1))/${count}  ${issue}  ${title}"
+    echo "$(jq -r --argjson i "$i" '"        asked by \(.[$i].askedBy), \(.[$i].askedAt)"' <<<"$questions")"
+    echo
+    printf '%s\n' "$body" | sed 's/^/  /'
+    echo
+
+    reply=""
+    while :; do
+      printf '> '
+      # ^D at the prompt ends the whole session rather than this question: it is
+      # the gesture for "I am done here", and treating it as an empty answer
+      # would silently walk the rest of the list.
+      IFS= read -r line || { echo; break 2; }
+      case "$line" in
+        *\\) reply="${reply}${line%\\}"$'\n' ;;
+        *)   reply="${reply}${line}"; break ;;
+      esac
+    done
+
+    if [ -z "$(printf '%s' "$reply" | tr -d '[:space:]')" ]; then
+      echo "  left open"
+    else
+      api POST "/api/hatch/issues/${issue}/comments" \
+        "$(jq -nc --arg body "$reply" --argjson answers "$id" \
+          '{body: $body, kind: "answer", answersId: $answers}')" >/dev/null
+      answered=$((answered + 1))
+      echo "  answered"
+    fi
+    echo
+
+    i=$((i + 1))
+  done
+
+  echo "answered ${answered} of ${count}"
+
+  # Said rather than left to be remembered: answering is only half of it, and
+  # the ticket does not move until somebody dispatches it again.
+  if [ "$answered" -gt 0 ]; then
+    echo "the tickets that are now clear can be worked: ./scripts/hatch.sh work${key:+ ${key}}"
+  fi
+}
+
 
 # ---- Working ----
 
@@ -441,6 +583,18 @@ compose() {
     (if (.children | length) > 0 then
       "## Its children\n\n" + ([.children[] | "- \(.key)  [\(.type)]  \(.title)"] | join("\n")) + "\n"
      else empty end),
+    # Decisions that were asked for and given, on this ticket, before now.
+    # Carried into the prompt rather than left for the agent to find in the
+    # comment thread, because the one thing a resumed run must not do is reopen
+    # a question somebody has already answered.
+    (if ([.questions[] | select((.answers | length) > 0)] | length) > 0 then
+      "## Decisions already made\n\n" +
+      "These were asked on this ticket and answered. They are settled: build on\nthem, and do not ask again.\n\n" +
+      ([.questions[] | select((.answers | length) > 0)
+        | "**Asked (\(.askedBy)):** \(.body)\n\n"
+          + ([.answers[] | "**Answered (\(.author)):** \(.body)"] | join("\n\n"))]
+       | join("\n\n---\n\n")) + "\n"
+     else empty end),
     "## Reaching Hatch",
     "",
     "Run these from the repository root. The key is already in the environment.",
@@ -449,12 +603,34 @@ compose() {
     "./scripts/hatch.sh show \(.issue.key)              the ticket and its comments",
     "./scripts/hatch.sh start \(.issue.key)             move it to in progress",
     "./scripts/hatch.sh move \(.issue.key) <column>     move it anywhere non-terminal",
-    "./scripts/hatch.sh comment \(.issue.key) \"...\"    write on the ticket",
+    "./scripts/hatch.sh comment \(.issue.key) \"...\"     write on the ticket",
+    "./scripts/hatch.sh ask \(.issue.key) \"...\"         ask for a decision, and stop",
     "./scripts/hatch.sh api GET /api/hatch/issues?parentKey=\(.issue.key)",
     "```",
     "",
     "Filing new issues, editing descriptions and setting dates all go through",
     "`api` - CLAUDE.md documents the shapes.",
+    "",
+    "## When you cannot decide",
+    "",
+    "Some things are not yours to choose: a product call, a name that will be",
+    "lived with for years, a tradeoff with no technically correct side. When you",
+    "reach one, do not guess, and do not quietly pick whichever option is easiest",
+    "to build.",
+    "",
+    "```",
+    "./scripts/hatch.sh ask \(.issue.key) \"the question, in full\"",
+    "```",
+    "",
+    "One call per question, so each can be answered on its own. Ask it so that a",
+    "sentence settles it: say what you would do either way and what each costs,",
+    "not merely that you are unsure. Then stop. An open question blocks this",
+    "ticket from being dispatched at all, so nothing further will be spawned at",
+    "it until somebody answers - and anything built past an unanswered question",
+    "is built on a guess.",
+    "",
+    "What the repository can answer, answer by reading the repository. A question",
+    "the code already settles is a round trip through a person for nothing.",
     "",
     "## Where this increment ends",
     "",
@@ -468,13 +644,14 @@ compose() {
 }
 
 cmd_work() {
-  local key="" model="" effort="" dry=0
+  local key="" model="" effort="" dry=0 attach=0
 
   while [ $# -gt 0 ]; do
     case "$1" in
       --model)   model="${2:?--model needs a value}"; shift 2 ;;
       --effort)  effort="${2:?--effort needs a value}"; shift 2 ;;
       --dry-run) dry=1; shift ;;
+      -i|--interactive) attach=1; shift ;;
       -*)        echo "hatch: work does not take $1" >&2; exit 1 ;;
       *)         key="$1"; shift ;;
     esac
@@ -487,15 +664,40 @@ cmd_work() {
     work=$(_get "/api/hatch/work/next?offsetMinutes=$(offset_minutes)")
     # 204: the board holds nothing an agent may advance. Not a failure - it is
     # the answer a finished board gives, and a loop should be able to see it.
-    [ -n "$work" ] || { echo "hatch: nothing on the board is an agent's to move"; exit 2; }
+    #
+    # "Nothing to do" and "everything is waiting on you" look identical from
+    # here and are not the same situation, so the second one is named. Without
+    # this an operator with a board full of open questions would be told the
+    # work had run out.
+    if [ -z "$work" ]; then
+      echo "hatch: nothing on the board is an agent's to move"
+      local waiting
+      waiting=$(jq 'length' <<<"$(questions_json '' true)")
+      [ "$waiting" -eq 0 ] || echo "hatch: ${waiting} question(s) are waiting on you - ./scripts/hatch.sh answer"
+      exit 2
+    fi
   fi
+
+  key=$(jq -r '.issue.key' <<<"$work")
 
   local blocked
   blocked=$(jq -r '.blocked // empty' <<<"$work")
-  [ -z "$blocked" ] || {
-    echo "hatch: $(jq -r '.issue.key' <<<"$work") - ${blocked}" >&2
+  if [ -n "$blocked" ]; then
+    echo "hatch: ${key} - ${blocked}" >&2
+
+    # A refusal that names a question prints the question. Being told a ticket
+    # is blocked and then having to go and ask what by is two round trips for
+    # something already in hand.
+    local open
+    open=$(jq -c '[.questions[] | select((.answers | length) == 0)]' <<<"$work")
+    if [ "$(jq 'length' <<<"$open")" -gt 0 ]; then
+      echo >&2
+      print_questions "$open" >&2
+      echo "  ./scripts/hatch.sh answer ${key}" >&2
+      echo "  $(issue_url "$key")" >&2
+    fi
     exit 2
-  }
+  fi
 
   # The playbook chooses; the flags override. Nothing here writes back, so an
   # override is one run's opinion and not a change to the matrix.
@@ -521,6 +723,32 @@ cmd_work() {
   echo "hatch: ${model}, effort ${effort}, $(jq -r '"\(.fromStatus.name) -> \(.toStatus.name)"' <<<"$work")"
   echo
 
+  if [ "$attach" = 1 ]; then
+    # Attached: the same ticket, the same playbook, the same budget, in a session
+    # somebody is sitting in front of. Two things are deliberately different.
+    #
+    # No bypassPermissions - there is somebody here to answer a prompt, and the
+    # grant below exists only because in print mode there is not.
+    #
+    # And the prompt is an argument rather than stdin, because stdin is the
+    # terminal: it is what the operator is about to type into. An argument list
+    # has a length limit that the piped form was chosen to avoid, which is a
+    # real difference and not one a playbook prompt gets anywhere near.
+    (cd "$root" && exec "$bin" \
+      --model "$model" \
+      --effort "$effort" \
+      --add-dir "$root" \
+      "$prompt")
+    return
+  fi
+
+  # What was open before the run, so that what the run asked can be told apart
+  # from what was already sitting there. Ids rather than a count: an operator
+  # who answered one question in another terminal while this ran would otherwise
+  # see the arithmetic come out to zero.
+  local before after asked
+  before=$(jq -c '[.questions[] | select((.answers | length) == 0) | .id]' <<<"$work")
+
   # bypassPermissions because in print mode nothing can answer a prompt: any
   # permission this did not anticipate becomes a silent denial in the middle of
   # a run nobody is watching. That is a deliberate grant, and the reason `work`
@@ -533,6 +761,23 @@ cmd_work() {
     --effort "$effort" \
     --permission-mode bypassPermissions \
     --add-dir "$root")
+
+  # Whatever the session asked for on its way out. This is the half of the loop
+  # that makes asking worth doing: an unattended run's questions are the one
+  # thing in its output that somebody has to act on, and they would otherwise be
+  # a paragraph in the middle of a transcript nobody scrolls back through.
+  after=$(questions_json "$key" true)
+  asked=$(jq -c --argjson before "$before" \
+    '[.[] | select(($before | index(.id)) == null)]' <<<"$after")
+
+  if [ "$(jq 'length' <<<"$asked")" -gt 0 ]; then
+    echo
+    echo "--- ${key} asked $(jq 'length' <<<"$asked") question(s) ---"
+    echo
+    print_questions "$asked"
+    echo "  ./scripts/hatch.sh answer ${key}"
+    echo "  $(issue_url "$key")"
+  fi
 }
 
 usage() {
@@ -547,7 +792,7 @@ load_env
 # machine which has neither yet. Named rather than defaulted, so that a typo
 # still comes back as a typo below.
 case "${1:-}" in
-  board|next|show|start|move|comment|work|api) require_env ;;
+  board|next|show|start|move|comment|ask|questions|answer|work|api) require_env ;;
 esac
 
 case "${1:-}" in
@@ -558,6 +803,9 @@ case "${1:-}" in
   start)   shift; cmd_move "${1:?usage: hatch.sh start AER-12}" "in progress" ;;
   move)    shift; cmd_move "$@" ;;
   comment) shift; cmd_comment "$@" ;;
+  ask)       shift; cmd_ask "$@" ;;
+  questions) shift; cmd_questions "$@" ;;
+  answer)    shift; cmd_answer "$@" ;;
   work)    shift; cmd_work "$@" ;;
   api)     shift; api "${1:?method}" "/${2#/}" "${3:-}" ;;
   ''|-h|--help|help) usage 0 ;;

@@ -30,12 +30,19 @@ public class BoardController(HatchContext db) : ControllerBase
         // Ordered by (StatusId, Rank, Id) so the client can slice the one list
         // into columns without sorting, and so two cards sharing a rank do not
         // trade places between refetches.
+        // One grouped read for the whole board rather than a count per card.
+        // A card that is waiting on somebody has to say so here: the board is
+        // where the operator looks, and a question they cannot see is a question
+        // they never answer.
+        var waiting = await Questions.OpenCountsAsync(db, ct);
+
         var issues = await db.Issues.AsNoTracking()
             .OrderBy(i => i.StatusId)
             .ThenBy(i => i.Rank)
             .ThenBy(i => i.Id)
             .Select(i => new
             {
+                i.Id,
                 ProjectKey = i.Project!.Key,
                 i.Number,
                 i.Type,
@@ -60,7 +67,8 @@ public class BoardController(HatchContext db) : ControllerBase
             i.Rank,
             i.ParentNumber is { } number ? IssueKey.Format(i.ParentProjectKey!, number) : null,
             IssueMoment.Format(i.ReadyAt, i.ReadyAtHasTime),
-            IssueMoment.Format(i.DueAt, i.DueAtHasTime))).ToList();
+            IssueMoment.Format(i.DueAt, i.DueAtHasTime),
+            waiting.GetValueOrDefault(i.Id))).ToList();
 
         return new BoardDto(statuses, cards);
     }

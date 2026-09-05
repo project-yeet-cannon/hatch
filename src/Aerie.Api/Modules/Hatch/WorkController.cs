@@ -115,22 +115,37 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
 
         var playbook = to is null ? null : await MatchAsync(from.Id, to.Id, issue.Type, ct);
 
+        // Both halves in one read: the open ones decide whether an agent is
+        // dispatched at all, and the answered ones are what it is dispatched
+        // knowing.
+        var questions = await Questions.ForIssueAsync(db, issue.Id, ct);
+        var waiting = questions.Count(q => q.Answers.Count == 0);
+
         return new WorkDto(
             await IssueProjection.ToDtoAsync(db, issue, ct),
             ToStatusDto(from),
             to is null ? null : ToStatusDto(to),
             playbook is null ? null : PlaybooksController.ToDto(playbook),
             childCards,
-            Blocked(from, to, playbook, issue.Type));
+            questions,
+            Blocked(from, to, playbook, issue.Type, waiting));
     }
 
     /// <summary>
     /// Why an agent should not be spawned for this issue, or null when it
-    /// should. Three refusals, and the middle one is the load-bearing rule of
-    /// the whole loop: only the operator decides that something shipped, so a
-    /// transition into a terminal column is not an agent's to make.
+    /// should. Four refusals, and two of them are load-bearing rules of the
+    /// whole loop rather than missing configuration: only the operator decides
+    /// that something shipped, so a transition into a terminal column is not an
+    /// agent's to make; and an issue holding an unanswered question is waiting
+    /// on a person, so dispatching another agent at it would only produce a
+    /// second session asking the same thing or guessing at the answer.
     /// </summary>
-    private static string? Blocked(EfHatchStatus from, EfHatchStatus? to, EfHatchPlaybook? playbook, string type)
+    /// <param name="waiting">
+    /// Unanswered questions on the issue. Checked before the playbook, because
+    /// "nobody has answered you" is a more useful sentence than "no playbook
+    /// covers this" when both are true.
+    /// </param>
+    private static string? Blocked(EfHatchStatus from, EfHatchStatus? to, EfHatchPlaybook? playbook, string type, int waiting)
     {
         if (from.IsTerminal)
             return $"\"{from.Name}\" is where work ends - there is nothing after it";
@@ -140,6 +155,9 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
 
         if (to.IsTerminal)
             return $"the next column is \"{to.Name}\", and only the operator moves work there";
+
+        if (waiting > 0)
+            return $"{waiting} unanswered question{(waiting == 1 ? "" : "s")} - it is waiting on a person, not on an agent";
 
         return playbook is null
             ? $"no playbook covers \"{from.Name}\" to \"{to.Name}\" for a {type} - add one on the Playbooks page"

@@ -79,5 +79,24 @@ columns.
 8. **Leave it in progress.** Never move a ticket to a terminal column; only the
    operator decides that something shipped. `hatch.sh` will refuse anyway.
 
+## If you cannot decide
+
+A product call, a name that will be lived with, a tradeoff with no technically
+correct side — not yours to choose, and not to be guessed at either. You are in
+a session with somebody in it, so ask them. Put it on the ticket as well:
+
+```
+./scripts/hatch.sh ask <KEY> "the question, in full"
+# ...ask me the same thing here, then record what I say
+./scripts/hatch.sh answer <KEY>
+```
+
+Recording it is not ceremony. An unanswered question blocks the ticket from
+being dispatched at all, so a question filed and left unanswered strands it —
+and a decision made only in this chat is a decision the next session, headless
+and six weeks from now, will make differently.
+
+Anything the repository can settle, settle by reading the repository first.
+
 Finish by telling me the key, the branch, the sha, and anything you left
 undone.

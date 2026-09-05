@@ -87,6 +87,17 @@ function CardFace({ card, waiting, terminal }: Required<Omit<CardProps, 'card'>>
       <div className="hatch-card-head">
         <span className="hatch-card-key">{card.key}</span>
         <TypeBadge type={card.type} />
+        {/* Drawn on the card and not only on the issue page, because a question
+            nobody can see is a question nobody answers - and this card is the
+            reason the column below it has stopped moving. */}
+        {card.openQuestions > 0 && (
+          <span
+            className="hatch-card-asking"
+            title={`${card.openQuestions} unanswered question${card.openQuestions === 1 ? '' : 's'}`}
+          >
+            ?{card.openQuestions > 1 && <span className="hatch-card-asking-count">{card.openQuestions}</span>}
+          </span>
+        )}
       </div>
       <div className="hatch-card-title" title={card.title}>
         {truncate(card.title)}

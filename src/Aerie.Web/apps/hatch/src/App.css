@@ -896,3 +896,66 @@
   font-size: var(--t-body);
   line-height: 1.5;
 }
+
+/* ---- Questions ----
+
+   An unanswered question is the one thing on a board that nothing else can get
+   past, so it is drawn in the same warn colours a due date warms into rather
+   than in a neutral badge: this is not information, it is something owed. */
+
+.hatch-card-asking {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 0 var(--sp-1-5);
+  border-radius: var(--r-pill);
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+  font-size: var(--t-micro);
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.hatch-card-asking-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.hatch-waiting-toggle.on {
+  background: var(--warn);
+  border-color: var(--warn);
+  color: var(--on-accent);
+}
+
+/* The band down the left edge is what makes this card different from the four
+   below it at a glance, without the page having to shout. */
+.hatch-waiting {
+  border-left: 3px solid var(--warn);
+}
+
+.hatch-question-list {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.hatch-question + .hatch-question {
+  border-top: 1px solid var(--line);
+  padding-top: var(--sp-4);
+}
+
+/* In the thread below, a question and its answer are marked but not boxed -
+   the acting happens in the card above, and this list is read back rather than
+   worked. */
+.hatch-comment-question {
+  border-left: 2px solid var(--warn);
+  padding-left: var(--sp-3);
+}
+
+.hatch-comment-answer {
+  border-left: 2px solid var(--primary);
+  padding-left: var(--sp-3);
+}

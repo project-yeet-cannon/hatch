@@ -540,6 +540,50 @@ an unattended session works rather than something a person reads to a session.
   override for one run without touching the matrix. The loop the operator runs
   is now one command.
 
+### Questions, on the ticket
+
+The first round gave an agent everything it needed to work except a way to say
+it could not. A headless session that reached a decision it had no standing to
+make had one option - guess - and the guess landed in a transcript nobody reads
+twice. This round gives that a shape, and the shape is the same one the ready
+date has: something that would otherwise be prose in a description becomes a row
+that the board and the dispatcher can act on.
+
+- **A comment has a kind, and an answer names its question.** `Kind` is
+  `""`, `question` or `answer`; an answer carries `AnswersId`, pointing at the
+  question it settles on the same issue. Open is computed - a question nothing
+  points at - and never stored, so a question cannot be open and answered at
+  once because two writes disagreed. The link runs answer→question rather than
+  the other way, which is what lets a decision be refined by a second answer
+  without editing the first.
+- **An open question blocks the dispatch.** A fourth refusal in
+  `WorkController.Blocked`, so `work/next` folds the card past exactly as it
+  folds one whose ready date has not arrived, and `work AER-12` by name comes
+  back with the question rather than a session. Without this the loop's only
+  reaction to a question is to ask it again on the next run.
+- **The board says which cards are waiting.** `IssueCardDto.OpenQuestions`, a
+  badge on the card and a *waiting on me* switch beside the type toggles. A
+  question nobody can see is a question nobody answers, so the one thing not
+  done here was folding a waiting card off the board.
+- **`hatch.sh ask`, `questions`, and `answer`.** `answer` walks the open
+  questions one at a time on the terminal and posts each reply as it is typed -
+  serial because a list of six printed at once gets answered in aggregate, which
+  is how a wrong assumption gets in. `work` prints whatever the run it just
+  spawned asked for, with the link, so the questions are not left in the
+  scrollback.
+- **`hatch.sh work -i`.** The same ticket, playbook and budget in a session the
+  operator sits in - no `bypassPermissions`, because that grant only exists
+  because a print-mode run has nobody to answer a prompt. Where `ask` is how an
+  unattended run raises a decision, this is how a watched one does.
+- **Nothing stops an API key answering its own question**, and that is stated
+  rather than papered over. A key is what `hatch.sh answer` types with and it is
+  also what a spawned agent inherits; the server cannot tell them apart, and a
+  check that looked like it could would be worse than none. What holds the loop
+  shut is one step further out - the dispatch is refused while a question is
+  open, and the dispatch is a command the operator types. A second scope minted
+  for agents would close it properly, and is not worth a column until somebody
+  wants it.
+
 ## Phase 7 — Migrate and dissipate
 
 Hatch becomes the system of record and this plan eats itself. Operator-paced —

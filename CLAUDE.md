@@ -45,8 +45,8 @@ working and the route is not one a key may take; ask the operator.
 ### From a terminal
 
 [`scripts/hatch.sh`](scripts/hatch.sh) wraps the calls a working session
-actually makes — `next`, `show`, `start`, `comment`, and `api` for everything
-else. It reads its settings from `scripts/.env` or the environment, finds the
+actually makes — `next`, `show`, `start`, `comment`, `ask`, `answer`, and `api`
+for everything else. It reads its settings from `scripts/.env` or the environment, finds the
 todo column by name rather than by id, and folds off the cards whose ready date
 has not arrived, exactly as the board does. Prefer it to raw `curl`; the
 raw calls below are what it is doing.
@@ -75,6 +75,32 @@ Two things about it are worth knowing before working on this repo:
   playbook is wrong, say so on the ticket. Do not try to route around it: the
   API refuses, and it refuses on purpose.
 
+### When a decision is not yours to make
+
+Some things a ticket needs are not an implementer's to choose: a product call, a
+name that will be lived with for years, a tradeoff with no technically correct
+side. Do not guess, and do not quietly take whichever branch is cheapest to
+build. Ask on the ticket:
+
+```
+./scripts/hatch.sh ask AER-12 "per-node or global retries?"
+```
+
+One call per question, phrased so that a sentence settles it — what you would do
+either way and what each costs, not merely that you are unsure. Then **stop**.
+An unanswered question blocks the ticket from being dispatched at all, so
+nothing further will be spawned at it until somebody answers, and anything built
+past the question is built on a guess.
+
+The operator answers on the terminal (`./scripts/hatch.sh answer`, which walks
+them one at a time) or on the issue page, and the answer is a comment bound to
+the question — so `work` carries the decisions already made into the next
+session's prompt, under **Decisions already made**. Those are settled. Build on
+them; do not reopen them.
+
+What the repository can answer, answer by reading the repository. A question the
+code already settles is a round trip through a person for nothing.
+
 ### Given a ticket
 
 A `hatch.${DOMAIN}/issues/AER-12` link, or a bare `AER-12`, means:
@@ -82,6 +108,7 @@ A `hatch.${DOMAIN}/issues/AER-12` link, or a bare `AER-12`, means:
 ```
 GET  ${AERIE_BASE}/api/hatch/issues/AER-12          # title, description, status, parent, children
 GET  ${AERIE_BASE}/api/hatch/issues/AER-12/comments
+GET  ${AERIE_BASE}/api/hatch/issues/AER-12/questions?open=false   # decisions asked for, and given
 GET  ${AERIE_BASE}/api/hatch/issues/AER-12/events   # what has happened to it, newest first
 ```
 

@@ -17,13 +17,18 @@ export interface CardFilter {
   types: IssueType[];
   /** What was typed in the search box, raw. */
   query: string;
+  /** Only the cards holding a question nobody has answered.
+      Its own switch rather than a search term, because "what is waiting on me"
+      is the question an operator opens the board with when the loop has stopped
+      moving, and it should not depend on remembering a word to type. */
+  waiting: boolean;
 }
 
-export const NO_FILTER: CardFilter = { types: [], query: '' };
+export const NO_FILTER: CardFilter = { types: [], query: '', waiting: false };
 
 /** Whether this filter is hiding anything, which is what decides if the board says so out loud. */
 export const isFiltering = (filter: CardFilter): boolean =>
-  filter.types.length > 0 || filter.query.trim() !== '';
+  filter.types.length > 0 || filter.query.trim() !== '' || filter.waiting;
 
 /**
  * Everything about a card that a search box can see: its key, its title, its
@@ -48,10 +53,15 @@ export function matchesQuery(card: IssueCard, query: string): boolean {
 }
 
 export const matchesFilter = (card: IssueCard, filter: CardFilter): boolean =>
-  (filter.types.length === 0 || filter.types.includes(card.type)) && matchesQuery(card, filter.query);
+  (filter.types.length === 0 || filter.types.includes(card.type)) &&
+  (!filter.waiting || card.openQuestions > 0) &&
+  matchesQuery(card, filter.query);
 
 export const filterCards = (cards: IssueCard[], filter: CardFilter): IssueCard[] =>
   cards.filter((card) => matchesFilter(card, filter));
+
+/** Flips the waiting switch. */
+export const toggleWaiting = (filter: CardFilter): CardFilter => ({ ...filter, waiting: !filter.waiting });
 
 /** Adds or removes one type, which is what a row of toggles does to a filter. */
 export const toggleType = (filter: CardFilter, type: IssueType): CardFilter => ({

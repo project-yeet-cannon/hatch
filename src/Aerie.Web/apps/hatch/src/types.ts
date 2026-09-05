@@ -50,6 +50,9 @@ export interface IssueCard {
   readyAt: string | null;
   /** When it is owed, or null. Same two forms as `readyAt`. */
   dueAt: string | null;
+  /** Questions on this issue nobody has answered. Non-zero means it is waiting
+      on a person, and the board says so - see IssueCardDto.OpenQuestions. */
+  openQuestions: number;
 }
 
 export interface Issue {
@@ -70,11 +73,30 @@ export interface Issue {
   updatedAt: string;
 }
 
+/** An ordinary note, a question that needs deciding, or the answer to one.
+    Mirrors EfHatchComment.Kind; the empty string is a note. */
+export type CommentKind = '' | 'question' | 'answer';
+
 export interface Comment {
   id: number;
   author: string;
   body: string;
+  kind: CommentKind;
+  /** The question this answers, on the same issue. Null on everything else. */
+  answersId: number | null;
   createdAt: string;
+}
+
+/** A question with whatever has been said back to it. Empty `answers` is what
+    "open" means - there is no second flag saying so. See QuestionDto. */
+export interface Question {
+  id: number;
+  issueKey: string;
+  issueTitle: string;
+  body: string;
+  askedBy: string;
+  askedAt: string;
+  answers: Comment[];
 }
 
 export type IssueEventKind =
@@ -87,6 +109,8 @@ export type IssueEventKind =
   | 'ready_changed'
   | 'due_changed'
   | 'commented'
+  | 'asked'
+  | 'answered'
   | 'imported';
 
 export interface IssueEvent {
@@ -257,6 +281,10 @@ export interface IssueMoveRequest {
 
 export interface CommentCreateRequest {
   body: string;
+  /** Omitted by everything that just wants to say something. */
+  kind?: CommentKind;
+  /** Required on an answer, and refused on anything else. */
+  answersId?: number;
 }
 
 // ---- Playbooks ----

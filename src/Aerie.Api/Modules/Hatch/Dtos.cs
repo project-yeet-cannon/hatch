@@ -58,6 +58,13 @@ public record StatusPatchRequest(string? Name, int? SortOrder, bool? IsTerminal,
 /// Carried on the card because the board decides what to fold away with it -
 /// see <see cref="BoardDto"/>.
 /// </param>
+/// <param name="OpenQuestions">
+/// How many questions on this issue nobody has answered. A count rather than
+/// the questions themselves: the board draws a badge and the detail page is
+/// where they are read. Defaulted, because the lists that are not the board -
+/// an issue's children, a search result - are not places anybody answers a
+/// question from, and counting for them would be a query nobody reads.
+/// </param>
 public record IssueCardDto(
     string Key,
     string ProjectKey,
@@ -67,7 +74,8 @@ public record IssueCardDto(
     long Rank,
     string? ParentKey,
     string? ReadyAt,
-    string? DueAt);
+    string? DueAt,
+    int OpenQuestions = 0);
 
 /// <summary>One issue, whole - the detail page's payload.</summary>
 /// <param name="ChildKeys">Its stories, or its tasks. Keys rather than nested issues: the page links to them and does not draw them.</param>
@@ -179,9 +187,38 @@ public record IssueBulkEditRequest(
 
 // ---- Comments and events ----
 
-public record CommentDto(long Id, string Author, string Body, DateTimeOffset CreatedAt);
+/// <param name="Kind">
+/// <c>""</c> for an ordinary note, <c>"question"</c> or <c>"answer"</c> - see
+/// <see cref="EfHatchComment.Kind"/> for why those two are a column.
+/// </param>
+/// <param name="AnswersId">The question this answers, on the same issue. Null on everything else.</param>
+public record CommentDto(long Id, string Author, string Body, string Kind, long? AnswersId, DateTimeOffset CreatedAt);
 
-public record CommentCreateRequest(string Body);
+/// <summary>
+/// A new comment. <paramref name="Kind"/> is omitted by everything that just
+/// wants to say something, which is most callers and every caller that predates
+/// questions.
+/// </summary>
+public record CommentCreateRequest(string Body, string? Kind = null, long? AnswersId = null);
+
+/// <summary>
+/// A question and whatever has been said back to it - what the CLI walks
+/// through, what the issue page threads together, and what the board counts.
+/// </summary>
+/// <param name="IssueKey">
+/// Carried on the question rather than looked up, because the house-wide list
+/// is read by somebody answering several tickets in a row and a question
+/// without its ticket is unanswerable.
+/// </param>
+/// <param name="Answers">Oldest first. Empty is what "open" means; there is no second flag saying so.</param>
+public record QuestionDto(
+    long Id,
+    string IssueKey,
+    string IssueTitle,
+    string Body,
+    string AskedBy,
+    DateTimeOffset AskedAt,
+    IReadOnlyList<CommentDto> Answers);
 
 /// <param name="Payload">
 /// <c>{ "from": …, "to": … }</c> for an edit, the source filename for an
@@ -309,10 +346,18 @@ public record PlaybookPatchRequest(
 /// </param>
 /// <param name="ToStatus">Where the increment ends, or null when there is nowhere to go.</param>
 /// <param name="Playbook">The matched row, or null when the matrix says nothing about this transition.</param>
+/// <param name="Questions">
+/// Every question ever asked about this issue, answered and not. Carried on the
+/// dispatch rather than fetched separately because both halves are needed here
+/// and for opposite reasons: an answered question is a decision the next
+/// session must not re-open, and an open one is why there is no next session
+/// yet - see <paramref name="Blocked"/>.
+/// </param>
 public record WorkDto(
     IssueDto Issue,
     StatusDto FromStatus,
     StatusDto? ToStatus,
     PlaybookDto? Playbook,
     IReadOnlyList<IssueCardDto> Children,
+    IReadOnlyList<QuestionDto> Questions,
     string? Blocked);
