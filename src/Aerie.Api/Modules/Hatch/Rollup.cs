@@ -167,9 +167,6 @@ public static class Rollup
             children = ChildIndex(nodes);
         }
 
-        /// <summary>Whether the tracker holds this issue at all.</summary>
-        public bool Knows(long id) => statusOf.ContainsKey(id);
-
         /// <summary>
         /// The direct children, in rank order. What a client draws a row per.
         /// </summary>
@@ -182,9 +179,6 @@ public static class Rollup
         /// deciding between a status pill and a bar.
         /// </summary>
         public bool IsLeaf(long id) => ChildrenOf(id).Count == 0;
-
-        /// <summary>Everything below this issue, at any depth.</summary>
-        public IReadOnlyList<long> Descendants(long id) => Descend(children, id);
 
         /// <summary>What this subtree adds up to.</summary>
         public RollupDto Of(long id)
