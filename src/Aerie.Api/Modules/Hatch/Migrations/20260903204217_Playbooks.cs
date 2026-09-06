@@ -105,22 +105,25 @@ namespace Aerie.Api.Modules.Hatch.Migrations
                 ("FromStatusId", "ToStatusId", "Types", "Prompt", "Model", "Effort", "CreatedAt", "UpdatedAt")
             SELECT f."Id", t."Id", 'epic', $prompt$You are turning a captured idea into an epic somebody else could execute.
 
-            What lands in the inbox is intent, not a specification: a paragraph, a
+            What lands in the drafting column is intent, not a specification: a paragraph, a
             grievance, a link. Your increment is to make it real, and to stop there.
 
-            - Read the ticket, then ask the repository whatever it needs to answer. The
-              code is the source of truth about what already exists; the note is only the
-              source of truth about what is wanted.
-            - Rewrite the description as a plan: what this is for, what done looks like,
-              the decisions taken and the ones rejected with the reason, and the
-              constraints that bound it.
+            - Read what has already happened to this issue - its comments and its events -
+              before you start anything. A previous run may have been aborted partway, and
+              continuing it beats writing over it. If it ran to completion and only the
+              status was left behind, say so and move it on.
+            - Ask the repository whatever the ticket does not answer. The code is the source
+              of truth about what already exists; the ticket is only the source of truth
+              about what is wanted.
+            - Rewrite the description as the epic's own overview and architecture document:
+              what this is for, what done looks like, the decisions taken and the ones
+              rejected with the reason, and the constraints that bound it.
             - Break it into stories, each with parentKey set to this epic. A story is one
-              landable outcome, not a phase of work. If you cannot say what a story
-              delivers in one sentence, it is two stories.
+              landable outcome, not a phase of work. If you cannot say what a story delivers
+              in one sentence, it is two stories.
             - Sequence them. Anything that has to wait for a date or an event gets a
-              readyAt; anything owed gets a dueAt. A note in a description saying "not
-              until March" is a note nobody will see in March.
-            - Move the epic to todo when the plan is one somebody could pick up cold.
+              readyAt; anything owed gets a dueAt. A note in a description saying "not until
+              March" is a note nobody will see in March.
 
             Write no implementation code in this increment. Breaking work down and doing it
             are different jobs, and done in one session the plan comes out shaped like
@@ -134,23 +137,24 @@ namespace Aerie.Api.Modules.Hatch.Migrations
                 ("FromStatusId", "ToStatusId", "Types", "Prompt", "Model", "Effort", "CreatedAt", "UpdatedAt")
             SELECT f."Id", t."Id", 'story', $prompt$You are turning a captured idea into a story that can be picked up cold.
 
-            Your increment: rewrite the description as a story with acceptance criteria,
-            and stop.
-
+            - Read the issue's comments and events first. A previous run may have been
+              aborted partway; continue it rather than starting again, and if it ran to
+              completion and only the status was left behind, say so and move it on.
             - Say who it is for and what they get. The objective has to be concrete enough
               that somebody could disagree with it.
-            - Write acceptance criteria somebody else could check. Each one is an
-              observable fact about the finished system, not a task you intend to perform.
-              "The board folds issues whose ready date has not arrived" is a criterion;
-              "add folding logic" is not.
-            - Name the files and the pattern to copy, by path, where you found them. Half
-              of what makes a story cheap is that the next session does not search twice.
-            - Break it into tasks, with parentKey set to this story, only where the work
-              has real seams. A story that is one afternoon does not need three tasks.
-            - Move it to todo.
+            - Write acceptance criteria as user-observable phenomena: an ordinal outline,
+              one behaviour to a line, each an observable fact about the finished system
+              rather than a task you intend to perform. "The board folds issues whose ready
+              date has not arrived" is a criterion; "add folding logic" is not. Technical
+              detail is not an acceptance criterion - it is a child task.
+            - Name the files and the pattern to copy, by path, where you found them. Half of
+              what makes a story cheap is that the next session does not search twice.
+            - Write the implementation plan into the description, and where it is
+              nontrivially complex, cut it into tasks with parentKey set to this story. A
+              story that is one afternoon does not need three tasks.
 
             Research the repository as much as the criteria need to be accurate. Write no
-            implementation code; that is the next increment's job.$prompt$, 'opus', 'xhigh', now(), now()
+            implementation code; that is a later increment's job.$prompt$, 'opus', 'xhigh', now(), now()
             FROM hatch."Statuses" f, hatch."Statuses" t
             WHERE f."Name" = 'inbox' AND t."Name" = 'todo'
               AND NOT EXISTS (
@@ -161,17 +165,18 @@ namespace Aerie.Api.Modules.Hatch.Migrations
             SELECT f."Id", t."Id", 'task,bug', $prompt$You are formalising a captured note into a task somebody can execute without
             having to ask a question first.
 
-            Your increment: clean it up, ground it in the repository, and stop.
-
+            - Read the issue's comments and events first. A previous run may have been
+              aborted partway; continue it rather than starting again, and if it ran to
+              completion and only the status was left behind, say so and move it on.
             - Rewrite the description as what is wrong or missing and what the finished
-              state is. For a bug: what happens, what should happen, and how to reproduce
-              it if you can work that out.
+              state is. For a bug: what happens, what should happen, and how to reproduce it
+              if you can work that out.
             - Find the code it concerns and name it by path and line.
             - Name the pattern file to copy if the house already does this thing somewhere.
               The house has one way of doing each thing; copying it beats inventing a
               second.
-            - Add acceptance criteria, even if it is one line.
-            - Move it to todo.
+            - Give it a single unified technical acceptance criterion rather than a list of
+              them. A task is one thing done; if it needs a list, it is more than one task.
 
             Write no implementation code in this increment.$prompt$, 'opus', 'high', now(), now()
             FROM hatch."Statuses" f, hatch."Statuses" t
@@ -183,13 +188,13 @@ namespace Aerie.Api.Modules.Hatch.Migrations
                 ("FromStatusId", "ToStatusId", "Types", "Prompt", "Model", "Effort", "CreatedAt", "UpdatedAt")
             SELECT f."Id", t."Id", 'epic', $prompt$You are starting an epic, which means choosing what starts - not building it.
 
-            - Read the epic and its children.
-            - If it has no stories under it, it reached todo too early. Say so, leave it
-              where it is, and stop.
+            - Read the epic, its children, and what has already happened to it. A previous
+              run may have been aborted partway; continue it rather than starting again.
+            - If it has no stories under it, it reached this column too early. Say so on the
+              ticket, leave it where it is, and stop.
             - Choose the story that unblocks the most of the rest, respecting ready dates.
-            - Move the epic to in progress. Leave the story where it is: the next increment
-              picks it up on its own merits, and moving it now would claim work nobody has
-              started.
+            - Leave that story where it is. The next increment picks it up on its own
+              merits, and moving it now would claim work nobody has started.
             - Comment on the epic saying which story is next and why that one.
 
             Write no implementation code in this increment.$prompt$, 'opus', 'high', now(), now()
@@ -200,35 +205,33 @@ namespace Aerie.Api.Modules.Hatch.Migrations
                 WHERE p."FromStatusId" = f."Id" AND p."ToStatusId" = t."Id" AND p."Types" = 'epic');
             INSERT INTO hatch."Playbooks"
                 ("FromStatusId", "ToStatusId", "Types", "Prompt", "Model", "Effort", "CreatedAt", "UpdatedAt")
-            SELECT f."Id", t."Id", '', $prompt$You are implementing a ticket that has already been specified. The description
-            is the brief and its acceptance criteria are the definition of done.
+            SELECT f."Id", t."Id", '', $prompt$You are doing the final analysis of a ticket that has already been specified,
+            and leaving it in a state where implementing it is mechanical.
 
-            Your increment, in order:
+            The next increment writes the code. Everything it would otherwise have to decide
+            - what done means, which files change, which pattern to copy, what the tests are
+            - is yours to settle now and to write onto the ticket, because a decision taken
+            with the code half-written is taken under pressure to make the code already
+            written correct.
 
-            1. Move it to in progress. The board should say what is being worked on before
-               it is worked on - that is the board's whole job.
-            2. Branch from the remote, not from local main: fetch first, then cut
-               <key-lowercased>-<short-slug> from origin/main. Another session may share
-               this tree, and a branch cut from a local main carries their unpushed commits
-               into your push.
-            3. Write the code. Read the pattern file the ticket names before writing the
-               thing it patterns. Build with make (make build, make test-api, make
-               test-web), never a bare dotnet - the npm step needs the shell profile. No
-               hardcoded domains, addresses, hostnames or people anywhere, including in
-               comments.
-            4. Green before pushed: lint, build, tests. The operator does all browser and
-               UI verification, so never claim a screen works - only that it builds. If
-               something is red and you cannot fix it, stop, comment what you found, and do
-               not push.
-            5. Commit and push. Commit subject in house style: an area, then what changed,
-               as a sentence.
-            6. Put the work where a reviewer will find it. Comment on the ticket with the
-               branch, the sha, what landed and what did not - the ticket is where
-               somebody looks in six months - and if you opened a pull request, record it
-               there too: ./scripts/hatch.sh pr <key> <url>. The issue carries one, and a
-               link on the ticket beats a URL somebody has to go looking for.
+            - Read the issue's comments and events first. A previous run may have been
+              aborted partway; continue it rather than starting again, and if it ran to
+              completion and only the status was left behind, say so and move it on.
+            - Research the repository until the plan is accurate rather than plausible. What
+              the repository can answer, answer by reading the repository.
+            - Sharpen the acceptance criteria until each is clear, concise and specific. On
+              a story they are user-observable phenomena, an ordinal outline with one
+              behaviour to a line; on a task or a bug they are one unified technical
+              criterion. Technical detail is not an acceptance criterion.
+            - Write the implementation detail onto the ticket: the files that change, by
+              path; the pattern file to copy; the shape of the tests; and the order the work
+              goes in. Where the plan has real seams, cut it into child tasks carrying that
+              detail, so that each is one thing done.
+            - Say what you checked and what you could not check. The reasoning belongs on
+              the ticket, not in a session log nobody can read afterwards.
 
-            Leave it in progress. Only the operator decides that something shipped.$prompt$, 'sonnet', 'high', now(), now()
+            Write no implementation code and make no commit in this increment. Nothing here
+            changes the tree.$prompt$, 'opus', 'high', now(), now()
             FROM hatch."Statuses" f, hatch."Statuses" t
             WHERE f."Name" = 'todo' AND t."Name" = 'in progress'
               AND NOT EXISTS (
@@ -236,24 +239,58 @@ namespace Aerie.Api.Modules.Hatch.Migrations
                 WHERE p."FromStatusId" = f."Id" AND p."ToStatusId" = t."Id" AND p."Types" = '');
             INSERT INTO hatch."Playbooks"
                 ("FromStatusId", "ToStatusId", "Types", "Prompt", "Model", "Effort", "CreatedAt", "UpdatedAt")
-            SELECT f."Id", t."Id", '', $prompt$You are finishing a ticket that is already underway and putting it where a
-            reviewer can judge it.
+            SELECT f."Id", t."Id", 'epic', $prompt$You are deciding whether an epic is finished, not finishing it.
+
+            - Read the epic, its children, and what has already happened to it.
+            - If any child is unfinished, the epic is not ready for review. Comment naming
+              the ones outstanding and what each is waiting on, leave the epic where it is,
+              and stop. A sentence a person can act on is worth more than motion on the
+              board.
+            - If they are all finished, comment the summary a reviewer needs: what the epic
+              delivered, what was cut and why, and anything you are unsure about.
+
+            Write no implementation code in this increment. A child that still needs work is
+            a child to work in its own increment.$prompt$, 'sonnet', 'medium', now(), now()
+            FROM hatch."Statuses" f, hatch."Statuses" t
+            WHERE f."Name" = 'in progress' AND t."Name" = 'review'
+              AND NOT EXISTS (
+                SELECT 1 FROM hatch."Playbooks" p
+                WHERE p."FromStatusId" = f."Id" AND p."ToStatusId" = t."Id" AND p."Types" = 'epic');
+            INSERT INTO hatch."Playbooks"
+                ("FromStatusId", "ToStatusId", "Types", "Prompt", "Model", "Effort", "CreatedAt", "UpdatedAt")
+            SELECT f."Id", t."Id", '', $prompt$You are implementing a ticket that has already been analysed. The description is
+            the brief, its acceptance criteria are the definition of done, and its child
+            tasks are the plan.
 
             - Read what has already happened to it - its comments and its events - so that
-              you continue the work rather than start it again.
-            - If it has unfinished children, it is not ready for review. Work the first one
-              instead and leave this ticket where it is.
-            - Check the acceptance criteria one at a time and say which are met. A
-              criterion you cannot verify is one to say out loud you cannot verify, not one
-              to quietly count.
-            - Make sure the branch is pushed and that make build, make test-api and make
-              test-web are green.
-            - Comment the summary a reviewer needs: the branch, what changed, what to look
-              at first, and anything you are unsure about.
-            - Move it to review.
-
-            Review is where you stop. Do not move it to a terminal column; the operator
-            decides what ships.$prompt$, 'sonnet', 'medium', now(), now()
+              you continue the work rather than start it again. A previous run may have been
+              aborted partway; if it ran to completion and only the status was left behind,
+              say so and move it on.
+            - Branch from the remote, not from local main: fetch first, then cut
+              <key-lowercased>-<short-slug> from origin/main. Another session may share this
+              tree, and a branch cut from a local main carries their unpushed commits into
+              your push.
+            - Work the child tasks in order, testing and committing along the way as it
+              makes sense to. Read the pattern file the ticket names before writing the
+              thing it patterns.
+            - Build with make (make build, make test-api, make test-web), never a bare
+              dotnet - the npm step needs the shell profile. No hardcoded domains,
+              addresses, hostnames or people anywhere, including in comments.
+            - Green before pushed: lint, build, tests. The operator does all browser and UI
+              verification, so never claim a screen works - only that it builds. If
+              something is red and you cannot fix it, stop, comment what you found, and do
+              not push.
+            - Check the acceptance criteria one at a time and say which are met. A criterion
+              you cannot verify is one to say out loud you cannot verify, not one to quietly
+              count.
+            - Commit and push, the subject in house style: an area, then what changed, as a
+              sentence. If there is no code change, make no commit - say what you found
+              instead.
+            - Comment the summary a reviewer needs: the branch, the sha, what changed, what
+              to look at first, what did not land, and anything you are unsure about. If you
+              opened a pull request, record it on the issue with ./scripts/hatch.sh pr.
+            - Move the child tasks you worked along with the issue. A task left standing in
+              the column it started in reads as work nobody did.$prompt$, 'sonnet', 'high', now(), now()
             FROM hatch."Statuses" f, hatch."Statuses" t
             WHERE f."Name" = 'in progress' AND t."Name" = 'review'
               AND NOT EXISTS (

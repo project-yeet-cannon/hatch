@@ -155,8 +155,8 @@ through them:
 | Draft | 10 | | operator | An idea being written. Nothing reads it. |
 | Breakdown | 20 | | **agent** | Turn the draft into a specification: acceptance criteria on the issue, children under it. |
 | Backlog | 30 | | operator | Specified work, awaiting selection. |
-| To Do | 40 | | **agent** | Pick it up and do it. |
-| In Progress | 50 | | **agent** | Finish it, push it, put it up for review. |
+| To Do | 40 | | **agent** | Analyse it until implementing it is mechanical. |
+| In Progress | 50 | | **agent** | Write the code, get it green, push it, put it up for review. |
 | In Review | 60 | | operator | Read the pull request, wait for green, merge. |
 | Done | 70 | ✓ | operator | Terminal. |
 
@@ -723,7 +723,7 @@ now; a full `claude-…` id is accepted for an operator with a reason to pin.
 not recognise is one it refuses at spawn time, long after the operator has
 stopped looking at the page they typed it on.
 
-Six rows are seeded, for the same reason the columns are: a Hatch whose agent
+Seven rows are seeded, for the same reason the columns are: a Hatch whose agent
 loop cannot run until somebody fills in a table is a Hatch that ships broken.
 They cover every transition an agent owns, so `go-to-work` on a fresh install
 needs no configuration beyond an origin and a key. They are joined on column
