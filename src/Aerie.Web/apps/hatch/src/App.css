@@ -888,6 +888,21 @@
   font-size: var(--t-body);
 }
 
+/* A box that grows with what is typed. The height is set by lib/useAutoGrow.ts,
+   which measures the floor - the height the box opens at, whatever `rows` and
+   the webfont make that - and leaves the ceiling here.
+
+   The ceiling is the screen rather than a row count, because "as tall as the
+   content area" is what a full box wants to be and a row count is a guess at
+   that on one display. The allowance is the chrome the editor sits under: the
+   top bar, the nav, the page's padding and the card's own head. The max() is
+   what stops a short window from clamping a box below the height it opened at -
+   between the two, opening at a size and immediately being smaller than it is
+   the worse failure, and the page scrolls either way. */
+.hatch-grows {
+  max-height: max(30rem, calc(100dvh - 14rem));
+}
+
 .hatch-child-list,
 .hatch-comments {
   list-style: none;
