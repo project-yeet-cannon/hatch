@@ -48,6 +48,7 @@
 #   ./hatch.sh answer AER-12
 #   ./hatch.sh work                   # one increment on the next thing due
 #   ./hatch.sh work AER-12            # ...or on this one
+#   ./hatch.sh work --under AER-1     # ...or on the next thing under one epic
 #   ./hatch.sh work -i AER-12         # ...in a session you sit in
 #   ./hatch.sh work --quiet           # ...saying nothing until it is finished
 #   ./hatch.sh work --model opus --effort xhigh AER-12
@@ -905,12 +906,13 @@ compose() {
 }
 
 cmd_work() {
-  local key="" model="" effort="" dry=0 attach=0 quiet=0
+  local key="" under="" model="" effort="" dry=0 attach=0 quiet=0
 
   while [ $# -gt 0 ]; do
     case "$1" in
       --model)   model="${2:?--model needs a value}"; shift 2 ;;
       --effort)  effort="${2:?--effort needs a value}"; shift 2 ;;
+      --under)   under="${2:?--under needs a key}"; shift 2 ;;
       --dry-run) dry=1; shift ;;
       --quiet)   quiet=1; shift ;;
       -i|--interactive) attach=1; shift ;;
@@ -919,23 +921,47 @@ cmd_work() {
     esac
   done
 
+  # Two different asks: a bare key is "this ticket", --under is "whatever is
+  # next below this one". Silently preferring either would be a run spent on a
+  # ticket nobody named, so both together is a refusal.
+  if [ -n "$key" ] && [ -n "$under" ]; then
+    echo "hatch: work takes a key or --under, not both - one names the ticket, the other names where to look for it" >&2
+    exit 1
+  fi
+
   local work
   if [ -n "$key" ]; then
     work=$(_get "/api/hatch/work/${key}")
   else
-    work=$(_get "/api/hatch/work/next?offsetMinutes=$(offset_minutes)")
-    # 204: the board holds nothing an agent may advance. Not a failure - it is
-    # the answer a finished board gives, and a loop should be able to see it.
+    # The same question either way, and the same rule answering it - right to
+    # left, top of the column down. --under only narrows the candidates to one
+    # subtree, on the server, so an evening can be pointed at one project
+    # without this script learning a second notion of "next".
+    local scope=""
+    [ -z "$under" ] || scope="&ancestorKey=${under}"
+    work=$(_get "/api/hatch/work/next?offsetMinutes=$(offset_minutes)${scope}")
+
+    # 204: nothing there is an agent's to advance. Not a failure - it is the
+    # answer a finished board gives, and a loop should be able to see it.
     #
     # "Nothing to do" and "everything is waiting on you" look identical from
     # here and are not the same situation, so the second one is named. Without
     # this an operator with a board full of open questions would be told the
     # work had run out.
     if [ -z "$work" ]; then
-      echo "hatch: nothing on the board is an agent's to move"
       local waiting
-      waiting=$(jq 'length' <<<"$(questions_json '' true)")
-      [ "$waiting" -eq 0 ] || echo "hatch: ${waiting} question(s) are waiting on you - ./scripts/hatch.sh answer"
+      if [ -n "$under" ]; then
+        echo "hatch: nothing under ${under} is an agent's to move"
+        # Scoped to match the sentence above it: an evening pointed at one epic
+        # is not helped by a count of every question in the house.
+        waiting=$(jq '[.[] | .openQuestions] | add // 0' \
+          <<<"$(_get "/api/hatch/issues?ancestorKey=${under}")")
+        [ "$waiting" -eq 0 ] || echo "hatch: ${waiting} question(s) under ${under} are waiting on you - ./scripts/hatch.sh answer"
+      else
+        echo "hatch: nothing on the board is an agent's to move"
+        waiting=$(jq 'length' <<<"$(questions_json '' true)")
+        [ "$waiting" -eq 0 ] || echo "hatch: ${waiting} question(s) are waiting on you - ./scripts/hatch.sh answer"
+      fi
       exit 2
     fi
   fi

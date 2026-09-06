@@ -359,6 +359,29 @@ export interface PlaybookPatchRequest {
   effort?: string;
 }
 
+// ---- Work ----
+
+/** What an agent should do next and how, answered in one request. Every part
+    of it is decided on the server - which issue, which column it is headed
+    for, whether it may go there at all, and which playbook speaks for the move
+    - so that this page and `hatch.sh` never disagree. Mirrors WorkDto. */
+export interface Work {
+  issue: Issue;
+  fromStatus: Status;
+  /** The column to the right, or null at the end of the board. */
+  toStatus: Status | null;
+  /** What the session would be told, and what it may spend. Null when no row
+      covers the move. */
+  playbook: Playbook | null;
+  children: IssueCard[];
+  /** Both halves: the open ones say why it is not dispatched, the answered
+      ones are what a session would be dispatched knowing. */
+  questions: Question[];
+  /** Why an agent should not be spawned at this issue, or null when one
+      should. A sentence, meant to be printed as it is. */
+  blocked: string | null;
+}
+
 /** One column's share of a subtree: how many of its leaves sit there. A status
     no leaf is in is absent, not zero - the column list is already held here.
     Mirrors RollupSliceDto. */

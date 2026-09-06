@@ -9,8 +9,10 @@ import {
   getEvents,
   getIssue,
   getIssuePlan,
+  getNextWorkUnder,
   patchIssue,
 } from '../api/client';
+import { Command } from '../components/Command';
 import { MomentChip } from '../components/MomentChip';
 import { StatusMeter } from '../components/StatusMeter';
 import { StatusPill } from '../components/StatusPill';
@@ -19,6 +21,7 @@ import { TypeBadge } from '../components/TypeBadge';
 import { statusVars } from '../lib/color';
 import { message } from '../lib/errors';
 import { renderMarkdown } from '../lib/markdown';
+import { waitingChild } from '../lib/next';
 import { openQuestions } from '../lib/questions';
 import { ISSUE_TYPES, LEGAL_PARENT_TYPES } from '../types';
 import type {
@@ -31,6 +34,7 @@ import type {
   IssueType,
   QuestionOption,
   Status,
+  Work,
 } from '../types';
 
 export function IssuePage() {
@@ -44,6 +48,7 @@ export function IssuePage() {
   const [error, setError] = useState<string | null>(null);
   const [rollup, setRollup] = useState<IssueRollup | null>(null);
   const [rollupError, setRollupError] = useState<string | null>(null);
+  const [next, setNext] = useState<NextAnswer | null>(null);
 
   const load = useCallback(async () => {
     /* The fifth read, sent with the other four and awaited apart from them.
@@ -54,6 +59,17 @@ export function IssuePage() {
     const rolling = getIssuePlan(key).then(
       (loaded) => ({ loaded, failure: null as string | null }),
       (err: unknown) => ({ loaded: null, failure: message(err) }),
+    );
+
+    /* And the sixth, on the same terms: what an agent would pick up under this
+       issue. Sent unconditionally rather than after the issue arrives and says
+       whether it has children - an issue with none has an empty subtree, which
+       the server answers with the 204 that means "nothing to do", and waiting
+       for the first read to decide would put this line on the page a moment
+       after somebody started reading it. */
+    const asking = getNextWorkUnder(key).then(
+      (work) => ({ work, error: null as string | null }),
+      (err: unknown) => ({ work: null, error: message(err) }),
     );
 
     try {
@@ -75,6 +91,8 @@ export function IssuePage() {
     const settled = await rolling;
     setRollup(settled.loaded);
     setRollupError(settled.failure);
+
+    setNext(await asking);
   }, [key]);
 
   useEffect(() => {
@@ -209,7 +227,7 @@ export function IssuePage() {
           rollup: the card is either there from the first paint or not at all,
           instead of appearing under the reader a moment later. */}
       {issue.childKeys.length > 0 && (
-        <Progress rollup={rollup} error={rollupError} statuses={board.statuses} />
+        <Progress rollup={rollup} error={rollupError} statuses={board.statuses} next={next} />
       )}
 
       <Comments issueKey={key} comments={comments} onAdded={() => void load()} onError={setError} />
@@ -286,10 +304,12 @@ function Progress({
   rollup,
   error,
   statuses,
+  next,
 }: {
   rollup: IssueRollup | null;
   error: string | null;
   statuses: Status[];
+  next: NextAnswer | null;
 }) {
   return (
     <Card>
@@ -306,6 +326,8 @@ function Progress({
         <>
           <StatusMeter rollup={rollup.rollup} statuses={statuses} size="lg" counts />
 
+          <Next answer={next} rollup={rollup} />
+
           {/* Rank order, as the server sent them - the order they sit in on the
               board's column, so the two screens agree about what is next. */}
           <ul className="hatch-progress-list">
@@ -316,6 +338,83 @@ function Progress({
         </>
       )}
     </Card>
+  );
+}
+
+/** The scoped `work/next`, settled: the issue an agent would take under this
+    one, or the sentence saying why the ask itself did not go through. Null
+    where neither has arrived. */
+interface NextAnswer {
+  work: Work | null;
+  error: string | null;
+}
+
+/**
+ * What an agent would pick up under this issue, and the one command that sets
+ * it going.
+ *
+ * The last sentence of the loop this tracker exists for: find the project worth
+ * furthering, find the next actionable story under it, and move it forward. The
+ * Plan page answers the first; this answers the second, on the page of the epic
+ * somebody has already chosen - once, rather than on every card of a screen
+ * holding twenty-eight of them.
+ *
+ * Which issue is next is not decided here and could not be: the rule is the
+ * server's (WorkController), and a copy of it in a browser would disagree with
+ * the CLI the first time a column was renamed. This draws the answer.
+ */
+function Next({ answer, rollup }: { answer: NextAnswer | null; rollup: IssueRollup }) {
+  // Not back yet. Said with nothing rather than with a second "Loading…" under
+  // a meter that has already painted - the card is readable, and this line
+  // arriving a moment later is what it is.
+  if (answer === null) return null;
+
+  // The ask failed while the rollup did not. Muted rather than red: the meter
+  // above is the card's subject and it is fine, and this is one line of it
+  // that could not be filled in.
+  if (answer.error !== null) {
+    return <p className="hatch-next-none text-muted">Could not ask what is next here: {answer.error}</p>;
+  }
+
+  if (answer.work !== null) {
+    const found = answer.work.issue;
+    return (
+      <p className="hatch-next">
+        <span className="hatch-next-label">Next</span>
+        <Link to={`/issues/${found.key}`} className="hatch-plan-key">
+          {found.key}
+        </Link>
+        <span className="hatch-next-title">— {found.title}</span>
+        <Command command={`./scripts/hatch.sh work ${found.key}`} />
+      </p>
+    );
+  }
+
+  // A 204: nothing under here is an agent's to move. That has several causes -
+  // it is all shipped, it is all in review, it is all waiting on a date - and
+  // only one of them is worth naming, because only one of them is somebody's
+  // to fix from this page.
+  const waiting = rollup.rollup.waiting;
+  const holder = waitingChild(rollup);
+
+  return (
+    <p className="hatch-next-none text-muted">
+      Nothing under this is an agent&rsquo;s to move.{' '}
+      {waiting > 0 && (
+        <>
+          {waiting} question{waiting === 1 ? ' is' : 's are'} waiting on a person
+          {holder && (
+            <>
+              , on{' '}
+              <Link to={`/issues/${holder}`} className="hatch-plan-key">
+                {holder}
+              </Link>
+            </>
+          )}
+          .
+        </>
+      )}
+    </p>
   );
 }
 

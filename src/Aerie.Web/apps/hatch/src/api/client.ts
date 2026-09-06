@@ -27,6 +27,7 @@ import type {
   Status,
   StatusCreateRequest,
   StatusPatchRequest,
+  Work,
 } from '../types';
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -165,6 +166,26 @@ export const getIssuePlan = (key: string) => fetchJson<IssueRollup>(`/api/hatch/
     on every drop for a screen nobody is looking at. */
 export const getPlan = (projectId?: number) =>
   fetchJson<Plan>(`/api/hatch/plan${projectId === undefined ? '' : `?projectId=${projectId}`}`);
+
+// ---- Work ----
+
+/**
+ * What an agent would pick up under this issue, and how it would be dispatched
+ * - or null when nothing beneath it is an agent's to move.
+ *
+ * The rule for "next" is the server's and is not re-derived here: right to
+ * left, top of the column down, folding past a ready date, an open question or
+ * a terminal column. `ancestorKey` narrows the candidates to one subtree and
+ * changes nothing else. See WorkController.
+ *
+ * A 204 arrives as an empty body, which `fetchJson` gives back as undefined;
+ * it is normalised to null so a caller has one absent value rather than two.
+ * It is not a failure - "nothing to do" is an answer.
+ */
+export const getNextWorkUnder = (ancestorKey: string) =>
+  fetchJson<Work | undefined>(
+    `/api/hatch/work/next?ancestorKey=${encodeURIComponent(ancestorKey)}&offsetMinutes=${-new Date().getTimezoneOffset()}`,
+  ).then((work) => work ?? null);
 
 // ---- Comments and events ----
 
