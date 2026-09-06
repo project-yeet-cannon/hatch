@@ -26,7 +26,7 @@ public class WorkControllerTests
         await h.FileAsync("task", "sitting in todo", h.Todo);
         var advanced = await h.FileAsync("task", "already underway", h.InProgress);
 
-        var work = Value(await h.Work.GetNextWork(0, default));
+        var work = Value(await h.Work.GetNextWork(0, null, default));
 
         // Both are workable. The one nearer the end of the board wins, because
         // a board worked left to right starts everything and finishes nothing.
@@ -41,7 +41,7 @@ public class WorkControllerTests
         var first = await h.FileAsync("task", "top", h.Todo, rank: 1024);
         await h.FileAsync("task", "below it", h.Todo, rank: 2048);
 
-        Assert.Equal(Key(first), Value(await h.Work.GetNextWork(0, default)).Issue.Key);
+        Assert.Equal(Key(first), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
     }
 
     [Fact]
@@ -53,7 +53,7 @@ public class WorkControllerTests
 
         // The folded card is above it and is passed over anyway - the board
         // hides it for the same reason (schedule.ts).
-        Assert.Equal(Key(workable), Value(await h.Work.GetNextWork(0, default)).Issue.Key);
+        Assert.Equal(Key(workable), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public class WorkControllerTests
         // Ready from the start of the day it names, whatever hour was set: a
         // ticket that becomes workable at 5pm is not one nobody may look at
         // over breakfast.
-        Assert.Equal(Key(today), Value(await h.Work.GetNextWork(0, default)).Issue.Key);
+        Assert.Equal(Key(today), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
     }
 
     [Fact]
@@ -77,7 +77,87 @@ public class WorkControllerTests
 
         // Review's only exit is terminal and done has no exit at all, so an
         // unattended run has nothing it may do - which is a 204, not a card.
-        Assert.IsType<NoContentResult>((await h.Work.GetNextWork(0, default)).Result);
+        Assert.IsType<NoContentResult>((await h.Work.GetNextWork(0, null, default)).Result);
+    }
+
+    // ---- One corner of the board ----
+
+    [Fact]
+    public async Task NextWork_UnderAnEpic_LeavesTheRestOfTheBoardAlone()
+    {
+        var h = await NewAsync();
+        var mine = await h.FileAsync("epic", "the one I am pushing", h.Todo, rank: 4096);
+        var story = await h.FileAsync("story", "under mine", h.Todo, rank: 2048, parentId: mine.Id);
+        var elsewhere = await h.FileAsync("task", "another epic's, and above it", h.Todo, rank: 1024);
+
+        // Unscoped this is the top of the column and would win outright.
+        Assert.Equal(Key(elsewhere), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
+
+        Assert.Equal(Key(story), Value(await h.Work.GetNextWork(0, Key(mine), default)).Issue.Key);
+    }
+
+    [Fact]
+    public async Task NextWork_UnderAnEpic_ReachesATaskTwoLevelsDown()
+    {
+        var h = await NewAsync();
+        var epic = await h.FileAsync("epic", "the epic", h.Todo, rank: 4096);
+        var story = await h.FileAsync("story", "the story", h.Todo, rank: 2048, parentId: epic.Id);
+        var task = await h.FileAsync("task", "the task", h.InProgress, rank: 1024, parentId: story.Id);
+
+        // Right to left still decides inside the scope: the task is further
+        // along than the story above it, and depth has nothing to do with it.
+        Assert.Equal(Key(task), Value(await h.Work.GetNextWork(0, Key(epic), default)).Issue.Key);
+    }
+
+    [Fact]
+    public async Task NextWork_UnderAnEpic_PassesOverABlockedChildExactlyAsTheWholeBoardDoes()
+    {
+        var h = await NewAsync();
+        var epic = await h.FileAsync("epic", "the epic", h.Todo, rank: 4096);
+        var asked = await h.FileAsync("story", "waiting on a decision", h.Todo, rank: 1024, parentId: epic.Id);
+        var workable = await h.FileAsync("story", "nothing in its way", h.Todo, rank: 2048, parentId: epic.Id);
+        await h.AskAsync(asked, "per-node or global?");
+
+        // The scope narrows the candidates and decides nothing about them.
+        Assert.Equal(Key(workable), Value(await h.Work.GetNextWork(0, Key(epic), default)).Issue.Key);
+    }
+
+    [Fact]
+    public async Task NextWork_UnderAnEpic_DoesNotOfferTheEpicItself()
+    {
+        var h = await NewAsync();
+        var epic = await h.FileAsync("epic", "workable, and not the question", h.Todo);
+
+        // "Under AER-1" is a question about what hangs beneath it. Unscoped
+        // this epic is the only thing on the board and would be the answer.
+        Assert.Equal(Key(epic), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
+        Assert.IsType<NoContentResult>((await h.Work.GetNextWork(0, Key(epic), default)).Result);
+    }
+
+    [Fact]
+    public async Task NextWork_UnderAnEpicWithNothingToDo_IsThe204AnEmptyBoardGives()
+    {
+        var h = await NewAsync();
+        var epic = await h.FileAsync("epic", "finished", h.Todo, rank: 4096);
+        await h.FileAsync("story", "shipped", h.Done, rank: 2048, parentId: epic.Id);
+        await h.FileAsync("task", "somebody else's problem", h.Todo, rank: 1024);
+
+        // Not a failure - `hatch.sh` reads it as "nothing to do", which is what
+        // it means whether the scope is one epic or the whole tracker.
+        Assert.IsType<NoContentResult>((await h.Work.GetNextWork(0, Key(epic), default)).Result);
+    }
+
+    [Fact]
+    public async Task NextWork_UnderAKeyNobodyMinted_IsTheSentenceTheSearchEndpointUses()
+    {
+        var h = await NewAsync();
+        await h.FileAsync("task", "workable", h.Todo);
+
+        var refused = Assert.IsType<BadRequestObjectResult>((await h.Work.GetNextWork(0, "AER-999", default)).Result);
+
+        // A scope nobody can name is a typo, not an empty subtree, and it must
+        // not read as "the work has run out".
+        Assert.Equal("there is no AER-999", refused.Value);
     }
 
     // ---- Refusals ----
@@ -149,7 +229,7 @@ public class WorkControllerTests
 
         // Folded past exactly as a card whose ready date has not arrived is,
         // and for the same reason: it is not workable yet.
-        Assert.Equal(Key(workable), Value(await h.Work.GetNextWork(0, default)).Issue.Key);
+        Assert.Equal(Key(workable), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
     }
 
     [Fact]

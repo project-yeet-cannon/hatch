@@ -36,11 +36,48 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// follows (schedule.ts). Absent is UTC, which is right for a machine and
     /// close enough for anybody who does not say.
     /// </param>
+    /// <param name="ancestorKey">
+    /// One corner of the board instead of all of it: the same question asked
+    /// only of the issues below this key, at any depth, so an evening can be
+    /// pointed at one epic. Absent is the whole board, which is what every
+    /// caller before this asked for.
+    ///
+    /// <para>Nothing else changes - still right to left, still top of the
+    /// column down, still folding past a ready date, an open question or a
+    /// terminal column. The scope narrows the candidates and decides nothing
+    /// about them.</para>
+    ///
+    /// <para>The issue itself is not a candidate. "Under AER-1" is a question
+    /// about what hangs beneath it, which is how <c>ancestorKey</c> already
+    /// reads on the search endpoint.</para>
+    /// </param>
     [HttpGet("next")]
-    public async Task<ActionResult<WorkDto>> GetNextWork([FromQuery] int offsetMinutes = 0, CancellationToken ct = default)
+    public async Task<ActionResult<WorkDto>> GetNextWork(
+        [FromQuery] int offsetMinutes = 0,
+        [FromQuery] string? ancestorKey = null,
+        CancellationToken ct = default)
     {
         var statuses = await OrderedStatusesAsync(ct);
         var today = DayNumber(time.GetUtcNow(), offsetMinutes);
+
+        // The scope, resolved once before the columns are walked. Null is the
+        // whole board; a list is the subtree, and an empty one is a childless
+        // issue, which is honestly "nothing under it" and falls out as a 204.
+        List<long>? scope = null;
+        if (!string.IsNullOrWhiteSpace(ancestorKey))
+        {
+            if (!IssueKey.TryParse(ancestorKey, out var ancestorProject, out var ancestorNumber))
+                return BadRequest($"there is no {ancestorKey}");
+
+            var ancestorId = await db.Issues.WithKey(ancestorProject, ancestorNumber)
+                .Select(i => (long?)i.Id).FirstOrDefaultAsync(ct);
+            if (ancestorId is null) return BadRequest($"there is no {ancestorKey}");
+
+            // The walk in Rollup, not a second one written here - a scope and a
+            // meter that disagreed about what is under an epic would be a bug
+            // nobody notices until the two are on the same screen.
+            scope = await Rollup.DescendantIdsAsync(db, ancestorId.Value, ct);
+        }
 
         // Right to left, top to bottom. The first issue whose transition is
         // actually available wins; everything folded, blocked or terminal is
@@ -50,8 +87,10 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
         {
             if (Advance(statuses, status) is null) continue;
 
-            var candidates = await db.Issues
-                .Where(i => i.StatusId == status.Id)
+            var query = db.Issues.Where(i => i.StatusId == status.Id);
+            if (scope is not null) query = query.Where(i => scope.Contains(i.Id));
+
+            var candidates = await query
                 .OrderBy(i => i.Rank).ThenBy(i => i.Id)
                 .Include(i => i.Project)
                 .ToListAsync(ct);
