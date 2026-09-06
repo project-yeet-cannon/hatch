@@ -12,6 +12,7 @@ import {
   getNextWorkUnder,
   patchIssue,
 } from '../api/client';
+import { CloseSubtreeDialog } from '../components/CloseSubtreeDialog';
 import { Command } from '../components/Command';
 import { MomentChip } from '../components/MomentChip';
 import { StatusMeter } from '../components/StatusMeter';
@@ -20,11 +21,13 @@ import { MomentField } from '../components/MomentField';
 import { PullRequestLink } from '../components/PullRequestLink';
 import { TypeBadge } from '../components/TypeBadge';
 import { statusVars } from '../lib/color';
+import { closeOffer } from '../lib/closeSubtree';
 import { message } from '../lib/errors';
 import { renderMarkdown } from '../lib/markdown';
 import { waitingChild } from '../lib/next';
 import { openQuestions } from '../lib/questions';
 import { useAutoGrow } from '../lib/useAutoGrow';
+import { useCloseSubtree } from '../lib/useCloseSubtree';
 import { ISSUE_TYPES, LEGAL_PARENT_TYPES } from '../types';
 import type {
   Board,
@@ -104,17 +107,28 @@ export function IssuePage() {
     return () => window.removeEventListener('focus', onFocus);
   }, [load]);
 
+  /* Answers whether the patch went through. Every existing caller says
+     `void save({ … })` and is unaffected; the one that asks is the status bar,
+     because an offer to close a subtree must not follow a move the server
+     refused. */
   const save = useCallback(
-    async (patch: Parameters<typeof patchIssue>[1]) => {
+    async (patch: Parameters<typeof patchIssue>[1]): Promise<boolean> => {
       try {
         await patchIssue(key, patch);
         await load();
+        return true;
       } catch (err) {
         setError(message(err));
+        return false;
       }
     },
     [key, load],
   );
+
+  // Handed `load`, so a confirmed cascade re-reads the rollup too and the
+  // progress meter counts the children that closed. Declared with the other
+  // hooks, above the guards below, because the rules of hooks are an error here.
+  const closing = useCloseSubtree(load);
 
   if (error && !issue) return <p className="text-danger">{error}</p>;
   if (!issue || !board) return <p className="text-muted">Loading…</p>;
@@ -130,6 +144,15 @@ export function IssuePage() {
   // Sitting in a column that means it shipped, so the due chip stops warning -
   // the same rule the board follows, for the same reason.
   const terminal = board.statuses.find((s) => s.id === issue.statusId)?.isTerminal ?? false;
+
+  /* A const rather than a declaration, so it is written after the guards above
+     and `issue` and `board` are the narrowed ones. */
+  const move = async (statusId: number) => {
+    // Computed before the patch, so it is the subtree the operator was looking
+    // at when they pressed; asked after it, so a refused move asks nothing.
+    const offer = closeOffer(board, key, issue.statusId, statusId);
+    if (await save({ statusId })) closing.ask(offer);
+  };
 
   async function remove() {
     if (!confirm(`Delete ${key}? Its comments and its history go with it.`)) return;
@@ -176,7 +199,7 @@ export function IssuePage() {
       <StatusBar
         statuses={board.statuses}
         statusId={issue.statusId}
-        onMove={(statusId) => void save({ statusId })}
+        onMove={(statusId) => void move(statusId)}
       />
 
       <Card>
@@ -236,6 +259,15 @@ export function IssuePage() {
       <Comments issueKey={key} comments={comments} onAdded={() => void load()} onError={setError} />
 
       <EventTrail events={events} />
+
+      <CloseSubtreeDialog
+        offer={closing.offer}
+        busy={closing.busy}
+        error={closing.error}
+        failures={closing.failures}
+        onConfirm={closing.confirm}
+        onClose={closing.close}
+      />
     </div>
   );
 }
