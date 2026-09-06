@@ -11,7 +11,7 @@ namespace Aerie.Api.Tests.Hatch;
 /// The model's shape, asserted where it is cheap to assert. Most of what these
 /// pin - the schema, the unique indexes, the delete behaviours - is invisible
 /// until it is wrong in production, and each one encodes a decision from
-/// docs/plans/pjm.md that a later refactor could quietly reverse.
+/// docs/hatch.md that a later refactor could quietly reverse.
 /// </summary>
 public class HatchContextTests
 {

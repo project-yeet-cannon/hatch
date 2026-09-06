@@ -9,7 +9,7 @@ namespace Aerie.Api.Modules.Hatch;
 /// The board, in one request: every column and every card in the house.
 ///
 /// One endpoint rather than a column-at-a-time read because the board is the
-/// screen the operator lives on (docs/plans/pjm.md, "Goals") and it is refetched
+/// screen the operator lives on (docs/hatch.md, "Goals") and it is refetched
 /// after every action - two round trips per drag would be felt, and a board
 /// assembled from separate reads can show a card in two columns at once.
 /// </summary>

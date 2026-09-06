@@ -30,7 +30,7 @@ const STATE_TONES: Record<PlanState, BadgeTone> = {
  * import button is only reachable from the other side of it.
  *
  * This page only ever copies. Retiring the source `.md` file stays a deliberate
- * manual act, per the plans lifecycle in docs/plans/README.md.
+ * manual act - see docs/hatch.md, "The importer".
  */
 export function ImportPage() {
   const [projects, setProjects] = useState<Project[]>([]);

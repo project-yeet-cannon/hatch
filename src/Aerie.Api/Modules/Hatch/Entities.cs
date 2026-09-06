@@ -10,7 +10,7 @@ namespace Aerie.Api.Modules.Hatch;
 /// can be called <c>AER-12</c> instead of <c>#4471</c>, and so that two efforts
 /// can number themselves independently.
 ///
-/// It is deliberately not a container. The board (docs/plans/pjm.md, "Goals")
+/// It is deliberately not a container. The board (docs/hatch.md, "Goals")
 /// shows every issue from every project at once, because the operator has one
 /// pair of hands and switching boards to find out what is next is the thing
 /// markdown files already do badly.
@@ -64,7 +64,7 @@ public class EfHatchProject
     /// without a lock or a sequence. Two concurrent creates both read 12, and
     /// the second <c>SaveChanges</c> finds the row no longer holding what it
     /// read and throws <c>DbUpdateConcurrencyException</c> - which the create
-    /// path catches and retries (docs/plans/pjm.md, "Issue numbering"). The
+    /// path catches and retries (docs/hatch.md, "Issue numbering"). The
     /// unique index on <c>(ProjectId, Number)</c> is the backstop underneath,
     /// so the worst case is a refused request rather than two issues wearing
     /// the same key.

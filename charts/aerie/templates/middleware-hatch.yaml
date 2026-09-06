@@ -1,4 +1,4 @@
-# Hatch's hostname rewrite (docs/plans/pjm.md Phase 4). Near enough to
+# Hatch's hostname rewrite (docs/hatch.md, "Where it lives"). Near enough to
 # middleware-kiosk.yaml to have been copied from it, with one difference that
 # matters: the kiosk is a pinned tablet that only ever asks for "/", and Hatch
 # is a tool whose links are the point of it.

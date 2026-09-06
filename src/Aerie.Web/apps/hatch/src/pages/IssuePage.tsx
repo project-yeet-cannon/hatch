@@ -247,7 +247,7 @@ export function IssuePage() {
  * one press each.
  *
  * Every column is offered, in board order, because Hatch has no transition
- * rules on purpose (docs/plans/pjm.md, "Non-goals") - any status to any status,
+ * rules on purpose (docs/hatch.md, "Non-goals") - any status to any status,
  * we trust ourselves.
  */
 function StatusBar({

@@ -9,7 +9,7 @@ namespace Aerie.Api.Modules.Hatch;
 /// "What should an agent do next, and how?" - answered in one request.
 ///
 /// Every part of that answer is decided here rather than in the shell, for the
-/// reason the rank is decided on the server (docs/plans/pjm.md, "Rank
+/// reason the rank is decided on the server (docs/hatch.md, "Rank
 /// computation"): it keeps every client dumb. Which issue is next, which column
 /// it is headed for, whether it may go there at all, and which playbook speaks
 /// for the move are all questions about rows this process owns, and a script

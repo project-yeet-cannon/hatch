@@ -138,7 +138,7 @@ public record IssuePatchRequest(
 /// <summary>
 /// A drop on the board: which column, and which cards it landed between. The
 /// client names neighbours and never a rank - the server owns the number
-/// (docs/plans/pjm.md, "Rank computation"), which is what keeps every client
+/// (docs/hatch.md, "Rank computation"), which is what keeps every client
 /// dumb, Claude included.
 /// </summary>
 /// <param name="AfterKey">The card immediately above the drop, or null at the top of the column.</param>

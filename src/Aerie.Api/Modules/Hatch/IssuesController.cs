@@ -16,7 +16,7 @@ namespace Aerie.Api.Modules.Hatch;
 /// on in March it answers nothing about February. And the create path mints its
 /// own number under optimistic concurrency rather than reaching for a sequence,
 /// so it stays testable in memory and its failure mode is a retry rather than a
-/// duplicated key (docs/plans/pjm.md, "Issue numbering").
+/// duplicated key (docs/hatch.md, "Issue numbering").
 /// </summary>
 [ApiController]
 [Route("api/hatch/issues")]

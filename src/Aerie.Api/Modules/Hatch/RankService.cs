@@ -8,7 +8,7 @@ namespace Aerie.Api.Modules.Hatch;
 /// Ordering by a sparse integer is what makes a drag one UPDATE instead of a
 /// rewritten column: the ranks start 1024 apart, and a card dropped between two
 /// takes the midpoint. Lexorank strings were considered and rejected for this
-/// board (docs/plans/pjm.md, "Ordering") - string midpoint arithmetic has sharp
+/// board (docs/hatch.md, "Ordering") - string midpoint arithmetic has sharp
 /// edges around exhausted alphabets, and a column here holds tens of cards, so
 /// the case those strings exist to avoid is a single cheap UPDATE.
 /// </summary>

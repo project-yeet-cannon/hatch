@@ -166,6 +166,43 @@ order of preference:
   `ADMIN_MODE` back to `none`, re-run Provision 4, reconcile. Every device stays
   enrolled and the wall stays up. Reach for this before turning the wall off.
 
+## Tracking work
+
+**Hatch** is the house project tracker, at `hatch.${DOMAIN}`: a kanban board,
+issues with keys like `AER-12`, columns you name yourself, and an audit trail
+under all of it. It is the operator's, not the household's — the bundle 404s and
+its API 403s for anyone who is not an administrator — so it is only reachable
+once the admin flag above is set on somebody's device. The design is in
+[docs/hatch.md](docs/hatch.md).
+
+The board is usable the moment the app is: five columns and six agent playbooks
+are seeded by the migrations, so there is nothing to fill in before filing the
+first issue. Two things are worth doing once:
+
+1. On the **Projects** page, create a project. The key is the prefix on every
+   issue in it (`AER`, `OPS`) and it is what you will type into a chat window,
+   so keep it short.
+2. If Claude is going to work tickets, mint a key on the admin app's **API
+   keys** page, scoped to `hatch`, and give it to
+   [`scripts/hatch.sh`](scripts/hatch.sh):
+
+   ```
+   ./scripts/hatch.sh config      # asks for the origin and the key
+   ./scripts/hatch.sh next        # the top of the todo column
+   ./scripts/hatch.sh work        # one increment, unattended
+   ```
+
+   The secret is shown exactly once, at mint. It is written to `scripts/.env`
+   (mode 600, git-ignored) and it never belongs in a tracked file — Aerie ships
+   to other operators, and a key in the artifact is one operator's credential
+   inherited by everyone who clones it. The `aerie_ak_` prefix is there so one
+   that slips into a diff is recognisable on sight.
+
+The key reaches `/api/hatch/*` and nothing else. Everything else an operator
+does — minting more keys, revoking sessions, editing the house, and editing the
+playbooks that tell an agent what to do — refuses it, on purpose. A `403` means
+the key works and the route is not one a key may take.
+
 ## Connecting a family calendar
 
 The kiosk shows a today-and-tomorrow agenda from any number of Google accounts,
