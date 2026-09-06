@@ -181,10 +181,40 @@ public static class Rollup
         public bool IsLeaf(long id) => ChildrenOf(id).Count == 0;
 
         /// <summary>What this subtree adds up to.</summary>
-        public RollupDto Of(long id)
-        {
-            var subtree = Fold(id);
+        public RollupDto Of(long id) => Shape(Fold(id));
 
+        /// <summary>
+        /// What several subtrees add up to together - the Plan page's
+        /// <c>loose</c>, which is the work hanging under no epic at all and so
+        /// is a total over many roots rather than one.
+        /// </summary>
+        /// <remarks>
+        /// The caller owes the disjointness: these are summed, not unioned, so
+        /// an id passed alongside one of its own ancestors is counted twice.
+        /// Roots of the tracker cannot contain one another, which is why the
+        /// one caller is safe.
+        /// </remarks>
+        public RollupDto Of(IEnumerable<long> ids)
+        {
+            var leaves = new Dictionary<int, int>();
+            var waiting = 0;
+
+            foreach (var id in ids)
+            {
+                var subtree = Fold(id);
+
+                foreach (var (status, count) in subtree.Leaves)
+                    leaves[status] = leaves.GetValueOrDefault(status) + count;
+
+                waiting += subtree.Waiting;
+            }
+
+            return Shape(new Subtree(leaves, waiting));
+        }
+
+        /// <summary>A folded total, dressed for the wire.</summary>
+        private RollupDto Shape(Subtree subtree)
+        {
             // Board order, and a status no leaf is sitting in is absent rather
             // than zero: the client already holds the column list and does not
             // need a row that draws nothing.

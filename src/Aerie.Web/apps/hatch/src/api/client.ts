@@ -17,6 +17,7 @@ import type {
   IssueSearch,
   ParsedEpic,
   PastedPlan,
+  Plan,
   Playbook,
   PlaybookCreateRequest,
   PlaybookPatchRequest,
@@ -157,6 +158,13 @@ export const moveIssue = (key: string, request: IssueMoveRequest) =>
     to. Server-side arithmetic on purpose: a meter re-derived here would
     disagree with the CLI the first time a column was added. See Rollup.cs. */
 export const getIssuePlan = (key: string) => fetchJson<IssueRollup>(`/api/hatch/plan/${seg(key)}`);
+
+/** Every epic in the tracker and what it adds up to, plus what hangs under no
+    epic at all. Its own read rather than a corner of the board: the board is
+    refetched after every drag, and a rollup bolted onto it would be recomputed
+    on every drop for a screen nobody is looking at. */
+export const getPlan = (projectId?: number) =>
+  fetchJson<Plan>(`/api/hatch/plan${projectId === undefined ? '' : `?projectId=${projectId}`}`);
 
 // ---- Comments and events ----
 
