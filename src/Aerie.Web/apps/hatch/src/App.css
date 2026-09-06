@@ -510,6 +510,26 @@
   line-height: var(--lh-tight);
 }
 
+/* The description section as one block, so the dialog's column gap falls
+   between it and the actions under it whatever the section currently holds -
+   a Loading line, a failure, or the editor - rather than between the pieces of
+   the section itself. Its own spacing is .hatch-section-head's, the same as on
+   the issue page. */
+.hatch-peek-description > :last-child {
+  margin-bottom: 0;
+}
+
+/* The same shape and the same reasoning as .hatch-grows below, with the
+   dialog's chrome as the allowance instead of the page's. The 22rem is the
+   panel's padding and head, the meta row, a title that wraps, the dates, this
+   section's own head and the row of actions; .aerie-modal__panel is itself
+   max-height: calc(100vh - var(--sp-8)) and scrolls, so .hatch-grows' 30rem
+   floor alone would push the buttons out of view. The 12rem is the height
+   rows={8} opens at, kept as the floor for the reason .hatch-grows gives. */
+.hatch-peek-grows {
+  max-height: max(12rem, calc(100dvh - 22rem));
+}
+
 /* ---- The offer to close a subtree ----
 
    Asked when an issue lands in a terminal column with open work under it. It
