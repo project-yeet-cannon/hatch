@@ -294,7 +294,16 @@ public class ImportController(HatchContext db, PlanImportParser parser, RankServ
             _ => Todo,
         };
 
+        // Matched on the letters and digits alone, so that "To Do", "todo" and
+        // "TODO" are one column and not three. The shipped board writes its
+        // columns the way a person would ("In Progress"), scripts/hatch.sh
+        // resolves a column name by exactly this rule, and a lookup here that
+        // insisted on the spacing would file every unchecked box into whatever
+        // happened to be leftmost.
         private static EfHatchStatus? Named(IReadOnlyList<EfHatchStatus> ordered, string name) =>
-            ordered.FirstOrDefault(s => string.Equals(s.Name.Trim(), name, StringComparison.OrdinalIgnoreCase));
+            ordered.FirstOrDefault(s => Squash(s.Name) == Squash(name));
+
+        private static string Squash(string name) =>
+            string.Concat(name.Where(char.IsLetterOrDigit)).ToLowerInvariant();
     }
 }

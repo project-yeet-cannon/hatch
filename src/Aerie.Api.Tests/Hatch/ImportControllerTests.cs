@@ -149,6 +149,32 @@ public class ImportControllerTests
     }
 
     /// <summary>
+    /// The shipped board writes its columns the way a person would - "To Do",
+    /// "In Progress" - and the importer has to find those. Matching on the
+    /// letters and digits alone is the same rule scripts/hatch.sh resolves a
+    /// column name by, so "To Do" and "todo" are one column and not two.
+    /// </summary>
+    [Fact]
+    public async Task ABoardWhoseColumnsAreWrittenForPeople_StillFindsThem()
+    {
+        var h = await NewAsync(seedStatuses: false);
+        var todo = new EfHatchStatus { Name = "To Do", SortOrder = 20 };
+        var doing = new EfHatchStatus { Name = "In Progress", SortOrder = 30 };
+        var done = new EfHatchStatus { Name = "Done", SortOrder = 40, IsTerminal = true };
+        // Leftmost, and not the one anything below should land in: it is only
+        // reached by the fallback, which is what this test is here to rule out.
+        var draft = new EfHatchStatus { Name = "Draft", SortOrder = 10 };
+        h.Db.AddRange(draft, todo, doing, done);
+        await h.Db.SaveChangesAsync();
+
+        await h.ImportAsync("pjm.md", Plan);
+
+        Assert.Equal(todo.Id, h.Issue("AER-6").StatusId);
+        Assert.Equal(doing.Id, h.Issue("AER-1").StatusId);
+        Assert.Equal(done.Id, h.Issue("AER-3").StatusId);
+    }
+
+    /// <summary>
     /// Every card in a column needs its own place in it. The ranks are handed
     /// out in memory because the issues are not in the database until the save
     /// at the end - asking the column for its bottom a second time would give
