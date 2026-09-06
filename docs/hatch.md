@@ -725,7 +725,7 @@ from.
 
 [`scripts/hatch.sh`](../scripts/hatch.sh) wraps the calls a working session
 actually makes — `board`, `next`, `queue`, `show`, `start`, `move`, `comment`,
-`ask`, `questions`, `answer`, `work`, and `api` for everything else. It finds the todo
+`pr`, `ask`, `questions`, `answer`, `work`, and `api` for everything else. It finds the todo
 column by name rather than by id and folds off cards whose ready date has not
 arrived, exactly as the board does.
 
@@ -760,9 +760,11 @@ watched cannot afford to be unsure about.
   questions, and the event trail are the context.
 - **Move it to *in progress* before starting.** The board saying what is being
   worked on right now is the board's whole job.
-- **Comment the commit sha, the branch, or the PR.** The ticket is where
-  somebody looks in six months, and a comment naming a commit is what makes that
-  search short.
+- **Comment the commit sha and the branch, and record the pull request.** The
+  ticket is where somebody looks in six months, and a comment naming a commit is
+  what makes that search short. The pull request is a field rather than a
+  sentence — `hatch.sh pr AER-12 <url>` puts it there, and the issue page draws
+  it as something to click.
 - **Plan on the ticket, not in a chat log.** A planning session `PATCH`es
   acceptance criteria into the description and `POST`s the stories or tasks the
   work breaks into. An epic takes stories; a story takes tasks.

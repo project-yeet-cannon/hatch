@@ -229,9 +229,13 @@ Two optional dates go on the same `PATCH`, and either may be a date
 
 - Move it to **in progress** before starting, so the board says what is being
   worked on right now. That is the board's whole job.
-- `POST /api/hatch/issues/AER-12/comments` with the commit sha, the branch, or
-  the PR — the ticket is where somebody looks in six months, and a comment
-  naming a commit is what makes that search short.
+- `POST /api/hatch/issues/AER-12/comments` with the commit sha and the branch —
+  the ticket is where somebody looks in six months, and a comment naming a
+  commit is what makes that search short.
+- `./scripts/hatch.sh pr AER-12 <url>` if you opened a pull request. It is a
+  field on the issue and a link on the issue page, not a URL somebody has to go
+  looking for in a comment; `pr AER-12` with no URL reads back the one that is
+  set, and `--clear` takes it off.
 - **Never move a ticket to a terminal status.** Only the operator decides that
   something shipped. Implementation ends in *in progress*, with a comment
   saying what landed and what did not.

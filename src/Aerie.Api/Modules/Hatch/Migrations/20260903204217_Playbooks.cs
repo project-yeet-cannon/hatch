@@ -222,8 +222,11 @@ namespace Aerie.Api.Modules.Hatch.Migrations
                not push.
             5. Commit and push. Commit subject in house style: an area, then what changed,
                as a sentence.
-            6. Comment on the ticket with the branch, the sha, what landed and what did
-               not. The ticket is where somebody looks in six months.
+            6. Put the work where a reviewer will find it. Comment on the ticket with the
+               branch, the sha, what landed and what did not - the ticket is where
+               somebody looks in six months - and if you opened a pull request, record it
+               there too: ./scripts/hatch.sh pr <key> <url>. The issue carries one, and a
+               link on the ticket beats a URL somebody has to go looking for.
 
             Leave it in progress. Only the operator decides that something shipped.$prompt$, 'sonnet', 'high', now(), now()
             FROM hatch."Statuses" f, hatch."Statuses" t

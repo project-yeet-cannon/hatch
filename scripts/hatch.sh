@@ -41,6 +41,9 @@
 #   ./hatch.sh start AER-12           # move it to "in progress"
 #   ./hatch.sh move AER-12 todo       # ...or to any non-terminal column
 #   ./hatch.sh comment AER-12 "sha abc123 on branch aer-12-thing"
+#   ./hatch.sh pr AER-12              # where it is being reviewed
+#   ./hatch.sh pr AER-12 https://...  # ...or say where, having opened one
+#   ./hatch.sh pr AER-12 --clear      # ...or take it off the one it has
 #   ./hatch.sh ask AER-12 "how should retries be scoped?" \
 #       --recommend "Per-node: one budget per node, so a slow node cannot starve" \
 #       --option "Global: one budget for the drain, simpler to reason about"
@@ -440,6 +443,39 @@ cmd_comment() {
   local key="${1:?usage: hatch.sh comment AER-12 \"body\"}" body="${2:?usage: hatch.sh comment AER-12 \"body\"}"
   api POST "/api/hatch/issues/${key}/comments" "$(jq -nc --arg body "$body" '{body: $body}')" \
     | jq -r '"commented on '"$key"' as \(.author)"'
+}
+
+# Where an issue is being reviewed: read it, set it, or take it off.
+#
+# The setting half is what a session that has just opened a pull request runs,
+# so that the URL lands on the ticket instead of in a comment somebody has to
+# find later. The reading half prints the URL alone, and nothing else, so that
+# `open "$(./hatch.sh pr AER-12)"` is the whole of "show me the review".
+cmd_pr() {
+  local key="${1:?usage: hatch.sh pr AER-12 [<url>|--clear]}" url found
+
+  # No second argument is a read. Distinguished by the count rather than by the
+  # value, so that an empty one is the mistake below and not a silent clear.
+  if [ $# -lt 2 ]; then
+    found=$(_get "/api/hatch/issues/${key}" | jq -r '.pullRequestUrl // empty')
+    [ -n "$found" ] || { echo "hatch: ${key} points at no pull request" >&2; exit 2; }
+    echo "$found"
+    return
+  fi
+
+  # "" is what the API reads as the clear (CLAUDE.md), and an empty argument at
+  # a prompt is easy to pass by accident and impossible to see afterwards. So
+  # the clear is spelled out loud and an empty string is refused.
+  url="$2"
+  if [ "$url" = "--clear" ]; then
+    url=""
+  elif [ -z "$url" ]; then
+    echo "hatch: give a url, or --clear to take ${key} off the one it has" >&2
+    exit 1
+  fi
+
+  api PATCH "/api/hatch/issues/${key}" "$(jq -nc --arg url "$url" '{pullRequestUrl: $url}')" \
+    | jq -r '.pullRequestUrl // "\(.key) points at no pull request"'
 }
 
 # ---- Questions ----
@@ -1848,7 +1884,7 @@ load_env
 # machine which has neither yet. Named rather than defaulted, so that a typo
 # still comes back as a typo below.
 case "${1:-}" in
-  board|next|queue|show|start|move|comment|ask|questions|answer|work|go-to-work|api) require_env ;;
+  board|next|queue|show|start|move|comment|pr|ask|questions|answer|work|go-to-work|api) require_env ;;
 esac
 
 case "${1:-}" in
@@ -1860,6 +1896,7 @@ case "${1:-}" in
   start)   shift; cmd_move "${1:?usage: hatch.sh start AER-12}" "in progress" ;;
   move)    shift; cmd_move "$@" ;;
   comment) shift; cmd_comment "$@" ;;
+  pr)      shift; cmd_pr "$@" ;;
   ask)       shift; cmd_ask "$@" ;;
   questions) shift; cmd_questions "$@" ;;
   answer)    shift; cmd_answer "$@" ;;
