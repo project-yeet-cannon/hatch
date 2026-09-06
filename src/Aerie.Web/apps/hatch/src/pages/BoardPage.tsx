@@ -15,15 +15,18 @@ import { Button, EmptyState, PageHeader } from '@aerie/ui';
 import { getBoard, getProjects, moveIssue } from '../api/client';
 import { BoardCard, CardPreview } from '../components/BoardCard';
 import { BoardFilters } from '../components/BoardFilters';
+import { CloseSubtreeDialog } from '../components/CloseSubtreeDialog';
 import { IssuePeek } from '../components/IssuePeek';
 import { NewIssueDialog } from '../components/NewIssueDialog';
 import { StatusDot } from '../components/StatusPill';
 import { statusVars } from '../lib/color';
+import { closeOffer } from '../lib/closeSubtree';
 import { message } from '../lib/errors';
 import { NO_FILTER, filterCards, isFiltering } from '../lib/filter';
 import type { CardFilter } from '../lib/filter';
 import { columnDroppableId, place, targetStatusId } from '../lib/place';
 import { isWaiting } from '../lib/schedule';
+import { useCloseSubtree } from '../lib/useCloseSubtree';
 import { useLoaded } from '../lib/useLoaded';
 import type { Board, IssueCard, Project, Status } from '../types';
 
@@ -41,6 +44,10 @@ export function BoardPage() {
 
   /** The card a click opened a summary for. Null when the dialog is closed. */
   const [peeking, setPeeking] = useState<IssueCard | null>(null);
+
+  // The offer to close everything under a card dropped into a terminal column.
+  const closing = useCloseSubtree(reload);
+  const { ask } = closing;
 
   useEffect(() => {
     getProjects().then(setProjects).catch(() => {
@@ -68,6 +75,13 @@ export function BoardPage() {
       const placed = place(board.issues, visible, String(event.active.id), event.over ? String(event.over.id) : null);
       if (!placed) return;
 
+      // Read off every card rather than off `visible`, and before the repaint:
+      // a card the filter is hiding is still work under this issue, one folded
+      // off by a ready date is too, and this is the subtree as it stood when
+      // the card was let go. Asked further down, once the move has come back.
+      const was = board.issues.find((i) => i.key === placed.key)?.statusId ?? null;
+      const offer = closeOffer(board, placed.key, was, placed.statusId);
+
       // Applied before the request so the card does not spring back under the
       // cursor for a round trip. A refusal reloads, which is the honest
       // correction: whatever the server thinks is what the board shows.
@@ -80,12 +94,14 @@ export function BoardPage() {
           beforeKey: placed.beforeKey,
         });
         await reload();
+        ask(offer);
       } catch (err) {
+        // Nothing is asked here: a move the server refused closed nothing.
         setError(message(err));
         await reload();
       }
     },
-    [board, visible, setBoard, setError, reload],
+    [board, visible, setBoard, setError, reload, ask],
   );
 
   if (error && !board) return <p className="text-danger">{error}</p>;
@@ -164,6 +180,15 @@ export function BoardPage() {
         card={peeking}
         status={peeking ? board.statuses.find((s) => s.id === peeking.statusId) : undefined}
         onClose={() => setPeeking(null)}
+      />
+
+      <CloseSubtreeDialog
+        offer={closing.offer}
+        busy={closing.busy}
+        error={closing.error}
+        failures={closing.failures}
+        onConfirm={closing.confirm}
+        onClose={closing.close}
       />
     </div>
   );
