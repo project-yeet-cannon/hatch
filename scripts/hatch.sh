@@ -55,6 +55,9 @@
 #   ./hatch.sh work --quiet           # ...saying nothing until it is finished
 #   ./hatch.sh work --model opus --effort xhigh AER-12
 #   ./hatch.sh work --dry-run         # print the prompt, spawn nothing
+#   ./hatch.sh go-to-work             # increments, back to back, until told to stop
+#   ./hatch.sh go-to-work --once      # ...one pass, and out
+#   ./hatch.sh go-to-work --under AER-1
 #   ./hatch.sh api GET /api/hatch/issues?statusId=2
 #   ./hatch.sh api PATCH /api/hatch/issues/AER-12 '{"dueAt":"2026-10-01"}'
 #
@@ -984,17 +987,20 @@ compose() {
 # out. Scoped to match the sentence above it: an evening pointed at one epic is
 # not helped by a count of every question in the house.
 nothing_to_do() {
-  local under="${1:-}" waiting
+  local under="${1:-}" waiting=0
   if [ -n "$under" ]; then
     echo "hatch: nothing under ${under} is an agent's to move"
     waiting=$(jq '[.[] | .openQuestions] | add // 0' \
-      <<<"$(_get "/api/hatch/issues?ancestorKey=${under}")")
-    [ "$waiting" -eq 0 ] || echo "hatch: ${waiting} question(s) under ${under} are waiting on you - ./scripts/hatch.sh answer"
+      <<<"$(_get "/api/hatch/issues?ancestorKey=${under}")") || waiting=0
   else
     echo "hatch: nothing on the board is an agent's to move"
-    waiting=$(jq 'length' <<<"$(questions_json '' true)")
-    [ "$waiting" -eq 0 ] || echo "hatch: ${waiting} question(s) are waiting on you - ./scripts/hatch.sh answer"
+    waiting=$(jq 'length' <<<"$(questions_json '' true)") || waiting=0
   fi
+
+  # A count that did not arrive is not a count. This is said on the way past
+  # something else, and a loop must not end on it.
+  case "$waiting" in ''|*[!0-9]*) waiting=0 ;; esac
+  [ "$waiting" -eq 0 ] || echo "hatch: ${waiting} question(s)${under:+ under ${under}} are waiting on you - ./scripts/hatch.sh answer"
 }
 
 # ---- One increment ----
@@ -1255,6 +1261,223 @@ cmd_work() {
   run_increment "$work" "$model" "$effort" "$quiet"
 }
 
+# ---- The loop ----
+
+# One loop at a time on one machine, and this is what says so.
+#
+# A directory, because mkdir is atomic on every filesystem this could land on
+# and a lock file written with `>` is not. Under TMPDIR rather than in the
+# repository: a lock in a tracked tree is a lock somebody commits, and a lock
+# that outlives a reboot is one somebody has to come and clear by hand.
+lock_dir() { echo "${TMPDIR:-/tmp}/hatch-go-to-work.lock"; }
+
+# Whether this process is the one that took it, so that an exit which never got
+# the lock cannot remove the lock belonging to the run that did.
+LOCK_HELD=0
+
+take_lock() {
+  local dir pid
+  dir=$(lock_dir)
+
+  if mkdir "$dir" 2>/dev/null; then
+    echo $$ >"${dir}/pid"
+    LOCK_HELD=1
+    return 0
+  fi
+
+  # kill -0 asks whether the pid is still there and signals nothing. A lock
+  # whose owner is gone - killed outright, or a machine that rebooted out from
+  # under it - is not a lock, it is litter, and clearing it is the difference
+  # between a loop that survives a crash and one that has to be let back in.
+  pid=$(cat "${dir}/pid" 2>/dev/null || true)
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    echo "hatch: a go-to-work is already running here, pid ${pid}." >&2
+    echo "hatch: one loop at a time is the whole premise - join that one, or stop it." >&2
+    return 1
+  fi
+
+  echo "hatch: clearing a stale lock left by pid ${pid:-?}" >&2
+  rm -rf "$dir"
+  if mkdir "$dir" 2>/dev/null; then
+    echo $$ >"${dir}/pid"
+    LOCK_HELD=1
+    return 0
+  fi
+
+  # Two loops that both found the lock stale, and this is the one that lost the
+  # race for it. The other is running; that is the right outcome either way.
+  echo "hatch: could not take the lock at ${dir}" >&2
+  return 1
+}
+
+drop_lock() {
+  [ "$LOCK_HELD" = 1 ] || return 0
+  rm -rf "$(lock_dir)"
+  LOCK_HELD=0
+}
+
+# Seconds, as somebody reads them off a terminal at midnight.
+duration() {
+  local s="$1"
+  if [ "$s" -ge 3600 ]; then
+    printf '%dh%02dm%02ds' $((s / 3600)) $(((s % 3600) / 60)) $((s % 60))
+  else
+    printf '%dm%02ds' $((s / 60)) $((s % 60))
+  fi
+}
+
+# The skip list the pass before this one printed, as a digest.
+#
+# An idle loop asking the same question every minute would otherwise reprint
+# the same dozen reasons until morning, and the one pass whose reasons changed
+# is exactly the one nobody would find in that. So the reasons are printed when
+# they change, and whenever an increment is about to run - which is the moment
+# they are context for something.
+LAST_SKIPS=""
+
+# One pass of the board: everything it folds past and why, and then the one
+# thing it does about the rest.
+#
+# Two reads where `work` makes one, and the second is the read `work` makes.
+# The scan says what was skipped, which is the only thing an unattended run
+# leaves behind that somebody has to act on; `work/next` says what to do, which
+# is what keeps an increment here the same increment as an increment there.
+# They are the same walk on the server, so the second cannot land on something
+# the first called blocked.
+#
+#   0  an increment ran, and the INC_ globals say how it went
+#   1  nothing on the board is an agent's to move
+#   2  the board could not be read - a reason to wait, not a reason to stop. A
+#      loop that ends on one bad minute of network is a loop somebody has to sit
+#      with, which is the thing being built away from here.
+work_pass() {
+  local under="$1" quiet="$2" scope="" queue skips clear work model effort digest
+
+  [ -z "$under" ] || scope="&ancestorKey=${under}"
+
+  queue=$(_get "/api/hatch/work/queue?offsetMinutes=$(offset_minutes)${scope}") || return 2
+  clear=$(jq -r 'map(select(.blocked == null)) | first | .issue.key // empty' <<<"$queue")
+
+  skips=$(jq -r '
+    def pad($n): . + ((" " * ($n - length)) // "");
+    [ .[] | select(.blocked) ] as $rows
+    | if ($rows | length) == 0 then empty
+      else ($rows | map(.issue.key | length) | max) as $k
+        | $rows[] | "hatch:   skipped " + (.issue.key | pad($k)) + "  " + .blocked
+      end' <<<"$queue")
+
+  digest=$(printf '%s' "$skips" | cksum)
+  if [ -n "$skips" ] && { [ -n "$clear" ] || [ "$digest" != "$LAST_SKIPS" ]; }; then
+    printf '%s\n' "$skips"
+  fi
+  LAST_SKIPS="$digest"
+
+  [ -n "$clear" ] || return 1
+
+  work=$(_get "/api/hatch/work/next?offsetMinutes=$(offset_minutes)${scope}") || return 2
+
+  # The board moved between the two reads - somebody answered a question, or
+  # something landed. Not an error, and not worth a sentence: the next pass
+  # asks again.
+  [ -n "$work" ] || return 1
+
+  # The playbook chooses, and here nothing overrides it. `work --model` is one
+  # operator's opinion about one increment; a loop that carried an override
+  # across a night would be applying it to tickets nobody looked at.
+  model=$(jq -r '.playbook.model' <<<"$work")
+  effort=$(jq -r '.playbook.effort' <<<"$work")
+
+  echo
+  run_increment "$work" "$model" "$effort" "$quiet"
+}
+
+# The command this epic is named for: pick the next actionable issue, spend one
+# increment on it, and do it again.
+#
+# The loop is the shell and not the model. A fresh context per ticket is
+# cheaper, and a session that has been running for six hours is one whose
+# earliest decisions nobody can audit.
+cmd_go_to_work() {
+  local key="" under="" interval=60 once=0 quiet=0 outcome idle_since=0 idle_said=0 now
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --under)    under="${2:?--under needs a key}"; shift 2 ;;
+      --interval) interval="${2:?--interval needs a number of seconds}"; shift 2 ;;
+      --once)     once=1; shift ;;
+      --quiet)    quiet=1; shift ;;
+      -*)         echo "hatch: go-to-work does not take $1" >&2; exit 1 ;;
+      *)          key="$1"; shift ;;
+    esac
+  done
+
+  # A key with --under is the refusal `work` makes, for the reason `work` makes
+  # it. A key on its own is a refusal too, and a different one: this command's
+  # question is "what is next", asked again and again, and one ticket cannot be
+  # the answer to it twice.
+  if [ -n "$key" ] && [ -n "$under" ]; then
+    echo "hatch: go-to-work takes --under or a key, not both - one names where to look, the other names the ticket" >&2
+    exit 1
+  fi
+  if [ -n "$key" ]; then
+    echo "hatch: go-to-work does not take a ticket - it asks the board what is next, until there is nothing." >&2
+    echo "hatch: one increment on ${key} is  ./scripts/hatch.sh work ${key}" >&2
+    exit 1
+  fi
+
+  case "$interval" in ''|*[!0-9]*) echo "hatch: --interval takes a number of seconds" >&2; exit 1 ;; esac
+
+  take_lock || exit 1
+  trap 'drop_lock' EXIT
+
+  while :; do
+    outcome=0
+    work_pass "$under" "$quiet" || outcome=$?
+
+    case "$outcome" in
+      0)
+        idle_since=0
+        echo
+        if [ "$INC_MOVED" = 1 ]; then
+          echo "hatch: ${INC_KEY} moved, ${INC_FROM} -> ${INC_ENDED}"
+        else
+          echo "hatch: ${INC_KEY} did not move - still in \"${INC_ENDED}\""
+        fi
+        ;;
+
+      1)
+        # Said in full the first time, and then rarely. An idle loop is a thing
+        # somebody left running; it should be able to say it is alive without
+        # filling a scrollback with the same sentence six hundred times.
+        now=$(date +%s)
+        if [ "$idle_since" = 0 ]; then
+          idle_since=$now
+          idle_said=$now
+          nothing_to_do "$under"
+          [ "$once" = 1 ] || echo "hatch: waiting, and asking again every ${interval}s"
+        elif [ $((now - idle_said)) -ge 600 ]; then
+          idle_said=$now
+          echo "hatch: still nothing an agent may move, $(duration $((now - idle_since))) now"
+        fi
+        ;;
+
+      *)
+        # api() already said what went wrong, in a sentence. This says what is
+        # going to happen about it.
+        echo "hatch: the board did not answer - asking again in ${interval}s" >&2
+        ;;
+    esac
+
+    # `--once` is the loop's own dry run against a board that is not a fixture:
+    # one pass, whatever it found, and out.
+    [ "$once" = 0 ] || break
+
+    # An increment that ran is followed by the next one immediately. The
+    # interval is what to do when there was nothing to do.
+    [ "$outcome" = 0 ] || sleep "$interval"
+  done
+}
+
 usage() {
   sed -n '/^# Usage:/,/^#$/p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
@@ -1267,7 +1490,7 @@ load_env
 # machine which has neither yet. Named rather than defaulted, so that a typo
 # still comes back as a typo below.
 case "${1:-}" in
-  board|next|queue|show|start|move|comment|ask|questions|answer|work|api) require_env ;;
+  board|next|queue|show|start|move|comment|ask|questions|answer|work|go-to-work|api) require_env ;;
 esac
 
 case "${1:-}" in
@@ -1283,6 +1506,7 @@ case "${1:-}" in
   questions) shift; cmd_questions "$@" ;;
   answer)    shift; cmd_answer "$@" ;;
   work)    shift; cmd_work "$@" ;;
+  go-to-work) shift; cmd_go_to_work "$@" ;;
   api)     shift; api "${1:?method}" "/${2#/}" "${3:-}" ;;
   ''|-h|--help|help) usage 0 ;;
   *) echo "hatch: no such command \"$1\"" >&2; usage 1 ;;
