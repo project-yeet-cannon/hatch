@@ -35,6 +35,8 @@
 #   ./hatch.sh board                  # the columns, and how many cards in each
 #   ./hatch.sh next                   # top workable card of "todo"
 #   ./hatch.sh next "in progress"     # ...or of any column
+#   ./hatch.sh queue                  # every card a pass would look at, and why
+#   ./hatch.sh queue AER-1            # ...under one epic
 #   ./hatch.sh show AER-12            # the brief, plus its comments
 #   ./hatch.sh start AER-12           # move it to "in progress"
 #   ./hatch.sh move AER-12 todo       # ...or to any non-terminal column
@@ -329,6 +331,54 @@ cmd_next() {
 
   [ -n "$card" ] || { echo "hatch: nothing workable in \"$want\"" >&2; exit 2; }
   jq -r '"\(.key)  [\(.type)]  \(.title)" + (if .dueAt then "  (due \(.dueAt))" else "" end)' <<<"$card"
+}
+
+# Everything a pass would look at, and what it would decide about each: the
+# same walk `work` takes, printed instead of acted on. It spawns nothing and
+# writes nothing.
+#
+# `next` and `work` fold past what they cannot do in silence, which is right
+# when somebody is watching - "nothing to do" is the useful answer. Nobody is
+# watching an unattended loop, and then the reasons are the whole point: a
+# column and type nobody has written a playbook for reads as a finished board
+# from the outside, and this is where it stops reading that way.
+#
+# The order is the dispatcher's - rightmost column first, top of the column
+# down - and it arrives that way. Nothing here re-sorts it, because a script
+# with its own opinion about which ticket is next is the drift this endpoint
+# exists to rule out.
+cmd_queue() {
+  local under="${1:-}" scope=""
+  [ -z "$under" ] || scope="&ancestorKey=${under}"
+
+  local queue
+  queue=$(_get "/api/hatch/work/queue?offsetMinutes=$(offset_minutes)${scope}")
+
+  # An empty board is a sentence and not a blank line: "there is nothing" and
+  # "something went wrong and printed nothing" look identical otherwise, which
+  # is the one thing a run nobody watched cannot afford to be unsure about.
+  if [ "$(jq 'length' <<<"$queue")" -eq 0 ]; then
+    if [ -n "$under" ]; then
+      echo "hatch: nothing under ${under} is on the dispatcher's path"
+    else
+      echo "hatch: nothing on the board is on the dispatcher's path"
+    fi
+    return 0
+  fi
+
+  # Columns are padded to the widest value in the answer rather than to a
+  # guessed width - status names are rows the operator renames.
+  jq -r '
+    def pad($n): . + ((" " * ($n - length)) // "");
+    (map(.issue.key | length) | max) as $k
+    | ((map(.issue.type | length) | max) + 2) as $t
+    | (map(.fromStatus.name | length) | max) as $c
+    | .[]
+    | (.issue.key | pad($k)) + "  "
+      + ("[" + .issue.type + "]" | pad($t)) + "  "
+      + (.fromStatus.name | pad($c)) + "  "
+      + (.blocked // ("-> " + (.toStatus.name // "?")))
+  ' <<<"$queue"
 }
 
 cmd_show() {
@@ -1096,13 +1146,14 @@ load_env
 # machine which has neither yet. Named rather than defaulted, so that a typo
 # still comes back as a typo below.
 case "${1:-}" in
-  board|next|show|start|move|comment|ask|questions|answer|work|api) require_env ;;
+  board|next|queue|show|start|move|comment|ask|questions|answer|work|api) require_env ;;
 esac
 
 case "${1:-}" in
   config)  shift; cmd_config "$@" ;;
   board)   shift; cmd_board "$@" ;;
   next)    shift; cmd_next "$@" ;;
+  queue)   shift; cmd_queue "$@" ;;
   show)    shift; cmd_show "$@" ;;
   start)   shift; cmd_move "${1:?usage: hatch.sh start AER-12}" "in progress" ;;
   move)    shift; cmd_move "$@" ;;

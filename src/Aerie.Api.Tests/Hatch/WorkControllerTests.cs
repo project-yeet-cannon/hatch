@@ -403,6 +403,229 @@ public class WorkControllerTests
         Assert.Equal(["first", "second"], work.Children.Select(c => c.Title));
     }
 
+    // ---- The scan ----
+    //
+    // What a whole pass would do, rather than what its first step is. These
+    // pin the two properties the endpoint exists for: it is the same walk
+    // `next` takes, and every fold it makes says why.
+
+    [Fact]
+    public async Task Queue_ReportsTheBoardInTheOrderTheDispatcherWalksIt()
+    {
+        var h = await NewAsync();
+        var filed = await h.FileAsync("story", "in the inbox", h.Inbox);
+        var waiting = await h.FileAsync("story", "below the top of todo", h.Todo, rank: 2048);
+        var top = await h.FileAsync("story", "top of todo", h.Todo, rank: 1024);
+        var underway = await h.FileAsync("story", "underway", h.InProgress);
+        var judged = await h.FileAsync("story", "awaiting the operator", h.Review);
+
+        var queue = Value(await h.Work.GetQueue(0, null, null, default));
+
+        // Rightmost column first, then top of the column down - the scheduling
+        // policy, written out rather than implied by which card came back.
+        Assert.Equal(
+            new[] { judged, underway, top, waiting, filed }.Select(Key),
+            queue.Select(e => e.Issue.Key));
+    }
+
+    [Fact]
+    public async Task Queue_LeavesOutTheColumnsWithNowhereToGo()
+    {
+        var h = await NewAsync();
+        await h.FileAsync("story", "shipped", h.Done);
+        var live = await h.FileAsync("story", "still going", h.Todo);
+
+        // Done is terminal, so the dispatcher never reaches it. An issue it
+        // never reaches is not one the pass skipped, and shipped work is not a
+        // backlog.
+        Assert.Equal([Key(live)], Value(await h.Work.GetQueue(0, null, null, default)).Select(e => e.Issue.Key));
+    }
+
+    [Fact]
+    public async Task Queue_FirstClearEntryIsWhatNextReturns()
+    {
+        var h = await NewAsync();
+        await h.FileAsync("story", "awaiting the operator", h.Review);
+        await h.FileAsync("epic", "not a type the loop takes", h.Todo, rank: 1024);
+        await h.FileAsync("story", "waiting on a renewal", h.Todo, rank: 2048, readyAt: Now.AddDays(3));
+        await h.FileAsync("story", "the one it should take", h.Todo, rank: 3072);
+        await h.FileAsync("story", "below it", h.Todo, rank: 4096);
+
+        var queue = Value(await h.Work.GetQueue(0, null, null, default));
+        var work = Value(await h.Work.GetNextWork(0, null, null, default));
+
+        // The property the endpoint exists for: one walk, reported and acted
+        // on. Two loops that could disagree about the order of the board is
+        // precisely the bug the scan is here to expose.
+        Assert.Equal(queue.First(e => e.Blocked is null).Issue.Key, work.Issue.Key);
+    }
+
+    [Fact]
+    public async Task Queue_AgreesWithNextWhenThereIsNothingToDo()
+    {
+        var h = await NewAsync();
+        await h.FileAsync("story", "awaiting the operator", h.Review);
+        await h.FileAsync("task", "a seam inside a story", h.Todo);
+
+        var queue = Value(await h.Work.GetQueue(0, null, null, default));
+
+        Assert.All(queue, e => Assert.NotNull(e.Blocked));
+        Assert.IsType<NoContentResult>((await h.Work.GetNextWork(0, null, null, default)).Result);
+    }
+
+    [Fact]
+    public async Task Queue_OnAnEmptyBoardIsEmptyRatherThanRefused()
+    {
+        var h = await NewAsync();
+
+        Assert.Empty(Value(await h.Work.GetQueue(0, null, null, default)));
+    }
+
+    // ---- ...and every fold it makes, named ----
+
+    [Fact]
+    public async Task Queue_NamesAReadyDateThatHasNotArrived()
+    {
+        var h = await NewAsync();
+        await h.FileAsync("story", "waiting on a renewal", h.Todo, readyAt: Now.AddDays(3));
+
+        Assert.Contains("not workable until", Only(await h.Work.GetQueue(0, null, null, default)).Blocked);
+    }
+
+    [Fact]
+    public async Task Queue_NamesAnUnansweredQuestion()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync("story", "waiting on a person", h.Todo);
+        await h.AskAsync(issue, "how should retries be scoped?");
+
+        Assert.Contains("unanswered question", Only(await h.Work.GetQueue(0, null, null, default)).Blocked);
+    }
+
+    [Fact]
+    public async Task Queue_NamesATypeTheLoopDoesNotPickUp()
+    {
+        var h = await NewAsync();
+        await h.FileAsync("epic", "somebody's product call", h.Todo);
+
+        // The case the epic's source note names: work sitting in a column an
+        // unattended run walks past, said out loud instead of silently folded.
+        Assert.Equal(
+            "an epic is not a type an unattended run picks up",
+            Only(await h.Work.GetQueue(0, null, null, default)).Blocked);
+    }
+
+    [Fact]
+    public async Task Queue_StopsNamingATypeTheCallerAsksFor()
+    {
+        var h = await NewAsync();
+        await h.FileAsync("epic", "somebody's product call", h.Todo);
+
+        // Widened by the caller, so it is no longer a reason - and the epic
+        // playbook covers todo to in progress, so nothing else refuses it.
+        Assert.Null(Only(await h.Work.GetQueue(0, null, "epic", default)).Blocked);
+    }
+
+    [Fact]
+    public async Task Queue_NamesTheSiblingThatIsAlreadyAwaitingReview()
+    {
+        var h = await NewAsync();
+        var parent = await h.FileAsync("epic", "the effort", h.Todo);
+        var inFlight = await h.FileAsync("story", "already up for review", h.Review, parentId: parent.Id);
+        var held = await h.FileAsync("story", "held back", h.Todo, parentId: parent.Id);
+
+        var blocked = Value(await h.Work.GetQueue(0, null, null, default))
+            .Single(e => e.Issue.Key == Key(held)).Blocked;
+
+        Assert.Contains(Key(inFlight), blocked);
+        Assert.Contains("two open pull requests under one parent", blocked);
+    }
+
+    [Fact]
+    public async Task Queue_NamesAColumnAndTypeNoPlaybookCovers()
+    {
+        var h = await NewAsync();
+        await h.FileAsync("story", "somebody's paragraph", h.Inbox);
+
+        // Nothing in the seeded matrix speaks for inbox to todo here, which is
+        // the difference between "no work left" and "no instructions left" -
+        // and a loop that could not tell them apart would report a finished
+        // board every night.
+        Assert.Equal(
+            "no playbook covers \"inbox\" to \"todo\" for a story - add one on the Playbooks page",
+            Only(await h.Work.GetQueue(0, null, null, default)).Blocked);
+    }
+
+    [Fact]
+    public async Task Queue_NamesTheNextColumnBeingTerminal()
+    {
+        var h = await NewAsync();
+        await h.FileAsync("story", "awaiting the operator", h.Review);
+
+        Assert.Equal(
+            "the next column is \"done\", and only the operator moves work there",
+            Only(await h.Work.GetQueue(0, null, null, default)).Blocked);
+    }
+
+    [Fact]
+    public async Task Queue_SaysTheBoardIsTheReasonBeforeItSaysTheTypeIs()
+    {
+        var h = await NewAsync();
+        await h.FileAsync("epic", "an epic the operator must judge", h.Review);
+
+        // Both are true. The one that no argument can change is the one worth
+        // printing: widening --types would not make this issue movable.
+        Assert.Contains("only the operator moves work there", Only(await h.Work.GetQueue(0, null, null, default)).Blocked);
+    }
+
+    // ---- One corner of the board, scanned ----
+
+    [Fact]
+    public async Task Queue_UnderAnEpic_LeavesTheRestOfTheBoardAlone()
+    {
+        var h = await NewAsync();
+        var mine = await h.FileAsync("epic", "the one I am pushing", h.Todo);
+        var story = await h.FileAsync("story", "under mine", h.Todo, parentId: mine.Id);
+        await h.FileAsync("story", "somebody else's", h.Todo);
+
+        // The same reading of ancestorKey the search filter and the meters
+        // use: what hangs beneath the key, and not the key itself.
+        Assert.Equal([Key(story)], Value(await h.Work.GetQueue(0, Key(mine), null, default)).Select(e => e.Issue.Key));
+    }
+
+    [Fact]
+    public async Task Queue_UnderAKeyNobodyMinted_IsTheSentenceTheSearchEndpointUses()
+    {
+        var h = await NewAsync();
+
+        var refusal = Assert.IsType<BadRequestObjectResult>((await h.Work.GetQueue(0, "AER-404", null, default)).Result);
+        Assert.Equal("there is no AER-404", refusal.Value);
+    }
+
+    [Fact]
+    public async Task Queue_RefusesATypeNobodyDefined()
+    {
+        var h = await NewAsync();
+
+        var refusal = Assert.IsType<BadRequestObjectResult>((await h.Work.GetQueue(0, null, "stroy", default)).Result);
+        Assert.Contains("there is no \"stroy\" type", (string)refusal.Value!);
+    }
+
+    [Fact]
+    public async Task Queue_CarriesTheTransitionAnIssueIsClearFor()
+    {
+        var h = await NewAsync();
+        await h.FileAsync("story", "ready to go", h.Todo);
+
+        var entry = Only(await h.Work.GetQueue(0, null, null, default));
+
+        // What a terminal prints on the line where there is no reason: where
+        // this issue is, and where the increment would leave it.
+        Assert.Null(entry.Blocked);
+        Assert.Equal("todo", entry.FromStatus.Name);
+        Assert.Equal("in progress", entry.ToStatus!.Name);
+    }
+
     // ---- The one edge that is cut ----
 
     [Fact]
@@ -448,6 +671,7 @@ public class WorkControllerTests
         public required WorkController Work { get; init; }
         public required PlaybooksController Playbooks { get; init; }
         public required int ProjectId { get; init; }
+        public required int Inbox { get; init; }
         public required int Todo { get; init; }
         public required int InProgress { get; init; }
         public required int Review { get; init; }
@@ -554,12 +778,19 @@ public class WorkControllerTests
             Work = new WorkController(db, new FakeTimeProvider(Now)),
             Playbooks = new PlaybooksController(db, new FakeTimeProvider(Now)),
             ProjectId = project.Id,
+            Inbox = inbox.Id,
             Todo = todo.Id,
             InProgress = doing.Id,
             Review = review.Id,
             Done = done.Id,
         };
     }
+
+    /// <summary>
+    /// The one row of a scan of a board with one issue on it - so that a test
+    /// about a single fold says which fold and nothing about arithmetic.
+    /// </summary>
+    private static QueueEntryDto Only(ActionResult<IReadOnlyList<QueueEntryDto>> result) => Assert.Single(Value(result));
 
     /// <summary>The display key of an issue these tests filed directly.</summary>
     private static string Key(EfHatchIssue issue) => IssueKey.Format("AER", issue.Number);

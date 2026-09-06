@@ -412,6 +412,28 @@ public record WorkDto(
     IReadOnlyList<QuestionDto> Questions,
     string? Blocked);
 
+/// <summary>
+/// One row of a pass: an issue the dispatcher looked at, and what it decided
+/// about it.
+/// </summary>
+/// <remarks>
+/// The fields <see cref="WorkDto"/> carries, minus the playbook prompt, the
+/// children and the questions. Those three are the payload of a dispatch - one
+/// agent, one issue - and loading them for every row would make a whole-board
+/// read expensive for nothing, since a scan is read to find out what was
+/// skipped and not to do the work.
+/// </remarks>
+/// <param name="Blocked">
+/// Why the pass folded past this issue, or null where it did not. The first
+/// entry with a null <c>Blocked</c> is the issue <c>work/next</c> returns for
+/// the same arguments, because it is the same walk.
+/// </param>
+public record QueueEntryDto(
+    IssueDto Issue,
+    StatusDto FromStatus,
+    StatusDto? ToStatus,
+    string? Blocked);
+
 // ---- Rollups ----
 
 /// <summary>
