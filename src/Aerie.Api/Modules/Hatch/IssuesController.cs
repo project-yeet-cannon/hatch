@@ -305,7 +305,7 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
             return BadRequest($"a bulk edit covers at most {MaxBulkKeys} issues at once - this one named {keys.Count}");
 
         var patch = new IssuePatchRequest(
-            null, null, request.Type, request.StatusId, request.ParentKey, request.ReadyAt, request.DueAt);
+            null, null, request.Type, request.StatusId, request.ParentKey, request.ReadyAt, request.DueAt, null);
 
         if (Invalid(null, null, request.Type, required: false) is { } invalid) return BadRequest(invalid);
         if (!ReadEdit(patch, out var edit, out var editError)) return BadRequest(editError);
@@ -436,6 +436,20 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
                 issue.DueAt = edit.DueAt?.At;
                 issue.DueAtHasTime = edit.DueAt?.HasTime ?? false;
             }
+        }
+
+        // Present-but-empty clears, the same as the dates. The event is what
+        // makes the trail hold every pull request the issue ever had, while the
+        // column holds the one it is being reviewed at now.
+        if (edit.SetPullRequest && edit.PullRequestUrl != issue.PullRequestUrl)
+        {
+            events.Add(Event(
+                actor,
+                EfHatchIssueEvent.PullRequestChanged,
+                new { from = issue.PullRequestUrl, to = edit.PullRequestUrl },
+                now));
+
+            issue.PullRequestUrl = edit.PullRequestUrl;
         }
 
         if (edit.ParentKey is not null && parent.Issue?.Id != issue.ParentId)
@@ -651,6 +665,7 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
     /// null that means two things.
     /// </summary>
     /// <param name="SetReady">Whether the body mentioned <c>readyAt</c> at all. False leaves the date alone; true with a null <paramref name="ReadyAt"/> clears it.</param>
+    /// <param name="SetPullRequest">The same flag for <c>pullRequestUrl</c>, read the same way.</param>
     private sealed record IssueEdit(
         string? Title,
         string? Description,
@@ -660,12 +675,14 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
         bool SetReady,
         IssueMoment? ReadyAt,
         bool SetDue,
-        IssueMoment? DueAt)
+        IssueMoment? DueAt,
+        bool SetPullRequest,
+        string? PullRequestUrl)
     {
         /// <summary>Whether this edit names nothing at all - the request a bulk edit refuses rather than reports as a hundred no-ops.</summary>
         public bool IsEmpty =>
             Title is null && Description is null && Type is null && StatusId is null
-            && ParentKey is null && !SetReady && !SetDue;
+            && ParentKey is null && !SetReady && !SetDue && !SetPullRequest;
     }
 
     /// <summary>
@@ -679,6 +696,7 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
 
         if (!ReadMoment(request.ReadyAt, "readyAt", out var readyAt, out error)) return false;
         if (!ReadMoment(request.DueAt, "dueAt", out var dueAt, out error)) return false;
+        if (!ReadPullRequestUrl(request.PullRequestUrl, out var pullRequestUrl, out error)) return false;
 
         edit = new IssueEdit(
             request.Title?.Trim(),
@@ -689,8 +707,52 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
             request.ReadyAt is not null,
             readyAt,
             request.DueAt is not null,
-            dueAt);
+            dueAt,
+            request.PullRequestUrl is not null,
+            pullRequestUrl);
 
+        return true;
+    }
+
+    /// <summary>
+    /// Reads the pull request URL off a request body. Absent and empty both
+    /// arrive here as "no URL", which the patch path - having already checked
+    /// the field was present - reads as the clear.
+    ///
+    /// Absolute <c>http</c> or <c>https</c> is the whole rule, and it is a rule
+    /// about the link opening rather than about whose forge it points at. A
+    /// relative path and a bare <c>github.com/o/r/pull/1</c> are both refused,
+    /// because a field whose only job is to be clicked should not hold
+    /// something that does not go anywhere; a self-hosted forge on a private
+    /// address is accepted, because Aerie has no opinion about where an
+    /// operator reviews code (docs/ethos.md).
+    /// </summary>
+    /// <summary>What a refused pull request URL is told to be instead, in the words the refusal uses.</summary>
+    private const string ExpectedPullRequestUrl =
+        "an absolute http or https address, like https://example.com/owner/repo/pull/12";
+
+    private static bool ReadPullRequestUrl(string? text, out string? url, out string? error)
+    {
+        url = null;
+        error = null;
+
+        var trimmed = text?.Trim();
+        if (string.IsNullOrEmpty(trimmed)) return true;
+
+        if (trimmed.Length > EfHatchIssue.MaxPullRequestUrlLength)
+        {
+            error = $"a pull request url is at most {EfHatchIssue.MaxPullRequestUrlLength} characters";
+            return false;
+        }
+
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var parsed)
+            || (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps))
+        {
+            error = $"\"{trimmed}\" is not a pull request url - give {ExpectedPullRequestUrl}";
+            return false;
+        }
+
+        url = trimmed;
         return true;
     }
 

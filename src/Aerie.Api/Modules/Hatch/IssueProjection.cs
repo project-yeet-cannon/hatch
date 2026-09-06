@@ -82,6 +82,7 @@ public static class IssueProjection
                 childKeys.TryGetValue(issue.Id, out var children) ? children : [],
                 IssueMoment.Format(issue.ReadyAt, issue.ReadyAtHasTime),
                 IssueMoment.Format(issue.DueAt, issue.DueAtHasTime),
+                issue.PullRequestUrl,
                 issue.CreatedBy,
                 issue.CreatedAt,
                 issue.UpdatedAt);

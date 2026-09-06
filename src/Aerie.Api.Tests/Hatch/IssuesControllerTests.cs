@@ -498,6 +498,162 @@ public class IssuesControllerTests
         Assert.Equal("renew the cert", Value(await h.Issues.GetIssue("AER-1", default)).Title);
     }
 
+    // ---- The pull request ----
+
+    [Fact]
+    public async Task AFreshIssue_PointsAtNoPullRequest()
+    {
+        var h = await NewAsync();
+
+        var created = await h.CreateAsync("task", "the work");
+
+        Assert.Null(created.PullRequestUrl);
+    }
+
+    [Fact]
+    public async Task APullRequestUrl_IsSetAndCarriedBack()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "the work");
+
+        var patched = Value(await h.Issues.PatchIssue(
+            "AER-1", Patch(pullRequestUrl: "https://example.com/owner/repo/pull/12"), default));
+
+        Assert.Equal("https://example.com/owner/repo/pull/12", patched.PullRequestUrl);
+        Assert.Equal("https://example.com/owner/repo/pull/12", Value(await h.Issues.GetIssue("AER-1", default)).PullRequestUrl);
+    }
+
+    /// <summary>
+    /// The field holds one URL; the trail holds every one it has held. That is
+    /// the whole reason this is a scalar and not a list.
+    /// </summary>
+    [Fact]
+    public async Task SettingAPullRequest_WritesOneEventNamingBothEnds()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "the work");
+
+        await h.Issues.PatchIssue("AER-1", Patch(pullRequestUrl: "https://example.com/owner/repo/pull/12"), default);
+        await h.Issues.PatchIssue("AER-1", Patch(pullRequestUrl: "https://example.com/owner/repo/pull/13"), default);
+
+        var events = await h.EventsAsync("AER-1");
+        Assert.Equal(
+            [EfHatchIssueEvent.PullRequestChanged, EfHatchIssueEvent.PullRequestChanged, EfHatchIssueEvent.Created],
+            events.Select(e => e.Kind));
+
+        var payload = events[0].Payload!.Value;
+        Assert.Equal("https://example.com/owner/repo/pull/12", payload.GetProperty("from").GetString());
+        Assert.Equal("https://example.com/owner/repo/pull/13", payload.GetProperty("to").GetString());
+    }
+
+    /// <summary>The empty string clears it, the same way it clears a date or a parent.</summary>
+    [Fact]
+    public async Task AnEmptyPullRequestUrl_ClearsItAndSaysSo()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "the work");
+        await h.Issues.PatchIssue("AER-1", Patch(pullRequestUrl: "https://example.com/owner/repo/pull/12"), default);
+
+        var patched = Value(await h.Issues.PatchIssue("AER-1", Patch(pullRequestUrl: ""), default));
+
+        Assert.Null(patched.PullRequestUrl);
+        var payload = (await h.EventsAsync("AER-1"))[0].Payload!.Value;
+        Assert.Equal("https://example.com/owner/repo/pull/12", payload.GetProperty("from").GetString());
+        Assert.Equal(JsonValueKind.Null, payload.GetProperty("to").ValueKind);
+    }
+
+    /// <summary>Null is no opinion. A PATCH sent to rename an issue must not unhook it from its review.</summary>
+    [Fact]
+    public async Task APullRequestNotMentioned_IsLeftAlone()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "the work");
+        await h.Issues.PatchIssue("AER-1", Patch(pullRequestUrl: "https://example.com/owner/repo/pull/12"), default);
+
+        var patched = Value(await h.Issues.PatchIssue("AER-1", Patch(title: "the same work, renamed"), default));
+
+        Assert.Equal("https://example.com/owner/repo/pull/12", patched.PullRequestUrl);
+    }
+
+    /// <summary>
+    /// The call `hatch.sh pr` makes twice in one session, because the second
+    /// push reran it. Re-sending the URL an issue already holds is not an edit
+    /// and must not read as one.
+    /// </summary>
+    [Fact]
+    public async Task APullRequestResentUnchanged_WritesNothing()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "the work");
+        await h.Issues.PatchIssue("AER-1", Patch(pullRequestUrl: "https://example.com/owner/repo/pull/12"), default);
+
+        await h.Issues.PatchIssue("AER-1", Patch(pullRequestUrl: "https://example.com/owner/repo/pull/12"), default);
+
+        Assert.Equal(2, (await h.EventsAsync("AER-1")).Count);
+    }
+
+    /// <summary>Clearing what is already clear is not an edit either.</summary>
+    [Fact]
+    public async Task ClearingAPullRequestThatIsNotSet_WritesNothing()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "the work");
+
+        await h.Issues.PatchIssue("AER-1", Patch(pullRequestUrl: ""), default);
+
+        Assert.Single(await h.EventsAsync("AER-1"));
+    }
+
+    /// <summary>
+    /// The rule is that the link opens, not whose forge it points at. A
+    /// self-hosted one on a private address is a pull request like any other.
+    /// </summary>
+    [Theory]
+    [InlineData("owner/repo/pull/12")]
+    [InlineData("example.com/owner/repo/pull/12")]
+    [InlineData("/issues/AER-1")]
+    [InlineData("ftp://example.com/owner/repo/pull/12")]
+    [InlineData("javascript:alert(1)")]
+    public async Task APullRequestUrlThatWouldNotOpen_IsRefusedWithAReason(string text)
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "the work");
+
+        var result = await h.Issues.PatchIssue("AER-1", Patch(pullRequestUrl: text), default);
+
+        Assert.Contains("pull request url", Reason(result.Result));
+        Assert.Contains("http", Reason(result.Result));
+        Assert.Null(Value(await h.Issues.GetIssue("AER-1", default)).PullRequestUrl);
+    }
+
+    [Fact]
+    public async Task APullRequestUrlLongerThanTheColumn_IsRefusedWithAReason()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "the work");
+
+        var tooLong = "https://example.com/owner/repo/pull/" + new string('9', EfHatchIssue.MaxPullRequestUrlLength);
+        var result = await h.Issues.PatchIssue("AER-1", Patch(pullRequestUrl: tooLong), default);
+
+        Assert.Contains($"{EfHatchIssue.MaxPullRequestUrlLength} characters", Reason(result.Result));
+    }
+
+    /// <summary>
+    /// Refused before anything is written, like every other bad field on this
+    /// endpoint - an edit nobody meant takes nothing with it.
+    /// </summary>
+    [Fact]
+    public async Task ABadPullRequestUrl_IsRefusedWithoutTouchingTheIssue()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "the work");
+
+        var result = await h.Issues.PatchIssue("AER-1", Patch(title: "renamed", pullRequestUrl: "not a url"), default);
+
+        Assert.Contains("pull request url", Reason(result.Result));
+        Assert.Equal("the work", Value(await h.Issues.GetIssue("AER-1", default)).Title);
+    }
+
     // ---- Moving ----
 
     [Fact]
@@ -1907,8 +2063,9 @@ public class IssuesControllerTests
         int? statusId = null,
         string? parentKey = null,
         string? readyAt = null,
-        string? dueAt = null) =>
-        new(title, description, type, statusId, parentKey, readyAt, dueAt);
+        string? dueAt = null,
+        string? pullRequestUrl = null) =>
+        new(title, description, type, statusId, parentKey, readyAt, dueAt, pullRequestUrl);
 
     private static IssueBulkEditRequest Bulk(
         IReadOnlyList<string> keys,
