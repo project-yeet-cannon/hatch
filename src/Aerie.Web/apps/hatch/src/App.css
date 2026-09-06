@@ -510,6 +510,31 @@
   line-height: var(--lh-tight);
 }
 
+/* ---- The offer to close a subtree ----
+
+   Asked when an issue lands in a terminal column with open work under it. It
+   names every issue it would move, so an epic with sixty of them is an ordinary
+   case rather than a dialog whose buttons have been pushed off the screen -
+   hence a list that scrolls inside a panel that does not. */
+
+.hatch-cascade {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.hatch-cascade-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-height: 40vh;
+  overflow-y: auto;
+  font-size: var(--t-label);
+}
+
 /* ---- Dates ----
 
    The two chips a card can carry: `Ready`, drawn only while an issue is still
