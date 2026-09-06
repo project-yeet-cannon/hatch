@@ -55,7 +55,11 @@ absence starts to hurt:
 - **No status-transition rules.** Any column to any column; we trust ourselves.
   The one asymmetry in the flow is not a rule in the database — it is that an
   agent is never dispatched *into* a terminal column (see
-  [the dispatcher](#the-dispatcher)).
+  [the dispatcher](#the-dispatcher)). The second thing that could be mistaken
+  for one is [closing a subtree](#closing-a-subtree), and it is not a rule
+  either: it is a question the browser asks a person after a move has already
+  committed. Nothing is forbidden by it and nothing is required — the answer is
+  the operator's, and "leave them" is one of the two.
 - **No granular permissions.** Reaching Hatch at all means trusted to do
   everything in it. The one exception is the API key, whose scope is a
   statement about *which surface*, never about which verb.
@@ -133,9 +137,10 @@ column" a deploy.
 `SortOrder` is sparse (the seed is 10 through 70, in tens) so inserting a column
 between two is one write.
 
-`IsTerminal` marks the columns that mean *shipped*. Two things read it: the
-importer lands a checked box in a terminal column, and the dispatcher refuses to
-move anything into one.
+`IsTerminal` marks the columns that mean *shipped*. Three things read it: the
+importer lands a checked box in a terminal column, the dispatcher refuses to
+move anything into one, and the browser offers to close a subtree when an issue
+lands in one (see [closing a subtree](#closing-a-subtree)).
 
 `Color` is a column rather than a palette keyed on the shipped names, because
 the operator invents columns — a lookup by name would leave a new one grey
@@ -289,6 +294,45 @@ anywhere.
 The browser's `lib/place.ts` is therefore about *which neighbours to name* —
 which matters because the board filters, and a drop has to land next to the card
 the operator can see rather than next to a hidden row at the same index.
+
+#### Closing a subtree
+
+Moving a parent into a terminal column used to move only the parent, and that
+was the single largest source of a board disagreeing with reality: the epic read
+shipped and the plan meter went on counting eleven leaves waiting, because
+closing them one at a time is the work nobody does.
+
+So an issue that lands in a terminal column with open work under it — dropped
+there on the board, or pressed there on its own status bar — is answered with a
+question about that work. It costs no request: `GET /board` hands the browser
+every issue with its `parentKey` and its column, so `lib/closeSubtree.ts` walks
+the subtree locally, and the dialog is on screen in the same frame the card
+lands. A reorder inside a terminal column is not a close and asks nothing, and
+neither does an issue whose descendants are all already closed.
+
+The dialog **names the keys**, and the cascade is one `POST /issues/bulk` naming
+exactly those — not a `cascade: true` flag the server would expand at write
+time. That is the rule `IssueBulkEditRequest.Keys` states in `Dtos.cs`, met a
+second time: a request that re-ran the query server-side could act on a row
+filed between the operator reading the list and pressing the button, and what
+was listed is what the operator agreed to.
+
+Four smaller decisions, each of which reads as arbitrary until it is said:
+
+- A descendant **already in a terminal column stays where it is**. It is already
+  closed, and closing it again in a different flavour rewrites what happened to
+  it.
+- A descendant the filter is hiding, or a ready date is folding away, **moves
+  like any other**. The fold is a view, not a fact — work that cannot start
+  until August is still work under this issue.
+- The descendants land in **whichever terminal column the parent landed in**,
+  rather than in some canonical closed one. There is no such concept in the
+  model, and a subtree abandoned into a second terminal column should read as
+  abandoned.
+- **The parent's move commits either way.** The question is about the
+  descendants, so dismissing it means *leave them*, never *undo that* — which is
+  also what lets the drag stay optimistic, with no card springing back out of a
+  column it was deliberately dropped in.
 
 ### Comment, question and answer
 
