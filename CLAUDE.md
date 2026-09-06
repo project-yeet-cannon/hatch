@@ -54,10 +54,15 @@ raw calls below are what it is doing.
 ### One increment, unattended
 
 ```
-./scripts/hatch.sh work            # the next thing due, whatever it is
-./scripts/hatch.sh work AER-12     # ...or this one
-./scripts/hatch.sh work --dry-run  # print the instruction, spawn nothing
+./scripts/hatch.sh work              # the next thing due, whatever it is
+./scripts/hatch.sh work AER-12       # ...or this one
+./scripts/hatch.sh work --under AER-1 # ...or the next thing under one epic
+./scripts/hatch.sh work --dry-run    # print the instruction, spawn nothing
 ```
+
+`--under` points an evening at one project: the same rule picks what is next,
+asked of one epic's subtree instead of the whole board. It and a bare key are
+the two ways of naming the work and cannot be given together.
 
 `work` asks the server what to do next and how, then spawns a headless session
 to do it. It streams what that session is doing as it happens — every tool call,
