@@ -590,9 +590,9 @@ useful answer and a list of reasons is not — while `work/{key}`, which somebod
 asked for by name, returns the refusal rather than a 404, because a person who
 named a ticket is owed the sentence saying why it cannot move.
 
-### Two more, on `next` alone
+### Three more, on `next` alone
 
-The five refusals above are facts about an issue. Two further rules are the
+The five refusals above are facts about an issue. Three further rules are the
 *loop's policy* — what an unattended run may **start**, as opposed to what may
 move — so they are asked on `work/next` and not on `work/{key}`. A person who
 names a ticket is giving an instruction, and housekeeping does not overrule it.
@@ -603,7 +603,12 @@ names a ticket is giving an instruction, and housekeeping does not overrule it.
    as part of its story's increment. `?types=story,bug,task` widens the set for
    a caller who means to, and a type nobody defined is a 400 naming it rather
    than a filter that silently matches nothing and reads as a finished board.
-2. **No sibling of it is awaiting review** — two open pull requests under one
+2. **Its ready date has arrived**, read against the caller's calendar day
+   (`?offsetMinutes=`) rather than the server's. A card folded off the board is
+   not one an unattended pass should be spending an increment on — but somebody
+   who names a ticket ahead of its date has said the date is not the point
+   today, and is given the dispatch rather than a lecture about it.
+3. **No sibling of it is awaiting review** — two open pull requests under one
    parent is one too many. "Awaiting review" is measured, not named: the column
    immediately left of the first terminal one, which is exactly where the
    migration that added `review` placed it, so an operator who renames the
@@ -691,6 +696,165 @@ there are not restored either: deleting a playbook is how an operator takes a
 column back from the loop, and a migration that re-seeded one would be handing
 it back.
 
+## The unattended loop
+
+`hatch.sh go-to-work` is [the dispatcher](#the-dispatcher) run in a circle: read
+the board, take the one issue an agent may advance, spend one increment on it,
+and ask again. Given nothing else it runs until the board has nothing on it that
+an agent may move, and then waits — asking again every interval, saying so once
+and then rarely — which is what "leave it running overnight" has to mean if the
+answer to "is anything left" can change while nobody is watching.
+
+**The loop is the shell, not the model.** The alternative was one long session
+told to keep going, and it was rejected for two reasons that point the same way:
+it would carry six hours of context into its last ticket, and the earliest
+decisions in that context are exactly the ones nobody can audit afterwards. A
+process per increment starts each ticket cold, on the model and effort that
+ticket's own [playbook](#playbooks) names rather than whatever the session
+started as, and costs less for the privilege.
+
+### What makes an issue actionable
+
+Six conditions. An issue is the loop's to pick up when it meets every one, and
+the sentence saying which one it failed is what `work/queue` reports:
+
+1. **There is a column to its right, and that column is not terminal.** The end
+   of the board is not a transition, and the step into a terminal column is the
+   operator's: *only the operator decides that something shipped*.
+2. **Its type is one an unattended run picks up** — `story` or `bug`, unless the
+   caller widens it with `?types=`. An epic is a product call and a task is a
+   seam inside a story; the story is the unit that ships.
+3. **Its ready date has arrived**, read against the caller's calendar day. A
+   card folded off the board is not one to spend an increment on tonight.
+4. **It holds no unanswered question.** It is waiting on a person, and another
+   agent sent at it would ask the same thing again or guess at the answer.
+5. **No sibling of it is awaiting review.** Two open pull requests under one
+   parent is one too many.
+6. **A playbook covers that transition for that type.** Without one there is
+   nothing to say to the session — and a column no playbook leads out of is
+   exactly [how a column becomes the operator's](#status), which is why the
+   absence is a fold rather than an error.
+
+Three of them — 1, 4 and 6 — are facts about the issue, and `work/{key}` asks
+them too. The other three are the loop's policy and are asked only when the pass
+is asking; see [three more, on `next` alone](#three-more-on-next-alone).
+
+**The board is worked right to left**, for the reason the dispatcher gives, and
+overnight it is the difference between a shape and a mess: a loop working left
+to right would open every draft in the house before it finished a single story,
+and the morning after would be a board where everything had started and nothing
+had shipped. Right to left, the run pushes whatever is furthest along over the
+line before it opens anything new, and the thing furthest along is a pull
+request somebody can read.
+
+### One loop at a time
+
+One loop at a time on one machine, and what says so is a directory under
+`TMPDIR`, holding the pid of the run that took it. A directory because `mkdir` is atomic on every filesystem this could land on and a lock file
+written with `>` is not; outside the repository because a lock in a tracked tree
+is a lock somebody commits. A lock whose owner is gone — killed outright, or a
+machine that rebooted out from under it — is cleared rather than honoured, which
+is the difference between a loop that survives a crash and one somebody has to
+let back in.
+
+The alternative was a **claim on the issue row** — a "who is working this, and
+since when" pair the dispatcher would fold past. It was rejected because a claim
+is a lease: a lease needs an expiry, an expiry needs a heartbeat, and the first
+run that dies mid-increment leaves a row nothing may touch until a timeout
+nobody has ever tuned. It would also put the loop's scheduling state in the
+tracker's schema, where the board would then have to draw it, to say something
+about a process on one machine. The premise is one loop at a time, and a
+directory says exactly that and nothing else. Two loops against one Hatch is
+[parallelism](#deferred-on-purpose), and it is deferred rather than
+half-answered here.
+
+### When an increment does nothing
+
+The one failure mode of an unattended loop that is dangerous rather than merely
+disappointing: a session ends with the ticket in the column it found it in.
+Nothing about the board changed, so the next pass picks the same issue, spends
+the same money, and fails the same way — all night. Every other way an increment
+can go badly costs one increment.
+
+So a stall is written on the ticket: a comment naming the session that ran and
+the transition it was trying to make — with the `claude --resume` command, since
+resuming the conversation is most of why a stall is worth recording rather than
+merely counting — and, if nothing is already open there, **a question**.
+
+A question rather than a **flag field**, which was the obvious alternative and
+would have had to be taught three things a question already does: it blocks the
+issue from being dispatched again, it badges the card on the board, and it is
+the list `hatch.sh answer` walks. Answering it clears the flag, which is the
+right gesture, because the flag means "nobody has looked at this" and answering
+is somebody having looked. A field would have been a fourth thing on the issue
+row that only the loop writes and only the loop reads, and a second flag the
+loop could read is one step from a flag the loop could set.
+
+Neither of its options is recommended, and that is not modesty: `--recommend` is
+for a choice something knows the answer to, and the whole content of a stall is
+that nothing here knows why it happened. A ticket that is already waiting on a
+question gets the comment and no second question — that question *is* the flag,
+usually raised by the session's own way out.
+
+### Where the loop's rules live
+
+On the server. `work/queue` is the same walk `work/next` takes, reported rather
+than acted on, and `GetNextWork` is the first clear row of that scan rather
+than a second walk that happens to agree with it — so the shell asks two
+questions and cannot get two different boards. Everything
+above is decided in one place, in one order, in
+[`WorkController.cs`](../src/Aerie.Api/Modules/Hatch/WorkController.cs).
+
+The alternative was **the shell**, and it is the cheaper thing to write: `queue`
+already parses the board, and folding the not-yet-ready and the wrong-typed out
+of it is a few lines of `jq`. It was rejected because it puts the rules where
+the *caller* is, and there is more than one caller — a terminal, a loop, and the
+issue page — so the first renamed column would leave two of them disagreeing
+about what is workable, silently, with nobody watching. The shell's whole job is
+to spend increments and say what happened; it decides nothing about which.
+
+That is also why the loop passes no `--model` or `--effort` of its own, though
+`work` accepts both. An override typed for one increment is one operator's
+opinion about one ticket, and a loop that carried it across a night would be
+applying it to tickets nobody looked at.
+
+### What it stops for
+
+Nothing, by default, and that is the point: a run that stopped for a reason
+nobody asked for is a run somebody has to check on. Every stop is asked for,
+except the last one:
+
+- `--once` — one pass, whatever it found, and out. The loop's own dry run
+  against a board that is not a fixture.
+- `--max-runs N` — that many increments.
+- `--max-spend USD` — measured from what the increments reported, not estimated.
+- `--until HH:MM` — wall clock. `--until 06:00` typed at eleven at night means
+  the morning, because the alternative reading is a loop that stops seventeen
+  hours before it started.
+- `--stop-file PATH` — touch it and the loop ends. A path, so stopping needs
+  nothing but a shell: no pid to find, and no signal that could land in the
+  middle of a push. It is read between increments, so the one in flight finishes
+  first, and a path that already exists is refused at startup rather than read
+  as a board with nothing on it.
+- **Three failures in a row** — the one nobody asks for. A failed increment is
+  not a reason to stop; a ticket can be wrong and a test can be flaky, and the
+  next ticket is a different question. Three in a row is something else:
+  whatever is broken is broken for every ticket, and the loop is now spending
+  money to prove it.
+
+`--under AER-1` points a night at one project: the same rule, asked of one
+epic's subtree. It and a bare key cannot be given together, and a bare key is
+refused outright — `go-to-work` asks "what is next" over and over, and one
+ticket cannot be the answer to that twice. One increment on one ticket is what
+`work AER-12` is for.
+
+The tally is printed from the exit path and nowhere else, because the ways a
+loop ends include the ones nobody wrote code for — an interrupt, a terminal
+closing — and those are the runs whose tally is most worth having. It counts the
+increments, the elapsed time and the spend, and then lists the tickets in two
+groups: the ones that moved, which is what the night got done, and the ones that
+stalled, which is what is waiting on somebody.
+
 ## The level above the board
 
 The board shows every card, which is the one thing it cannot do: say which of
@@ -761,7 +925,8 @@ from.
 
 [`scripts/hatch.sh`](../scripts/hatch.sh) wraps the calls a working session
 actually makes — `board`, `next`, `queue`, `show`, `start`, `move`, `comment`,
-`pr`, `ask`, `questions`, `answer`, `work`, and `api` for everything else. It
+`pr`, `ask`, `questions`, `answer`, `work`, `go-to-work`, and `api` for
+everything else. It
 finds a column by name rather than by id — on the letters and digits alone, so
 `todo` at a terminal reaches the column the board calls `To Do` — and folds off
 cards whose ready date has not arrived, exactly as the board does.
@@ -782,6 +947,10 @@ what it is still waiting on. That last part is not a nicety: the CLI's default
 output prints nothing until the run ends, so a four-minute increment was four
 minutes of blank terminal indistinguishable from a hang, and the fix for "is it
 working" is showing the work, not a spinner.
+
+`hatch.sh go-to-work` is `work` in a circle, and is
+[its own section](#the-unattended-loop) — what it may pick up, what it does
+about a ticket that did not move, and what it stops for.
 
 `hatch.sh queue` reads the scan and prints it, one issue a line — key, type,
 column, and either the reason the pass would fold past it or the transition it
@@ -860,6 +1029,14 @@ code already settles is a round trip through a person for nothing.
 
 ## Deferred on purpose
 
+- **Parallelism.** One loop at a time, on one machine, enforced by a directory
+  in `TMPDIR` and by nothing else. Two loops against one Hatch would need a
+  claim the dispatcher honours — with an expiry, and a heartbeat behind the
+  expiry — and the lock exists precisely so that none of that has to be right
+  before the first unattended night can run. It is also not obviously wanted:
+  the [sibling rule](#three-more-on-next-alone) already says one open pull
+  request per parent, and the operator reading them is the one thing that does
+  not parallelise.
 - **A second scope for agents**, which would stop a key answering its own
   question. Worth a column when somebody wants it; see
   [the one edge](#the-one-edge-that-is-deliberately-cut).
