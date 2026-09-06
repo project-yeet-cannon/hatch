@@ -1152,3 +1152,121 @@ button.hatch-option.chosen {
   max-width: 68ch;
   line-height: 1.6;
 }
+
+/* ---- The Plan page ----
+
+   A column of cards, one per root epic, each a stack of rows: what the epic
+   is, where it sits, how far along it is, and the epics inside it drawn the
+   same way one step further in.
+
+   Almost nothing here paints. The meter, the pills and the card are already
+   components with opinions; this is the spacing between them and the one rule
+   that makes a nested epic look nested. */
+
+.hatch-plan-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+/* A root epic's line is the card's headline and is read from further away than
+   the ones inside it. */
+.hatch-plan-row.top > .hatch-plan-head .hatch-plan-title {
+  font-size: var(--t-heading);
+  font-weight: 600;
+}
+
+.hatch-plan-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* Monospaced and quiet: the key is a handle to click, not the thing to read.
+   The title beside it is what the eye is scanning for. */
+.hatch-plan-key {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--t-label);
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.hatch-plan-key:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.hatch-plan-title {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* One indent per level, and the rule that says which parent an indent belongs
+   to. Without the line a third-level epic reads as a sibling of the first that
+   somebody nudged sideways. */
+.hatch-plan-nested {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  margin-top: var(--sp-2);
+  padding-left: var(--sp-4);
+  border-left: 1px solid var(--line);
+}
+
+/* Finished epics: present, countable, and shut. The page is about what to push
+   next, and a page whose top half is shipped work is a page that answers a
+   different question. */
+.hatch-plan-finished {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.hatch-plan-finished > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+  padding: var(--sp-2) 0;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.hatch-plan-finished-count {
+  padding: 0 var(--sp-1-5);
+  border-radius: var(--r-pill);
+  background: var(--bg);
+  font-size: var(--t-micro);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The picker sits in the page header's actions, where a Field's default stacked
+   column would push the title's line taller than it needs to be. Laid on its
+   side instead: the label beside the control, on one line.
+
+   The rules are on the inner .aerie-field__control because that is the box the
+   label and the select actually share - the outer .aerie-field is the wrapper
+   that also holds the hint, and this field has none. */
+.hatch-plan-picker > .aerie-field__control {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* The stacked field's gap is a margin under the label, which on one line is a
+   gap in the wrong direction. */
+.hatch-plan-picker .aerie-field__label {
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+
+/* Field.css stretches a field's own control to full width, which on a row is
+   the select trying to take the label's space with it. */
+.hatch-plan-picker .aerie-field__control > select {
+  width: auto;
+}
