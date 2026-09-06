@@ -45,8 +45,9 @@ working and the route is not one a key may take; ask the operator.
 ### From a terminal
 
 [`scripts/hatch.sh`](scripts/hatch.sh) wraps the calls a working session
-actually makes — `next`, `show`, `start`, `comment`, `ask`, `answer`, and `api`
-for everything else. It reads its settings from `scripts/.env` or the environment, finds a
+actually makes — `board`, `next`, `queue`, `show`, `start`, `move`, `comment`,
+`pr`, `ask`, `questions`, `answer`, `work`, `go-to-work`, and `api` for
+everything else. It reads its settings from `scripts/.env` or the environment, finds a
 column by name rather than by id — on the letters and digits alone, so `todo`
 reaches the column the board calls `To Do` — and folds off the cards whose ready
 date has not arrived, exactly as the board does. Prefer it to raw `curl`; the
@@ -83,7 +84,8 @@ hatch:   join it with  claude --resume 764ca76a-…
 That is how you prod a run without throwing it away — `claude --resume <id>`
 opens the same conversation, with everything it has done in context, so you can
 redirect it instead of starting over.
- What that session is told, which model it runs on, and how much
+
+What that session is told, which model it runs on, and how much
 effort it spends are a **playbook**: a row per (status transition, issue types)
 that the operator edits on Hatch's Playbooks page. Turning a paragraph of a
 draft into an epic with stories under it is not the same job as implementing an
@@ -97,6 +99,53 @@ Two things about it are worth knowing before working on this repo:
 - **Playbooks are readable by a key and writable only by a person.** If a
   playbook is wrong, say so on the ticket. Do not try to route around it: the
   API refuses, and it refuses on purpose.
+
+### The same thing, all night
+
+```
+./scripts/hatch.sh go-to-work                 # increments, back to back, until told to stop
+./scripts/hatch.sh go-to-work --once          # ...one pass, and out
+./scripts/hatch.sh go-to-work --under AER-1   # ...inside one epic, all night
+./scripts/hatch.sh go-to-work --interval 300  # ...asking this often when there is nothing
+./scripts/hatch.sh go-to-work --max-runs 5 --max-spend 20 --until 08:00
+./scripts/hatch.sh go-to-work --stop-file /tmp/stop   # touch it to end the loop
+```
+
+`go-to-work` is `work` in a circle: the next actionable issue, one increment,
+and ask again. It takes `--under` or nothing at all, never a ticket — its
+question is "what is next", asked over and over, and one ticket cannot be the
+answer to that twice. One increment on one ticket is `work AER-12`. Nothing
+stops it by default; the flags above are how a night is bounded, and three
+failed increments in a row stop it on their own.
+
+**This is most likely how you got here.** Assume nobody is reading the terminal,
+and that the next increment starts the moment yours ends. Four things follow,
+and they are why this section is in a file an agent reads:
+
+- **Leave the ticket somewhere new.** An increment that ends with the ticket in
+  the column it started in is a *stall*: the loop writes a comment naming the
+  session that ran, opens a question against the issue, and moves on — and
+  nothing further is dispatched there until a person answers it. That guard
+  exists so a bad ticket costs one increment instead of a night, but a sentence
+  you wrote about why you stopped is worth more than the one it writes for you.
+- **Asking is a full stop, not a pause.** An open question blocks the ticket
+  from being dispatched at all. The loop takes the next thing and yours waits
+  for a person, so ask and stop — do not ask and keep building.
+- **Record the pull request**: `./scripts/hatch.sh pr AER-12 <url>`. The loop
+  will not start a second story under the same parent while one is awaiting
+  review, so the operator reading yours is what unblocks the rest of that epic.
+  A URL somebody has to find in a comment makes that read take longer than it
+  needs to.
+- **Read the board before assuming it is empty.** `./scripts/hatch.sh queue`
+  prints every issue a pass would look at, in the order it looks, each with the
+  reason it would be folded past — or the transition it is clear for.
+  `queue AER-1` scopes it to one epic. It spawns nothing and writes nothing. A
+  column and type nobody has written a playbook for reads as a finished board
+  from outside and is not one, and this is where that shows up.
+
+The rules deciding all of this live on the server, not in the script:
+[`docs/hatch.md`](docs/hatch.md) has the six conditions that make an issue
+actionable and the reasoning behind each.
 
 ### When a decision is not yours to make
 
