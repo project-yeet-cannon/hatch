@@ -159,6 +159,12 @@ public class AdminSurfaceTests
         "WorkController.GetNextWork",
         "WorkController.GetWork",
 
+        // The same walk as GetNextWork, reported instead of acted on. A read,
+        // and one a key already holds every part of: it says nothing about the
+        // board that `next` and `/issues` do not already say, only in one
+        // answer instead of a hundred.
+        "WorkController.GetQueue",
+
         // The read a meter is drawn from, Hatch-scoped like the rest of the
         // module: it says how far along a subtree is, which is exactly what a
         // key holder asking "what is left under this epic" is entitled to.
