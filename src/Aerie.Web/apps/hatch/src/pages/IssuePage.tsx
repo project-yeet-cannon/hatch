@@ -15,6 +15,7 @@ import {
 } from '../api/client';
 import { CloseSubtreeDialog } from '../components/CloseSubtreeDialog';
 import { Command } from '../components/Command';
+import { DescriptionEditor } from '../components/DescriptionEditor';
 import { MomentChip } from '../components/MomentChip';
 import { StatusMeter } from '../components/StatusMeter';
 import { StatusPill } from '../components/StatusPill';
@@ -250,7 +251,7 @@ export function IssuePage() {
         </div>
       </Card>
 
-      <Description issue={issue} onSave={(description) => void save({ description })} />
+      <Description issue={issue} onSave={(description) => save({ description })} />
 
       {/* Drawn where something may be filed under this issue, and where
           something already is. The second arm is not redundant: a retype does
@@ -681,50 +682,15 @@ function InlineTitle({ issue, onSave }: { issue: Issue; onSave: (title: string) 
  * The description: raw markdown in a textarea, with a preview toggle. Stored
  * and edited raw on purpose - what the database holds is what somebody wrote.
  */
-function Description({ issue, onSave }: { issue: Issue; onSave: (description: string) => void }) {
-  const [draft, setDraft] = useState(issue.description);
-  const [known, setKnown] = useState(issue.description);
-  const [preview, setPreview] = useState(true);
-  const editor = useAutoGrow(draft);
-
-  // Same reasoning as the title's - see InlineTitle.
-  if (issue.description !== known) {
-    setKnown(issue.description);
-    setDraft(issue.description);
-  }
-
+function Description({ issue, onSave }: { issue: Issue; onSave: (description: string) => Promise<boolean> }) {
   return (
     <Card>
-      <div className="hatch-section-head">
-        <h2 className="hatch-section-title">Description</h2>
-        <div className="hatch-section-actions">
-          <Button onClick={() => setPreview(!preview)}>{preview ? 'Edit' : 'Preview'}</Button>
-          {!preview && (
-            <Button variant="primary" disabled={draft === issue.description} onClick={() => onSave(draft)}>
-              Save
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {preview ? (
-        issue.description.trim() ? (
-          // Sanitized by renderMarkdown - nothing from the database is trusted markup.
-          <div className="hatch-markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(issue.description) }} />
-        ) : (
-          <p className="text-muted">No description yet.</p>
-        )
-      ) : (
-        // `rows` is the height it opens at and the floor it never goes back
-        // under; useAutoGrow measures it rather than being told it.
-        <textarea
-          ref={editor}
-          className="hatch-description-editor hatch-grows"
-          rows={16}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-        />
-      )}
+      <DescriptionEditor
+        title={<h2 className="hatch-section-title">Description</h2>}
+        value={issue.description}
+        onSave={onSave}
+        className="hatch-grows"
+      />
     </Card>
   );
 }
