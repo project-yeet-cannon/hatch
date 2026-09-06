@@ -676,6 +676,10 @@ cmd_answer() {
 
 # ---- Watching a run ----
 
+# The mark on a line that is a fact for the caller rather than a line for the
+# terminal - see render_stream, which puts it on and takes it off again.
+FACT_MARK=$'\001'
+
 # How long the terminal may stay silent before it says it is still alive.
 # Overridable because the right number depends on what the ticket has the agent
 # doing: twenty seconds is right for editing, and irritating while a test suite
@@ -699,13 +703,22 @@ HATCH_HEARTBEAT="${HATCH_HEARTBEAT:-20}"
 # --include-partial-messages is deliberately not asked for. It streams assistant
 # prose token by token, which is the one thing here that reads fine arriving
 # whole, and it multiplies the event count by an order of magnitude to do it.
+#
+# The second argument is a file, and it is how the two things a caller needs
+# back out of a run - the session id and what it cost - escape a pipeline whose
+# every stage is a subshell. jq cannot write a second file and stdout is the
+# terminal's, so those lines come down the same pipe wearing FACT_MARK and are
+# set aside at the end. A control character, because everything else on this
+# pipe is prose somebody wrote.
 render_stream() {
+  local root="${1:-}" facts="${2:-}" line
+
   # Only the events. The CLI is entitled to say something on stdout that is not
   # one - a warning, an update notice - and jq exits on the first thing it
   # cannot parse, which would take the whole log down with it for a line nobody
   # needed. Line-buffered so the filter does not become the stall it exists to
   # prevent.
-  grep --line-buffered '^{' | jq -n -r --unbuffered --arg root "${1:-}" '
+  grep --line-buffered '^{' | jq -n -r --unbuffered --arg root "$root" --arg mark "$FACT_MARK" '
     def clip($n): if length > $n then .[0:$n - 1] + "…" else . end;
 
     # Paths as the repository says them. An absolute path to a file in this
@@ -728,7 +741,8 @@ render_stream() {
 
     foreach inputs as $e ({ think: 0, mark: 0, out: null };
       if $e.type == "system" and $e.subtype == "init" then
-        .out = "hatch: session \($e.session_id)\n" + resume($e.session_id) + "\n"
+        .out = $mark + "session=\($e.session_id)\n"
+          + "hatch: session \($e.session_id)\n" + resume($e.session_id) + "\n"
 
       # Thinking is the longest silence a run produces and the one most often
       # mistaken for a hang. Reported every few thousand tokens: often enough to
@@ -755,7 +769,9 @@ render_stream() {
                       | flat | clip(96)) ] | join("\n"))
 
       elif $e.type == "result" then
-        .out = "\nhatch: "
+        .out = $mark + "session=\($e.session_id)\n"
+          + (if $e.total_cost_usd then $mark + "cost=\($e.total_cost_usd)\n" else "" end)
+          + "\nhatch: "
           + (if $e.is_error then "ended with an error" else "done" end)
           + " in \(($e.duration_ms / 1000 | floor) | clock), \($e.num_turns) turns"
           + (if $e.total_cost_usd then ", $\(($e.total_cost_usd * 100 | round) / 100)" else "" end)
@@ -764,7 +780,12 @@ render_stream() {
       else .out = null end;
 
       select(.out != null and .out != "") | .out)
-  '
+  ' | while IFS= read -r line; do
+      case "$line" in
+        "$FACT_MARK"*) [ -z "$facts" ] || printf '%s\n' "${line#$FACT_MARK}" >>"$facts" ;;
+        *) printf '%s\n' "$line" ;;
+      esac
+    done
 }
 
 # The rendered lines, plus a pulse when there are none.
@@ -955,6 +976,171 @@ compose() {
   ' <<<"$work"
 }
 
+# "There is nothing an agent may move", said properly.
+#
+# "Nothing to do" and "everything is waiting on you" look identical from here
+# and are not the same situation, so the second one is named. Without this an
+# operator with a board full of open questions would be told the work had run
+# out. Scoped to match the sentence above it: an evening pointed at one epic is
+# not helped by a count of every question in the house.
+nothing_to_do() {
+  local under="${1:-}" waiting
+  if [ -n "$under" ]; then
+    echo "hatch: nothing under ${under} is an agent's to move"
+    waiting=$(jq '[.[] | .openQuestions] | add // 0' \
+      <<<"$(_get "/api/hatch/issues?ancestorKey=${under}")")
+    [ "$waiting" -eq 0 ] || echo "hatch: ${waiting} question(s) under ${under} are waiting on you - ./scripts/hatch.sh answer"
+  else
+    echo "hatch: nothing on the board is an agent's to move"
+    waiting=$(jq 'length' <<<"$(questions_json '' true)")
+    [ "$waiting" -eq 0 ] || echo "hatch: ${waiting} question(s) are waiting on you - ./scripts/hatch.sh answer"
+  fi
+}
+
+# ---- One increment ----
+
+# What one increment answers with.
+#
+# Bash 3.2 has no way to return a record, and the run happens inside a pipeline
+# whose every stage is a subshell, so nothing learned in there survives being
+# returned the ordinary way. These are set by run_increment and read by its
+# caller before the next one starts, which is how a loop can say what happened
+# without asking the board a second time.
+INC_KEY=""      # the issue the increment was spent on
+INC_FROM=""     # the column it started in
+INC_TO=""       # the column the playbook was moving it to
+INC_ENDED=""    # the column it is in now, which is the only report that counts
+INC_MOVED=0     # whether those last two differ
+INC_SESSION=""  # what `claude --resume` takes
+INC_COST=""     # dollars, out of the result event
+INC_EXIT=0      # what the CLI exited with
+INC_ASKED=0     # questions the session opened on its way out
+
+# One increment: the header, the session, and what became of the ticket.
+#
+# Everything between "here is the dispatch" and "here is what happened", which
+# is the part `work` and `go-to-work` have in common. Choosing the ticket stays
+# with the callers, because they choose it differently, and so does the last
+# word, because one of them is talking to somebody sitting there and the other
+# is writing a log nobody will read until morning.
+run_increment() {
+  local work="$1" model="$2" effort="$3" quiet="${4:-0}"
+  local bin root prompt facts before after asked out later
+  local -a codes
+
+  INC_KEY=$(jq -r '.issue.key' <<<"$work")
+  INC_FROM=$(jq -r '.fromStatus.name' <<<"$work")
+  INC_TO=$(jq -r '.toStatus.name // "?"' <<<"$work")
+  INC_ENDED="$INC_FROM"
+  INC_MOVED=0
+  INC_SESSION=""
+  INC_COST=""
+  INC_EXIT=0
+  INC_ASKED=0
+
+  bin=$(claude_bin)
+  root=$(repo_root)
+  prompt=$(compose "$work")
+
+  jq -r '"hatch: \(.issue.key) [\(.issue.type)] \(.issue.title)"' <<<"$work"
+  echo "hatch: ${model}, effort ${effort}, ${INC_FROM} -> ${INC_TO}"
+  echo
+
+  # What was open before the run, so that what the run asked can be told apart
+  # from what was already sitting there. Ids rather than a count: an operator
+  # who answered one question in another terminal while this ran would otherwise
+  # see the arithmetic come out to zero.
+  before=$(jq -c '[.questions[] | select((.answers | length) == 0) | .id]' <<<"$work")
+
+  # Where the renderer leaves the session id and the cost. Under TMPDIR and
+  # removed on the way out: it is one run's scratch, and it belongs neither in
+  # the repository nor in the next increment.
+  facts=$(mktemp "${TMPDIR:-/tmp}/hatch-run.XXXXXX")
+
+  # bypassPermissions because in print mode nothing can answer a prompt: any
+  # permission this did not anticipate becomes a silent denial in the middle of
+  # a run nobody is watching. That is a deliberate grant, and the reason `work`
+  # is a command an operator types rather than something a cron job does.
+  #
+  # The prompt goes in on stdin rather than as an argument - it is long, and an
+  # argument list is the one place where "long" has a limit worth avoiding.
+  #
+  # `set -e` is off across the spawn, and the exit code is kept rather than let
+  # go of. A run that ends badly has already said so through the stream, and the
+  # two things worth knowing afterwards - what it asked, and where the ticket
+  # ended up - are worth printing either way; but a loop counting three failures
+  # in a row needs the number, and this is the only place it exists.
+  set +e
+  if [ "$quiet" = 1 ]; then
+    # No renderer, so the facts come from the CLI's own summary instead: one
+    # object at the end carrying the session id, the cost, and the last thing
+    # the session said.
+    out=$(printf '%s' "$prompt" | (cd "$root" && "$bin" -p \
+      --model "$model" \
+      --effort "$effort" \
+      --permission-mode bypassPermissions \
+      --add-dir "$root" \
+      --output-format json))
+    INC_EXIT=$?
+    set -e
+
+    if [ -n "$out" ] && jq -e . >/dev/null 2>&1 <<<"$out"; then
+      jq -r '.result // empty' <<<"$out"
+      # That object is the event the stream ends with, so the closing lines and
+      # the facts are written once rather than twice.
+      jq -c . <<<"$out" | render_stream "$root" "$facts"
+    elif [ -n "$out" ]; then
+      # Not JSON, so it is the CLI complaining. Whatever it said is the only
+      # account of the run there is.
+      printf '%s\n' "$out"
+    fi
+  else
+    printf '%s' "$prompt" | (cd "$root" && "$bin" -p \
+      --model "$model" \
+      --effort "$effort" \
+      --permission-mode bypassPermissions \
+      --add-dir "$root" \
+      --output-format stream-json \
+      --verbose) | render_stream "$root" "$facts" | watch_stream
+    codes=("${PIPESTATUS[@]}")
+    set -e
+    INC_EXIT=${codes[1]}
+  fi
+
+  INC_SESSION=$(sed -n 's/^session=//p' "$facts" | tail -1)
+  INC_COST=$(sed -n 's/^cost=//p' "$facts" | tail -1)
+  rm -f "$facts"
+
+  # Where the ticket actually ended up, asked of the board rather than of the
+  # session. An increment that says it did the work and leaves the ticket in the
+  # column it found it in did not do the work, and this is the read that can
+  # tell the difference. Wrapped in an `if` because a blip here is not worth
+  # taking a whole loop down for: the increment already happened.
+  if later=$(_get "/api/hatch/work/${INC_KEY}"); then
+    INC_ENDED=$(jq -r '.fromStatus.name' <<<"$later")
+  fi
+  [ "$INC_ENDED" = "$INC_FROM" ] || INC_MOVED=1
+
+  # Whatever the session asked for on its way out. This is the half of the loop
+  # that makes asking worth doing: an unattended run's questions are the one
+  # thing in its output that somebody has to act on, and they would otherwise be
+  # a paragraph in the middle of a transcript nobody scrolls back through.
+  if after=$(questions_json "$INC_KEY" true); then
+    asked=$(jq -c --argjson before "$before" \
+      '[.[] | select(($before | index(.id)) == null)]' <<<"$after")
+    INC_ASKED=$(jq 'length' <<<"$asked")
+
+    if [ "$INC_ASKED" -gt 0 ]; then
+      echo
+      echo "--- ${INC_KEY} asked ${INC_ASKED} question(s) ---"
+      echo
+      print_questions "$asked"
+      echo "  ./scripts/hatch.sh answer ${INC_KEY}"
+      echo "  $(issue_url "$INC_KEY")"
+    fi
+  fi
+}
+
 cmd_work() {
   local key="" under="" model="" effort="" dry=0 attach=0 quiet=0
 
@@ -999,19 +1185,7 @@ cmd_work() {
     # this an operator with a board full of open questions would be told the
     # work had run out.
     if [ -z "$work" ]; then
-      local waiting
-      if [ -n "$under" ]; then
-        echo "hatch: nothing under ${under} is an agent's to move"
-        # Scoped to match the sentence above it: an evening pointed at one epic
-        # is not helped by a count of every question in the house.
-        waiting=$(jq '[.[] | .openQuestions] | add // 0' \
-          <<<"$(_get "/api/hatch/issues?ancestorKey=${under}")")
-        [ "$waiting" -eq 0 ] || echo "hatch: ${waiting} question(s) under ${under} are waiting on you - ./scripts/hatch.sh answer"
-      else
-        echo "hatch: nothing on the board is an agent's to move"
-        waiting=$(jq 'length' <<<"$(questions_json '' true)")
-        [ "$waiting" -eq 0 ] || echo "hatch: ${waiting} question(s) are waiting on you - ./scripts/hatch.sh answer"
-      fi
+      nothing_to_do "$under"
       exit 2
     fi
   fi
@@ -1042,36 +1216,34 @@ cmd_work() {
   [ -n "$model" ]  || model=$(jq -r '.playbook.model' <<<"$work")
   [ -n "$effort" ] || effort=$(jq -r '.playbook.effort' <<<"$work")
 
-  local prompt
-  prompt=$(compose "$work")
-
   if [ "$dry" = 1 ]; then
     jq -r '"# \(.issue.key) \(.fromStatus.name) -> \(.toStatus.name)"' <<<"$work"
     echo "# model ${model}, effort ${effort}"
     echo
-    printf '%s\n' "$prompt"
+    compose "$work"
     return
   fi
-
-  local bin root
-  bin=$(claude_bin)
-  root=$(repo_root)
-
-  jq -r '"hatch: \(.issue.key) [\(.issue.type)] \(.issue.title)"' <<<"$work"
-  echo "hatch: ${model}, effort ${effort}, $(jq -r '"\(.fromStatus.name) -> \(.toStatus.name)"' <<<"$work")"
-  echo
 
   if [ "$attach" = 1 ]; then
     # Attached: the same ticket, the same playbook, the same budget, in a session
     # somebody is sitting in front of. Two things are deliberately different.
     #
     # No bypassPermissions - there is somebody here to answer a prompt, and the
-    # grant below exists only because in print mode there is not.
+    # grant run_increment makes exists only because in print mode there is not.
     #
     # And the prompt is an argument rather than stdin, because stdin is the
     # terminal: it is what the operator is about to type into. An argument list
     # has a length limit that the piped form was chosen to avoid, which is a
     # real difference and not one a playbook prompt gets anywhere near.
+    local bin root prompt
+    bin=$(claude_bin)
+    root=$(repo_root)
+    prompt=$(compose "$work")
+
+    jq -r '"hatch: \(.issue.key) [\(.issue.type)] \(.issue.title)"' <<<"$work"
+    echo "hatch: ${model}, effort ${effort}, $(jq -r '"\(.fromStatus.name) -> \(.toStatus.name)"' <<<"$work")"
+    echo
+
     (cd "$root" && exec "$bin" \
       --model "$model" \
       --effort "$effort" \
@@ -1080,58 +1252,7 @@ cmd_work() {
     return
   fi
 
-  # What was open before the run, so that what the run asked can be told apart
-  # from what was already sitting there. Ids rather than a count: an operator
-  # who answered one question in another terminal while this ran would otherwise
-  # see the arithmetic come out to zero.
-  local before after asked
-  before=$(jq -c '[.questions[] | select((.answers | length) == 0) | .id]' <<<"$work")
-
-  # bypassPermissions because in print mode nothing can answer a prompt: any
-  # permission this did not anticipate becomes a silent denial in the middle of
-  # a run nobody is watching. That is a deliberate grant, and the reason `work`
-  # is a command an operator types rather than something a cron job does.
-  #
-  # The prompt goes in on stdin rather than as an argument - it is long, and an
-  # argument list is the one place where "long" has a limit worth avoiding.
-  #
-  # The exit code is let go of deliberately. A run that ends badly has already
-  # said so through the stream, in a sentence, and the two things worth knowing
-  # afterwards - what it asked, and where the ticket ended up - are worth
-  # printing either way. Losing them to `set -e` on a non-zero exit would throw
-  # away the part of the output somebody has to act on.
-  if [ "$quiet" = 1 ]; then
-    printf '%s' "$prompt" | (cd "$root" && "$bin" -p \
-      --model "$model" \
-      --effort "$effort" \
-      --permission-mode bypassPermissions \
-      --add-dir "$root") || true
-  else
-    printf '%s' "$prompt" | (cd "$root" && "$bin" -p \
-      --model "$model" \
-      --effort "$effort" \
-      --permission-mode bypassPermissions \
-      --add-dir "$root" \
-      --output-format stream-json \
-      --verbose) | render_stream "$root" | watch_stream || true
-  fi
-
-  # Whatever the session asked for on its way out. This is the half of the loop
-  # that makes asking worth doing: an unattended run's questions are the one
-  # thing in its output that somebody has to act on, and they would otherwise be
-  # a paragraph in the middle of a transcript nobody scrolls back through.
-  after=$(questions_json "$key" true)
-  asked=$(jq -c --argjson before "$before" \
-    '[.[] | select(($before | index(.id)) == null)]' <<<"$after")
-
-  if [ "$(jq 'length' <<<"$asked")" -gt 0 ]; then
-    echo
-    echo "--- ${key} asked $(jq 'length' <<<"$asked") question(s) ---"
-    echo
-    print_questions "$asked"
-    echo "  ./scripts/hatch.sh answer ${key}"
-    echo "  $(issue_url "$key")"
-  fi
+  run_increment "$work" "$model" "$effort" "$quiet"
 }
 
 usage() {
