@@ -46,9 +46,10 @@ working and the route is not one a key may take; ask the operator.
 
 [`scripts/hatch.sh`](scripts/hatch.sh) wraps the calls a working session
 actually makes — `next`, `show`, `start`, `comment`, `ask`, `answer`, and `api`
-for everything else. It reads its settings from `scripts/.env` or the environment, finds the
-todo column by name rather than by id, and folds off the cards whose ready date
-has not arrived, exactly as the board does. Prefer it to raw `curl`; the
+for everything else. It reads its settings from `scripts/.env` or the environment, finds a
+column by name rather than by id — on the letters and digits alone, so `todo`
+reaches the column the board calls `To Do` — and folds off the cards whose ready
+date has not arrived, exactly as the board does. Prefer it to raw `curl`; the
 raw calls below are what it is doing.
 
 ### One increment, unattended
@@ -84,8 +85,8 @@ opens the same conversation, with everything it has done in context, so you can
 redirect it instead of starting over.
  What that session is told, which model it runs on, and how much
 effort it spends are a **playbook**: a row per (status transition, issue types)
-that the operator edits on Hatch's Playbooks page. Turning a paragraph in the
-inbox into an epic with stories under it is not the same job as implementing an
+that the operator edits on Hatch's Playbooks page. Turning a paragraph of a
+draft into an epic with stories under it is not the same job as implementing an
 already-specified task, and the matrix is where that difference is written
 down.
 
@@ -185,8 +186,8 @@ a subtree's total is the histogram of its leaf descendants by status, and an
 issue with no children counts as itself, one leaf in its own column. So a
 parent's total is exactly the sum of its children's, and a stack of them agrees
 with the one above it. A parent's own column never lands in its own total — a
-story sitting in review whose tasks are all in todo reads as todo, because the
-tasks are the work — and ready dates are not consulted, because a card folded
+story sitting in In Review whose tasks are all in To Do reads as To Do, because
+the tasks are the work — and ready dates are not consulted, because a card folded
 off the board is still work.
 
 Every total is the same shape: `leaves`, `done` (the leaves in a terminal
@@ -212,8 +213,9 @@ A planning session leaves the plan **on the ticket**, not in a chat log:
   criteria — what "done" means, in a form somebody else could check.
 - `POST /api/hatch/issues` with `parentKey: "AER-12"` for each story or task the
   work breaks into. An epic takes stories; a story takes tasks.
-- Move it out of the inbox: `POST /api/hatch/issues/AER-12/move` with the
-  `statusId` of **todo**. `GET /api/hatch/board` names the columns.
+- Move it out of the drafting column: `POST /api/hatch/issues/AER-12/move` with
+  the `statusId` of the column that holds specified work awaiting selection
+  (**Backlog** on a stock board). `GET /api/hatch/board` names the columns.
 
 Two optional dates go on the same `PATCH`, and either may be a date
 (`2027-08-15`) or an instant (`2027-09-01T17:00:00Z`); `""` clears one:

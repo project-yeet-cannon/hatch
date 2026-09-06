@@ -130,8 +130,8 @@ put a foreign issue in. Rows rather than an enum because the operator renames
 and reorders them from the Statuses page, and an enum would make "add a review
 column" a deploy.
 
-`SortOrder` is sparse (the seed is 10/20/30/40) so inserting a column between
-two is one write.
+`SortOrder` is sparse (the seed is 10 through 70, in tens) so inserting a column
+between two is one write.
 
 `IsTerminal` marks the columns that mean *shipped*. Two things read it: the
 importer lands a checked box in a terminal column, and the dispatcher refuses to
@@ -142,23 +142,48 @@ the operator invents columns — a lookup by name would leave a new one grey
 forever and lose a renamed one's colour. The ink written on a colour is computed
 from its luminance (`lib/color.ts`), because CSS still cannot ask that question.
 
-Every install starts with five columns:
+Every install starts with the same seven columns, and with the same flow
+through them:
 
-| Column | Sort | Terminal | Seeded by |
-|---|---|---|---|
-| inbox | 10 | | `Init` |
-| todo | 20 | | `Init` |
-| in progress | 30 | | `Init` |
-| review | left of the first terminal column | | `Playbooks` |
-| done | 40 | ✓ | `Init` |
+| Column | Sort | Terminal | Whose | What happens in it |
+|---|---|---|---|---|
+| Draft | 10 | | operator | An idea being written. Nothing reads it. |
+| Breakdown | 20 | | **agent** | Turn the draft into a specification: acceptance criteria on the issue, children under it. |
+| Backlog | 30 | | operator | Specified work, awaiting selection. |
+| To Do | 40 | | **agent** | Pick it up and do it. |
+| In Progress | 50 | | **agent** | Finish it, push it, put it up for review. |
+| In Review | 60 | | operator | Read the pull request, wait for green, merge. |
+| Done | 70 | ✓ | operator | Terminal. |
 
-`review` is placed by measurement rather than at a hardcoded 35, so an install
-that had already renamed or reordered its columns gets it immediately left of
-its own first terminal one, and one with no terminal column at all gets it on
-the right. It is skipped where a `review` already exists. It is what makes
-"never move a ticket to a terminal status" something the board expresses rather
-than something a prompt has to ask for: `review` is an end an agent may reach,
-and `done` is one only the operator may.
+**Which column belongs to whom is not a field.** It is derived: a column an
+agent may leave is a column some [playbook](#playbooks) names as its `from`, for
+that issue's type. A missing playbook row is how a column becomes the
+operator's, and it is also how an epic in Breakdown can stay the operator's
+while a story in Breakdown is the agent's, because a playbook names types. A
+second "whose column is this" flag would be free to disagree with the first, and
+a flag the loop could read is one step from a flag the loop could set.
+
+The order is the point. `Backlog` is the gate between "somebody wrote a
+paragraph" and "a pull request is open", and `In Review` is the gate before
+shipped — which is what makes "never move a ticket to a terminal status"
+something the board expresses rather than something a prompt has to ask for.
+
+Three migrations built it, and the last one is the one to read before changing
+any of it. `Init` seeded the first four columns; `Playbooks` measured `review`
+into place immediately left of the first terminal column; `TheFlow` renamed the
+five for people, added `Breakdown` and `Backlog`, and moved the specifying
+playbooks onto the transition they now describe.
+
+`TheFlow` touches **only a board that is still exactly the one those two
+migrations shipped** — the five columns, in their order, with their terminal
+flags. Anything else and it does nothing at all: no rename, no insert, no
+repoint. That is a harder guard than the measurement `Playbooks` used, and
+deliberately: one column relative to the first terminal one is a question a
+board can answer, but `Breakdown` means nothing except "between Draft and
+Backlog", and there is no measurement that finds those two on a board somebody
+arranged by hand. A board whose columns no longer alternate is worse than one
+that was left alone, because the loop would run, and it would run straight
+through the gate that was supposed to stop it.
 
 ### Issue
 
@@ -630,8 +655,9 @@ one batch.
 
 A playbook row is `(from column, to column, issue types) → prompt, model,
 effort`. A row naming the issue's type beats a row naming every type, and ties
-go to the older row, so "inbox to todo, epics" can say something different from
-"inbox to todo, anything else" without either having to know about the other.
+go to the older row, so "Breakdown to Backlog, epics" can say something
+different from "Breakdown to Backlog, anything else" without either having to
+know about the other.
 
 The matrix exists because **"do the next increment" is not one job**. Turning a
 paragraph of intent into an epic with stories under it is the hardest thinking
@@ -650,10 +676,20 @@ stopped looking at the page they typed it on.
 
 Six rows are seeded, for the same reason the columns are: a Hatch whose agent
 loop cannot run until somebody fills in a table is a Hatch that ships broken.
-They are joined on column *name*, because a migration cannot know
-identity-generated ids — so an install that renamed its columns first seeds
-nothing, which is the right failure. Nothing re-asserts them afterwards; the
-operator's edits are theirs to keep.
+They cover every transition an agent owns, so `go-to-work` on a fresh install
+needs no configuration beyond an origin and a key. They are joined on column
+*name*, because a migration cannot know identity-generated ids — so an install
+that renamed its columns first seeds nothing, which is the right failure: a
+playbook wired to the wrong transition is worse than an empty table.
+
+Nothing re-asserts them afterwards, and nothing overwrites one. `TheFlow` moves
+three of them from `inbox → todo` onto `Breakdown → Backlog`, because that is
+where specifying a draft happens now, but it writes no prompt, no model and no
+effort — an operator who has retuned a row keeps every word of it, and this only
+says which transition their playbook is the playbook for. Rows that are not
+there are not restored either: deleting a playbook is how an operator takes a
+column back from the loop, and a migration that re-seeded one would be handing
+it back.
 
 ## The level above the board
 
@@ -670,17 +706,17 @@ one are the same size. They are not, and the bar is there to say how much work
 is left. The agreement comes for free anyway: a parent's total is exactly the
 sum of its children's, and a test pins it.
 
-**A parent's own column never lands in its own total.** A story sitting in
-review whose tasks are all in todo reads as todo, because the tasks are the
+**A parent's own column never lands in its own total.** A story sitting in In
+Review whose tasks are all in To Do reads as To Do, because the tasks are the
 work. Ready dates are not consulted either — a card folded off the board is
 still work, and a total that shrank and grew as dates arrived would not be a
 total.
 
 **The bar shows the distribution across the columns, not a filled fraction.**
 One stacked segment per status, in the colour the operator painted that column,
-so where the bulk sits reads at a glance: an epic whose every story is in review
-looks nothing like one whose every story is in todo, and a single fill would
-have drawn both as 0%. It also disposes of the partial-credit question
+so where the bulk sits reads at a glance: an epic whose every story is in In
+Review looks nothing like one whose every story is in Draft, and a single fill
+would have drawn both as 0%. It also disposes of the partial-credit question
 underneath it — nothing has to invent a score per column when every column is
 drawn. A subtree with nothing filed under it draws no bar rather than an empty
 trough, because an epic with no stories is at the start of its life, not stalled
@@ -725,9 +761,10 @@ from.
 
 [`scripts/hatch.sh`](../scripts/hatch.sh) wraps the calls a working session
 actually makes — `board`, `next`, `queue`, `show`, `start`, `move`, `comment`,
-`pr`, `ask`, `questions`, `answer`, `work`, and `api` for everything else. It finds the todo
-column by name rather than by id and folds off cards whose ready date has not
-arrived, exactly as the board does.
+`pr`, `ask`, `questions`, `answer`, `work`, and `api` for everything else. It
+finds a column by name rather than by id — on the letters and digits alone, so
+`todo` at a terminal reaches the column the board calls `To Do` — and folds off
+cards whose ready date has not arrived, exactly as the board does.
 
 Its settings come from `scripts/.env` (mode 600, git-ignored, written by
 `hatch.sh config`), and an exported `AERIE_BASE` or `AERIE_HATCH_KEY` wins over
