@@ -550,6 +550,28 @@ useful answer and a list of reasons is not — while `work/{key}`, which somebod
 asked for by name, returns the refusal rather than a 404, because a person who
 named a ticket is owed the sentence saying why it cannot move.
 
+### Two more, on `next` alone
+
+The five refusals above are facts about an issue. Two further rules are the
+*loop's policy* — what an unattended run may **start**, as opposed to what may
+move — so they are asked on `work/next` and not on `work/{key}`. A person who
+names a ticket is giving an instruction, and housekeeping does not overrule it.
+
+1. **Its type is `story` or `bug`.** An epic is out because choosing what an
+   effort contains is a product call; a task because a task is a seam inside a
+   story, and the story is the unit that ships — a task still crosses the board
+   as part of its story's increment. `?types=story,bug,task` widens the set for
+   a caller who means to, and a type nobody defined is a 400 naming it rather
+   than a filter that silently matches nothing and reads as a finished board.
+2. **No sibling of it is awaiting review** — two open pull requests under one
+   parent is one too many. "Awaiting review" is measured, not named: the column
+   immediately left of the first terminal one, which is exactly where the
+   migration that added `review` placed it, so an operator who renames the
+   column does not silently turn the rule off. Same-parent only — a null parent
+   is not a group, so two loose issues are not siblings of each other — and a
+   sibling in a terminal column blocks nothing, because merged work is not work
+   in flight.
+
 ### Playbooks
 
 A playbook row is `(from column, to column, issue types) → prompt, model,
