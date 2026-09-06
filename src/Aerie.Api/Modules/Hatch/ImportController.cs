@@ -18,7 +18,7 @@ namespace Aerie.Api.Modules.Hatch;
 /// </summary>
 /// <remarks>
 /// The importer only ever copies. Retiring the source <c>.md</c> file stays a
-/// deliberate manual act (docs/plans/README.md, the plans lifecycle) - this
+/// deliberate manual act (docs/hatch.md, "The importer") - this
 /// endpoint has no idea where the file it was handed lives, which is the point.
 /// </remarks>
 [ApiController]

@@ -3,11 +3,11 @@
 Notes for Claude. Read [`README.md`](README.md) for what Aerie is,
 [`docs/ethos.md`](docs/ethos.md) for the one rule that constrains every commit
 (*nothing in this repo may be true of exactly one installation*), and
-[`docs/plans/README.md`](docs/plans/README.md) for how plans are worked.
+[`docs/hatch.md`](docs/hatch.md) for the tracker every ticket below comes off.
 
 ## Hatch: the ticket is the unit of work
 
-[Hatch](docs/plans/pjm.md) is the house project tracker, at
+[Hatch](docs/hatch.md) is the house project tracker, at
 `hatch.${DOMAIN}`. It is where work is described, and it is reachable
 programmatically — so a link to a ticket is a complete instruction, and the
 ticket is where the answer goes back.

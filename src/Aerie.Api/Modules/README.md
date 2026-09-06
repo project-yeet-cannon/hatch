@@ -4,6 +4,12 @@ A module is one family app: its own folder, its own Postgres schema, its own
 migration history. It rides the existing pod, deploy, backup, and log pipeline —
 adding one touches no container, manifest, CI job, or `Program.cs`.
 
+Not every module is the family's. Hatch
+([`docs/hatch.md`](../../../docs/hatch.md)) is the operator's, on its own host
+and behind the admin gate, and it is the worked example for the two things a
+module of that kind needs: a surface only an operator reaches, and a caller that
+is a program rather than a browser.
+
 ## Adding a module
 
 1. `mkdir Modules/<Name>/` and write the entities and context there.
@@ -59,7 +65,12 @@ adding one touches no container, manifest, CI job, or `Program.cs`.
    ```
 
 6. Controller at `/api/<name>/*` — `AddControllers` already finds it anywhere in
-   the assembly.
+   the assembly. A module the household uses needs nothing more; one that is the
+   operator's carries [`RequireAdmin`](../Common/RequireAdminAttribute.cs), and
+   naming a scope on it (`[RequireAdmin(AcceptScope = …)]`) is what opens a
+   route to an API key. Hatch is the worked example of both —
+   [`docs/hatch.md`](../../../docs/hatch.md), "The wall, the admin gate, and API
+   keys".
 
 Startup migrates every registered module context automatically. Nothing else to
 wire.
@@ -106,6 +117,8 @@ wire.
   read in one place and it is not here** — `Services/Auth/AdminGate.cs`, guarding
   the operator's own tools, and a module reaching for a household-wide role is
   a module answering a question about the house rather than about its own rows.
+  Hatch is entirely the operator's and still reads it that way: every controller
+  carries the attribute, and the gate answers ([`docs/hatch.md`](../../../docs/hatch.md)).
   And no endpoint changes *what a verb does* based on who is asking; that is the
   permission model arriving, and it should arrive on purpose rather than as one
   module's `if`.

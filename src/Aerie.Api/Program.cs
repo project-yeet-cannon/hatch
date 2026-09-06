@@ -554,7 +554,7 @@ if (Directory.Exists(Path.Combine(appsPath, "docs")))
 }
 // Hatch deep links are the point rather than a nicety: /apps/hatch/issues/AER-12
 // is what gets pasted into a chat window and into a VS Code prompt, so it has
-// to survive being opened cold (docs/plans/pjm.md).
+// to survive being opened cold (docs/hatch.md).
 if (Directory.Exists(Path.Combine(appsPath, "hatch")))
 {
     app.MapFallbackToFile("/apps/hatch/{*path:nonfile}", "apps/hatch/index.html");

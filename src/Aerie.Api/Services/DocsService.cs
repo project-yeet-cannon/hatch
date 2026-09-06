@@ -28,11 +28,11 @@ public class DocsService(IConfiguration configuration, IWebHostEnvironment env) 
         if (!Directory.Exists(DocsRoot))
             return [];
 
-        // Recursive, so docs/plans/<name>/ shows up (see docs/plans/README.md - a
-        // plan becomes a subdirectory when it outgrows one file). The slug is the
-        // path relative to DocsRoot, always with forward slashes, so it survives
-        // both the URL and Windows; Group is the directory half of it, which is
-        // what the sidebar sections on.
+        // Recursive, so a subject that outgrew one file and became a directory
+        // of them (docs/cfd/) shows up. The slug is the path relative to
+        // DocsRoot, always with forward slashes, so it survives both the URL and
+        // Windows; Group is the directory half of it, which is what the sidebar
+        // sections on.
         return Directory.EnumerateFiles(DocsRoot, "*.md", SearchOption.AllDirectories)
             .Select(path =>
             {

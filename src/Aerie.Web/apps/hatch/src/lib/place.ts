@@ -1,7 +1,7 @@
 /* Where a dragged card landed.
 
    The board hands the server two neighbours and never a rank - the server owns
-   the number (docs/plans/pjm.md, "Rank computation") - so this module's whole
+   the number (docs/hatch.md, "Rank computation") - so this module's whole
    job is to turn "dropped on that card" into "between these two", and to
    produce the reordered list to paint before the request comes back.
 

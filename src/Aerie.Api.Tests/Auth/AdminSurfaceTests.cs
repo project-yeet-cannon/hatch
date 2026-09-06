@@ -39,8 +39,8 @@ namespace Aerie.Api.Tests.Auth;
 ///   app - it is the operator's own tooling wearing a module's clothes, like
 ///   the admin app is the operator's own screen. Every one of its verbs is
 ///   guarded, reads included, and its bundle 404s for non-admins the same way
-///   (AdminAppMiddleware). Phase 6 of docs/plans/pjm.md widens that to scoped
-///   API keys, which is a second credential through the same gate rather than
+///   (AdminAppMiddleware). Scoped API keys widen that (docs/hatch.md, "One
+///   gate, two lanes"): a second credential through the same gate rather than
 ///   a second gate.
 /// </summary>
 public class AdminSurfaceTests
