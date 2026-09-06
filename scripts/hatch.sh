@@ -1158,8 +1158,13 @@ run_increment() {
   # thing in its output that somebody has to act on, and they would otherwise be
   # a paragraph in the middle of a transcript nobody scrolls back through.
   if after=$(questions_json "$INC_KEY" true); then
+    # The id is lifted out before `index` is asked about it: inside index(),
+    # `.` is the array being searched, so `index(.id)` looks for a field on the
+    # list rather than the question's own id - and answers with an error, which
+    # under `set -e` would end the run at the exact moment a session had asked
+    # something worth reading.
     asked=$(jq -c --argjson before "$before" \
-      '[.[] | select(($before | index(.id)) == null)]' <<<"$after")
+      '[.[] | . as $q | select(($before | index($q.id)) == null)]' <<<"$after")
     INC_ASKED=$(jq 'length' <<<"$asked")
 
     if [ "$INC_ASKED" -gt 0 ]; then
