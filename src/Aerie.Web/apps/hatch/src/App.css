@@ -910,6 +910,87 @@
   overflow-wrap: anywhere;
 }
 
+/* ---- What is next under this issue ----
+
+   One line between the meter and the children: the ticket an agent would take
+   below this one, and the command that starts it. The band is tinted and set
+   apart from the rows under it because it is the only thing in the card that is
+   an instruction rather than a reading. */
+.hatch-next,
+.hatch-next-none {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: var(--sp-4) 0 0;
+  padding: var(--sp-2-5) var(--sp-3);
+  border-radius: var(--r-in);
+  background: var(--primary-bg);
+}
+
+/* Nothing to dispatch is a sentence, not an instruction - no tint behind it,
+   and it reads as the muted line it is. */
+.hatch-next-none {
+  background: none;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.hatch-next-label {
+  flex: none;
+  font-size: var(--t-label);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+/* Takes the slack, so the command sits at the right edge of the card whatever
+   the title is - and wraps under it rather than squeezing it when it cannot. */
+.hatch-next-title {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---- A command, in the shape it is pasted ---- */
+.hatch-command {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.hatch-command code {
+  font-family: var(--mono);
+  font-size: var(--t-label);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-chip);
+  background: var(--card);
+
+  /* Selectable, and it has to stay that way: where the clipboard API is not
+     available the button is not drawn at all and selecting this text by hand
+     is the whole fallback. */
+  user-select: all;
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+.hatch-command-copy {
+  flex: none;
+  font: inherit;
+  font-size: var(--t-label);
+  color: var(--primary);
+  background: none;
+  border: none;
+  padding: var(--sp-1);
+  cursor: pointer;
+}
+
+.hatch-command-copy:hover {
+  text-decoration: underline;
+}
+
 /* The right-hand cell, whichever of the two it is. Pushed right so it stays
    there when a long title wraps the row onto a second line, and the meter is a
    fixed width rather than a shrink-to-fit one so a card full of stories shares
