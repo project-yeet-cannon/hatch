@@ -968,6 +968,32 @@
   overflow-wrap: anywhere;
 }
 
+/* The composer at the foot of the Progress card: file the next child where the
+   children are read. The title takes whatever the picker and the button leave,
+   and the rule above it closes the list - the rows draw their own top borders,
+   so without it the table has no last line. Only where there is a list to
+   close: on an epic with nothing under it yet the composer is the whole card,
+   and a rule under a heading with nothing above it is a line about nothing. */
+.hatch-child-composer {
+  margin-top: var(--sp-4);
+}
+
+.hatch-progress-list + .hatch-child-composer {
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+
+.hatch-child-composer-title {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+/* Its own line under the row, whatever the row wrapped to. */
+.hatch-child-composer .text-danger {
+  flex: 1 0 100%;
+  margin: 0;
+}
+
 /* ---- What is next under this issue ----
 
    One line between the meter and the children: the ticket an agent would take
