@@ -63,7 +63,7 @@ than mechanics:
 
 The emoji icons are carried across from the page this replaced. What Aerie's
 iconography should be is the design pass's to answer
-(`docs/plans/design-system-mvp.md`, Phase 6).
+([`docs/design-system-architecture.md`](../../../../docs/design-system-architecture.md)).
 
 ## Development
 
