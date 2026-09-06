@@ -575,6 +575,24 @@
   font-weight: 600;
 }
 
+/* The pull request chip, which is the only chip that goes anywhere. It is a
+   link, so it says so on hover and carries the primary ink rather than the
+   muted grey the dates wear - a chip nobody can tell is clickable is a chip
+   nobody clicks. */
+.hatch-chip-link {
+  color: var(--primary);
+  text-decoration: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hatch-chip-link:hover,
+.hatch-chip-link:focus-visible {
+  border-color: var(--primary);
+  text-decoration: underline;
+}
+
 /* A card only visible because its column's fold was opened. Held back rather
    than hidden, and drawn as such. */
 .hatch-card.waiting {

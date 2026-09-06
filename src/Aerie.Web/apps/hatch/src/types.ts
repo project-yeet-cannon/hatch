@@ -68,6 +68,10 @@ export interface Issue {
   childKeys: string[];
   readyAt: string | null;
   dueAt: string | null;
+  /** Where the work is being reviewed, or null while it is nowhere. An absolute
+      http(s) URL - see EfHatchIssue.PullRequestUrl for why it is one and not a
+      list of them. */
+  pullRequestUrl: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -236,9 +240,9 @@ export interface IssueCreateRequest {
   dueAt?: string | null;
 }
 
-/** Null leaves a field alone. An empty `parentKey`, `readyAt` or `dueAt` clears
-    it - see IssuePatchRequest in Dtos.cs for why the empty string carries that
-    meaning. */
+/** Null leaves a field alone. An empty `parentKey`, `readyAt`, `dueAt` or
+    `pullRequestUrl` clears it - see IssuePatchRequest in Dtos.cs for why the
+    empty string carries that meaning. */
 export interface IssuePatchRequest {
   title?: string | null;
   description?: string | null;
@@ -247,6 +251,10 @@ export interface IssuePatchRequest {
   parentKey?: string | null;
   readyAt?: string | null;
   dueAt?: string | null;
+  /** An absolute http(s) URL, or `''` to take the issue off the one it holds.
+      Anything else is refused with a sentence - the field's only job is to be
+      clicked. */
+  pullRequestUrl?: string | null;
 }
 
 /** A filter, as the search endpoint reads it. Every field is optional and they

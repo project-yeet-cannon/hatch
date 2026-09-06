@@ -17,6 +17,7 @@ import { MomentChip } from '../components/MomentChip';
 import { StatusMeter } from '../components/StatusMeter';
 import { StatusPill } from '../components/StatusPill';
 import { MomentField } from '../components/MomentField';
+import { PullRequestLink } from '../components/PullRequestLink';
 import { TypeBadge } from '../components/TypeBadge';
 import { statusVars } from '../lib/color';
 import { message } from '../lib/errors';
@@ -150,6 +151,7 @@ export function IssuePage() {
             {issue.parentKey && <Link to={`/issues/${issue.parentKey}`}>↳ {issue.parentKey}</Link>}
             <MomentChip kind="ready" value={issue.readyAt} />
             <MomentChip kind="due" value={issue.dueAt} muted={terminal} />
+            <PullRequestLink url={issue.pullRequestUrl} />
             <span className="text-muted">
               filed by {issue.createdBy} on {new Date(issue.createdAt).toLocaleDateString()}
             </span>
