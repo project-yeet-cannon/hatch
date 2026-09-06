@@ -57,7 +57,10 @@
 #   ./hatch.sh work --dry-run         # print the prompt, spawn nothing
 #   ./hatch.sh go-to-work             # increments, back to back, until told to stop
 #   ./hatch.sh go-to-work --once      # ...one pass, and out
-#   ./hatch.sh go-to-work --under AER-1
+#   ./hatch.sh go-to-work --under AER-1     # ...inside one epic, all night
+#   ./hatch.sh go-to-work --quiet --interval 300
+#   ./hatch.sh go-to-work --max-runs 5 --max-spend 20 --until 08:00
+#   ./hatch.sh go-to-work --stop-file /tmp/stop   # touch it to end the loop
 #   ./hatch.sh api GET /api/hatch/issues?statusId=2
 #   ./hatch.sh api PATCH /api/hatch/issues/AER-12 '{"dueAt":"2026-10-01"}'
 #
@@ -1021,6 +1024,22 @@ INC_SESSION=""  # what `claude --resume` takes
 INC_COST=""     # dollars, out of the result event
 INC_EXIT=0      # what the CLI exited with
 INC_ASKED=0     # questions the session opened on its way out
+INC_PENDING=0   # set once the increment is under way, cleared once it is counted
+INC_FACTS=""    # the file the renderer leaves the session id and the cost in
+
+# The session id and what the run cost, out of the file the renderer wrote them
+# to. Also called from the exit trap, for the increment an interrupt landed on:
+# a session that was cut short still had a session id and still sent a bill.
+read_facts() {
+  [ -n "$INC_FACTS" ] || return 0
+
+  if [ -f "$INC_FACTS" ]; then
+    INC_SESSION=$(sed -n 's/^session=//p' "$INC_FACTS" | tail -1)
+    INC_COST=$(sed -n 's/^cost=//p' "$INC_FACTS" | tail -1)
+    rm -f "$INC_FACTS"
+  fi
+  INC_FACTS=""
+}
 
 # One increment: the header, the session, and what became of the ticket.
 #
@@ -1043,6 +1062,8 @@ run_increment() {
   INC_COST=""
   INC_EXIT=0
   INC_ASKED=0
+  INC_PENDING=0
+  INC_FACTS=""
 
   bin=$(claude_bin)
   root=$(repo_root)
@@ -1062,6 +1083,13 @@ run_increment() {
   # removed on the way out: it is one run's scratch, and it belongs neither in
   # the repository nor in the next increment.
   facts=$(mktemp "${TMPDIR:-/tmp}/hatch-run.XXXXXX")
+  INC_FACTS="$facts"
+
+  # From here an interrupt must not lose the run. Bash holds a pending handler
+  # until the spawn it is waiting on returns and then runs it immediately - a
+  # statement before anything below could have counted this - so the counting
+  # has to be something the trap can finish on its own.
+  INC_PENDING=1
 
   # bypassPermissions because in print mode nothing can answer a prompt: any
   # permission this did not anticipate becomes a silent denial in the middle of
@@ -1113,9 +1141,7 @@ run_increment() {
     INC_EXIT=${codes[1]}
   fi
 
-  INC_SESSION=$(sed -n 's/^session=//p' "$facts" | tail -1)
-  INC_COST=$(sed -n 's/^cost=//p' "$facts" | tail -1)
-  rm -f "$facts"
+  read_facts
 
   # Where the ticket actually ended up, asked of the board rather than of the
   # session. An increment that says it did the work and leaves the ticket in the
@@ -1391,6 +1417,158 @@ work_pass() {
   run_increment "$work" "$model" "$effort" "$quiet"
 }
 
+# ---- Ending, and saying what happened ----
+
+# Everything the loop has to stop for, and none of them set by default. An
+# unattended run that stopped for a reason nobody asked for would be a run
+# somebody has to check on, which is the thing being built away from.
+MAX_RUNS=""    # --max-runs N
+MAX_SPEND=""   # --max-spend USD
+UNTIL=""       # --until HH:MM, as typed
+UNTIL_AT=""    # ...and as an instant
+STOP_FILE=""   # --stop-file PATH
+
+# The tally, accumulated as the loop goes rather than reconstructed at the end -
+# because an interrupted run has to be able to print it too, and an interrupted
+# run is exactly the one with nothing left to reconstruct from.
+STARTED=0
+RUNS=0
+SPENT=0
+MOVED_LINES=""
+STALLED_LINES=""
+FAILS=0        # increments that exited non-zero, in a row
+FAIL_KEYS=""   # ...and which
+STOP_WHY=""    # the sentence naming what ended the run
+
+# Dollars, the way a bill is written.
+money() { awk -v v="$1" 'BEGIN { printf "%.2f", v }'; }
+
+# HH:MM today, or tomorrow if that hour has already gone by - somebody who says
+# `--until 06:00` at eleven at night means the morning, and a loop that read it
+# as "seventeen hours ago" would stop before it started. BSD date first because
+# this file is Bash 3.2 for macOS's sake; GNU date behind it, for everywhere
+# else.
+at_clock() {
+  local hhmm="$1" today ts
+  today=$(date +%Y-%m-%d)
+  ts=$(date -j -f '%Y-%m-%d %H:%M' "${today} ${hhmm}" +%s 2>/dev/null) ||
+    ts=$(date -d "${today} ${hhmm}" +%s 2>/dev/null) ||
+    return 1
+  [ "$ts" -gt "$(date +%s)" ] || ts=$((ts + 86400))
+  echo "$ts"
+}
+
+# Whether this run is over, and why - asked before every increment and through
+# every wait. One function, because "every exit path" is not something several
+# call sites can promise between them.
+should_stop() {
+  STOP_WHY=""
+
+  # First, because it is the one that says something is wrong rather than
+  # something is finished.
+  if [ "$FAILS" -ge 3 ]; then
+    STOP_WHY="three increments in a row failed: ${FAIL_KEYS}"
+    return 0
+  fi
+
+  # A file, so that stopping a loop needs nothing but a shell and a path - no
+  # pid to find, no signal to send, and nothing that could land in the middle
+  # of a push. The increment in flight finishes first; this is only ever read
+  # between them.
+  if [ -n "$STOP_FILE" ] && [ -e "$STOP_FILE" ]; then
+    STOP_WHY="${STOP_FILE} exists"
+    return 0
+  fi
+
+  if [ -n "$MAX_RUNS" ] && [ "$RUNS" -ge "$MAX_RUNS" ]; then
+    STOP_WHY="--max-runs ${MAX_RUNS} reached"
+    return 0
+  fi
+
+  if [ -n "$MAX_SPEND" ] && awk -v s="$SPENT" -v m="$MAX_SPEND" 'BEGIN { exit !(s + 0 >= m + 0) }'; then
+    STOP_WHY="--max-spend ${MAX_SPEND} reached at \$$(money "$SPENT")"
+    return 0
+  fi
+
+  if [ -n "$UNTIL_AT" ] && [ "$(date +%s)" -ge "$UNTIL_AT" ]; then
+    STOP_WHY="--until ${UNTIL} has come"
+    return 0
+  fi
+
+  return 1
+}
+
+# Waiting, in slices, so that a stop file dropped during a wait is noticed then
+# rather than an interval later, and an --until at three in the morning lands at
+# three in the morning however long the interval is.
+nap() {
+  local left="$1" slice
+  while [ "$left" -gt 0 ]; do
+    slice=5
+    [ "$left" -ge 5 ] || slice="$left"
+    sleep "$slice"
+    left=$((left - slice))
+    ! should_stop || return 1
+  done
+  return 0
+}
+
+# One increment, added to the run's account.
+#
+# Called by the loop when an increment finishes, and by the exit trap when an
+# interrupt landed between the two - bash runs a pending handler the moment the
+# spawn it was waiting on returns, which is one statement before the loop gets
+# to count it.
+record_increment() {
+  [ "$INC_PENDING" = 1 ] || return 0
+  INC_PENDING=0
+  read_facts
+
+  RUNS=$((RUNS + 1))
+  [ -z "$INC_COST" ] || SPENT=$(awk -v a="$SPENT" -v b="$INC_COST" 'BEGIN { printf "%.6f", a + b }')
+
+  if [ "$INC_MOVED" = 1 ]; then
+    MOVED_LINES="${MOVED_LINES}hatch:   moved    ${INC_KEY}  ${INC_FROM} -> ${INC_ENDED}
+"
+  else
+    STALLED_LINES="${STALLED_LINES}hatch:   stalled  ${INC_KEY}  still in \"${INC_ENDED}\"
+"
+  fi
+
+  # A failed increment is not a reason to stop - a ticket can be wrong, or a
+  # test can be flaky, and the next ticket is a different question. Three in a
+  # row is something else: whatever is broken is broken for every ticket, and
+  # the loop is now spending money to prove it.
+  if [ "$INC_EXIT" -ne 0 ]; then
+    FAILS=$((FAILS + 1))
+    FAIL_KEYS="${FAIL_KEYS}${FAIL_KEYS:+, }${INC_KEY} (exit ${INC_EXIT})"
+  else
+    FAILS=0
+    FAIL_KEYS=""
+  fi
+}
+
+# What the run came to. Printed from the EXIT trap and nowhere else, because
+# the reasons a loop ends include the ones nobody wrote code for - an interrupt,
+# a failure, a terminal closing - and those are precisely the runs whose tally
+# somebody needs.
+print_tally() {
+  local elapsed
+  elapsed=$(( $(date +%s) - STARTED ))
+
+  echo
+  [ -z "$STOP_WHY" ] || echo "hatch: ${STOP_WHY}"
+  echo "hatch: ${RUNS} increment(s) in $(duration "$elapsed"), \$$(money "$SPENT")"
+  [ -z "$MOVED_LINES" ]   || printf '%s' "$MOVED_LINES"
+  [ -z "$STALLED_LINES" ] || printf '%s' "$STALLED_LINES"
+}
+
+go_to_work_ends() {
+  drop_lock
+  record_increment
+  print_tally
+}
+
 # The command this epic is named for: pick the next actionable issue, spend one
 # increment on it, and do it again.
 #
@@ -1402,12 +1580,16 @@ cmd_go_to_work() {
 
   while [ $# -gt 0 ]; do
     case "$1" in
-      --under)    under="${2:?--under needs a key}"; shift 2 ;;
-      --interval) interval="${2:?--interval needs a number of seconds}"; shift 2 ;;
-      --once)     once=1; shift ;;
-      --quiet)    quiet=1; shift ;;
-      -*)         echo "hatch: go-to-work does not take $1" >&2; exit 1 ;;
-      *)          key="$1"; shift ;;
+      --under)      under="${2:?--under needs a key}"; shift 2 ;;
+      --interval)   interval="${2:?--interval needs a number of seconds}"; shift 2 ;;
+      --once)       once=1; shift ;;
+      --quiet)      quiet=1; shift ;;
+      --max-runs)   MAX_RUNS="${2:?--max-runs needs a count}"; shift 2 ;;
+      --max-spend)  MAX_SPEND="${2:?--max-spend needs an amount in dollars}"; shift 2 ;;
+      --until)      UNTIL="${2:?--until needs HH:MM}"; shift 2 ;;
+      --stop-file)  STOP_FILE="${2:?--stop-file needs a path}"; shift 2 ;;
+      -*)           echo "hatch: go-to-work does not take $1" >&2; exit 1 ;;
+      *)            key="$1"; shift ;;
     esac
   done
 
@@ -1425,23 +1607,52 @@ cmd_go_to_work() {
     exit 1
   fi
 
-  case "$interval" in ''|*[!0-9]*) echo "hatch: --interval takes a number of seconds" >&2; exit 1 ;; esac
+  # Zero is refused rather than clamped: it reads as "as fast as possible" and
+  # means a board asked the same question thousands of times a minute.
+  case "$interval" in ''|*[!0-9]*|0) echo "hatch: --interval takes a number of seconds, at least one" >&2; exit 1 ;; esac
+  [ -z "$MAX_RUNS" ] || case "$MAX_RUNS" in ''|*[!0-9]*) echo "hatch: --max-runs takes a count" >&2; exit 1 ;; esac
+  [ -z "$MAX_SPEND" ] || case "$MAX_SPEND" in ''|*[!0-9.]*) echo "hatch: --max-spend takes an amount in dollars" >&2; exit 1 ;; esac
+
+  # Read before anything is spawned. A wrong clock discovered at the end of the
+  # night is a stop condition that never applied.
+  if [ -n "$UNTIL" ]; then
+    UNTIL_AT=$(at_clock "$UNTIL") || { echo "hatch: --until takes a wall-clock time, as HH:MM" >&2; exit 1; }
+  fi
+
+  # A stop file that is already there would end the loop before its first
+  # increment, silently, and look exactly like a board with nothing on it.
+  if [ -n "$STOP_FILE" ] && [ -e "$STOP_FILE" ]; then
+    echo "hatch: ${STOP_FILE} already exists - that is the stop signal, so nothing would run. Remove it, or name another path." >&2
+    exit 1
+  fi
 
   take_lock || exit 1
-  trap 'drop_lock' EXIT
+
+  STARTED=$(date +%s)
+
+  # Every way out through one door. INT and TERM are named rather than left to
+  # bash, because a signal the shell does not trap kills it outright - and the
+  # run that ends in an interrupt is the one whose tally is most worth having.
+  trap 'go_to_work_ends' EXIT
+  trap 'STOP_WHY="interrupted"; exit 130' INT
+  trap 'STOP_WHY="terminated"; exit 143' TERM
 
   while :; do
+    if should_stop; then break; fi
+
     outcome=0
     work_pass "$under" "$quiet" || outcome=$?
 
     case "$outcome" in
       0)
         idle_since=0
+        record_increment
+
         echo
         if [ "$INC_MOVED" = 1 ]; then
-          echo "hatch: ${INC_KEY} moved, ${INC_FROM} -> ${INC_ENDED}"
+          echo "hatch: ${INC_KEY} moved, ${INC_FROM} -> ${INC_ENDED}  (${RUNS} increment(s), \$$(money "$SPENT"))"
         else
-          echo "hatch: ${INC_KEY} did not move - still in \"${INC_ENDED}\""
+          echo "hatch: ${INC_KEY} did not move - still in \"${INC_ENDED}\"  (${RUNS} increment(s), \$$(money "$SPENT"))"
         fi
         ;;
 
@@ -1470,11 +1681,11 @@ cmd_go_to_work() {
 
     # `--once` is the loop's own dry run against a board that is not a fixture:
     # one pass, whatever it found, and out.
-    [ "$once" = 0 ] || break
+    [ "$once" = 0 ] || { STOP_WHY="--once, and the pass is done"; break; }
 
     # An increment that ran is followed by the next one immediately. The
     # interval is what to do when there was nothing to do.
-    [ "$outcome" = 0 ] || sleep "$interval"
+    [ "$outcome" = 0 ] || nap "$interval" || break
   done
 }
 
