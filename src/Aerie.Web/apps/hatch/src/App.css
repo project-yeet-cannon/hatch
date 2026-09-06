@@ -224,6 +224,114 @@
   letter-spacing: 0.01em;
 }
 
+/* ---- The status meter ----
+
+   One bar that says where the bulk of a subtree is sitting: a segment per
+   column, in that column's colour, sized by how many leaves are in it. Drawn
+   from the same --status-color and --status-ink the pills above are, so a
+   colour is decided once (lib/color.ts) and read everywhere.
+
+   Sizes are the two places it appears: `sm` on a list row, where it is one
+   cell among several and has to stay out of the way of the title beside it,
+   and `lg` on a page, where the meter is what the page is about. */
+.hatch-meter {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+/* overflow hidden so the rounded ends actually cut the first and last
+   segments, rather than the segments squaring off the corners of the bar. */
+.hatch-meter-bar {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+  border-radius: var(--r-chip);
+}
+
+.hatch-meter-sm .hatch-meter-bar {
+  height: 6px;
+}
+
+.hatch-meter-lg .hatch-meter-bar {
+  height: 20px;
+  border-radius: var(--r-ctl);
+}
+
+/* flex-grow is set inline, from the count. flex-basis is 0 so growth is the
+   only thing dividing the bar, and min-width is the floor that keeps one task
+   out of two hundred a visible sliver rather than a sub-pixel nothing. */
+.hatch-meter-segment {
+  flex-basis: 0;
+  min-width: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--status-color);
+  color: var(--status-ink);
+}
+
+/* The hairline between two segments, in the surface colour so it reads as a
+   gap rather than as a line drawn on purpose.
+
+   Load-bearing: a column keeps the default grey until somebody paints it on
+   the Statuses page, and a bar of adjacent greys with no divider reads as one
+   undifferentiated block - which is the one thing this bar exists not to be. */
+.hatch-meter-segment + .hatch-meter-segment {
+  border-left: 1px solid var(--card);
+}
+
+/* Only on `lg`, and only where the segment is wide enough to hold it - see
+   StatusMeter.tsx. The ink is the one computed for this fill, never a token,
+   because the fill is the operator's to choose. */
+.hatch-meter-segment-count {
+  padding: 0 var(--sp-1);
+  font-size: var(--t-micro);
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.hatch-meter-counts {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--t-label);
+  color: var(--muted);
+}
+
+.hatch-meter-lg .hatch-meter-counts {
+  font-size: var(--t-body);
+}
+
+.hatch-meter-done {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The headline number, and the only part of the row drawn in full ink. */
+.hatch-meter-percent {
+  color: var(--ink);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Questions nobody has answered, anywhere below this issue. The same warn
+   colours the board's asking badge wears, for the same reason: this is not
+   information, it is something owed, and it is why the bar has stopped. */
+.hatch-meter-waiting {
+  padding: 0 var(--sp-1-5);
+  border-radius: var(--r-pill);
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+  font-size: var(--t-micro);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 /* Said quietly under a filtered column, because a short column and a filtered
    one look identical and the difference matters. */
 .hatch-column-hidden {
