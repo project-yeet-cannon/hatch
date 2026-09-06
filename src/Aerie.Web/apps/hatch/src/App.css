@@ -880,6 +880,51 @@
   gap: var(--sp-3);
 }
 
+/* ---- Progress, on the issue page ----
+
+   What an epic or a story adds up to, and a line per direct child: the child's
+   own meter where it has children, its status pill where it is a leaf. The
+   card the plain list of child keys grew into.
+
+   Rules rather than a separator per row: the lines are what makes a stack of
+   twelve stories read as a table of them. */
+.hatch-progress-list {
+  list-style: none;
+  margin: var(--sp-4) 0 0;
+  padding: 0;
+}
+
+.hatch-progress-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--line);
+}
+
+.hatch-progress-title {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The right-hand cell, whichever of the two it is. Pushed right so it stays
+   there when a long title wraps the row onto a second line, and the meter is a
+   fixed width rather than a shrink-to-fit one so a card full of stories shares
+   one left edge for its bars - a ragged column of bars cannot be read across,
+   which is the only reason to put twelve of them in a list. */
+.hatch-progress-row > .hatch-meter {
+  flex: 0 0 16rem;
+  margin-left: auto;
+}
+
+.hatch-progress-row > .hatch-status-pill,
+.hatch-progress-row > .text-muted {
+  margin-left: auto;
+}
+
 .hatch-comment {
   border-top: 1px solid var(--line);
   padding-top: var(--sp-3);

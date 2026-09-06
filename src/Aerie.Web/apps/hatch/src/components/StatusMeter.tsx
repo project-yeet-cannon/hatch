@@ -28,12 +28,17 @@ export function StatusMeter({
   statuses,
   size = 'sm',
   counts = false,
+  waiting = true,
 }: {
   rollup: Rollup;
   statuses: Status[];
   size?: StatusMeterSize;
   /** Print `12 / 43`, the percentage, and anything waiting, beside the bar. */
   counts?: boolean;
+  /** Say what is waiting below, where `counts` is on. Off where the row around
+      the meter already says it in a fixed place of its own - see the Progress
+      card on IssuePage, which has to put it somewhere a leaf can wear it too. */
+  waiting?: boolean;
 }) {
   const segments = meterSegments(rollup, statuses);
 
@@ -74,7 +79,7 @@ export function StatusMeter({
           {/* The one thing that stops a subtree moving. Nothing below this
               issue can advance while somebody owes it a decision, so it is
               said in the same warn colours a question wears on the board. */}
-          {rollup.waiting > 0 && (
+          {waiting && rollup.waiting > 0 && (
             <span
               className="hatch-meter-waiting"
               title={`${rollup.waiting} unanswered question${rollup.waiting === 1 ? '' : 's'} below this`}

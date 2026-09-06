@@ -8,9 +8,11 @@ import {
   getComments,
   getEvents,
   getIssue,
+  getIssuePlan,
   patchIssue,
 } from '../api/client';
 import { MomentChip } from '../components/MomentChip';
+import { StatusMeter } from '../components/StatusMeter';
 import { StatusPill } from '../components/StatusPill';
 import { MomentField } from '../components/MomentField';
 import { TypeBadge } from '../components/TypeBadge';
@@ -19,7 +21,17 @@ import { message } from '../lib/errors';
 import { renderMarkdown } from '../lib/markdown';
 import { openQuestions } from '../lib/questions';
 import { ISSUE_TYPES, LEGAL_PARENT_TYPES } from '../types';
-import type { Board, Comment, Issue, IssueEvent, IssueType, QuestionOption, Status } from '../types';
+import type {
+  Board,
+  ChildRollup,
+  Comment,
+  Issue,
+  IssueEvent,
+  IssueRollup,
+  IssueType,
+  QuestionOption,
+  Status,
+} from '../types';
 
 export function IssuePage() {
   const { key = '' } = useParams();
@@ -30,8 +42,20 @@ export function IssuePage() {
   const [comments, setComments] = useState<Comment[]>([]);
   const [events, setEvents] = useState<IssueEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [rollup, setRollup] = useState<IssueRollup | null>(null);
+  const [rollupError, setRollupError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    /* The fifth read, sent with the other four and awaited apart from them.
+       The four are what the page is made of and share one failure; the rollup
+       is one card on it, so its failure is caught here and handed to that card
+       instead of blanking an issue somebody came here to read. Handlers are
+       attached at the call, so a rejection is never loose. */
+    const rolling = getIssuePlan(key).then(
+      (loaded) => ({ loaded, failure: null as string | null }),
+      (err: unknown) => ({ loaded: null, failure: message(err) }),
+    );
+
     try {
       const [loaded, loadedBoard, loadedComments, loadedEvents] = await Promise.all([
         getIssue(key),
@@ -47,6 +71,10 @@ export function IssuePage() {
     } catch (err) {
       setError(message(err));
     }
+
+    const settled = await rolling;
+    setRollup(settled.loaded);
+    setRollupError(settled.failure);
   }, [key]);
 
   useEffect(() => {
@@ -173,17 +201,15 @@ export function IssuePage() {
 
       <Description issue={issue} onSave={(description) => void save({ description })} />
 
+      {/* Only where something is filed under it. A task's meter, and an epic
+          nobody has put anything under, could read 0% or 100% and nothing
+          else - which says less than the status band already above it.
+
+          Gated on childKeys, which arrived with the issue, rather than on the
+          rollup: the card is either there from the first paint or not at all,
+          instead of appearing under the reader a moment later. */}
       {issue.childKeys.length > 0 && (
-        <Card>
-          <h2 className="hatch-section-title">Children</h2>
-          <ul className="hatch-child-list">
-            {issue.childKeys.map((child) => (
-              <li key={child}>
-                <Link to={`/issues/${child}`}>{child}</Link>
-              </li>
-            ))}
-          </ul>
-        </Card>
+        <Progress rollup={rollup} error={rollupError} statuses={board.statuses} />
       )}
 
       <Comments issueKey={key} comments={comments} onAdded={() => void load()} onError={setError} />
@@ -243,6 +269,96 @@ function StatusBar({
         })}
       </div>
     </section>
+  );
+}
+
+/**
+ * How far along this issue is, and what it is made of.
+ *
+ * The card an epic or a story grows the moment something is filed under it: the
+ * whole subtree's meter across the top, and a line per direct child beneath.
+ *
+ * It replaces the list of child keys this card used to be rather than sitting
+ * beside it. Two lists of the same children on one page is one list going
+ * stale, and the keys are still here - each row starts with one.
+ */
+function Progress({
+  rollup,
+  error,
+  statuses,
+}: {
+  rollup: IssueRollup | null;
+  error: string | null;
+  statuses: Status[];
+}) {
+  return (
+    <Card>
+      <h2 className="hatch-section-title">Progress</h2>
+
+      {/* Said here, where the thing that failed was going to be. The rest of
+          the page is already readable without it, so this is not the page's
+          error - and it is not nothing, either, which is what a card that
+          quietly stayed empty would be. */}
+      {error && <p className="text-danger">{error}</p>}
+      {!rollup && !error && <p className="text-muted">Loading…</p>}
+
+      {rollup && (
+        <>
+          <StatusMeter rollup={rollup.rollup} statuses={statuses} size="lg" counts />
+
+          {/* Rank order, as the server sent them - the order they sit in on the
+              board's column, so the two screens agree about what is next. */}
+          <ul className="hatch-progress-list">
+            {rollup.children.map((child) => (
+              <ChildRow key={child.issue.key} child={child} statuses={statuses} />
+            ))}
+          </ul>
+        </>
+      )}
+    </Card>
+  );
+}
+
+/** One direct child: what it is, and either how far along it is or where it sits. */
+function ChildRow({ child, statuses }: { child: ChildRollup; statuses: Status[] }) {
+  const status = statuses.find((s) => s.id === child.issue.statusId);
+  const waiting = child.rollup.waiting;
+
+  return (
+    <li className="hatch-progress-row">
+      <Link to={`/issues/${child.issue.key}`} className="hatch-plan-key">
+        {child.issue.key}
+      </Link>
+      <TypeBadge type={child.issue.type} />
+      <span className="hatch-progress-title">{child.issue.title}</span>
+
+      {/* Somebody owes an answer at or below this child, which is why the bar
+          above has stopped. Worn by the row rather than printed inside the
+          meter's counts, so it is in the same place on a leaf - which has no
+          meter to put it in and is exactly the row most likely to be the one
+          holding everything up. */}
+      {waiting > 0 && (
+        <span
+          className="hatch-meter-waiting"
+          title={`${waiting} unanswered question${waiting === 1 ? '' : 's'} at or below ${child.issue.key}`}
+        >
+          waiting
+        </span>
+      )}
+
+      {/* isLeaf decides, not the shape of the numbers: a story with one task
+          and a task with none both roll up to a single leaf, and only one of
+          them has a bar worth drawing. */}
+      {child.isLeaf ? (
+        status ? (
+          <StatusPill status={status} />
+        ) : (
+          <span className="text-muted">unknown</span>
+        )
+      ) : (
+        <StatusMeter rollup={child.rollup} statuses={statuses} size="sm" counts waiting={false} />
+      )}
+    </li>
   );
 }
 
