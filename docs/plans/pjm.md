@@ -47,7 +47,9 @@ document becomes its first migrated epic.
 
 ## Non-goals (MVP)
 
-- No reporting or metrics screens (events are recorded, not rendered).
+- No reporting or metrics screens (events are recorded, not rendered). *(A Plan
+  view of every epic's progress landed after the plan — see [After the
+  plan](#after-the-plan). Events are still recorded rather than rendered.)*
 - No filtration, swimlanes, sprints, WIP limits, or board configuration beyond
   statuses-as-columns. *(Board filtering and a bulk editor landed after the
   plan — see [After the plan](#after-the-plan). Swimlanes, sprints and WIP
@@ -615,6 +617,46 @@ that the board and the dispatcher can act on.
   open, and the dispatch is a command the operator types. A second scope minted
   for agents would close it properly, and is not worth a column until somebody
   wants it.
+
+### The level above the board
+
+The board shows every card, which is the one thing it cannot do: say which of
+the running projects is nearest the line. A **Plan** view answers that, and its
+shape came from two decisions that were the operator's to make rather than the
+implementer's.
+
+- **The unit is the leaf, and every leaf weighs the same.** A subtree's total
+  is the histogram of its leaf descendants by status; an issue with no children
+  counts as itself, one leaf in its own column. The alternative on the table
+  was child-weighted — each story 1/n of its epic whatever its size — which
+  makes nested meters agree by construction but says a twenty-task story and a
+  two-task one are the same size. They are not, and the bar is there to say how
+  much work is left. The agreement comes for free anyway: a parent's total is
+  exactly the sum of its children's, and a test pins it.
+- **The bar shows the distribution across the columns, not a filled fraction.**
+  One stacked segment per status, in the colour the operator painted that
+  column, so where the bulk sits reads at a glance — an epic whose every story
+  is in review looks nothing like one whose every story is in todo, and a
+  single fill would have drawn both as 0%. It also disposes of the
+  partial-credit question underneath it: nothing has to invent a score per
+  column when every column is drawn.
+- **`GET /api/hatch/plan` and `/api/hatch/plan/{key}`.** Every epic and where
+  it stands in one request; and one subtree with each of its direct children
+  carrying its own total, which is what the issue page draws. `Rollup` loads
+  the tracker once and folds post-order — O(n) for the tree rather than a walk
+  per node — because the Plan page asks about every epic in the house at once.
+  Server-side for the reason the rank and the dispatcher's pick are: a browser
+  that re-derived a total would disagree with the CLI the first time a column
+  was added.
+- **`StatusMeter`, drawn on three screens.** The Plan page, an epic's row, and
+  the progress card on an issue. A subtree with nothing filed under it draws no
+  bar rather than an empty trough — an epic with no stories is at the start of
+  its life, not stalled at the bottom of one.
+- **Plan is a nav item and `/` stays the board.** *Narrows "no reporting or
+  metrics screens".* The plan is the screen you open to choose what to further;
+  the board is the one you live on. `work --under AER-12` is the other half of
+  that journey — the same right-to-left pick, asked of one epic's subtree — so
+  choosing a project and moving it forward is two commands and no guess.
 
 ## Phase 7 — Migrate and dissipate
 

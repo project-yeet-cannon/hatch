@@ -171,6 +171,39 @@ the same edit writes nothing, so it is safe to run twice.
 Prefer it to a loop of `PATCH`es when moving a whole epic's worth of work: one
 request, one audit timestamp, and one place to read what did not apply.
 
+### Where a project stands
+
+Two reads answer "how far along is this" without walking the tree yourself:
+
+```
+GET  ${AERIE_BASE}/api/hatch/plan             # every epic, and what it adds up to
+GET  ${AERIE_BASE}/api/hatch/plan/AER-12      # one issue, and each of its children
+```
+
+A **leaf** is an issue with no children, and it is the unit both of them count:
+a subtree's total is the histogram of its leaf descendants by status, and an
+issue with no children counts as itself, one leaf in its own column. So a
+parent's total is exactly the sum of its children's, and a stack of them agrees
+with the one above it. A parent's own column never lands in its own total — a
+story sitting in review whose tasks are all in todo reads as todo, because the
+tasks are the work — and ready dates are not consulted, because a card folded
+off the board is still work.
+
+Every total is the same shape: `leaves`, `done` (the leaves in a terminal
+column), `waiting` (open questions on the issue and everything below it), and
+`slices`, one `{ statusId, count }` per column in board order with the empty
+ones left out.
+
+`/api/hatch/plan` answers with `epics` — the ones with no parent, each carrying
+the epics beneath it, so the tree is drawn once — and `loose`, the total of
+everything hanging under no epic at all. `?projectId=` narrows both halves.
+`/api/hatch/plan/{key}` answers with the issue's own total and its direct
+children in rank order, each with its own; a child's `isLeaf` says whether it
+has work beneath it or is the work.
+
+Read the plan when the question is *which* project to further; then
+`work --under AER-12` takes the next thing inside the one you picked.
+
 ### Planning a ticket
 
 A planning session leaves the plan **on the ticket**, not in a chat log:
