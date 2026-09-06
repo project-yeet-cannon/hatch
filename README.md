@@ -20,6 +20,45 @@ change land.
 
 [http://localhost:5197/swagger](http://localhost:5197/swagger) for swagger.
 
+## The web apps
+
+Everything with a screen lives in `src/Aerie.Web`, which is **one npm
+workspace** — one `package-lock.json`, one `node_modules`, and every app with
+a build step a member of it:
+
+```
+src/Aerie.Web/
+  apps/       admin  auth  chrome  dashboard  design  docs
+              family  hatch  home  logo  modeler  trading
+  packages/   ui     @aerie/ui  — the design system: tokens, day/night, components
+              lib    @aerie/lib — the framework-free logic more than one app needs
+```
+
+The apps are not independent, and that is the point. They share a vocabulary of
+tokens, one top bar, one theme choice and one set of primitives out of
+`@aerie/ui`, so a color or a radius is changed in one file and every app changes
+with it. `@aerie/lib` holds the logic two apps had already duplicated and drifted
+apart on. What is a token, how an app adopts the library, how the gallery at
+`/apps/design` is extended, and the six places a *new* app has to be plumbed
+into are all in
+[docs/design-system-architecture.md](docs/design-system-architecture.md).
+
+Build them the way CI does — `make build` builds the API and the apps it
+serves, `make test-web` lints, tests and builds every one of them in turn. Both
+go through `make` rather than a bare `dotnet` because the npm step needs the
+shell profile.
+
+For a single app, `npm install` once at any depth in the tree installs all of
+them, and then:
+
+```
+cd src/Aerie.Web
+npm run dev -w apps/design      # or admin, home, hatch, ...
+```
+
+Editing `packages/ui` hot-reloads into whatever app is open: the packages have
+no build step, and the app's Vite bundles their source.
+
 ## Dependencies
 
 - Docker

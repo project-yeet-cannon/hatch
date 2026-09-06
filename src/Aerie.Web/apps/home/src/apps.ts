@@ -9,8 +9,9 @@
  *
  * The icons are emoji, carried across from the static page this app replaced.
  * They are placeholders in the same sense every other value here is: what
- * Aerie's iconography should be is Phase 6's to answer (docs/plans/
- * design-system-mvp.md), and a set drawn now would be a set drawn twice.
+ * Aerie's iconography should be is the design pass's to answer
+ * (docs/design-system-architecture.md), and a set drawn now would be a set
+ * drawn twice.
  */
 
 export interface AppEntry {

@@ -4,10 +4,11 @@ The design gallery: every token and component in `@aerie/ui`, on a page you can
 browse, in both themes.
 
 This app is a workbench rather than a product surface. It is the artifact the
-design pass (`docs/plans/design-system-mvp.md`, Phase 6) is handed, and it
-exists so that every component built afterwards is developed here — against its
-own states, in both themes — rather than inside a page of admin where only the
-happy path is visible.
+design pass
+([`docs/design-system-architecture.md`](../../../../docs/design-system-architecture.md))
+is handed, and it exists so that every component built afterwards is developed
+here — against its own states, in both themes — rather than inside a page of
+admin where only the happy path is visible.
 
 ## What is in it
 
