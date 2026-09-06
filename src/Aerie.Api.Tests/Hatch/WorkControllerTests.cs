@@ -23,10 +23,10 @@ public class WorkControllerTests
     public async Task NextWork_TakesTheRightmostColumnBeforeTheLeftmost()
     {
         var h = await NewAsync();
-        await h.FileAsync("task", "sitting in todo", h.Todo);
-        var advanced = await h.FileAsync("task", "already underway", h.InProgress);
+        await h.FileAsync("story", "sitting in todo", h.Todo);
+        var advanced = await h.FileAsync("story", "already underway", h.InProgress);
 
-        var work = Value(await h.Work.GetNextWork(0, null, default));
+        var work = Value(await h.Work.GetNextWork(0, null, null, default));
 
         // Both are workable. The one nearer the end of the board wins, because
         // a board worked left to right starts everything and finishes nothing.
@@ -38,46 +38,46 @@ public class WorkControllerTests
     public async Task NextWork_TakesTheTopOfTheColumn()
     {
         var h = await NewAsync();
-        var first = await h.FileAsync("task", "top", h.Todo, rank: 1024);
-        await h.FileAsync("task", "below it", h.Todo, rank: 2048);
+        var first = await h.FileAsync("story", "top", h.Todo, rank: 1024);
+        await h.FileAsync("story", "below it", h.Todo, rank: 2048);
 
-        Assert.Equal(Key(first), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
+        Assert.Equal(Key(first), Value(await h.Work.GetNextWork(0, null, null, default)).Issue.Key);
     }
 
     [Fact]
     public async Task NextWork_SkipsAnIssueWhoseReadyDateHasNotArrived()
     {
         var h = await NewAsync();
-        await h.FileAsync("task", "waiting on a renewal", h.Todo, rank: 1024, readyAt: Now.AddDays(3));
-        var workable = await h.FileAsync("task", "can start now", h.Todo, rank: 2048);
+        await h.FileAsync("story", "waiting on a renewal", h.Todo, rank: 1024, readyAt: Now.AddDays(3));
+        var workable = await h.FileAsync("story", "can start now", h.Todo, rank: 2048);
 
         // The folded card is above it and is passed over anyway - the board
         // hides it for the same reason (schedule.ts).
-        Assert.Equal(Key(workable), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
+        Assert.Equal(Key(workable), Value(await h.Work.GetNextWork(0, null, null, default)).Issue.Key);
     }
 
     [Fact]
     public async Task NextWork_TakesAnIssueReadyLaterToday()
     {
         var h = await NewAsync();
-        var today = await h.FileAsync("task", "ready at five", h.Todo, readyAt: Now.AddHours(5));
+        var today = await h.FileAsync("story", "ready at five", h.Todo, readyAt: Now.AddHours(5));
 
         // Ready from the start of the day it names, whatever hour was set: a
         // ticket that becomes workable at 5pm is not one nobody may look at
         // over breakfast.
-        Assert.Equal(Key(today), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
+        Assert.Equal(Key(today), Value(await h.Work.GetNextWork(0, null, null, default)).Issue.Key);
     }
 
     [Fact]
     public async Task NextWork_SaysNothingWhenTheOnlyWorkLeftIsTheOperatorsToJudge()
     {
         var h = await NewAsync();
-        await h.FileAsync("task", "waiting on a human", h.Review);
-        await h.FileAsync("task", "shipped", h.Done);
+        await h.FileAsync("story", "waiting on a human", h.Review);
+        await h.FileAsync("story", "shipped", h.Done);
 
         // Review's only exit is terminal and done has no exit at all, so an
         // unattended run has nothing it may do - which is a 204, not a card.
-        Assert.IsType<NoContentResult>((await h.Work.GetNextWork(0, null, default)).Result);
+        Assert.IsType<NoContentResult>((await h.Work.GetNextWork(0, null, null, default)).Result);
     }
 
     // ---- One corner of the board ----
@@ -88,25 +88,25 @@ public class WorkControllerTests
         var h = await NewAsync();
         var mine = await h.FileAsync("epic", "the one I am pushing", h.Todo, rank: 4096);
         var story = await h.FileAsync("story", "under mine", h.Todo, rank: 2048, parentId: mine.Id);
-        var elsewhere = await h.FileAsync("task", "another epic's, and above it", h.Todo, rank: 1024);
+        var elsewhere = await h.FileAsync("story", "another epic's, and above it", h.Todo, rank: 1024);
 
         // Unscoped this is the top of the column and would win outright.
-        Assert.Equal(Key(elsewhere), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
+        Assert.Equal(Key(elsewhere), Value(await h.Work.GetNextWork(0, null, null, default)).Issue.Key);
 
-        Assert.Equal(Key(story), Value(await h.Work.GetNextWork(0, Key(mine), default)).Issue.Key);
+        Assert.Equal(Key(story), Value(await h.Work.GetNextWork(0, Key(mine), null, default)).Issue.Key);
     }
 
     [Fact]
-    public async Task NextWork_UnderAnEpic_ReachesATaskTwoLevelsDown()
+    public async Task NextWork_UnderAnEpic_ReachesAStoryTwoLevelsDown()
     {
         var h = await NewAsync();
         var epic = await h.FileAsync("epic", "the epic", h.Todo, rank: 4096);
-        var story = await h.FileAsync("story", "the story", h.Todo, rank: 2048, parentId: epic.Id);
-        var task = await h.FileAsync("task", "the task", h.InProgress, rank: 1024, parentId: story.Id);
+        var under = await h.FileAsync("epic", "an epic inside it", h.Todo, rank: 2048, parentId: epic.Id);
+        var story = await h.FileAsync("story", "the story", h.InProgress, rank: 1024, parentId: under.Id);
 
-        // Right to left still decides inside the scope: the task is further
-        // along than the story above it, and depth has nothing to do with it.
-        Assert.Equal(Key(task), Value(await h.Work.GetNextWork(0, Key(epic), default)).Issue.Key);
+        // Right to left still decides inside the scope: the story is further
+        // along than the epic above it, and depth has nothing to do with it.
+        Assert.Equal(Key(story), Value(await h.Work.GetNextWork(0, Key(epic), null, default)).Issue.Key);
     }
 
     [Fact]
@@ -119,7 +119,7 @@ public class WorkControllerTests
         await h.AskAsync(asked, "per-node or global?");
 
         // The scope narrows the candidates and decides nothing about them.
-        Assert.Equal(Key(workable), Value(await h.Work.GetNextWork(0, Key(epic), default)).Issue.Key);
+        Assert.Equal(Key(workable), Value(await h.Work.GetNextWork(0, Key(epic), null, default)).Issue.Key);
     }
 
     [Fact]
@@ -128,10 +128,11 @@ public class WorkControllerTests
         var h = await NewAsync();
         var epic = await h.FileAsync("epic", "workable, and not the question", h.Todo);
 
-        // "Under AER-1" is a question about what hangs beneath it. Unscoped
-        // this epic is the only thing on the board and would be the answer.
-        Assert.Equal(Key(epic), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
-        Assert.IsType<NoContentResult>((await h.Work.GetNextWork(0, Key(epic), default)).Result);
+        // "Under AER-1" is a question about what hangs beneath it. Asked of
+        // the whole board this epic is the only thing on it and is the answer;
+        // asked of itself it is not a candidate for its own scope.
+        Assert.Equal(Key(epic), Value(await h.Work.GetNextWork(0, null, "epic", default)).Issue.Key);
+        Assert.IsType<NoContentResult>((await h.Work.GetNextWork(0, Key(epic), "epic", default)).Result);
     }
 
     [Fact]
@@ -140,24 +141,128 @@ public class WorkControllerTests
         var h = await NewAsync();
         var epic = await h.FileAsync("epic", "finished", h.Todo, rank: 4096);
         await h.FileAsync("story", "shipped", h.Done, rank: 2048, parentId: epic.Id);
-        await h.FileAsync("task", "somebody else's problem", h.Todo, rank: 1024);
+        await h.FileAsync("story", "somebody else's problem", h.Todo, rank: 1024);
 
         // Not a failure - `hatch.sh` reads it as "nothing to do", which is what
         // it means whether the scope is one epic or the whole tracker.
-        Assert.IsType<NoContentResult>((await h.Work.GetNextWork(0, Key(epic), default)).Result);
+        Assert.IsType<NoContentResult>((await h.Work.GetNextWork(0, Key(epic), null, default)).Result);
     }
 
     [Fact]
     public async Task NextWork_UnderAKeyNobodyMinted_IsTheSentenceTheSearchEndpointUses()
     {
         var h = await NewAsync();
-        await h.FileAsync("task", "workable", h.Todo);
+        await h.FileAsync("story", "workable", h.Todo);
 
-        var refused = Assert.IsType<BadRequestObjectResult>((await h.Work.GetNextWork(0, "AER-999", default)).Result);
+        var refused = Assert.IsType<BadRequestObjectResult>((await h.Work.GetNextWork(0, "AER-999", null, default)).Result);
 
         // A scope nobody can name is a typo, not an empty subtree, and it must
         // not read as "the work has run out".
         Assert.Equal("there is no AER-999", refused.Value);
+    }
+
+    // ---- What the loop may pick up ----
+    //
+    // The two rules that are the loop's policy rather than facts about an
+    // issue. Both are `next`-only: a person who names a ticket is giving an
+    // instruction, and housekeeping does not overrule it.
+
+    [Fact]
+    public async Task NextWork_PassesOverAnEpicAndATaskAtTheTopOfTheColumn()
+    {
+        var h = await NewAsync();
+        await h.FileAsync("epic", "somebody has to choose what this contains", h.Todo, rank: 1024);
+        await h.FileAsync("task", "a seam inside a story", h.Todo, rank: 2048);
+        var story = await h.FileAsync("story", "the unit that ships", h.Todo, rank: 4096);
+
+        // Both of the others are above it and workable. An unattended run takes
+        // neither: an epic is a product call and a task moves as part of the
+        // story it is a seam in.
+        Assert.Equal(Key(story), Value(await h.Work.GetNextWork(0, null, null, default)).Issue.Key);
+    }
+
+    [Fact]
+    public async Task NextWork_TakesTheTypesTheCallerNames()
+    {
+        var h = await NewAsync();
+        var task = await h.FileAsync("task", "a seam inside a story", h.Todo, rank: 1024);
+        await h.FileAsync("story", "the unit that ships", h.Todo, rank: 2048);
+
+        // An operator who means to have an evening spent on tasks says so, and
+        // the top of the column is the top of the column again.
+        var work = Value(await h.Work.GetNextWork(0, null, "story,bug,task", default));
+
+        Assert.Equal(Key(task), work.Issue.Key);
+    }
+
+    [Fact]
+    public async Task NextWork_RefusesATypeNobodyDefined()
+    {
+        var h = await NewAsync();
+        await h.FileAsync("story", "workable", h.Todo);
+
+        var refused = Assert.IsType<BadRequestObjectResult>(
+            (await h.Work.GetNextWork(0, null, "story,epci", default)).Result);
+
+        // A misspelling that quietly matched nothing would read as a finished
+        // board, which is the one answer a loop acts on.
+        Assert.Contains("epci", (string)refused.Value!);
+    }
+
+    [Fact]
+    public async Task NextWork_PassesOverAnIssueWhoseSiblingIsAwaitingReview()
+    {
+        var h = await NewAsync();
+        var mine = await h.FileAsync("epic", "the effort", h.Todo, rank: 8192);
+        await h.FileAsync("story", "already up for review", h.Review, rank: 1024, parentId: mine.Id);
+        await h.FileAsync("story", "the next one under it", h.Todo, rank: 1024, parentId: mine.Id);
+
+        var other = await h.FileAsync("epic", "another effort", h.Todo, rank: 8192);
+        var elsewhere = await h.FileAsync("story", "under nothing in flight", h.Todo, rank: 2048, parentId: other.Id);
+
+        // The folded one is above it in the column: two open pull requests
+        // under one parent is one too many, so the loop opens the other one.
+        Assert.Equal(Key(elsewhere), Value(await h.Work.GetNextWork(0, null, null, default)).Issue.Key);
+    }
+
+    [Fact]
+    public async Task NextWork_DoesNotTreatTwoParentlessIssuesAsSiblings()
+    {
+        var h = await NewAsync();
+        await h.FileAsync("story", "up for review, under nothing", h.Review, rank: 1024);
+        var workable = await h.FileAsync("story", "also under nothing", h.Todo, rank: 1024);
+
+        // A null parent is not a group. Otherwise one loose story in review
+        // would stop every other loose story on the board.
+        Assert.Equal(Key(workable), Value(await h.Work.GetNextWork(0, null, null, default)).Issue.Key);
+    }
+
+    [Fact]
+    public async Task NextWork_IsNotHeldUpByASiblingThatShipped()
+    {
+        var h = await NewAsync();
+        var mine = await h.FileAsync("epic", "the effort", h.Todo, rank: 8192);
+        await h.FileAsync("story", "merged last week", h.Done, rank: 1024, parentId: mine.Id);
+        var workable = await h.FileAsync("story", "the next one under it", h.Todo, rank: 2048, parentId: mine.Id);
+
+        // The rule is about work in flight, and merged work is not in flight.
+        Assert.Equal(Key(workable), Value(await h.Work.GetNextWork(0, null, null, default)).Issue.Key);
+    }
+
+    [Fact]
+    public async Task Work_OnANamedIssueIgnoresTheLoopsPolicy()
+    {
+        var h = await NewAsync();
+        var parent = await h.FileAsync("epic", "the effort", h.Todo, rank: 8192);
+        await h.FileAsync("story", "already up for review", h.Review, rank: 1024, parentId: parent.Id);
+        var epic = await h.FileAsync("epic", "a type the loop does not take", h.Todo, rank: 2048, parentId: parent.Id);
+
+        // Nothing here is an unattended run's to start...
+        Assert.IsType<NoContentResult>((await h.Work.GetNextWork(0, null, null, default)).Result);
+
+        // ...and all of it is somebody's to ask for by name. Neither the type
+        // nor the sibling is a fact about this issue, so neither refuses it.
+        Assert.Null(Value(await h.Work.GetWork(Key(epic), default)).Blocked);
     }
 
     // ---- Refusals ----
@@ -223,13 +328,13 @@ public class WorkControllerTests
     public async Task NextWork_PassesOverAnIssueWaitingOnAnAnswer()
     {
         var h = await NewAsync();
-        var asked = await h.FileAsync("task", "waiting on a decision", h.Todo, rank: 1024);
-        var workable = await h.FileAsync("task", "nothing in its way", h.Todo, rank: 2048);
+        var asked = await h.FileAsync("story", "waiting on a decision", h.Todo, rank: 1024);
+        var workable = await h.FileAsync("story", "nothing in its way", h.Todo, rank: 2048);
         await h.AskAsync(asked, "per-node or global?");
 
         // Folded past exactly as a card whose ready date has not arrived is,
         // and for the same reason: it is not workable yet.
-        Assert.Equal(Key(workable), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
+        Assert.Equal(Key(workable), Value(await h.Work.GetNextWork(0, null, null, default)).Issue.Key);
     }
 
     [Fact]

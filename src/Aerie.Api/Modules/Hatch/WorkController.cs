@@ -43,22 +43,36 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// caller before this asked for.
     ///
     /// <para>Nothing else changes - still right to left, still top of the
-    /// column down, still folding past a ready date, an open question or a
-    /// terminal column. The scope narrows the candidates and decides nothing
+    /// column down, still folding past a ready date, an open question, a
+    /// terminal column, a type the loop does not take, or a sibling already
+    /// awaiting review. The scope narrows the candidates and decides nothing
     /// about them.</para>
     ///
     /// <para>The issue itself is not a candidate. "Under AER-1" is a question
     /// about what hangs beneath it, which is how <c>ancestorKey</c> already
     /// reads on the search endpoint.</para>
     /// </param>
+    /// <param name="types">
+    /// Which types an unattended run may pick up, comma separated. Absent is
+    /// <see cref="LoopTypes"/>; a type nobody defined is a 400 naming it rather
+    /// than a filter that silently matches nothing.
+    ///
+    /// <para>A widening, and it belongs to the caller because the narrow set is
+    /// the loop's policy rather than a fact about the board: an operator who
+    /// means to have an evening spent on tasks says so.</para>
+    /// </param>
     [HttpGet("next")]
     public async Task<ActionResult<WorkDto>> GetNextWork(
         [FromQuery] int offsetMinutes = 0,
         [FromQuery] string? ancestorKey = null,
+        [FromQuery] string? types = null,
         CancellationToken ct = default)
     {
         var statuses = await OrderedStatusesAsync(ct);
         var today = DayNumber(time.GetUtcNow(), offsetMinutes);
+
+        if (!TryReadTypes(types, out var wanted, out var unknown))
+            return BadRequest($"there is no \"{unknown}\" type - the types are {string.Join(", ", EfHatchIssue.Types)}");
 
         // The scope, resolved once before the columns are walked. Null is the
         // whole board; a list is the subtree, and an empty one is a childless
@@ -79,6 +93,11 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
             scope = await Rollup.DescendantIdsAsync(db, ancestorId.Value, ct);
         }
 
+        // What is already in flight, read once for the whole pass rather than
+        // once per candidate: the sibling rule below asks the same question of
+        // every issue it looks at, and the answer does not change while it does.
+        var inFlight = await InFlightAsync(statuses, ct);
+
         // Right to left, top to bottom. The first issue whose transition is
         // actually available wins; everything folded, blocked or terminal is
         // passed over rather than reported, because "nothing to do" is the
@@ -87,7 +106,7 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
         {
             if (Advance(statuses, status) is null) continue;
 
-            var query = db.Issues.Where(i => i.StatusId == status.Id);
+            var query = db.Issues.Where(i => i.StatusId == status.Id && wanted.Contains(i.Type));
             if (scope is not null) query = query.Where(i => scope.Contains(i.Id));
 
             var candidates = await query
@@ -98,6 +117,7 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
             foreach (var issue in candidates)
             {
                 if (IsWaiting(issue, today, offsetMinutes)) continue;
+                if (SiblingInFlight(issue, inFlight) is not null) continue;
 
                 var work = await ResolveAsync(issue, statuses, ct);
                 if (work.Blocked is null) return work;
@@ -106,6 +126,105 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
 
         return NoContent();
     }
+
+    // ---- The loop's own policy ----
+    //
+    // Two rules that are not facts about an issue but decisions about what an
+    // unattended run may start, so they live on `next` and not in Blocked,
+    // which `{key}` shares. A person who names a ticket is giving an
+    // instruction; housekeeping does not overrule it.
+
+    /// <summary>
+    /// The types an unattended run picks up when the caller does not say.
+    ///
+    /// An epic is out because choosing what an effort contains is a product
+    /// call, and a task because a task is a seam inside a story - the story is
+    /// the unit that ships, and it carries its tasks across the board with it.
+    /// Neither is a rule about the issue: both are still worked the moment
+    /// somebody names one.
+    /// </summary>
+    private static readonly string[] LoopTypes = ["story", "bug"];
+
+    /// <summary>
+    /// The caller's type list, or <see cref="LoopTypes"/> when there is not
+    /// one. False, with the offending name, for a type nobody defined - a
+    /// misspelling that quietly matched nothing would read as a finished board.
+    /// </summary>
+    private static bool TryReadTypes(string? types, out string[] wanted, out string? unknown)
+    {
+        unknown = null;
+        wanted = LoopTypes;
+        if (string.IsNullOrWhiteSpace(types)) return true;
+
+        var named = types.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (named.Length == 0) return true;
+
+        unknown = named.FirstOrDefault(t => !EfHatchIssue.Types.Contains(t, StringComparer.OrdinalIgnoreCase));
+        if (unknown is not null) return false;
+
+        wanted = named.Select(t => t.ToLowerInvariant()).Distinct().ToArray();
+        return true;
+    }
+
+    /// <summary>
+    /// The last stop before shipped: the column immediately left of the first
+    /// terminal one, or the rightmost column on a board with no terminal column
+    /// at all.
+    ///
+    /// Measured rather than named, and measured the same way the <c>review</c>
+    /// column was placed by the migration that added it
+    /// (20260903204217_Playbooks.cs). An operator renames columns, and a
+    /// hardcoded "review" would be a rule that quietly stopped applying.
+    /// </summary>
+    private static EfHatchStatus? AwaitingReview(List<EfHatchStatus> statuses)
+    {
+        var terminal = statuses.FindIndex(s => s.IsTerminal);
+        var at = terminal < 0 ? statuses.Count - 1 : terminal - 1;
+        return at >= 0 ? statuses[at] : null;
+    }
+
+    /// <summary>
+    /// Every issue sitting in the awaiting-review column, with the parent it
+    /// hangs under - one read, for a rule asked of every candidate.
+    /// </summary>
+    private async Task<List<InFlightIssue>> InFlightAsync(List<EfHatchStatus> statuses, CancellationToken ct)
+    {
+        if (AwaitingReview(statuses) is not { } awaiting) return [];
+
+        // A null parent is not a group: two parentless issues are not siblings
+        // of each other, so they are never loaded as one another's blocker.
+        var rows = await db.Issues.AsNoTracking()
+            .Where(i => i.StatusId == awaiting.Id && i.ParentId != null)
+            .Select(i => new { i.Id, ParentId = i.ParentId!.Value, ProjectKey = i.Project!.Key, i.Number })
+            .ToListAsync(ct);
+
+        return rows
+            .Select(r => new InFlightIssue(r.Id, r.ParentId, IssueKey.Format(r.ProjectKey, r.Number), awaiting.Name))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Why this issue is not an unattended run's to start yet: a sibling of it
+    /// is already awaiting review, and two open pull requests under one parent
+    /// is one too many. Null when nothing under its parent is in flight.
+    ///
+    /// <para>The sentence is written here rather than at the caller even though
+    /// <c>next</c> discards it - <c>next</c> folds in silence on purpose, and
+    /// the scan that explains a whole pass reads the same fold and prints
+    /// it.</para>
+    /// </summary>
+    private static string? SiblingInFlight(EfHatchIssue issue, List<InFlightIssue> inFlight)
+    {
+        if (issue.ParentId is not { } parent) return null;
+
+        var sibling = inFlight.FirstOrDefault(o => o.ParentId == parent && o.Id != issue.Id);
+        return sibling is null
+            ? null
+            : $"{sibling.Key} is in \"{sibling.Column}\", and two open pull requests under one parent is one too many";
+    }
+
+    /// <summary>An issue in the awaiting-review column, and what it takes to name it.</summary>
+    private sealed record InFlightIssue(long Id, long ParentId, string Key, string Column);
 
     /// <summary>
     /// The same answer for an issue somebody named. Blocked or not, it is
