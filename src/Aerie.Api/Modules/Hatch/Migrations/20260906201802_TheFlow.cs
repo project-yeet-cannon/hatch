@@ -12,8 +12,8 @@ namespace Aerie.Api.Modules.Hatch.Migrations
     ///   Draft       operator   an idea being written; nothing reads it
     ///   Breakdown   agent      turn the draft into a specification
     ///   Backlog     operator   specified work, awaiting selection
-    ///   To Do       agent      pick it up and do it
-    ///   In Progress agent      finish it, push it, put it up for review
+    ///   To Do       agent      analyse it until implementing it is mechanical
+    ///   In Progress agent      write the code, get it green, push it, put it up for review
     ///   In Review   operator   read the pull request, wait for green, merge
     ///   Done        operator   terminal
     /// </code>
