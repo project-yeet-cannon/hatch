@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Badge, Button, Card, Field, PageHeader } from '@aerie/ui';
 import {
   addComment,
+  createIssue,
   deleteIssue,
   getBoard,
   getComments,
@@ -20,6 +21,7 @@ import { StatusPill } from '../components/StatusPill';
 import { MomentField } from '../components/MomentField';
 import { PullRequestLink } from '../components/PullRequestLink';
 import { TypeBadge } from '../components/TypeBadge';
+import { childTypes } from '../lib/childTypes';
 import { statusVars } from '../lib/color';
 import { closeOffer } from '../lib/closeSubtree';
 import { message } from '../lib/errors';
@@ -141,6 +143,11 @@ export function IssuePage() {
     (i) => i.projectKey === issue.projectKey && i.key !== issue.key && legal.includes(i.type),
   );
 
+  // What may be filed under this issue, read off the same table the server
+  // refuses by - see lib/childTypes.ts. Empty on a task, which is what decides
+  // both the composer and, with childKeys, whether the card is drawn at all.
+  const filings = childTypes(issue.type);
+
   // Sitting in a column that means it shipped, so the due chip stops warning -
   // the same rule the board follows, for the same reason.
   const terminal = board.statuses.find((s) => s.id === issue.statusId)?.isTerminal ?? false;
@@ -245,15 +252,30 @@ export function IssuePage() {
 
       <Description issue={issue} onSave={(description) => void save({ description })} />
 
-      {/* Only where something is filed under it. A task's meter, and an epic
-          nobody has put anything under, could read 0% or 100% and nothing
-          else - which says less than the status band already above it.
+      {/* Drawn where something may be filed under this issue, and where
+          something already is. The second arm is not redundant: a retype does
+          not re-check what already hangs below (StageEditAsync), so an epic
+          with stories can be turned into a task, and that card must keep its
+          list.
 
-          Gated on childKeys, which arrived with the issue, rather than on the
-          rollup: the card is either there from the first paint or not at all,
-          instead of appearing under the reader a moment later. */}
-      {issue.childKeys.length > 0 && (
-        <Progress rollup={rollup} error={rollupError} statuses={board.statuses} next={next} />
+          Inside it, the meter and the list are gated on childKeys, which
+          arrived with the issue, rather than on the rollup: the card's shape is
+          settled on the first paint instead of rearranging itself under the
+          reader a moment later. A task's meter, and an epic nobody has put
+          anything under, could read 0% or 100% and nothing else - which says
+          less than the status band already above it. */}
+      {(filings.length > 0 || issue.childKeys.length > 0) && (
+        <Progress
+          rollup={rollup}
+          error={rollupError}
+          statuses={board.statuses}
+          next={next}
+          hasChildren={issue.childKeys.length > 0}
+          projectId={issue.projectId}
+          parentKey={issue.key}
+          types={filings}
+          onFiled={() => void load()}
+        />
       )}
 
       <Comments issueKey={key} comments={comments} onAdded={() => void load()} onError={setError} />
@@ -340,39 +362,151 @@ function Progress({
   error,
   statuses,
   next,
+  hasChildren,
+  projectId,
+  parentKey,
+  types,
+  onFiled,
 }: {
   rollup: IssueRollup | null;
   error: string | null;
   statuses: Status[];
   next: NextAnswer | null;
+  /** Whether anything is filed under this issue, off the issue rather than off
+      the rollup, so the card does not change shape when the fifth read lands. */
+  hasChildren: boolean;
+  projectId: number;
+  parentKey: string;
+  /** What may be filed here. Empty draws no composer - a task takes nothing. */
+  types: IssueType[];
+  onFiled: () => void;
 }) {
   return (
     <Card>
       <h2 className="hatch-section-title">Progress</h2>
 
-      {/* Said here, where the thing that failed was going to be. The rest of
-          the page is already readable without it, so this is not the page's
-          error - and it is not nothing, either, which is what a card that
-          quietly stayed empty would be. */}
-      {error && <p className="text-danger">{error}</p>}
-      {!rollup && !error && <p className="text-muted">Loading…</p>}
-
-      {rollup && (
+      {hasChildren && (
         <>
-          <StatusMeter rollup={rollup.rollup} statuses={statuses} size="lg" counts />
+          {/* Said here, where the thing that failed was going to be. The rest of
+              the page is already readable without it, so this is not the page's
+              error - and it is not nothing, either, which is what a card that
+              quietly stayed empty would be. */}
+          {error && <p className="text-danger">{error}</p>}
+          {!rollup && !error && <p className="text-muted">Loading…</p>}
 
-          <Next answer={next} rollup={rollup} />
+          {rollup && (
+            <>
+              <StatusMeter rollup={rollup.rollup} statuses={statuses} size="lg" counts />
 
-          {/* Rank order, as the server sent them - the order they sit in on the
-              board's column, so the two screens agree about what is next. */}
-          <ul className="hatch-progress-list">
-            {rollup.children.map((child) => (
-              <ChildRow key={child.issue.key} child={child} statuses={statuses} />
-            ))}
-          </ul>
+              <Next answer={next} rollup={rollup} />
+
+              {/* Rank order, as the server sent them - the order they sit in on
+                  the board's column, so the two screens agree about what is
+                  next. */}
+              <ul className="hatch-progress-list">
+                {rollup.children.map((child) => (
+                  <ChildRow key={child.issue.key} child={child} statuses={statuses} />
+                ))}
+              </ul>
+            </>
+          )}
         </>
       )}
+
+      {/* Last in the card, and not waiting on the rollup: it is drawn from the
+          issue, which has already arrived. */}
+      {types.length > 0 && (
+        <ChildComposer projectId={projectId} parentKey={parentKey} types={types} onFiled={onFiled} />
+      )}
     </Card>
+  );
+}
+
+/**
+ * Filing the next child where the children are listed.
+ *
+ * A type and a title and nothing else. A description and dates belong to the
+ * child and are set on its own page; asking for them here would make filing
+ * three stories under an epic three visits to a dialog, which is the thing
+ * this card exists to stop.
+ *
+ * What it may offer is not decided here - childTypes reads the same table the
+ * server refuses by, so the picker cannot come to disagree with the refusal.
+ */
+function ChildComposer({
+  projectId,
+  parentKey,
+  types,
+  onFiled,
+}: {
+  projectId: number;
+  parentKey: string;
+  types: IssueType[];
+  onFiled: () => void;
+}) {
+  const [picked, setPicked] = useState<IssueType | null>(null);
+  const [title, setTitle] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const box = useRef<HTMLInputElement>(null);
+
+  // Null until somebody chooses, so the first legal type is the default without
+  // an effect to set it - and clamped on the way out, because the issue's own
+  // type is editable on this page: a picker still holding "story" after the
+  // epic above it became a story would offer what the server refuses.
+  const chosen = picked && types.includes(picked) ? picked : types[0];
+
+  async function submit() {
+    setSaving(true);
+    try {
+      await createIssue({ projectId, type: chosen, title: title.trim(), parentKey });
+      setTitle('');
+      setError(null);
+      box.current?.focus();
+      onFiled();
+    } catch (err) {
+      // The title is deliberately left where it was typed - the refusal is
+      // usually about the type, and retyping the title to try again is a tax.
+      setError(message(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="hatch-inline-form hatch-child-composer" role="group" aria-label="File a child issue">
+      <Field label="Type">
+        <select value={chosen} onChange={(e) => setPicked(e.target.value as IssueType)}>
+          {types.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      <Field label="Title" className="hatch-child-composer-title">
+        <input
+          ref={box}
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          // Enter files it. A title is one line, so there is no newline for
+          // Enter to be taking away - unlike the comment boxes on this page,
+          // which need meta+Enter for exactly that reason.
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && title.trim() && !saving) void submit();
+          }}
+        />
+      </Field>
+
+      <Button variant="primary" loading={saving} disabled={!title.trim()} onClick={() => void submit()}>
+        File it
+      </Button>
+
+      {/* Said here, under the box that caused it, in the sentence the server
+          wrote - see failureMessage in api/client.ts. */}
+      {error && <p className="text-danger">{error}</p>}
+    </div>
   );
 }
 
