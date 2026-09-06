@@ -1026,6 +1026,8 @@ INC_EXIT=0      # what the CLI exited with
 INC_ASKED=0     # questions the session opened on its way out
 INC_PENDING=0   # set once the increment is under way, cleared once it is counted
 INC_FACTS=""    # the file the renderer leaves the session id and the cost in
+INC_STALLED=0   # the board says it ended where it started: an increment that did nothing
+INC_FLAG=""     # what was done about that, in the words the tally says it in
 
 # The session id and what the run cost, out of the file the renderer wrote them
 # to. Also called from the exit trap, for the increment an interrupt landed on:
@@ -1041,6 +1043,114 @@ read_facts() {
   INC_FACTS=""
 }
 
+# ---- The stall guard ----
+
+# An increment that ended with the ticket in the column it found it in, said
+# where a person will see it.
+#
+# This is the one failure mode of an unattended loop that is dangerous rather
+# than merely disappointing. Nothing about the board changed, so the next pass
+# picks the same issue, spends the same money and fails the same way - and does
+# it all night. Every other way an increment can go badly costs one increment.
+#
+# The flag is an open question, because a question already does all three things
+# a flag field would have to be taught: it blocks the issue from being
+# dispatched again, it badges the card on the board, and it is the list
+# `hatch.sh answer` walks. Answering it clears the flag, which is the right
+# gesture - the flag means "nobody has looked at this", and answering is
+# somebody having looked.
+#
+# Written through `comment` and `ask` rather than through a POST spelled out
+# here, so a stall reads like every other question: on the issue page, in
+# `hatch.sh questions`, and in the next session's "Decisions already made".
+#
+# The comment and the question are two jobs and only one of them is conditional.
+# The comment says which session ran and what it was trying to do, and that is
+# worth having whether or not the ticket is already flagged; the question is the
+# flag, and a ticket that has one does not need a second.
+#
+# Neither option is recommended, and that is not modesty. `--recommend` is for a
+# choice something knows the answer to, and the whole content of a stall is that
+# nothing here knows why it happened.
+flag_stall() {
+  local open="$1" body
+
+  # Nothing is written on a guess. If the questions could not be read, whether
+  # this issue is already flagged is not known, and a second question under the
+  # first is one more thing for somebody to answer saying no more than it did.
+  if [ -z "$open" ]; then
+    INC_FLAG="not flagged - its questions could not be read"
+    echo "hatch: ${INC_KEY} moved nothing and could not be flagged - a later pass may offer it again" >&2
+    return
+  fi
+
+  body="An unattended increment ran here and left this issue where it found it:
+still in \"${INC_FROM}\", under a playbook moving ${INC_FROM} -> ${INC_TO}. The
+board is the report that counts, and it says nothing happened."
+
+  if [ -n "$INC_SESSION" ]; then
+    body="${body}
+
+The session it ran in is still there, with everything it did in context:
+
+    claude --resume ${INC_SESSION}"
+  else
+    body="${body}
+
+There is no session to resume: the run ended before it said what its id was."
+  fi
+
+  [ "$INC_EXIT" = 0 ] || body="${body}
+
+It exited ${INC_EXIT}."
+
+  echo
+  if [ "$open" -gt 0 ]; then
+    # A question already open on the ticket is this flag, raised - usually the
+    # session's own, asked on the way out by something that knew why it was
+    # stopping. It blocks the next dispatch and badges the same card, so all
+    # that is left to do is write down which session it was.
+    body="${body}
+
+There is already a question open here, and that is the flag: nothing further
+will be dispatched at this issue until somebody answers it."
+    echo "hatch: ${INC_KEY} moved nothing, and is already waiting on a question"
+  else
+    body="${body}
+
+A question goes up with this comment, so nothing further will be dispatched at
+this issue until somebody answers it."
+    echo "hatch: ${INC_KEY} moved nothing - flagging it, and going on to the next"
+  fi
+  echo
+
+  # In a subshell, because every call through `api` ends the process on a
+  # refusal and this is the one place where that must not be what takes a
+  # night's run down with it: a stall is not a reason to stop, and neither is
+  # failing to write one down.
+  #
+  # The comment goes on either way - it is where the session id lives, and
+  # resuming the conversation is most of why a stall is worth recording rather
+  # than merely counting. The question goes up only when there is not one there.
+  if (
+    cmd_comment "$INC_KEY" "$body" &&
+    { [ "$open" -gt 0 ] ||
+      cmd_ask "$INC_KEY" "An unattended increment left ${INC_KEY} in \"${INC_FROM}\" without moving it - what should happen to it now?" \
+        --option "leave it: It waits for you. Nothing is dispatched at it while this question is open, so answer once you have looked - or once you have moved it somewhere the loop does not reach." \
+        --option "try again: Spend another increment on the same ticket. The next session is handed this stall, and your answer, among the decisions already made."
+    }
+  ); then
+    if [ "$open" -gt 0 ]; then
+      INC_FLAG="waiting on a question"
+    else
+      INC_FLAG="flagged"
+    fi
+  else
+    INC_FLAG="not flagged - the write was refused"
+    echo "hatch: ${INC_KEY} could not be flagged - a later pass may offer it again" >&2
+  fi
+}
+
 # One increment: the header, the session, and what became of the ticket.
 #
 # Everything between "here is the dispatch" and "here is what happened", which
@@ -1050,7 +1160,7 @@ read_facts() {
 # is writing a log nobody will read until morning.
 run_increment() {
   local work="$1" model="$2" effort="$3" quiet="${4:-0}"
-  local bin root prompt facts before after asked out later
+  local bin root prompt facts before after asked out later open
   local -a codes
 
   INC_KEY=$(jq -r '.issue.key' <<<"$work")
@@ -1064,6 +1174,8 @@ run_increment() {
   INC_ASKED=0
   INC_PENDING=0
   INC_FACTS=""
+  INC_STALLED=0
+  INC_FLAG=""
 
   bin=$(claude_bin)
   root=$(repo_root)
@@ -1150,16 +1262,28 @@ run_increment() {
   # taking a whole loop down for: the increment already happened.
   if later=$(_get "/api/hatch/work/${INC_KEY}"); then
     INC_ENDED=$(jq -r '.fromStatus.name' <<<"$later")
+    if [ "$INC_ENDED" = "$INC_FROM" ]; then INC_STALLED=1; else INC_MOVED=1; fi
+  else
+    # Not knowing where it ended up is not the same as knowing it went nowhere.
+    # A stall is written on the ticket in front of a person, so a read that did
+    # not happen must not become one.
+    INC_FLAG="where it ended up is not known - the board did not answer"
   fi
-  [ "$INC_ENDED" = "$INC_FROM" ] || INC_MOVED=1
 
   # Whatever the session asked for on its way out. This is the half of the loop
   # that makes asking worth doing: an unattended run's questions are the one
   # thing in its output that somebody has to act on, and they would otherwise be
   # a paragraph in the middle of a transcript nobody scrolls back through.
+  open=""
   if after=$(questions_json "$INC_KEY" true); then
+    open=$(jq 'length' <<<"$after")
+    # The id is lifted out before `index` is asked about it: inside index(),
+    # `.` is the array being searched, so `index(.id)` looks for a field on the
+    # list rather than the question's own id - and answers with an error, which
+    # under `set -e` would end the run at the exact moment a session had asked
+    # something worth reading.
     asked=$(jq -c --argjson before "$before" \
-      '[.[] | select(($before | index(.id)) == null)]' <<<"$after")
+      '[.[] | . as $q | select(($before | index($q.id)) == null)]' <<<"$after")
     INC_ASKED=$(jq 'length' <<<"$asked")
 
     if [ "$INC_ASKED" -gt 0 ]; then
@@ -1170,6 +1294,13 @@ run_increment() {
       echo "  ./scripts/hatch.sh answer ${INC_KEY}"
       echo "  $(issue_url "$INC_KEY")"
     fi
+  fi
+
+  # And if the board says nothing happened, say so on the ticket. Only for an
+  # increment that actually ran against an issue that was actually offered,
+  # which is the only thing that reaches this function.
+  if [ "$INC_STALLED" = 1 ]; then
+    flag_stall "$open"
   fi
 }
 
@@ -1513,6 +1644,19 @@ nap() {
   return 0
 }
 
+# What became of the ticket, in the phrase both the running commentary and the
+# tally say it in - so a line read at midnight and a line read in the morning
+# cannot come to disagree about the same increment.
+increment_outcome() {
+  if [ "$INC_MOVED" = 1 ]; then
+    echo "${INC_FROM} -> ${INC_ENDED}"
+  elif [ "$INC_STALLED" = 1 ]; then
+    echo "still in \"${INC_ENDED}\"${INC_FLAG:+, ${INC_FLAG}}"
+  else
+    echo "${INC_FLAG:-where it ended up is not known}"
+  fi
+}
+
 # One increment, added to the run's account.
 #
 # Called by the loop when an increment finishes, and by the exit trap when an
@@ -1527,11 +1671,14 @@ record_increment() {
   RUNS=$((RUNS + 1))
   [ -z "$INC_COST" ] || SPENT=$(awk -v a="$SPENT" -v b="$INC_COST" 'BEGIN { printf "%.6f", a + b }')
 
+  # Two lists rather than one, because they are two different mornings: the
+  # moved ones are what the night got done, and the stalled ones are what is
+  # waiting on somebody - each of them flagged with a question that says so.
   if [ "$INC_MOVED" = 1 ]; then
-    MOVED_LINES="${MOVED_LINES}hatch:   moved    ${INC_KEY}  ${INC_FROM} -> ${INC_ENDED}
+    MOVED_LINES="${MOVED_LINES}hatch:   moved    ${INC_KEY}  $(increment_outcome)
 "
   else
-    STALLED_LINES="${STALLED_LINES}hatch:   stalled  ${INC_KEY}  still in \"${INC_ENDED}\"
+    STALLED_LINES="${STALLED_LINES}hatch:   stalled  ${INC_KEY}  $(increment_outcome)
 "
   fi
 
@@ -1650,9 +1797,9 @@ cmd_go_to_work() {
 
         echo
         if [ "$INC_MOVED" = 1 ]; then
-          echo "hatch: ${INC_KEY} moved, ${INC_FROM} -> ${INC_ENDED}  (${RUNS} increment(s), \$$(money "$SPENT"))"
+          echo "hatch: ${INC_KEY} moved, $(increment_outcome)  (${RUNS} increment(s), \$$(money "$SPENT"))"
         else
-          echo "hatch: ${INC_KEY} did not move - still in \"${INC_ENDED}\"  (${RUNS} increment(s), \$$(money "$SPENT"))"
+          echo "hatch: ${INC_KEY} did not move - $(increment_outcome)  (${RUNS} increment(s), \$$(money "$SPENT"))"
         fi
         ;;
 
