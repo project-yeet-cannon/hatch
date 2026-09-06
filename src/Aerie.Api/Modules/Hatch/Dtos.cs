@@ -85,6 +85,11 @@ public record IssueCardDto(
 /// forms mean different things and <see cref="IssueMoment"/> says how.
 /// </param>
 /// <param name="DueAt">When it is owed, in the same two forms, or null.</param>
+/// <param name="PullRequestUrl">
+/// Where the work is being reviewed, or null while it is nowhere. An absolute
+/// http(s) URL - see <see cref="EfHatchIssue.PullRequestUrl"/> for why it is one
+/// and not a list of them.
+/// </param>
 public record IssueDto(
     string Key,
     int ProjectId,
@@ -98,6 +103,7 @@ public record IssueDto(
     IReadOnlyList<string> ChildKeys,
     string? ReadyAt,
     string? DueAt,
+    string? PullRequestUrl,
     string CreatedBy,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
@@ -123,9 +129,16 @@ public record IssueCreateRequest(
 /// cannot otherwise distinguish "no opinion" from "no parent", and the empty
 /// string is unambiguous because no issue key can ever be one.
 ///
-/// <paramref name="ReadyAt"/> and <paramref name="DueAt"/> read the empty
-/// string the same way, and for the same reason: no date is written as "".
+/// <paramref name="ReadyAt"/>, <paramref name="DueAt"/> and
+/// <paramref name="PullRequestUrl"/> read the empty string the same way, and for
+/// the same reason: no date and no URL is written as "".
 /// </summary>
+/// <param name="PullRequestUrl">
+/// An absolute <c>http</c> or <c>https</c> URL, or <c>""</c> to take the issue
+/// off the one it holds. Anything else is refused with a sentence - a relative
+/// path or a bare <c>github.com/...</c> is a link that would not open, and the
+/// whole point of the field is that it opens.
+/// </param>
 public record IssuePatchRequest(
     string? Title,
     string? Description,
@@ -133,7 +146,8 @@ public record IssuePatchRequest(
     int? StatusId,
     string? ParentKey,
     string? ReadyAt,
-    string? DueAt);
+    string? DueAt,
+    string? PullRequestUrl);
 
 /// <summary>
 /// A drop on the board: which column, and which cards it landed between. The
@@ -164,9 +178,9 @@ public record IssueBulkFailureDto(string Key, string Reason);
 
 /// <summary>
 /// One edit applied to many issues. The fields are
-/// <see cref="IssuePatchRequest"/>'s, minus the two - title and description -
-/// that describe a single issue and could only be applied to a hundred of them
-/// by mistake.
+/// <see cref="IssuePatchRequest"/>'s, minus the three - title, description and
+/// pull request URL - that describe a single issue and could only be applied to
+/// a hundred of them by mistake.
 ///
 /// Null still means "leave this alone", and the empty string still clears, so
 /// "take the due date off all of these" is <c>dueAt: ""</c> and nothing else.

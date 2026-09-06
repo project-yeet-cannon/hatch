@@ -164,7 +164,8 @@ and `done` is one only the operator may.
 
 `EfHatchIssue` — `ProjectId`, `Number`, `Type`, `Title`, `Description`,
 `StatusId`, `ParentId`, `Rank`, `ReadyAt`/`ReadyAtHasTime`,
-`DueAt`/`DueAtHasTime`, `CreatedBy`, `CreatedAt`, `UpdatedAt`.
+`DueAt`/`DueAtHasTime`, `PullRequestUrl`, `CreatedBy`, `CreatedAt`,
+`UpdatedAt`.
 
 The display key `AER-12` is **computed** (`Project.Key + "-" + Number`) and
 never stored, so there is exactly one fact about a key anywhere and no chance of
@@ -200,6 +201,19 @@ half of what a tracker is for is recording that something was due last Tuesday,
 and a form that argues about it is a form people stop telling the truth to — and
 a ready date after a due date is a mix-up worth seeing on the card rather than
 one worth a `400`.
+
+**`PullRequestUrl` is where the work is being reviewed**, and it is one URL
+rather than a list on purpose: the field answers “where is this being reviewed
+*now*”, and “what has it been” is already answered by the event log, which
+keeps every value the column has ever held. A list beside that would be a second
+history, and a worse one.
+
+The only rule about the value is that it is an absolute `http` or `https`
+address — anything else is refused with a sentence, because a field whose only
+job is to be clicked should not hold something that does not open. Nothing
+parses the host: a self-hosted forge on a private address is a pull request like
+any other, and a column that only accepted one company's would be a fact about
+exactly one installation.
 
 `CreatedBy` is a **name**, not a foreign key to `People`. The audit trail has to
 read the same after a person row is deleted, and an API key's name goes in this
@@ -299,8 +313,8 @@ Append-only, written by every mutating endpoint, never edited and never deleted
 except with its issue.
 
 Kinds: `created`, `retitled`, `redescribed`, `retyped`, `status_changed`,
-`parent_changed`, `ready_changed`, `due_changed`, `commented`, `asked`,
-`answered`, `imported`.
+`parent_changed`, `ready_changed`, `due_changed`, `pull_request_changed`,
+`commented`, `asked`, `answered`, `imported`.
 
 Nothing renders this, and it has been written since the first release anyway,
 because an event log is the one feature that cannot be added retroactively:
@@ -481,7 +495,7 @@ Everything under `/api/hatch`, every route `[RequireAdmin(AcceptScope =
 | `/board` | GET | Statuses plus every issue, ordered by `(StatusId, Rank, Id)`. Never filtered — the browser folds not-yet-ready cards away; the server hands over all of them |
 | `/issues` | GET, POST | GET filters on `projectId`, `type`, `statusId`, `parentKey`, `ancestorKey`, `text`, ANDed, all optional |
 | `/issues/bulk` | POST | `keys` plus any of `type`, `statusId`, `parentKey`, `readyAt`, `dueAt` |
-| `/issues/{key}` | GET, PATCH, DELETE | PATCH writes one event per changed field; `""` clears a parent or a date |
+| `/issues/{key}` | GET, PATCH, DELETE | PATCH writes one event per changed field; `""` clears a parent, a date or the pull request URL |
 | `/issues/{key}/move` | POST | `{ statusId, afterKey?, beforeKey? }` — the server computes the rank |
 | `/issues/{key}/comments` | GET, POST | POST carries the kind, the `answersId`, and a question's options |
 | `/issues/{key}/questions` | GET | `?open=false` for the answered ones too |

@@ -176,6 +176,14 @@ public class EfHatchIssue
     public const int MaxDescriptionLength = 200_000;
     public const int MaxTypeLength = 16;
 
+    /// <summary>
+    /// Room for a pull request URL. Generous against the forge URLs anybody
+    /// actually pastes - a long branch name on a long repository path is a
+    /// couple of hundred characters - and short enough that the column is not
+    /// somewhere a description ends up by mistake.
+    /// </summary>
+    public const int MaxPullRequestUrlLength = 500;
+
     /// <summary>The four types, in the order a picker should offer them.</summary>
     public static readonly string[] Types = ["epic", "story", "task", "bug"];
 
@@ -268,6 +276,27 @@ public class EfHatchIssue
 
     /// <summary>Whether <see cref="DueAt"/>'s time of day was meant - see <see cref="IssueMoment"/>.</summary>
     public bool DueAtHasTime { get; set; }
+
+    /// <summary>
+    /// Where the work is being reviewed: an absolute http(s) URL, or null until
+    /// something opens one. Held here so that "show me the pull request" is a
+    /// link on the issue rather than a search through the comments for a URL
+    /// somebody remembered to paste.
+    /// </summary>
+    /// <remarks>
+    /// One URL rather than a list, deliberately. The field answers "where is
+    /// this being reviewed <em>now</em>", and the question "what has it been"
+    /// is already answered by the event log, which keeps every value this
+    /// column has ever held. A list would be a second history beside that one,
+    /// and worse than it.
+    ///
+    /// Not a foreign key to anything and not parsed for a host: Aerie has no
+    /// opinion about whose forge an operator uses, and a column that only
+    /// accepted one would be a fact about exactly one installation
+    /// (docs/ethos.md).
+    /// </remarks>
+    [MaxLength(MaxPullRequestUrlLength)]
+    public string? PullRequestUrl { get; set; }
 
     /// <summary>
     /// Who filed it, as a name rather than a foreign key. The audit trail wants
@@ -425,6 +454,14 @@ public class EfHatchIssueEvent
     public const string ParentChanged = "parent_changed";
     public const string ReadyChanged = "ready_changed";
     public const string DueChanged = "due_changed";
+
+    /// <summary>
+    /// The issue was pointed at a pull request, or taken off one. The field
+    /// holds one URL; this is what makes the trail hold every URL it has ever
+    /// held - see <see cref="EfHatchIssue.PullRequestUrl"/>.
+    /// </summary>
+    public const string PullRequestChanged = "pull_request_changed";
+
     public const string Commented = "commented";
 
     /// <summary>A question was asked, and the issue is waiting on a person until it is answered.</summary>
