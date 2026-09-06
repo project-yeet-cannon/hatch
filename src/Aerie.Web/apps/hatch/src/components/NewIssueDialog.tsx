@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Button, Field, Modal } from '@aerie/ui';
 import { createIssue } from '../api/client';
 import { message } from '../lib/errors';
+import { useAutoGrow } from '../lib/useAutoGrow';
 import { MomentField } from './MomentField';
 import { ISSUE_TYPES } from '../types';
 import type { IssueType, Project } from '../types';
@@ -30,6 +31,7 @@ export function NewIssueDialog({
   const [dueAt, setDueAt] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const brief = useAutoGrow(description);
 
   // The first project, until somebody picks another. One project is the
   // ordinary case and choosing it for them is one fewer thing to do.
@@ -86,7 +88,13 @@ export function NewIssueDialog({
         </Field>
 
         <Field label="Description" hint="Markdown, rendered on the issue page.">
-          <textarea rows={6} value={description} onChange={(e) => setDescription(e.target.value)} />
+          <textarea
+            ref={brief}
+            className="hatch-grows"
+            rows={6}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
         </Field>
 
         {/* Both optional, and both usually left empty. They are here rather than

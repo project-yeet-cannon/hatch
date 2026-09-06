@@ -24,6 +24,7 @@ import { message } from '../lib/errors';
 import { renderMarkdown } from '../lib/markdown';
 import { waitingChild } from '../lib/next';
 import { openQuestions } from '../lib/questions';
+import { useAutoGrow } from '../lib/useAutoGrow';
 import { ISSUE_TYPES, LEGAL_PARENT_TYPES } from '../types';
 import type {
   Board,
@@ -518,6 +519,7 @@ function Description({ issue, onSave }: { issue: Issue; onSave: (description: st
   const [draft, setDraft] = useState(issue.description);
   const [known, setKnown] = useState(issue.description);
   const [preview, setPreview] = useState(true);
+  const editor = useAutoGrow(draft);
 
   // Same reasoning as the title's - see InlineTitle.
   if (issue.description !== known) {
@@ -547,7 +549,15 @@ function Description({ issue, onSave }: { issue: Issue; onSave: (description: st
           <p className="text-muted">No description yet.</p>
         )
       ) : (
-        <textarea className="hatch-description-editor" rows={16} value={draft} onChange={(e) => setDraft(e.target.value)} />
+        // `rows` is the height it opens at and the floor it never goes back
+        // under; useAutoGrow measures it rather than being told it.
+        <textarea
+          ref={editor}
+          className="hatch-description-editor hatch-grows"
+          rows={16}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+        />
       )}
     </Card>
   );
@@ -741,6 +751,7 @@ function Comments({
 }) {
   const [body, setBody] = useState('');
   const [saving, setSaving] = useState(false);
+  const box = useAutoGrow(body);
 
   async function submit() {
     setSaving(true);
@@ -783,7 +794,14 @@ function Comments({
       </ul>
 
       <div className="hatch-comment-box">
-        <textarea rows={3} value={body} placeholder="Markdown, like everything else." onChange={(e) => setBody(e.target.value)} />
+        <textarea
+          ref={box}
+          className="hatch-grows"
+          rows={3}
+          value={body}
+          placeholder="Markdown, like everything else."
+          onChange={(e) => setBody(e.target.value)}
+        />
         <Button variant="primary" loading={saving} disabled={!body.trim()} onClick={() => void submit()}>
           Comment
         </Button>
