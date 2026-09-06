@@ -489,6 +489,7 @@ Everything under `/api/hatch`, every route `[RequireAdmin(AcceptScope =
 | `/questions` | GET | Every open question in the house |
 | `/plan`, `/plan/{key}` | GET | See [the level above the board](#the-level-above-the-board) |
 | `/work/next`, `/work/{key}` | GET | See [the dispatcher](#the-dispatcher) |
+| `/work/queue` | GET | The same walk `next` takes, reported rather than acted on — see [what a pass skipped](#what-a-pass-skipped) |
 | `/playbooks` | GET | **Reads only.** POST/PATCH/DELETE are plain `[RequireAdmin]` |
 | `/import/preview`, `/import/preview-text`, `/import` | POST | See [the importer](#the-importer) |
 
@@ -571,6 +572,45 @@ names a ticket is giving an instruction, and housekeeping does not overrule it.
    is not a group, so two loose issues are not siblings of each other — and a
    sibling in a terminal column blocks nothing, because merged work is not work
    in flight.
+
+### What a pass skipped
+
+`work/next` folding in silence is right for one increment and backwards for an
+unattended loop. Nobody is watching, and the one thing worth having afterwards
+is what the pass skipped and why — above all a column and type nobody has
+written a playbook for, which reads as a finished board from the outside and is
+not one.
+
+`GET /api/hatch/work/queue` answers with every issue the dispatcher considers,
+in the order it considers them, each carrying the sentence saying why it cannot
+be advanced — or nothing, where it can. It takes the same `ancestorKey`,
+`offsetMinutes` and `types` and means the same things by them, and each row is
+what a dispatch carries minus the playbook prompt, the children and the
+questions: those are the payload of one agent working one issue, and loading
+them for every row would make a whole-board read expensive for nothing.
+
+**The first entry with no reason is what `work/next` returns**, because it is
+the same walk. `GetNextWork` is the first clear row of the scan rather than a
+second loop that happens to agree with it — two walks that could disagree about
+the order of the board is precisely the bug this endpoint exists to expose.
+
+Every fold therefore lives in one place and in one order, most fundamental
+first: a next column that is terminal, then the type an unattended run picks up,
+then a ready date, then an unanswered question, then a sibling awaiting review,
+and last the missing playbook — last because it is only worth saying about an
+issue that is otherwise a candidate. The three that are the *loop's* policy
+rather than facts about an issue are asked only when the pass is asking, so
+`work/{key}` still ignores them.
+
+The columns with nowhere to go — a terminal one, and a rightmost one that is not
+terminal — are absent rather than listed as blocked. An issue the dispatcher
+never reaches is not something the pass skipped, and shipped work is not a
+backlog.
+
+It is a read, and it costs what a read should: the statuses, the scope, what is
+awaiting review, the open-question counts and the whole playbook matrix are each
+read once for the pass rather than once per row, and the issues are projected in
+one batch.
 
 ### Playbooks
 
@@ -670,8 +710,8 @@ from.
 ### Reaching Hatch
 
 [`scripts/hatch.sh`](../scripts/hatch.sh) wraps the calls a working session
-actually makes — `board`, `next`, `show`, `start`, `move`, `comment`, `ask`,
-`questions`, `answer`, `work`, and `api` for everything else. It finds the todo
+actually makes — `board`, `next`, `queue`, `show`, `start`, `move`, `comment`,
+`ask`, `questions`, `answer`, `work`, and `api` for everything else. It finds the todo
 column by name rather than by id and folds off cards whose ready date has not
 arrived, exactly as the board does.
 
@@ -691,6 +731,14 @@ what it is still waiting on. That last part is not a nicety: the CLI's default
 output prints nothing until the run ends, so a four-minute increment was four
 minutes of blank terminal indistinguishable from a hang, and the fix for "is it
 working" is showing the work, not a spinner.
+
+`hatch.sh queue` reads the scan and prints it, one issue a line — key, type,
+column, and either the reason the pass would fold past it or the transition it
+is clear for. `hatch.sh queue AER-1` scopes it to one epic's subtree. It spawns
+nothing and writes nothing, and an empty board prints a sentence saying so
+rather than a blank line: "there is nothing" and "something went wrong and
+printed nothing" look identical otherwise, which is the one thing a run nobody
+watched cannot afford to be unsure about.
 
 ### What an agent does with a ticket
 
