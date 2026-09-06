@@ -55,6 +55,12 @@
 #   ./hatch.sh work --quiet           # ...saying nothing until it is finished
 #   ./hatch.sh work --model opus --effort xhigh AER-12
 #   ./hatch.sh work --dry-run         # print the prompt, spawn nothing
+#   ./hatch.sh go-to-work             # increments, back to back, until told to stop
+#   ./hatch.sh go-to-work --once      # ...one pass, and out
+#   ./hatch.sh go-to-work --under AER-1     # ...inside one epic, all night
+#   ./hatch.sh go-to-work --quiet --interval 300
+#   ./hatch.sh go-to-work --max-runs 5 --max-spend 20 --until 08:00
+#   ./hatch.sh go-to-work --stop-file /tmp/stop   # touch it to end the loop
 #   ./hatch.sh api GET /api/hatch/issues?statusId=2
 #   ./hatch.sh api PATCH /api/hatch/issues/AER-12 '{"dueAt":"2026-10-01"}'
 #
@@ -676,6 +682,10 @@ cmd_answer() {
 
 # ---- Watching a run ----
 
+# The mark on a line that is a fact for the caller rather than a line for the
+# terminal - see render_stream, which puts it on and takes it off again.
+FACT_MARK=$'\001'
+
 # How long the terminal may stay silent before it says it is still alive.
 # Overridable because the right number depends on what the ticket has the agent
 # doing: twenty seconds is right for editing, and irritating while a test suite
@@ -699,13 +709,22 @@ HATCH_HEARTBEAT="${HATCH_HEARTBEAT:-20}"
 # --include-partial-messages is deliberately not asked for. It streams assistant
 # prose token by token, which is the one thing here that reads fine arriving
 # whole, and it multiplies the event count by an order of magnitude to do it.
+#
+# The second argument is a file, and it is how the two things a caller needs
+# back out of a run - the session id and what it cost - escape a pipeline whose
+# every stage is a subshell. jq cannot write a second file and stdout is the
+# terminal's, so those lines come down the same pipe wearing FACT_MARK and are
+# set aside at the end. A control character, because everything else on this
+# pipe is prose somebody wrote.
 render_stream() {
+  local root="${1:-}" facts="${2:-}" line
+
   # Only the events. The CLI is entitled to say something on stdout that is not
   # one - a warning, an update notice - and jq exits on the first thing it
   # cannot parse, which would take the whole log down with it for a line nobody
   # needed. Line-buffered so the filter does not become the stall it exists to
   # prevent.
-  grep --line-buffered '^{' | jq -n -r --unbuffered --arg root "${1:-}" '
+  grep --line-buffered '^{' | jq -n -r --unbuffered --arg root "$root" --arg mark "$FACT_MARK" '
     def clip($n): if length > $n then .[0:$n - 1] + "…" else . end;
 
     # Paths as the repository says them. An absolute path to a file in this
@@ -728,7 +747,8 @@ render_stream() {
 
     foreach inputs as $e ({ think: 0, mark: 0, out: null };
       if $e.type == "system" and $e.subtype == "init" then
-        .out = "hatch: session \($e.session_id)\n" + resume($e.session_id) + "\n"
+        .out = $mark + "session=\($e.session_id)\n"
+          + "hatch: session \($e.session_id)\n" + resume($e.session_id) + "\n"
 
       # Thinking is the longest silence a run produces and the one most often
       # mistaken for a hang. Reported every few thousand tokens: often enough to
@@ -755,7 +775,9 @@ render_stream() {
                       | flat | clip(96)) ] | join("\n"))
 
       elif $e.type == "result" then
-        .out = "\nhatch: "
+        .out = $mark + "session=\($e.session_id)\n"
+          + (if $e.total_cost_usd then $mark + "cost=\($e.total_cost_usd)\n" else "" end)
+          + "\nhatch: "
           + (if $e.is_error then "ended with an error" else "done" end)
           + " in \(($e.duration_ms / 1000 | floor) | clock), \($e.num_turns) turns"
           + (if $e.total_cost_usd then ", $\(($e.total_cost_usd * 100 | round) / 100)" else "" end)
@@ -764,7 +786,12 @@ render_stream() {
       else .out = null end;
 
       select(.out != null and .out != "") | .out)
-  '
+  ' | while IFS= read -r line; do
+      case "$line" in
+        "$FACT_MARK"*) [ -z "$facts" ] || printf '%s\n' "${line#$FACT_MARK}" >>"$facts" ;;
+        *) printf '%s\n' "$line" ;;
+      esac
+    done
 }
 
 # The rendered lines, plus a pulse when there are none.
@@ -955,6 +982,197 @@ compose() {
   ' <<<"$work"
 }
 
+# "There is nothing an agent may move", said properly.
+#
+# "Nothing to do" and "everything is waiting on you" look identical from here
+# and are not the same situation, so the second one is named. Without this an
+# operator with a board full of open questions would be told the work had run
+# out. Scoped to match the sentence above it: an evening pointed at one epic is
+# not helped by a count of every question in the house.
+nothing_to_do() {
+  local under="${1:-}" waiting=0
+  if [ -n "$under" ]; then
+    echo "hatch: nothing under ${under} is an agent's to move"
+    waiting=$(jq '[.[] | .openQuestions] | add // 0' \
+      <<<"$(_get "/api/hatch/issues?ancestorKey=${under}")") || waiting=0
+  else
+    echo "hatch: nothing on the board is an agent's to move"
+    waiting=$(jq 'length' <<<"$(questions_json '' true)") || waiting=0
+  fi
+
+  # A count that did not arrive is not a count. This is said on the way past
+  # something else, and a loop must not end on it.
+  case "$waiting" in ''|*[!0-9]*) waiting=0 ;; esac
+  [ "$waiting" -eq 0 ] || echo "hatch: ${waiting} question(s)${under:+ under ${under}} are waiting on you - ./scripts/hatch.sh answer"
+}
+
+# ---- One increment ----
+
+# What one increment answers with.
+#
+# Bash 3.2 has no way to return a record, and the run happens inside a pipeline
+# whose every stage is a subshell, so nothing learned in there survives being
+# returned the ordinary way. These are set by run_increment and read by its
+# caller before the next one starts, which is how a loop can say what happened
+# without asking the board a second time.
+INC_KEY=""      # the issue the increment was spent on
+INC_FROM=""     # the column it started in
+INC_TO=""       # the column the playbook was moving it to
+INC_ENDED=""    # the column it is in now, which is the only report that counts
+INC_MOVED=0     # whether those last two differ
+INC_SESSION=""  # what `claude --resume` takes
+INC_COST=""     # dollars, out of the result event
+INC_EXIT=0      # what the CLI exited with
+INC_ASKED=0     # questions the session opened on its way out
+INC_PENDING=0   # set once the increment is under way, cleared once it is counted
+INC_FACTS=""    # the file the renderer leaves the session id and the cost in
+
+# The session id and what the run cost, out of the file the renderer wrote them
+# to. Also called from the exit trap, for the increment an interrupt landed on:
+# a session that was cut short still had a session id and still sent a bill.
+read_facts() {
+  [ -n "$INC_FACTS" ] || return 0
+
+  if [ -f "$INC_FACTS" ]; then
+    INC_SESSION=$(sed -n 's/^session=//p' "$INC_FACTS" | tail -1)
+    INC_COST=$(sed -n 's/^cost=//p' "$INC_FACTS" | tail -1)
+    rm -f "$INC_FACTS"
+  fi
+  INC_FACTS=""
+}
+
+# One increment: the header, the session, and what became of the ticket.
+#
+# Everything between "here is the dispatch" and "here is what happened", which
+# is the part `work` and `go-to-work` have in common. Choosing the ticket stays
+# with the callers, because they choose it differently, and so does the last
+# word, because one of them is talking to somebody sitting there and the other
+# is writing a log nobody will read until morning.
+run_increment() {
+  local work="$1" model="$2" effort="$3" quiet="${4:-0}"
+  local bin root prompt facts before after asked out later
+  local -a codes
+
+  INC_KEY=$(jq -r '.issue.key' <<<"$work")
+  INC_FROM=$(jq -r '.fromStatus.name' <<<"$work")
+  INC_TO=$(jq -r '.toStatus.name // "?"' <<<"$work")
+  INC_ENDED="$INC_FROM"
+  INC_MOVED=0
+  INC_SESSION=""
+  INC_COST=""
+  INC_EXIT=0
+  INC_ASKED=0
+  INC_PENDING=0
+  INC_FACTS=""
+
+  bin=$(claude_bin)
+  root=$(repo_root)
+  prompt=$(compose "$work")
+
+  jq -r '"hatch: \(.issue.key) [\(.issue.type)] \(.issue.title)"' <<<"$work"
+  echo "hatch: ${model}, effort ${effort}, ${INC_FROM} -> ${INC_TO}"
+  echo
+
+  # What was open before the run, so that what the run asked can be told apart
+  # from what was already sitting there. Ids rather than a count: an operator
+  # who answered one question in another terminal while this ran would otherwise
+  # see the arithmetic come out to zero.
+  before=$(jq -c '[.questions[] | select((.answers | length) == 0) | .id]' <<<"$work")
+
+  # Where the renderer leaves the session id and the cost. Under TMPDIR and
+  # removed on the way out: it is one run's scratch, and it belongs neither in
+  # the repository nor in the next increment.
+  facts=$(mktemp "${TMPDIR:-/tmp}/hatch-run.XXXXXX")
+  INC_FACTS="$facts"
+
+  # From here an interrupt must not lose the run. Bash holds a pending handler
+  # until the spawn it is waiting on returns and then runs it immediately - a
+  # statement before anything below could have counted this - so the counting
+  # has to be something the trap can finish on its own.
+  INC_PENDING=1
+
+  # bypassPermissions because in print mode nothing can answer a prompt: any
+  # permission this did not anticipate becomes a silent denial in the middle of
+  # a run nobody is watching. That is a deliberate grant, and the reason `work`
+  # is a command an operator types rather than something a cron job does.
+  #
+  # The prompt goes in on stdin rather than as an argument - it is long, and an
+  # argument list is the one place where "long" has a limit worth avoiding.
+  #
+  # `set -e` is off across the spawn, and the exit code is kept rather than let
+  # go of. A run that ends badly has already said so through the stream, and the
+  # two things worth knowing afterwards - what it asked, and where the ticket
+  # ended up - are worth printing either way; but a loop counting three failures
+  # in a row needs the number, and this is the only place it exists.
+  set +e
+  if [ "$quiet" = 1 ]; then
+    # No renderer, so the facts come from the CLI's own summary instead: one
+    # object at the end carrying the session id, the cost, and the last thing
+    # the session said.
+    out=$(printf '%s' "$prompt" | (cd "$root" && "$bin" -p \
+      --model "$model" \
+      --effort "$effort" \
+      --permission-mode bypassPermissions \
+      --add-dir "$root" \
+      --output-format json))
+    INC_EXIT=$?
+    set -e
+
+    if [ -n "$out" ] && jq -e . >/dev/null 2>&1 <<<"$out"; then
+      jq -r '.result // empty' <<<"$out"
+      # That object is the event the stream ends with, so the closing lines and
+      # the facts are written once rather than twice.
+      jq -c . <<<"$out" | render_stream "$root" "$facts"
+    elif [ -n "$out" ]; then
+      # Not JSON, so it is the CLI complaining. Whatever it said is the only
+      # account of the run there is.
+      printf '%s\n' "$out"
+    fi
+  else
+    printf '%s' "$prompt" | (cd "$root" && "$bin" -p \
+      --model "$model" \
+      --effort "$effort" \
+      --permission-mode bypassPermissions \
+      --add-dir "$root" \
+      --output-format stream-json \
+      --verbose) | render_stream "$root" "$facts" | watch_stream
+    codes=("${PIPESTATUS[@]}")
+    set -e
+    INC_EXIT=${codes[1]}
+  fi
+
+  read_facts
+
+  # Where the ticket actually ended up, asked of the board rather than of the
+  # session. An increment that says it did the work and leaves the ticket in the
+  # column it found it in did not do the work, and this is the read that can
+  # tell the difference. Wrapped in an `if` because a blip here is not worth
+  # taking a whole loop down for: the increment already happened.
+  if later=$(_get "/api/hatch/work/${INC_KEY}"); then
+    INC_ENDED=$(jq -r '.fromStatus.name' <<<"$later")
+  fi
+  [ "$INC_ENDED" = "$INC_FROM" ] || INC_MOVED=1
+
+  # Whatever the session asked for on its way out. This is the half of the loop
+  # that makes asking worth doing: an unattended run's questions are the one
+  # thing in its output that somebody has to act on, and they would otherwise be
+  # a paragraph in the middle of a transcript nobody scrolls back through.
+  if after=$(questions_json "$INC_KEY" true); then
+    asked=$(jq -c --argjson before "$before" \
+      '[.[] | select(($before | index(.id)) == null)]' <<<"$after")
+    INC_ASKED=$(jq 'length' <<<"$asked")
+
+    if [ "$INC_ASKED" -gt 0 ]; then
+      echo
+      echo "--- ${INC_KEY} asked ${INC_ASKED} question(s) ---"
+      echo
+      print_questions "$asked"
+      echo "  ./scripts/hatch.sh answer ${INC_KEY}"
+      echo "  $(issue_url "$INC_KEY")"
+    fi
+  fi
+}
+
 cmd_work() {
   local key="" under="" model="" effort="" dry=0 attach=0 quiet=0
 
@@ -999,19 +1217,7 @@ cmd_work() {
     # this an operator with a board full of open questions would be told the
     # work had run out.
     if [ -z "$work" ]; then
-      local waiting
-      if [ -n "$under" ]; then
-        echo "hatch: nothing under ${under} is an agent's to move"
-        # Scoped to match the sentence above it: an evening pointed at one epic
-        # is not helped by a count of every question in the house.
-        waiting=$(jq '[.[] | .openQuestions] | add // 0' \
-          <<<"$(_get "/api/hatch/issues?ancestorKey=${under}")")
-        [ "$waiting" -eq 0 ] || echo "hatch: ${waiting} question(s) under ${under} are waiting on you - ./scripts/hatch.sh answer"
-      else
-        echo "hatch: nothing on the board is an agent's to move"
-        waiting=$(jq 'length' <<<"$(questions_json '' true)")
-        [ "$waiting" -eq 0 ] || echo "hatch: ${waiting} question(s) are waiting on you - ./scripts/hatch.sh answer"
-      fi
+      nothing_to_do "$under"
       exit 2
     fi
   fi
@@ -1042,36 +1248,34 @@ cmd_work() {
   [ -n "$model" ]  || model=$(jq -r '.playbook.model' <<<"$work")
   [ -n "$effort" ] || effort=$(jq -r '.playbook.effort' <<<"$work")
 
-  local prompt
-  prompt=$(compose "$work")
-
   if [ "$dry" = 1 ]; then
     jq -r '"# \(.issue.key) \(.fromStatus.name) -> \(.toStatus.name)"' <<<"$work"
     echo "# model ${model}, effort ${effort}"
     echo
-    printf '%s\n' "$prompt"
+    compose "$work"
     return
   fi
-
-  local bin root
-  bin=$(claude_bin)
-  root=$(repo_root)
-
-  jq -r '"hatch: \(.issue.key) [\(.issue.type)] \(.issue.title)"' <<<"$work"
-  echo "hatch: ${model}, effort ${effort}, $(jq -r '"\(.fromStatus.name) -> \(.toStatus.name)"' <<<"$work")"
-  echo
 
   if [ "$attach" = 1 ]; then
     # Attached: the same ticket, the same playbook, the same budget, in a session
     # somebody is sitting in front of. Two things are deliberately different.
     #
     # No bypassPermissions - there is somebody here to answer a prompt, and the
-    # grant below exists only because in print mode there is not.
+    # grant run_increment makes exists only because in print mode there is not.
     #
     # And the prompt is an argument rather than stdin, because stdin is the
     # terminal: it is what the operator is about to type into. An argument list
     # has a length limit that the piped form was chosen to avoid, which is a
     # real difference and not one a playbook prompt gets anywhere near.
+    local bin root prompt
+    bin=$(claude_bin)
+    root=$(repo_root)
+    prompt=$(compose "$work")
+
+    jq -r '"hatch: \(.issue.key) [\(.issue.type)] \(.issue.title)"' <<<"$work"
+    echo "hatch: ${model}, effort ${effort}, $(jq -r '"\(.fromStatus.name) -> \(.toStatus.name)"' <<<"$work")"
+    echo
+
     (cd "$root" && exec "$bin" \
       --model "$model" \
       --effort "$effort" \
@@ -1080,58 +1284,409 @@ cmd_work() {
     return
   fi
 
-  # What was open before the run, so that what the run asked can be told apart
-  # from what was already sitting there. Ids rather than a count: an operator
-  # who answered one question in another terminal while this ran would otherwise
-  # see the arithmetic come out to zero.
-  local before after asked
-  before=$(jq -c '[.questions[] | select((.answers | length) == 0) | .id]' <<<"$work")
+  run_increment "$work" "$model" "$effort" "$quiet"
+}
 
-  # bypassPermissions because in print mode nothing can answer a prompt: any
-  # permission this did not anticipate becomes a silent denial in the middle of
-  # a run nobody is watching. That is a deliberate grant, and the reason `work`
-  # is a command an operator types rather than something a cron job does.
-  #
-  # The prompt goes in on stdin rather than as an argument - it is long, and an
-  # argument list is the one place where "long" has a limit worth avoiding.
-  #
-  # The exit code is let go of deliberately. A run that ends badly has already
-  # said so through the stream, in a sentence, and the two things worth knowing
-  # afterwards - what it asked, and where the ticket ended up - are worth
-  # printing either way. Losing them to `set -e` on a non-zero exit would throw
-  # away the part of the output somebody has to act on.
-  if [ "$quiet" = 1 ]; then
-    printf '%s' "$prompt" | (cd "$root" && "$bin" -p \
-      --model "$model" \
-      --effort "$effort" \
-      --permission-mode bypassPermissions \
-      --add-dir "$root") || true
+# ---- The loop ----
+
+# One loop at a time on one machine, and this is what says so.
+#
+# A directory, because mkdir is atomic on every filesystem this could land on
+# and a lock file written with `>` is not. Under TMPDIR rather than in the
+# repository: a lock in a tracked tree is a lock somebody commits, and a lock
+# that outlives a reboot is one somebody has to come and clear by hand.
+lock_dir() { echo "${TMPDIR:-/tmp}/hatch-go-to-work.lock"; }
+
+# Whether this process is the one that took it, so that an exit which never got
+# the lock cannot remove the lock belonging to the run that did.
+LOCK_HELD=0
+
+take_lock() {
+  local dir pid
+  dir=$(lock_dir)
+
+  if mkdir "$dir" 2>/dev/null; then
+    echo $$ >"${dir}/pid"
+    LOCK_HELD=1
+    return 0
+  fi
+
+  # kill -0 asks whether the pid is still there and signals nothing. A lock
+  # whose owner is gone - killed outright, or a machine that rebooted out from
+  # under it - is not a lock, it is litter, and clearing it is the difference
+  # between a loop that survives a crash and one that has to be let back in.
+  pid=$(cat "${dir}/pid" 2>/dev/null || true)
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    echo "hatch: a go-to-work is already running here, pid ${pid}." >&2
+    echo "hatch: one loop at a time is the whole premise - join that one, or stop it." >&2
+    return 1
+  fi
+
+  echo "hatch: clearing a stale lock left by pid ${pid:-?}" >&2
+  rm -rf "$dir"
+  if mkdir "$dir" 2>/dev/null; then
+    echo $$ >"${dir}/pid"
+    LOCK_HELD=1
+    return 0
+  fi
+
+  # Two loops that both found the lock stale, and this is the one that lost the
+  # race for it. The other is running; that is the right outcome either way.
+  echo "hatch: could not take the lock at ${dir}" >&2
+  return 1
+}
+
+drop_lock() {
+  [ "$LOCK_HELD" = 1 ] || return 0
+  rm -rf "$(lock_dir)"
+  LOCK_HELD=0
+}
+
+# Seconds, as somebody reads them off a terminal at midnight.
+duration() {
+  local s="$1"
+  if [ "$s" -ge 3600 ]; then
+    printf '%dh%02dm%02ds' $((s / 3600)) $(((s % 3600) / 60)) $((s % 60))
   else
-    printf '%s' "$prompt" | (cd "$root" && "$bin" -p \
-      --model "$model" \
-      --effort "$effort" \
-      --permission-mode bypassPermissions \
-      --add-dir "$root" \
-      --output-format stream-json \
-      --verbose) | render_stream "$root" | watch_stream || true
+    printf '%dm%02ds' $((s / 60)) $((s % 60))
+  fi
+}
+
+# The skip list the pass before this one printed, as a digest.
+#
+# An idle loop asking the same question every minute would otherwise reprint
+# the same dozen reasons until morning, and the one pass whose reasons changed
+# is exactly the one nobody would find in that. So the reasons are printed when
+# they change, and whenever an increment is about to run - which is the moment
+# they are context for something.
+LAST_SKIPS=""
+
+# One pass of the board: everything it folds past and why, and then the one
+# thing it does about the rest.
+#
+# Two reads where `work` makes one, and the second is the read `work` makes.
+# The scan says what was skipped, which is the only thing an unattended run
+# leaves behind that somebody has to act on; `work/next` says what to do, which
+# is what keeps an increment here the same increment as an increment there.
+# They are the same walk on the server, so the second cannot land on something
+# the first called blocked.
+#
+#   0  an increment ran, and the INC_ globals say how it went
+#   1  nothing on the board is an agent's to move
+#   2  the board could not be read - a reason to wait, not a reason to stop. A
+#      loop that ends on one bad minute of network is a loop somebody has to sit
+#      with, which is the thing being built away from here.
+work_pass() {
+  local under="$1" quiet="$2" scope="" queue skips clear work model effort digest
+
+  [ -z "$under" ] || scope="&ancestorKey=${under}"
+
+  queue=$(_get "/api/hatch/work/queue?offsetMinutes=$(offset_minutes)${scope}") || return 2
+  clear=$(jq -r 'map(select(.blocked == null)) | first | .issue.key // empty' <<<"$queue")
+
+  skips=$(jq -r '
+    def pad($n): . + ((" " * ($n - length)) // "");
+    [ .[] | select(.blocked) ] as $rows
+    | if ($rows | length) == 0 then empty
+      else ($rows | map(.issue.key | length) | max) as $k
+        | $rows[] | "hatch:   skipped " + (.issue.key | pad($k)) + "  " + .blocked
+      end' <<<"$queue")
+
+  digest=$(printf '%s' "$skips" | cksum)
+  if [ -n "$skips" ] && { [ -n "$clear" ] || [ "$digest" != "$LAST_SKIPS" ]; }; then
+    printf '%s\n' "$skips"
+  fi
+  LAST_SKIPS="$digest"
+
+  [ -n "$clear" ] || return 1
+
+  work=$(_get "/api/hatch/work/next?offsetMinutes=$(offset_minutes)${scope}") || return 2
+
+  # The board moved between the two reads - somebody answered a question, or
+  # something landed. Not an error, and not worth a sentence: the next pass
+  # asks again.
+  [ -n "$work" ] || return 1
+
+  # The playbook chooses, and here nothing overrides it. `work --model` is one
+  # operator's opinion about one increment; a loop that carried an override
+  # across a night would be applying it to tickets nobody looked at.
+  model=$(jq -r '.playbook.model' <<<"$work")
+  effort=$(jq -r '.playbook.effort' <<<"$work")
+
+  echo
+  run_increment "$work" "$model" "$effort" "$quiet"
+}
+
+# ---- Ending, and saying what happened ----
+
+# Everything the loop has to stop for, and none of them set by default. An
+# unattended run that stopped for a reason nobody asked for would be a run
+# somebody has to check on, which is the thing being built away from.
+MAX_RUNS=""    # --max-runs N
+MAX_SPEND=""   # --max-spend USD
+UNTIL=""       # --until HH:MM, as typed
+UNTIL_AT=""    # ...and as an instant
+STOP_FILE=""   # --stop-file PATH
+
+# The tally, accumulated as the loop goes rather than reconstructed at the end -
+# because an interrupted run has to be able to print it too, and an interrupted
+# run is exactly the one with nothing left to reconstruct from.
+STARTED=0
+RUNS=0
+SPENT=0
+MOVED_LINES=""
+STALLED_LINES=""
+FAILS=0        # increments that exited non-zero, in a row
+FAIL_KEYS=""   # ...and which
+STOP_WHY=""    # the sentence naming what ended the run
+
+# Dollars, the way a bill is written.
+money() { awk -v v="$1" 'BEGIN { printf "%.2f", v }'; }
+
+# HH:MM today, or tomorrow if that hour has already gone by - somebody who says
+# `--until 06:00` at eleven at night means the morning, and a loop that read it
+# as "seventeen hours ago" would stop before it started. BSD date first because
+# this file is Bash 3.2 for macOS's sake; GNU date behind it, for everywhere
+# else.
+at_clock() {
+  local hhmm="$1" today ts
+  today=$(date +%Y-%m-%d)
+  ts=$(date -j -f '%Y-%m-%d %H:%M' "${today} ${hhmm}" +%s 2>/dev/null) ||
+    ts=$(date -d "${today} ${hhmm}" +%s 2>/dev/null) ||
+    return 1
+  [ "$ts" -gt "$(date +%s)" ] || ts=$((ts + 86400))
+  echo "$ts"
+}
+
+# Whether this run is over, and why - asked before every increment and through
+# every wait. One function, because "every exit path" is not something several
+# call sites can promise between them.
+should_stop() {
+  STOP_WHY=""
+
+  # First, because it is the one that says something is wrong rather than
+  # something is finished.
+  if [ "$FAILS" -ge 3 ]; then
+    STOP_WHY="three increments in a row failed: ${FAIL_KEYS}"
+    return 0
   fi
 
-  # Whatever the session asked for on its way out. This is the half of the loop
-  # that makes asking worth doing: an unattended run's questions are the one
-  # thing in its output that somebody has to act on, and they would otherwise be
-  # a paragraph in the middle of a transcript nobody scrolls back through.
-  after=$(questions_json "$key" true)
-  asked=$(jq -c --argjson before "$before" \
-    '[.[] | select(($before | index(.id)) == null)]' <<<"$after")
-
-  if [ "$(jq 'length' <<<"$asked")" -gt 0 ]; then
-    echo
-    echo "--- ${key} asked $(jq 'length' <<<"$asked") question(s) ---"
-    echo
-    print_questions "$asked"
-    echo "  ./scripts/hatch.sh answer ${key}"
-    echo "  $(issue_url "$key")"
+  # A file, so that stopping a loop needs nothing but a shell and a path - no
+  # pid to find, no signal to send, and nothing that could land in the middle
+  # of a push. The increment in flight finishes first; this is only ever read
+  # between them.
+  if [ -n "$STOP_FILE" ] && [ -e "$STOP_FILE" ]; then
+    STOP_WHY="${STOP_FILE} exists"
+    return 0
   fi
+
+  if [ -n "$MAX_RUNS" ] && [ "$RUNS" -ge "$MAX_RUNS" ]; then
+    STOP_WHY="--max-runs ${MAX_RUNS} reached"
+    return 0
+  fi
+
+  if [ -n "$MAX_SPEND" ] && awk -v s="$SPENT" -v m="$MAX_SPEND" 'BEGIN { exit !(s + 0 >= m + 0) }'; then
+    STOP_WHY="--max-spend ${MAX_SPEND} reached at \$$(money "$SPENT")"
+    return 0
+  fi
+
+  if [ -n "$UNTIL_AT" ] && [ "$(date +%s)" -ge "$UNTIL_AT" ]; then
+    STOP_WHY="--until ${UNTIL} has come"
+    return 0
+  fi
+
+  return 1
+}
+
+# Waiting, in slices, so that a stop file dropped during a wait is noticed then
+# rather than an interval later, and an --until at three in the morning lands at
+# three in the morning however long the interval is.
+nap() {
+  local left="$1" slice
+  while [ "$left" -gt 0 ]; do
+    slice=5
+    [ "$left" -ge 5 ] || slice="$left"
+    sleep "$slice"
+    left=$((left - slice))
+    ! should_stop || return 1
+  done
+  return 0
+}
+
+# One increment, added to the run's account.
+#
+# Called by the loop when an increment finishes, and by the exit trap when an
+# interrupt landed between the two - bash runs a pending handler the moment the
+# spawn it was waiting on returns, which is one statement before the loop gets
+# to count it.
+record_increment() {
+  [ "$INC_PENDING" = 1 ] || return 0
+  INC_PENDING=0
+  read_facts
+
+  RUNS=$((RUNS + 1))
+  [ -z "$INC_COST" ] || SPENT=$(awk -v a="$SPENT" -v b="$INC_COST" 'BEGIN { printf "%.6f", a + b }')
+
+  if [ "$INC_MOVED" = 1 ]; then
+    MOVED_LINES="${MOVED_LINES}hatch:   moved    ${INC_KEY}  ${INC_FROM} -> ${INC_ENDED}
+"
+  else
+    STALLED_LINES="${STALLED_LINES}hatch:   stalled  ${INC_KEY}  still in \"${INC_ENDED}\"
+"
+  fi
+
+  # A failed increment is not a reason to stop - a ticket can be wrong, or a
+  # test can be flaky, and the next ticket is a different question. Three in a
+  # row is something else: whatever is broken is broken for every ticket, and
+  # the loop is now spending money to prove it.
+  if [ "$INC_EXIT" -ne 0 ]; then
+    FAILS=$((FAILS + 1))
+    FAIL_KEYS="${FAIL_KEYS}${FAIL_KEYS:+, }${INC_KEY} (exit ${INC_EXIT})"
+  else
+    FAILS=0
+    FAIL_KEYS=""
+  fi
+}
+
+# What the run came to. Printed from the EXIT trap and nowhere else, because
+# the reasons a loop ends include the ones nobody wrote code for - an interrupt,
+# a failure, a terminal closing - and those are precisely the runs whose tally
+# somebody needs.
+print_tally() {
+  local elapsed
+  elapsed=$(( $(date +%s) - STARTED ))
+
+  echo
+  [ -z "$STOP_WHY" ] || echo "hatch: ${STOP_WHY}"
+  echo "hatch: ${RUNS} increment(s) in $(duration "$elapsed"), \$$(money "$SPENT")"
+  [ -z "$MOVED_LINES" ]   || printf '%s' "$MOVED_LINES"
+  [ -z "$STALLED_LINES" ] || printf '%s' "$STALLED_LINES"
+}
+
+go_to_work_ends() {
+  drop_lock
+  record_increment
+  print_tally
+}
+
+# The command this epic is named for: pick the next actionable issue, spend one
+# increment on it, and do it again.
+#
+# The loop is the shell and not the model. A fresh context per ticket is
+# cheaper, and a session that has been running for six hours is one whose
+# earliest decisions nobody can audit.
+cmd_go_to_work() {
+  local key="" under="" interval=60 once=0 quiet=0 outcome idle_since=0 idle_said=0 now
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --under)      under="${2:?--under needs a key}"; shift 2 ;;
+      --interval)   interval="${2:?--interval needs a number of seconds}"; shift 2 ;;
+      --once)       once=1; shift ;;
+      --quiet)      quiet=1; shift ;;
+      --max-runs)   MAX_RUNS="${2:?--max-runs needs a count}"; shift 2 ;;
+      --max-spend)  MAX_SPEND="${2:?--max-spend needs an amount in dollars}"; shift 2 ;;
+      --until)      UNTIL="${2:?--until needs HH:MM}"; shift 2 ;;
+      --stop-file)  STOP_FILE="${2:?--stop-file needs a path}"; shift 2 ;;
+      -*)           echo "hatch: go-to-work does not take $1" >&2; exit 1 ;;
+      *)            key="$1"; shift ;;
+    esac
+  done
+
+  # A key with --under is the refusal `work` makes, for the reason `work` makes
+  # it. A key on its own is a refusal too, and a different one: this command's
+  # question is "what is next", asked again and again, and one ticket cannot be
+  # the answer to it twice.
+  if [ -n "$key" ] && [ -n "$under" ]; then
+    echo "hatch: go-to-work takes --under or a key, not both - one names where to look, the other names the ticket" >&2
+    exit 1
+  fi
+  if [ -n "$key" ]; then
+    echo "hatch: go-to-work does not take a ticket - it asks the board what is next, until there is nothing." >&2
+    echo "hatch: one increment on ${key} is  ./scripts/hatch.sh work ${key}" >&2
+    exit 1
+  fi
+
+  # Zero is refused rather than clamped: it reads as "as fast as possible" and
+  # means a board asked the same question thousands of times a minute.
+  case "$interval" in ''|*[!0-9]*|0) echo "hatch: --interval takes a number of seconds, at least one" >&2; exit 1 ;; esac
+  [ -z "$MAX_RUNS" ] || case "$MAX_RUNS" in ''|*[!0-9]*) echo "hatch: --max-runs takes a count" >&2; exit 1 ;; esac
+  [ -z "$MAX_SPEND" ] || case "$MAX_SPEND" in ''|*[!0-9.]*) echo "hatch: --max-spend takes an amount in dollars" >&2; exit 1 ;; esac
+
+  # Read before anything is spawned. A wrong clock discovered at the end of the
+  # night is a stop condition that never applied.
+  if [ -n "$UNTIL" ]; then
+    UNTIL_AT=$(at_clock "$UNTIL") || { echo "hatch: --until takes a wall-clock time, as HH:MM" >&2; exit 1; }
+  fi
+
+  # A stop file that is already there would end the loop before its first
+  # increment, silently, and look exactly like a board with nothing on it.
+  if [ -n "$STOP_FILE" ] && [ -e "$STOP_FILE" ]; then
+    echo "hatch: ${STOP_FILE} already exists - that is the stop signal, so nothing would run. Remove it, or name another path." >&2
+    exit 1
+  fi
+
+  take_lock || exit 1
+
+  STARTED=$(date +%s)
+
+  # Every way out through one door. INT and TERM are named rather than left to
+  # bash, because a signal the shell does not trap kills it outright - and the
+  # run that ends in an interrupt is the one whose tally is most worth having.
+  trap 'go_to_work_ends' EXIT
+  trap 'STOP_WHY="interrupted"; exit 130' INT
+  trap 'STOP_WHY="terminated"; exit 143' TERM
+
+  while :; do
+    if should_stop; then break; fi
+
+    outcome=0
+    work_pass "$under" "$quiet" || outcome=$?
+
+    case "$outcome" in
+      0)
+        idle_since=0
+        record_increment
+
+        echo
+        if [ "$INC_MOVED" = 1 ]; then
+          echo "hatch: ${INC_KEY} moved, ${INC_FROM} -> ${INC_ENDED}  (${RUNS} increment(s), \$$(money "$SPENT"))"
+        else
+          echo "hatch: ${INC_KEY} did not move - still in \"${INC_ENDED}\"  (${RUNS} increment(s), \$$(money "$SPENT"))"
+        fi
+        ;;
+
+      1)
+        # Said in full the first time, and then rarely. An idle loop is a thing
+        # somebody left running; it should be able to say it is alive without
+        # filling a scrollback with the same sentence six hundred times.
+        now=$(date +%s)
+        if [ "$idle_since" = 0 ]; then
+          idle_since=$now
+          idle_said=$now
+          nothing_to_do "$under"
+          [ "$once" = 1 ] || echo "hatch: waiting, and asking again every ${interval}s"
+        elif [ $((now - idle_said)) -ge 600 ]; then
+          idle_said=$now
+          echo "hatch: still nothing an agent may move, $(duration $((now - idle_since))) now"
+        fi
+        ;;
+
+      *)
+        # api() already said what went wrong, in a sentence. This says what is
+        # going to happen about it.
+        echo "hatch: the board did not answer - asking again in ${interval}s" >&2
+        ;;
+    esac
+
+    # `--once` is the loop's own dry run against a board that is not a fixture:
+    # one pass, whatever it found, and out.
+    [ "$once" = 0 ] || { STOP_WHY="--once, and the pass is done"; break; }
+
+    # An increment that ran is followed by the next one immediately. The
+    # interval is what to do when there was nothing to do.
+    [ "$outcome" = 0 ] || nap "$interval" || break
+  done
 }
 
 usage() {
@@ -1146,7 +1701,7 @@ load_env
 # machine which has neither yet. Named rather than defaulted, so that a typo
 # still comes back as a typo below.
 case "${1:-}" in
-  board|next|queue|show|start|move|comment|ask|questions|answer|work|api) require_env ;;
+  board|next|queue|show|start|move|comment|ask|questions|answer|work|go-to-work|api) require_env ;;
 esac
 
 case "${1:-}" in
@@ -1162,6 +1717,7 @@ case "${1:-}" in
   questions) shift; cmd_questions "$@" ;;
   answer)    shift; cmd_answer "$@" ;;
   work)    shift; cmd_work "$@" ;;
+  go-to-work) shift; cmd_go_to_work "$@" ;;
   api)     shift; api "${1:?method}" "/${2#/}" "${3:-}" ;;
   ''|-h|--help|help) usage 0 ;;
   *) echo "hatch: no such command \"$1\"" >&2; usage 1 ;;
