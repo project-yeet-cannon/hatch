@@ -20,6 +20,10 @@
 
 .hatch-nav-content {
   display: flex;
+  /* Centred rather than stretched, because the strip now holds a glyph beside
+     the links and a 24px circle stretched to the height of a nav link is an
+     oval. */
+  align-items: center;
   gap: var(--sp-1);
   padding: 0 var(--sp-5);
 }
@@ -1687,4 +1691,186 @@ button.hatch-option.chosen {
   margin: var(--sp-2) 0 0;
   color: var(--muted);
   font-size: var(--t-label);
+}
+
+/* The battery: the account's Claude headroom, in the strip, on every route.
+
+   Two numbers in one glyph - a disc filled from the bottom to the percentage
+   spent, inside a ring running down what is left of the five-hour window - and
+   the percentage in figures beside it, because a picture of a number is not a
+   number.
+
+   Colour comes from --warn and --danger through .hatch-battery-warn and
+   .hatch-battery-danger below. The tone is the server's decision (it sends
+   `normal`, `warn` or `danger`); nothing here reads a percentage. A literal
+   colour in this block would be a bug - see the note at the top of this file. */
+
+.hatch-battery {
+  /* Pushed to the right of the links, which is the whole of its placement: it
+     is not one of them and must not read as one. */
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1-5);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-ctl);
+  background: none;
+  color: var(--muted);
+  font-size: var(--t-label);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition), background var(--transition);
+}
+
+.hatch-battery:hover {
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.hatch-battery-glyph {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
+/* The ring's own colour is the tone; the track under it is the line the page
+   already draws everything else with, so a nearly-spent window is still a
+   circle rather than a stub floating in the strip. */
+.hatch-battery-track {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 2;
+}
+
+.hatch-battery-ring {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+/* No reset instant to run down to. A dashed ring rather than a full or an empty
+   one: "we do not know when this comes back" must not look like either answer. */
+.hatch-battery-ring-unknown {
+  stroke-dasharray: 2 3;
+  opacity: 0.6;
+}
+
+.hatch-battery-disc {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+  opacity: 0.5;
+}
+
+.hatch-battery-fill {
+  fill: currentColor;
+}
+
+/* The three tones, and the only place any of them names a colour. Normal is
+   the strip's own muted ink, so a calm battery is furniture rather than a
+   third thing competing with the links. */
+.hatch-battery-normal {
+  color: var(--muted);
+}
+
+.hatch-battery-warn {
+  color: var(--warn);
+}
+
+.hatch-battery-danger {
+  color: var(--danger);
+}
+
+.hatch-battery-warn:hover,
+.hatch-battery-danger:hover {
+  /* A tone that is saying something keeps saying it on hover, rather than
+     turning back into ordinary ink under the pointer. */
+  color: inherit;
+}
+
+.hatch-battery-percent {
+  line-height: 1;
+}
+
+/* The detail modal: one row per window the account is enforcing, in the
+   account's own order, and what has been bought on top of the subscription. */
+
+.hatch-usage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.hatch-usage-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.hatch-usage-row {
+  display: grid;
+  /* The label takes what is left; the number and the clause are fixed columns
+     so a stack of rows reads down rather than zig-zagging. */
+  grid-template-columns: 1fr auto auto;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-2-5);
+  border-radius: var(--r-in);
+  background: var(--bg);
+}
+
+.hatch-usage-label {
+  font-weight: 600;
+  font-size: var(--t-body);
+  /* Stated rather than inherited: the row wears the tone class so that the
+     percentage can be painted with it, and a calm row's --muted must not drag
+     the name of the window down with it. */
+  color: var(--ink);
+}
+
+.hatch-usage-percent {
+  font-weight: 700;
+  font-size: var(--t-body);
+  font-variant-numeric: tabular-nums;
+  /* The row wears the tone class, so this is the tone the server decided. */
+  color: currentColor;
+}
+
+.hatch-usage-reset {
+  font-size: var(--t-label);
+  color: var(--muted);
+}
+
+.hatch-usage-credits {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--sp-1) var(--sp-4);
+  margin: 0;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+  font-size: var(--t-body);
+}
+
+.hatch-usage-credits dt {
+  color: var(--muted);
+}
+
+.hatch-usage-credits dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.hatch-usage-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
 }

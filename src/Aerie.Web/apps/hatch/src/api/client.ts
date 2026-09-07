@@ -29,6 +29,7 @@ import type {
   Status,
   StatusCreateRequest,
   StatusPatchRequest,
+  Utilization,
   Work,
 } from '../types';
 
@@ -227,3 +228,23 @@ export const previewText = (request: PastedPlan) =>
 
 export const runImport = (request: ImportRequest) =>
   fetchJson<ImportResult>('/api/hatch/import', { method: 'POST', ...asJson(request) });
+
+// ---- The battery ----
+
+/**
+ * The account's Claude headroom, read by the server so no browser ever holds
+ * the subscription token.
+ *
+ * A 204 arrives as an empty body, which `fetchJson` gives back as undefined,
+ * and it is normalised to null the way `getNextWorkUnder` normalises its own.
+ * It is the answer this endpoint gives most often on most installations - no
+ * token is configured - and it is not a failure: it means there is no battery
+ * here, and the component draws nothing at all.
+ *
+ * `refresh` bypasses the server's five-minute window. It is the modal's
+ * refresh control and nothing else calls it that way.
+ */
+export const getUtilization = (refresh = false) =>
+  fetchJson<Utilization | undefined>(`/api/hatch/utilization${refresh ? '?refresh=true' : ''}`).then(
+    (reading) => reading ?? null,
+  );

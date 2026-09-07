@@ -676,6 +676,7 @@ Everything under `/api/hatch`, every route `[RequireAdmin(AcceptScope =
 | `/work/queue` | GET | The same walk `next` takes, reported rather than acted on — see [what a pass skipped](#what-a-pass-skipped) |
 | `/playbooks` | GET | **Reads only.** POST/PATCH/DELETE are plain `[RequireAdmin]` |
 | `/import/preview`, `/import/preview-text`, `/import` | POST | See [the importer](#the-importer) |
+| `/utilization` | GET | The account's Claude headroom, read by the server. `204` when no token is configured; `?refresh=true` bypasses the cache — see [the battery](#the-battery) |
 
 Two of the filters are worth knowing: `ancestorKey` returns everything below an
 issue at any depth — an epic's stories and their tasks in one request — and
@@ -687,6 +688,104 @@ answers with `changed`, `unchanged` and `failures`. That "one refusal does not
 take the batch with it" property is not a `try`/`catch` per key — the
 single-issue edit path was pulled apart so that everything refusable is looked
 up before anything is written, and the bulk path shares it.
+
+## The battery
+
+The nav strip carries one element the board does not: how much Claude the
+account has left, and how long until it comes back. It is read from every page
+without opening another app, and it is drawn from `GET
+/api/hatch/utilization`.
+
+**Absent is a supported state, and it is the default.** An installation with no
+Claude subscription token gets a Hatch with no battery — no element, no
+placeholder, no reserved space, and nothing anywhere reporting an error. This
+is an enhancement to a tracker, not a dependency of one, and the `204` the
+endpoint answers with is what says so.
+
+### The credential
+
+The token is a **secret-valued site setting**, `ClaudeSubscriptionToken`, set on
+the admin app's **Settings** page and stored the way the Immich key and the
+Anthropic key already are: obfuscated at rest, redacted on read, never leaving
+the API. It is an OAuth token for the operator's own Claude subscription, and
+like every other credential in Aerie it is the operator's to supply
+([`docs/ethos.md`](ethos.md)) — nothing about one household's account may be
+true of the artifact.
+
+A setting rather than an environment variable for a reason beyond habit: this
+credential is genuinely optional, the provisioning path cannot express an
+optional cluster secret, and an expiring token is re-pasted far more often than
+a cluster is provisioned. Leave it blank and there is no battery, which is a
+working configuration.
+
+The token reaches the app through one interface, `IClaudeCredential`, whose one
+member answers "the token, or null". Null is an ordinary value there rather
+than a startup failure, and moving where the token lives is a change to one
+class.
+
+### What the endpoint answers
+
+`GET /api/hatch/utilization` is `[RequireAdmin(AcceptScope = "hatch")]` like the
+rest of the module. It answers `204 No Content` when no token is configured, and
+otherwise:
+
+```json
+{
+  "state": "ok",
+  "readAt": "2026-09-07T08:12:03Z",
+  "limits": [
+    { "window": "session", "label": "Session", "percent": 17,
+      "tone": "normal", "resetsAt": "2026-09-07T12:00:00Z", "isActive": true }
+  ],
+  "credits": { "isEnabled": true, "monthlyLimit": null, "usedCredits": 0,
+               "currency": "USD", "spendLimitReached": false }
+}
+```
+
+Every name in it is Hatch's own. The account's spelling stops at
+`ClaudeUsageClient`, so the day a field is renamed upstream there is one file to
+fix and no page that has gone blank — and a test asserts that not one of the
+account's field names survives into the body.
+
+- `state` is the whole of the degraded story. `ok` — read within the freshness
+  window. `stale` — the account could not be reached and this is the last good
+  reading, whose age `readAt` gives. `unknown` — could not be reached and there
+  has never been a good reading, so `limits` is empty and `readAt` is null.
+- `window` is `session`, `weekly`, `weeklyModel` or `other`, in the order the
+  account listed them. `other` is the carry-through for a kind Hatch has never
+  seen: it is rendered, not dropped and not thrown on.
+- `label` is what the row is called on screen, decided on the server —
+  `Session`, `Weekly`, the account's own display name for a model-scoped row,
+  and for `other` the account's own kind with its underscores turned to spaces.
+  So a fourth kind draws a row with a plain name rather than a blank one, and
+  **no model name is written down in this repository**.
+- `tone` is `normal`, `warn` or `danger` — the *decision*, not the account's
+  word for it, so the rule lives in one file on the server and the client paints
+  what it is told. Severity upstream is an open vocabulary and only `normal` has
+  ever been observed, so a severity Hatch knows maps and anything else falls
+  back to the percentage (90 and up is danger, 75 and up is warn). Without that
+  fallback the first new word upstream would paint a spent window calm.
+- `credits` is null when the account reports no extra usage block at all, and
+  the modal then says nothing about credits.
+
+### How often it is actually read
+
+The reading is held by a process-wide cache, and the cache holds the last good
+one **forever** — not an `IMemoryCache` entry, because "the last good reading,
+however old" is exactly what an eviction policy would throw away and it is what
+a `stale` answer is made of.
+
+Two floors bound how often somebody else's endpoint is asked:
+
+- **Five minutes of freshness**, with a semaphore and a re-check inside it, so
+  twenty open tabs polling every two minutes are one upstream read.
+- **Sixty seconds after a failure.** Without it the failure path would be the
+  only path with no rate limit on it, and an outage would become a request per
+  tab per poll.
+
+`?refresh=true` ignores both. It is the modal's refresh control: one person
+pressing a button once, which is not what the floors exist to bound.
+
 
 ## The dispatcher
 

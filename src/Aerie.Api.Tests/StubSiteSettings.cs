@@ -24,7 +24,8 @@ internal sealed class StubSiteSettings(
     string airQualityProvider = HazardProviders.OpenMeteo,
     string? anthropicApiKey = null,
     string? immichBaseUrl = null,
-    string? immichApiKey = null) : ISiteSettingsService
+    string? immichApiKey = null,
+    string? claudeSubscriptionToken = null) : ISiteSettingsService
 {
     public Task<SiteSettingsSnapshot> GetAsync(CancellationToken ct) => Task.FromResult(new SiteSettingsSnapshot(
         TimeZone: timeZone,
@@ -47,7 +48,8 @@ internal sealed class StubSiteSettings(
         HazardMaxSeverityAgeHours: hazardMaxSeverityAgeHours,
         AnthropicApiKey: anthropicApiKey,
         ImmichBaseUrl: immichBaseUrl,
-        ImmichApiKey: immichApiKey));
+        ImmichApiKey: immichApiKey,
+        ClaudeSubscriptionToken: claudeSubscriptionToken));
 
     /// <summary>Counted rather than ignored: SettingsController is supposed to call it on every write.</summary>
     public int Invalidations { get; private set; }

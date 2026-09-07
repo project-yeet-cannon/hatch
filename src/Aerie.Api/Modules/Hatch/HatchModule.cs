@@ -20,6 +20,25 @@ public static class HatchModule
         // nor the clock.
         services.AddSingleton<PlanImportParser>();
 
+        // The battery in the nav, in three registrations. All singletons, and
+        // the chain has to be: UtilizationCache holds the last good reading for
+        // the whole process - which is what lets an unreachable account still
+        // answer with something - and a singleton may not depend on anything
+        // shorter-lived than itself.
+        //
+        // Nothing here wants a scope anyway. The credential is its own
+        // interface so that where the token lives is one class rather than a
+        // decision spread through the adapter, and it reads through
+        // ISiteSettingsService, which is a singleton with its own cache; the
+        // adapter takes IHttpClientFactory, which is the whole reason a named
+        // client exists.
+        services.AddSingleton<IClaudeCredential, SiteSettingClaudeCredential>();
+
+        services.AddHttpClient(ClaudeUsageClient.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
+        services.AddSingleton<IClaudeUsageClient, ClaudeUsageClient>();
+
+        services.AddSingleton<UtilizationCache>();
+
         return services;
     }
 }

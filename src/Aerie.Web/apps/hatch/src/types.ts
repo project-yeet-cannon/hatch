@@ -496,3 +496,50 @@ export interface Plan {
       a story without a parent. */
   loose: Rollup;
 }
+
+// ---- The battery ----
+
+/** One limit window as the server describes it. Mirrors UtilizationLimit. */
+export interface UtilizationLimit {
+  /** `session` | `weekly` | `weeklyModel` | `other`. A string rather than a
+      union of four, because `other` exists precisely so a kind nobody has seen
+      yet still renders - and a union would make the fifth one a type error at
+      the moment it most needs to be a row. */
+  window: string;
+  /** What the row is called on screen, decided on the server: `Session`,
+      `Weekly`, the account's own name for a model, or a humanised `kind`. No
+      model name is written down in Hatch. */
+  label: string;
+  percent: number;
+  /** `normal` | `warn` | `danger` - the decision, already made. The client
+      paints what it is told; the rule lives in one file on the server. */
+  tone: string;
+  /** Null on a window with nothing to run down to - the scoped weekly row
+      arrives that way. Drawn as unknown, not as full and not as empty. */
+  resetsAt: string | null;
+  isActive: boolean;
+}
+
+/** Extra usage, when the account reports any. Mirrors UtilizationCredits. */
+export interface UtilizationCredits {
+  isEnabled: boolean;
+  monthlyLimit: number | null;
+  usedCredits: number;
+  currency: string | null;
+  spendLimitReached: boolean;
+}
+
+/** A reading of the account's Claude headroom. Mirrors UtilizationReading. */
+export interface Utilization {
+  /** `ok` read within the freshness window; `stale` the account could not be
+      reached and this is the last good reading, whose age `readAt` gives;
+      `unknown` could not be reached and there has never been one, so `limits`
+      is empty and `readAt` is null. */
+  state: string;
+  readAt: string | null;
+  /** In the order the account listed them. Nothing here sorts or filters. */
+  limits: UtilizationLimit[];
+  /** Null when the account reports no extra usage block at all, which is what
+      a modal that says nothing about credits is drawn from. */
+  credits: UtilizationCredits | null;
+}
