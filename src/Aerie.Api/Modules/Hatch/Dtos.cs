@@ -571,3 +571,129 @@ public record PlanEntryDto(IssueCardDto Issue, bool IsLeaf, RollupDto Rollup, IR
 /// they did.
 /// </param>
 public record PlanDto(IReadOnlyList<PlanEntryDto> Epics, RollupDto Loose);
+
+// ---- The work log ----
+
+/// <summary>
+/// What one model cost inside one session - the row's breakdown, one entry per
+/// model the session used.
+/// </summary>
+/// <remarks>
+/// Hatch's names, not Anthropic's. The CLI's <c>result</c> event spells these
+/// <c>inputTokens</c>, <c>cacheCreationInputTokens</c>, <c>costUSD</c> and so
+/// on, and the translation happens once, in <c>scripts/hatch.sh</c>, exactly as
+/// <see cref="ClaudeUsageClient"/> is the only file that knows the battery's
+/// spelling. Nothing downstream of the wire should have to know two vocabularies.
+/// </remarks>
+public record WorkLogModelUseDto(
+    string Model,
+    long InputTokens,
+    long OutputTokens,
+    long CacheCreationTokens,
+    long CacheReadTokens,
+    decimal CostUsd);
+
+/// <summary>
+/// One finished session, as the dispatcher reports it.
+/// </summary>
+/// <remarks>
+/// Two fields on the stored row are deliberately absent here, and both for the
+/// same reason: they are derived, and a caller that could send them is a caller
+/// that could make the row disagree with itself.
+///
+/// The four token counts are the sum over <paramref name="Models"/>, computed by
+/// the endpoint. And <c>Described</c> is whether a title or a summary actually
+/// arrived - a run that died before it could say what it did still gets its row,
+/// with every metric intact and the mark on the wire rather than left for a
+/// client to infer from an empty string.
+/// </remarks>
+/// <param name="SessionId">What <c>claude --resume</c> takes.</param>
+/// <param name="StartedAt">Wall clock at the spawn.</param>
+/// <param name="EndedAt">Wall clock as the stream closed.</param>
+/// <param name="DurationMs">The session's own <c>duration_ms</c>, which is the smaller number and the honest one.</param>
+/// <param name="Title">What the session did, in a few words, or null when it never said.</param>
+/// <param name="Summary">The same at length. Clipped rather than refused when it runs long - see <see cref="WorkLogController"/>.</param>
+/// <param name="Models">
+/// The per-model breakdown. Absent on a run that fell over before the accounting
+/// arrived, which records zero tokens and whatever cost was reported: a session
+/// that ended badly still had an id and still cost something.
+/// </param>
+public record WorkLogEntryRequest(
+    string SessionId,
+    DateTimeOffset StartedAt,
+    DateTimeOffset EndedAt,
+    long DurationMs,
+    string? Title,
+    string? Summary,
+    bool IsError,
+    int Turns,
+    decimal CostUsd,
+    IReadOnlyList<WorkLogModelUseDto>? Models);
+
+/// <summary>
+/// One row of the work log, as the issue page draws it.
+/// </summary>
+/// <param name="Described">
+/// Whether the session said what it did. On the wire rather than inferred from
+/// an empty title, because "this run never described itself" is a fact about the
+/// run and a client deducing it from an absent string is a client guessing.
+/// </param>
+/// <param name="TotalTokens">
+/// The four counts added up, carried rather than left to the client, so the
+/// headline figure has one definition.
+/// </param>
+public record WorkLogEntryDto(
+    long Id,
+    string SessionId,
+    DateTimeOffset StartedAt,
+    DateTimeOffset EndedAt,
+    long DurationMs,
+    string? Title,
+    string? Summary,
+    bool Described,
+    bool IsError,
+    int Turns,
+    decimal CostUsd,
+    long InputTokens,
+    long OutputTokens,
+    long CacheCreationTokens,
+    long CacheReadTokens,
+    long TotalTokens,
+    IReadOnlyList<WorkLogModelUseDto> Models);
+
+/// <summary>
+/// What a set of sessions cost, added up. See <see cref="WorkLogRollup"/> for
+/// why this addition is not the leaf rule <see cref="Rollup"/> uses.
+/// </summary>
+/// <param name="Sessions">How many rows are in the sum.</param>
+/// <param name="Errors">How many of them ended badly. Their spend is in the totals either way.</param>
+/// <param name="TotalTokens">The four counts added up - one definition of the headline, as on an entry.</param>
+public record WorkLogTotalsDto(
+    int Sessions,
+    int Errors,
+    long InputTokens,
+    long OutputTokens,
+    long CacheCreationTokens,
+    long CacheReadTokens,
+    long TotalTokens,
+    decimal CostUsd);
+
+/// <summary>
+/// An issue's work log: what everything beneath it has cost, what it has cost
+/// on its own, and its own sessions.
+/// </summary>
+/// <remarks>
+/// The asymmetry is the point and is worth saying out loud: <b>entries are the
+/// issue's own, totals are the subtree's.</b> An epic showing four sessions of
+/// its own and 1.4M tokens is not a bug, it is the feature - and
+/// <paramref name="Own"/> is here so a page can say which number is which
+/// instead of letting one pass for the other.
+/// </remarks>
+/// <param name="Totals">This issue and every descendant, at any depth.</param>
+/// <param name="Own">Only the entries on this issue.</param>
+/// <param name="Entries">This issue's own sessions, newest first.</param>
+public record WorkLogDto(
+    string Key,
+    WorkLogTotalsDto Totals,
+    WorkLogTotalsDto Own,
+    IReadOnlyList<WorkLogEntryDto> Entries);

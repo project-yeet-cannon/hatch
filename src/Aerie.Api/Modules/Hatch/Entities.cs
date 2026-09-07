@@ -350,6 +350,7 @@ public class EfHatchIssue
 
     public ICollection<EfHatchComment> Comments { get; set; } = [];
     public ICollection<EfHatchIssueEvent> Events { get; set; } = [];
+    public ICollection<EfHatchWorkLogEntry> WorkLog { get; set; } = [];
 
     public static bool IsValidType(string? type) => type is not null && Types.Contains(type);
 }
@@ -741,5 +742,138 @@ public class EfHatchIssueDependency
     [MaxLength(Common.PersonName.MaxChars)]
     public required string CreatedBy { get; set; }
 
+    public required DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>
+/// What one agent session cost, on the ticket it was spent on.
+///
+/// A row per unattended increment: the session id <c>claude --resume</c> takes,
+/// how long it ran, what it burned in tokens and in notional dollars, and a
+/// sentence saying what it did. Account-wide utilization is honest but
+/// anonymous - no arithmetic over it can say which epic ate the evening - and
+/// the dispatcher is the only thing in the system that knows which ticket a
+/// session's spend was for. This table is that knowledge, written down.
+///
+/// The dollars are notional API list price as the CLI reports it, not money
+/// that left an account: on a subscription nothing was billed per session. Both
+/// figures are stored and both go out on the wire, so which one is the headline
+/// is a decision the page makes and not one the schema has baked in.
+/// </summary>
+/// <remarks>
+/// No author column, and it is the one table in the module without one. Every
+/// other row records who acted; here the actor <em>is</em> the session, whose
+/// id is already the row's identity.
+///
+/// Two limits are accepted rather than designed around. An interactive session
+/// - <c>hatch.sh work -i</c>, or one resumed by hand - leaves no row, because
+/// nothing is watching its exit; that hole is smaller than making every
+/// terminal session a writer. And a run that dies before it can describe itself
+/// still gets a row, marked undescribed: losing an evening's spend because a
+/// session could not compose a summary would be the wrong trade.
+///
+/// Nothing prunes these. One row per increment is small, and the day it is not,
+/// a retention window is a sampler's worth of work rather than a schema change.
+/// </remarks>
+[Table("WorkLogEntries")]
+// What makes a retried write idempotent rather than a second row - the same
+// property EfHatchIssueDependency's unique index has, and for the same reason:
+// the caller is a shell script at the end of a run, and a run can be re-run.
+[Index(nameof(IssueId), nameof(SessionId), IsUnique = true)]
+// The issue page's one query: this issue's entries, newest first.
+[Index(nameof(IssueId), nameof(EndedAt))]
+public class EfHatchWorkLogEntry
+{
+    public const int MaxSessionIdLength = 64;
+    public const int MaxTitleLength = 200;
+    public const int MaxSummaryLength = 2000;
+
+    [Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+    public long Id { get; set; }
+
+    /// <summary>Set by EF fixup when the entry is added through <see cref="EfHatchIssue.WorkLog"/> - see <see cref="EfHatchComment.IssueId"/>.</summary>
+    public long IssueId { get; set; }
+    public EfHatchIssue? Issue { get; set; }
+
+    /// <summary>What <c>claude --resume</c> takes, and this row's identity within its issue.</summary>
+    [MaxLength(MaxSessionIdLength)]
+    public required string SessionId { get; set; }
+
+    /// <summary>Wall clock either side of the CLI, taken by the dispatcher.</summary>
+    /// <remarks>
+    /// Deliberately not reconciled with <see cref="DurationMs"/>, which is what
+    /// the session itself reported. The pair says when the increment occupied
+    /// the machine; the duration says how long it was thinking, which is the
+    /// smaller number and the honest answer to "how long did this take".
+    /// </remarks>
+    public required DateTimeOffset StartedAt { get; set; }
+    public required DateTimeOffset EndedAt { get; set; }
+
+    /// <summary>The session's own <c>duration_ms</c> - see <see cref="StartedAt"/>.</summary>
+    public required long DurationMs { get; set; }
+
+    /// <summary>What the session did, in a few words. Null when it never said.</summary>
+    [MaxLength(MaxTitleLength)]
+    public string? Title { get; set; }
+
+    /// <summary>The same, at length. Sessions are asked to keep it under 100 words.</summary>
+    [MaxLength(MaxSummaryLength)]
+    public string? Summary { get; set; }
+
+    /// <summary>
+    /// Whether the session said what it did. Set by the server from
+    /// <see cref="Title"/> and <see cref="Summary"/> and never sent by a caller,
+    /// so the two cannot come to disagree.
+    /// </summary>
+    /// <remarks>
+    /// A column rather than a client-side test for an empty title, because
+    /// "this run never described itself" is a fact about the run and a client
+    /// inferring it from an absent string is a client guessing.
+    /// </remarks>
+    public bool Described { get; set; }
+
+    /// <summary>The session's <c>is_error</c>. Its spend counted either way.</summary>
+    public bool IsError { get; set; }
+
+    /// <summary>The session's <c>num_turns</c>.</summary>
+    public int Turns { get; set; }
+
+    /// <summary>
+    /// Notional API list price, in dollars, as the CLI reported it. Eight
+    /// places because a short session costs a fraction of a cent and rounding
+    /// it to two would make a night of them add up to nothing.
+    /// </summary>
+    public decimal CostUsd { get; set; }
+
+    /// <summary>
+    /// The session's four token counts, summed over <see cref="ModelUsage"/>.
+    /// </summary>
+    /// <remarks>
+    /// A denormalisation, said out loud because a denormalisation nobody wrote
+    /// down is a bug waiting for its second writer: these are the sum of the
+    /// breakdown and are computed from it by the endpoint that writes the row,
+    /// never sent independently. They are columns and not a fold over the json
+    /// because every total in the hierarchy is an aggregate over them.
+    /// </remarks>
+    public long InputTokens { get; set; }
+    public long OutputTokens { get; set; }
+    public long CacheCreationTokens { get; set; }
+    public long CacheReadTokens { get; set; }
+
+    /// <summary>
+    /// The per-model breakdown the four counts are the sum of, as <c>jsonb</c>:
+    /// an ordered list of <see cref="WorkLogModelUseDto"/>. Null when the run
+    /// ended before the accounting arrived.
+    /// </summary>
+    /// <remarks>
+    /// <c>jsonb</c> and not a table, on the grounds
+    /// <see cref="EfHatchIssueEvent.Payload"/> is: it is read whole with the row
+    /// that owns it, and a table would buy a join and a cascade for nothing. The
+    /// day somebody asks which model a quarter went on, it is a query against
+    /// this column rather than a migration.
+    /// </remarks>
+    public string? ModelUsage { get; set; }
+
+    /// <summary>When the row landed, which is not when the session ended.</summary>
     public required DateTimeOffset CreatedAt { get; set; }
 }

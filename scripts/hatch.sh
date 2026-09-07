@@ -872,6 +872,34 @@ render_stream() {
 
     def resume($id): "hatch:   join it with  claude --resume \($id)";
 
+    # What the session said it did, out of the fenced block it was asked to end
+    # with - see the "Where this increment ends" section of compose, which is
+    # where that instruction is written.
+    #
+    # The first non-empty line is the title (a leading "title:" comes off, for
+    # the session that writes one), and everything after it is the summary. The
+    # *last* block wins, so a session that quotes the format earlier in its own
+    # prose does not talk itself out of a title. No block, no closing text, or a
+    # block with nothing in it: both fields are null and the row goes up
+    # undescribed, which is a mark the page draws rather than an entry lost.
+    #
+    # "m" is the flag that makes a dot match a newline in jq, not "s" - the two
+    # are the other way round here from most regex dialects.
+    def worklog:
+      ([ scan("```work-log[^\n]*\n(.*?)```"; "m") ] | last) as $found
+      | if $found == null then { title: null, summary: null }
+        else
+          ($found[0] | split("\n") | map(sub("\\s+$"; ""))) as $lines
+          | ([ $lines | to_entries[] | select(.value | test("\\S")) ] | first) as $head
+          | if $head == null then { title: null, summary: null }
+            else
+              { title: ($head.value | sub("^\\s+"; "") | sub("^title:\\s*"; ""; "i") | .[0:200]),
+                summary: ($lines[($head.key + 1):] | join("\n")
+                          | sub("^\\s+"; "") | sub("\\s+$"; "")
+                          | if . == "" then null else .[0:2000] end) }
+            end
+        end;
+
     foreach inputs as $e ({ think: 0, mark: 0, out: null };
       if $e.type == "system" and $e.subtype == "init" then
         .out = $mark + "session=\($e.session_id)\n"
@@ -904,6 +932,38 @@ render_stream() {
       elif $e.type == "result" then
         .out = $mark + "session=\($e.session_id)\n"
           + (if $e.total_cost_usd then $mark + "cost=\($e.total_cost_usd)\n" else "" end)
+
+          # The whole of the work log entry, as one compact object already in
+          # the vocabulary Hatch uses - the fact channel is line-based and a
+          # summary has newlines in it, so it travels as JSON rather than as
+          # six more key=value lines.
+          #
+          # This is the only place the names the CLI uses are translated into
+          # the ones Hatch stores, exactly as ClaudeUsageClient is the only file
+          # that knows how the battery spells its own. Two things about the
+          # source are worth knowing and neither is the obvious reading. First,
+          # `usage` is not the total for the session and `modelUsage` is: the
+          # latter is the per-model aggregate over the whole run, and its
+          # costUSD sums to total_cost_usd to the last digit - so the four
+          # counts are the sum over `modelUsage` and `usage` is not read at all.
+          # Second, `usage` is snake_case while the values inside `modelUsage`
+          # are camelCase, in the same object.
+          + $mark + "result=" + ({
+              sessionId: $e.session_id,
+              durationMs: ($e.duration_ms // 0),
+              turns: ($e.num_turns // 0),
+              isError: ($e.is_error // false),
+              costUsd: ($e.total_cost_usd // 0),
+              models: [ ($e.modelUsage // {}) | to_entries[] | {
+                  model: .key,
+                  inputTokens: (.value.inputTokens // 0),
+                  outputTokens: (.value.outputTokens // 0),
+                  cacheCreationTokens: (.value.cacheCreationInputTokens // 0),
+                  cacheReadTokens: (.value.cacheReadInputTokens // 0),
+                  costUsd: (.value.costUSD // 0)
+              } ]
+            } + (($e.result // "") | worklog) | tojson) + "\n"
+
           + "\nhatch: "
           + (if $e.is_error then "ended with an error" else "done" end)
           + " in \(($e.duration_ms / 1000 | floor) | clock), \($e.num_turns) turns"
@@ -1135,7 +1195,20 @@ compose() {
     "",
     "Do not edit playbooks. The API refuses it, and the refusal is deliberate:",
     "an agent that could widen its own instructions and its own budget is a loop",
-    "with no end. If a playbook is wrong, say so on the ticket and stop."
+    "with no end. If a playbook is wrong, say so on the ticket and stop.",
+    "",
+    "Last of all, say what you did, in a fenced block:",
+    "",
+    "```work-log",
+    "A title naming what this session did",
+    "",
+    "The summary, under 100 words.",
+    "```",
+    "",
+    "That block becomes the work log row for this session on \(.issue.key),",
+    "beside what the session cost. A run that writes none still gets its row,",
+    "marked as never having said what it did - so the block is worth the two",
+    "lines it takes. Write it last, and write it once."
   ' <<<"$work"
 }
 
@@ -1219,6 +1292,8 @@ INC_ENDED=""    # the column it is in now, which is the only report that counts
 INC_MOVED=0     # whether those last two differ
 INC_SESSION=""  # what `claude --resume` takes
 INC_COST=""     # dollars, out of the result event
+INC_RESULT=""   # the whole work log entry, as one line of JSON
+INC_STARTED=""  # wall clock at the spawn, for the work log entry
 INC_EXIT=0      # what the CLI exited with
 INC_ASKED=0     # questions the session opened on its way out
 INC_PENDING=0   # set once the increment is under way, cleared once it is counted
@@ -1226,18 +1301,87 @@ INC_FACTS=""    # the file the renderer leaves the session id and the cost in
 INC_STALLED=0   # the board says it ended where it started: an increment that did nothing
 INC_FLAG=""     # what was done about that, in the words the tally says it in
 
-# The session id and what the run cost, out of the file the renderer wrote them
-# to. Also called from the exit trap, for the increment an interrupt landed on:
-# a session that was cut short still had a session id and still sent a bill.
+# The session id, what the run cost, and the whole of its work log entry, out of
+# the file the renderer wrote them to. Also called from the exit trap, for the
+# increment an interrupt landed on: a session that was cut short still had a
+# session id and still sent a bill.
 read_facts() {
   [ -n "$INC_FACTS" ] || return 0
 
   if [ -f "$INC_FACTS" ]; then
     INC_SESSION=$(sed -n 's/^session=//p' "$INC_FACTS" | tail -1)
     INC_COST=$(sed -n 's/^cost=//p' "$INC_FACTS" | tail -1)
+    INC_RESULT=$(sed -n 's/^result=//p' "$INC_FACTS" | tail -1)
     rm -f "$INC_FACTS"
   fi
   INC_FACTS=""
+}
+
+# What the increment just spent, on the ticket it spent it: one row per agent
+# session, which is the only record anywhere that knows *which* ticket the money
+# went on. Account-wide utilization is honest and anonymous; this is not.
+#
+# Nothing here may fail the increment. api() exits 1 on any non-2xx and the
+# script runs under `set -euo pipefail`, so the call goes inside an `if`: the
+# work happened either way, and a loop must not stop because a meter did not.
+post_work_log() {
+  local body out ended said
+
+  # No result event arrived - an interrupted run, or a CLI that fell over before
+  # it could report. Nothing is posted, because a row of zeros would be a claim
+  # rather than a record. The same for a line that will not parse, which is what
+  # an interrupt part-way through writing one looks like: under `set -e` an
+  # unchecked jq on it would take the whole loop down over a meter reading.
+  if [ -z "$INC_RESULT" ] || ! jq -e . >/dev/null 2>&1 <<<"$INC_RESULT"; then
+    echo "hatch: no work log entry for ${INC_KEY} - the run ended before it said what it had spent" >&2
+    return
+  fi
+
+  # Wall clock either side of the CLI. Deliberately not reconciled with the
+  # duration the session reports: this pair says when the increment occupied the
+  # machine, and durationMs says how long it was thinking, which is the smaller
+  # number and the honest answer to "how long did this take".
+  ended=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+  body=$(jq -n --argjson r "$INC_RESULT" \
+    --arg started "${INC_STARTED:-$ended}" --arg ended "$ended" '
+    {
+      sessionId: $r.sessionId,
+      startedAt: $started,
+      endedAt: $ended,
+      durationMs: $r.durationMs,
+      title: $r.title,
+      summary: $r.summary,
+      isError: $r.isError,
+      turns: $r.turns,
+      costUsd: $r.costUsd,
+      models: $r.models
+    }')
+
+  if out=$(api POST "/api/hatch/issues/${INC_KEY}/work-log" "$body" 2>&1); then
+    # Read tolerantly, and say something either way. The capture takes stderr
+    # too so that a refusal arrives with its sentence attached, which means a
+    # successful call can in principle carry a stray line of curl noise in front
+    # of its JSON - and a run must not end on a log line failing to render.
+    said=$(jq -r '
+      def pad2: tostring | if length == 1 then "0" + . else . end;
+      def clock: (. / 60 | floor) as $m | "\($m)m\((. % 60) | pad2)s";
+      def compact:
+        if . >= 1000000 then "\((. / 100000 | round) / 10)M"
+        elif . >= 1000 then "\(. / 1000 | round)k"
+        else tostring end;
+      # Enough places that a cheap session does not read as free. Two would
+      # print a third of a cent as $0, which is a different claim.
+      def money:
+        if . >= 0.01 then "$\((. * 100 | round) / 100)"
+        else "$\((. * 10000 | round) / 10000)" end;
+      "hatch: work log: \(.totalTokens | compact) tokens, "
+        + "\(.costUsd | money), \((.durationMs / 1000 | floor) | clock)"
+    ' <<<"$out" 2>/dev/null) || said=""
+    printf '%s\n' "${said:-hatch: work log: written to ${INC_KEY}}"
+  else
+    echo "hatch: the work log entry for ${INC_KEY} could not be written - ${out}" >&2
+  fi
 }
 
 # ---- The stall guard ----
@@ -1367,6 +1511,8 @@ run_increment() {
   INC_MOVED=0
   INC_SESSION=""
   INC_COST=""
+  INC_RESULT=""
+  INC_STARTED=""
   INC_EXIT=0
   INC_ASKED=0
   INC_PENDING=0
@@ -1415,6 +1561,11 @@ run_increment() {
   # two things worth knowing afterwards - what it asked, and where the ticket
   # ended up - are worth printing either way; but a loop counting three failures
   # in a row needs the number, and this is the only place it exists.
+  # The spawn instant, for the work log entry. Taken here rather than at the top
+  # of the function so that composing the prompt and reading the board do not
+  # land in what the session is said to have cost.
+  INC_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
   set +e
   if [ "$quiet" = 1 ]; then
     # No renderer, so the facts come from the CLI's own summary instead: one
@@ -1453,6 +1604,10 @@ run_increment() {
   fi
 
   read_facts
+
+  # Before the board is asked anything, so a row exists even when the reads
+  # after it fail.
+  post_work_log
 
   # Where the ticket actually ended up, asked of the board rather than of the
   # session. An increment that says it did the work and leaves the ticket in the

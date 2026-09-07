@@ -4,7 +4,7 @@ namespace Aerie.Api.Modules.Hatch;
 
 /// <summary>
 /// Hatch's slice of the Aerie database: the <c>hatch</c> schema, its own
-/// migration history, seven tables.
+/// migration history, eight tables.
 /// </summary>
 public class HatchContext(DbContextOptions<HatchContext> options) : DbContext(options), IModuleContext
 {
@@ -17,6 +17,7 @@ public class HatchContext(DbContextOptions<HatchContext> options) : DbContext(op
     public DbSet<EfHatchIssueEvent> IssueEvents => Set<EfHatchIssueEvent>();
     public DbSet<EfHatchPlaybook> Playbooks => Set<EfHatchPlaybook>();
     public DbSet<EfHatchIssueDependency> Dependencies => Set<EfHatchIssueDependency>();
+    public DbSet<EfHatchWorkLogEntry> WorkLog => Set<EfHatchWorkLogEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -123,6 +124,26 @@ public class HatchContext(DbContextOptions<HatchContext> options) : DbContext(op
                 .WithMany()
                 .HasForeignKey(d => d.DependsOnId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Cascade with the issue, the way comments and events do and for the
+        // same reason: a meter reading for a ticket nobody kept is a row about
+        // nothing. What the account spent in total is a separate record and
+        // does not depend on this one surviving.
+        modelBuilder.Entity<EfHatchWorkLogEntry>(e =>
+        {
+            e.HasOne(w => w.Issue)
+                .WithMany(i => i.WorkLog)
+                .HasForeignKey(w => w.IssueId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Eight places, because a short session costs a fraction of a cent
+            // and the default scale would round a night of them to nothing.
+            e.Property(w => w.CostUsd).HasPrecision(18, 8);
+
+            // jsonb for the reason the event payload is - see
+            // EfHatchWorkLogEntry.ModelUsage.
+            e.Property(w => w.ModelUsage).HasColumnType("jsonb");
         });
 
         base.OnModelCreating(modelBuilder);

@@ -178,6 +178,16 @@ public class AdminSurfaceTests
         // rather than about the house.
         "UtilizationController.Get",
 
+        // What each ticket cost, one row per agent session. Hatch-scoped like
+        // the rest of the module - and the write is cut a third way, tighter
+        // than either of the two below: it refuses a person outright, in the
+        // action, because the only honest writer of a meter reading is the
+        // dispatcher that read the meter. That check cannot live in the
+        // attribute, which is dormant wherever Auth:EnforceAdmin is off. See
+        // WorkLogController.NotAKey.
+        "WorkLogController.GetWorkLog",
+        "WorkLogController.PostEntry",
+
         // Playbooks are guarded twice over. Reading one is Hatch-scoped like
         // the rest; writing one names no scope at all, so an API key is
         // refused - a playbook chooses the next agent's instructions, its

@@ -543,3 +543,76 @@ export interface Utilization {
       a modal that says nothing about credits is drawn from. */
   credits: UtilizationCredits | null;
 }
+
+// ---- The work log ----
+
+/** What one model cost inside one session. Mirrors WorkLogModelUseDto. */
+export interface WorkLogModelUse {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  costUsd: number;
+}
+
+/** One agent session against one issue. Mirrors WorkLogEntryDto. */
+export interface WorkLogEntry {
+  id: number;
+  /** What `claude --resume` takes. Drawn as a copyable command, not as an id. */
+  sessionId: string;
+  /** Wall clock either side of the CLI. Deliberately not the same span as
+      `durationMs`, which is what the session itself reported. */
+  startedAt: string;
+  endedAt: string;
+  durationMs: number;
+  /** Null when the session never said what it did - see `described`. */
+  title: string | null;
+  summary: string | null;
+  /** Whether the session said what it did. On the wire rather than inferred
+      from an empty title: "this run never described itself" is a fact about the
+      run, and deducing it from an absent string is a client guessing. */
+  described: boolean;
+  isError: boolean;
+  turns: number;
+  /** Notional API list price, not money that left an account. Secondary to the
+      tokens everywhere it is drawn. */
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  /** The four, added up on the server so the headline has one definition. */
+  totalTokens: number;
+  /** The per-model breakdown the four counts are the sum of. Empty on a run
+      that ended before the accounting arrived. */
+  models: WorkLogModelUse[];
+}
+
+/** What a set of sessions cost, added up. Mirrors WorkLogTotalsDto. */
+export interface WorkLogTotals {
+  sessions: number;
+  /** How many ended badly. Their spend is in the totals either way. */
+  errors: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  totalTokens: number;
+  costUsd: number;
+}
+
+/** An issue's work log. Mirrors WorkLogDto.
+
+    The asymmetry is the point: **entries are the issue's own, totals are the
+    subtree's**. An epic showing one session and 1.4M tokens is not a bug, and
+    `own` is what lets the page say which number is which. */
+export interface WorkLog {
+  key: string;
+  /** This issue and every descendant, at any depth. */
+  totals: WorkLogTotals;
+  /** Only the sessions run against this issue. */
+  own: WorkLogTotals;
+  /** This issue's own sessions, newest first. */
+  entries: WorkLogEntry[];
+}

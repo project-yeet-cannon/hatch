@@ -1201,6 +1201,64 @@
   border-top: 1px solid var(--line);
 }
 
+/* ---- The work log, on the issue page ----
+
+   One row per agent session: what it did, then its tokens and its dollars, then
+   the command that reopens it. Rules between rows rather than cards, the way
+   the comment thread is drawn - it is a list of the same kind of thing, and a
+   card each would make eleven of them read as eleven sections. */
+.hatch-worklog {
+  list-style: none;
+  margin: var(--sp-4) 0 0;
+  padding: 0;
+}
+
+.hatch-worklog-totals {
+  margin: var(--sp-2) 0 0;
+}
+
+.hatch-worklog-entry {
+  border-top: 1px solid var(--line);
+  padding: var(--sp-3) 0 0;
+  margin-top: var(--sp-3);
+}
+
+.hatch-worklog-entry:first-child {
+  margin-top: 0;
+}
+
+.hatch-worklog-head {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.hatch-worklog-summary {
+  margin: var(--sp-2) 0 0;
+  overflow-wrap: anywhere;
+}
+
+/* The metrics, on one line and wrapping rather than truncating: every one of
+   them is a number somebody came here for, and a row that hides the money on a
+   narrow screen is the wrong one to shorten. */
+.hatch-worklog-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  align-items: baseline;
+  font-size: var(--t-label);
+  margin: var(--sp-2) 0;
+}
+
+/* A left edge rather than a fill: an errored session is still a row of numbers
+   to be read, and a tinted block would make the figures harder to read to say
+   something the badge beside them already says. */
+.hatch-worklog-error {
+  border-left: 2px solid var(--danger);
+  padding-left: var(--sp-3);
+}
+
 /* Rendered markdown - descriptions and comments. Only the spacing is stated:
    base.css already dresses headings, lists, code and links. */
 .hatch-markdown > :first-child {

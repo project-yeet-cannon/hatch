@@ -31,6 +31,7 @@ import type {
   StatusPatchRequest,
   Utilization,
   Work,
+  WorkLog,
 } from '../types';
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -248,3 +249,18 @@ export const getUtilization = (refresh = false) =>
   fetchJson<Utilization | undefined>(`/api/hatch/utilization${refresh ? '?refresh=true' : ''}`).then(
     (reading) => reading ?? null,
   );
+
+// ---- The work log ----
+
+/**
+ * What every session run against this issue cost, and what the whole subtree
+ * beneath it cost.
+ *
+ * Read-only, and that is the guarantee rather than a convention: there is no
+ * `postWorkLog` here, no patch and no delete, because a work log entry is
+ * written by the dispatcher with an API key and by nothing else. The server
+ * refuses a browser outright - see WorkLogController.NotAKey - and the absence
+ * of a function that could is the client half of the same statement. Do not add
+ * one for symmetry.
+ */
+export const getWorkLog = (key: string) => fetchJson<WorkLog>(`/api/hatch/issues/${seg(key)}/work-log`);
