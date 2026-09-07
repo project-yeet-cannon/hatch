@@ -45,6 +45,16 @@ public class WorkLogController(HatchContext db, TimeProvider time) : ControllerB
     private static readonly TimeSpan HourlyUpTo = TimeSpan.FromHours(48);
 
     /// <summary>
+    /// The most rows one answer will list, past which the request is an export
+    /// rather than a leaderboard. The totals cover the whole filter either way,
+    /// so a capped answer still adds up honestly.
+    /// </summary>
+    public const int MaxSessions = 500;
+
+    /// <summary>What a caller who named no limit gets: more than the table draws, and far less than the cap.</summary>
+    private const int DefaultSessions = 100;
+
+    /// <summary>
     /// Spend over time: what the work log recorded across a range, in equal
     /// buckets.
     /// </summary>
@@ -90,11 +100,7 @@ public class WorkLogController(HatchContext db, TimeProvider time) : ControllerB
         if (offsetMinutes is < -1440 or > 1440)
             return BadRequest($"an offset from UTC is minutes between -1440 and 1440 - not {offsetMinutes}");
 
-        if (!Bound(to, time.GetUtcNow(), out var end)) return BadRequest(NotAnInstant(to));
-        if (!Bound(from, end - DefaultRange, out var start)) return BadRequest(NotAnInstant(from));
-
-        // Equal is legal and is one bucket. Inverted is not a range at all.
-        if (start > end) return BadRequest("a range ends before it begins");
+        if (Range(from, to, out var start, out var end) is { } badRange) return badRange;
 
         var trimmed = bucket?.Trim();
         WorkLogBucketSize size;
@@ -127,21 +133,129 @@ public class WorkLogController(HatchContext db, TimeProvider time) : ControllerB
                 $"{window.Buckets} buckets is more than the {MaxBuckets} this answers in " +
                 "- ask for daily buckets, or a shorter range");
 
-        long? ancestorId = null;
-        if (!string.IsNullOrWhiteSpace(ancestorKey))
-        {
-            if (!IssueKey.TryParse(ancestorKey, out var projectKey, out var number))
-                return BadRequest($"there is no {ancestorKey}");
-
-            ancestorId = await db.Issues.AsNoTracking().WithKey(projectKey, number)
-                .Select(i => (long?)i.Id).FirstOrDefaultAsync(ct);
-
-            // Refused rather than answered as if it matched nothing: a graph of
-            // zeroes is a worse answer to a typo than a sentence is.
-            if (ancestorId is null) return BadRequest($"there is no {ancestorKey}");
-        }
+        var (ancestorId, refusal) = await AncestorAsync(ancestorKey, ct);
+        if (refusal is not null) return refusal;
 
         return await WorkLogRollup.SeriesAsync(db, window, size, ancestorId, ct);
+    }
+
+    /// <summary>
+    /// The sessions in a range, ranked - and what that range cost in total.
+    /// </summary>
+    /// <remarks>
+    /// The ranking and the table are this one read asked twice with a different
+    /// sort and a different cap, rather than two endpoints that could come to
+    /// disagree about what a session is.
+    ///
+    /// The range is used <em>as given</em>. That is the one place this differs
+    /// from <see cref="GetHistory"/>, which snaps outward onto the bucket grid
+    /// it draws on; there is no grid here, and there is deliberately no
+    /// <c>offsetMinutes</c> either - it exists next door to put a daily bucket
+    /// on the reader's midnight, and this read has nothing to align.
+    ///
+    /// <c>totals</c> covers the whole filter and not the page that came back, so
+    /// a capped table adds up honestly. A caller tells the two apart by
+    /// comparing <c>totals.sessions</c> with the length of <c>sessions</c>.
+    /// </remarks>
+    /// <param name="ancestorKey">
+    /// One issue and everything beneath it, <b>that issue included</b> - read
+    /// exactly as <see cref="GetHistory"/> reads it, so the ranking, the table
+    /// and the graph can never describe different populations.
+    /// </param>
+    /// <param name="sort">
+    /// <c>tokens</c>, <c>cost</c> or <c>ended</c>, and every one of them
+    /// descending. Ties break on <c>EndedAt</c> then id, so two reads of one
+    /// filter come back in one order.
+    /// </param>
+    /// <param name="limit">How many rows to list, 1 to <see cref="MaxSessions"/>.</param>
+    [HttpGet("sessions")]
+    public async Task<ActionResult<WorkLogSessionsDto>> GetSessions(
+        [FromQuery] string? from,
+        [FromQuery] string? to,
+        [FromQuery] string? ancestorKey = null,
+        [FromQuery] string? sort = null,
+        [FromQuery] int limit = DefaultSessions,
+        CancellationToken ct = default)
+    {
+        if (Range(from, to, out var start, out var end) is { } badRange) return badRange;
+
+        var trimmed = sort?.Trim();
+        WorkLogSort ranking;
+        if (string.IsNullOrEmpty(trimmed) || string.Equals(trimmed, "tokens", StringComparison.OrdinalIgnoreCase))
+        {
+            // The headline figure, and so the default - AERIE-735 decision 2.
+            ranking = WorkLogSort.Tokens;
+        }
+        else if (string.Equals(trimmed, "cost", StringComparison.OrdinalIgnoreCase))
+        {
+            ranking = WorkLogSort.Cost;
+        }
+        else if (string.Equals(trimmed, "ended", StringComparison.OrdinalIgnoreCase))
+        {
+            ranking = WorkLogSort.Ended;
+        }
+        else
+        {
+            return BadRequest($"a sort is tokens, cost or ended - not \"{sort}\"");
+        }
+
+        // Interpolated from the constant, so the sentence and the cap cannot
+        // drift apart.
+        if (limit is < 1 or > MaxSessions)
+            return BadRequest($"a limit is between 1 and {MaxSessions} - not {limit}");
+
+        var (ancestorId, refusal) = await AncestorAsync(ancestorKey, ct);
+        if (refusal is not null) return refusal;
+
+        return await WorkLogRollup.SessionsAsync(db, start, end, ancestorId, ranking, limit, ct);
+    }
+
+    /// <summary>
+    /// The range both reads take, or the sentence refusing it.
+    /// </summary>
+    /// <remarks>
+    /// Shared rather than written twice, and that is the point of the two reads
+    /// sitting on one controller: two copies of "the last fourteen days" is how
+    /// a ranking, a table and a graph come to describe different populations.
+    ///
+    /// The order matters and is the order <see cref="GetHistory"/> has always
+    /// refused in - <c>to</c>, then <c>from</c>, then the inversion - so a
+    /// request that is wrong twice still comes back with the sentence it did
+    /// before.
+    /// </remarks>
+    private BadRequestObjectResult? Range(
+        string? from, string? to, out DateTimeOffset start, out DateTimeOffset end)
+    {
+        start = default;
+        if (!Bound(to, time.GetUtcNow(), out end)) return BadRequest(NotAnInstant(to));
+        if (!Bound(from, end - DefaultRange, out start)) return BadRequest(NotAnInstant(from));
+
+        // Equal is legal - one bucket next door, an empty list here. Inverted is
+        // not a range at all.
+        return start > end ? BadRequest("a range ends before it begins") : null;
+    }
+
+    /// <summary>
+    /// One issue and everything beneath it: <c>(null, null)</c> is no filter at
+    /// all, and <c>(null, refusal)</c> is a key naming no issue.
+    /// </summary>
+    /// <remarks>
+    /// A typo is refused rather than answered as if it matched nothing: a graph
+    /// of zeroes and an empty leaderboard are both worse answers than a sentence
+    /// is.
+    /// </remarks>
+    private async Task<(long? Id, BadRequestObjectResult? Refusal)> AncestorAsync(
+        string? ancestorKey, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(ancestorKey)) return (null, null);
+
+        if (!IssueKey.TryParse(ancestorKey, out var projectKey, out var number))
+            return (null, BadRequest($"there is no {ancestorKey}"));
+
+        var id = await db.Issues.AsNoTracking().WithKey(projectKey, number)
+            .Select(i => (long?)i.Id).FirstOrDefaultAsync(ct);
+
+        return id is null ? (null, BadRequest($"there is no {ancestorKey}")) : (id, null);
     }
 
     /// <summary>A bound as it was typed, or the default when nothing was.</summary>
