@@ -1110,6 +1110,49 @@
   margin-left: auto;
 }
 
+/* ---- Depends on / Blocks, on the issue page ----
+
+   Two lists of edges in one card, drawn with the Progress card's own list and
+   rows rather than a second set of them: they are the same thing on the page -
+   a key, what it is, a title and where it sits - and a second stack of rules
+   is a second stack to keep looking the same.
+
+   The remove button is what is new. It sits after the status pill, which has
+   already been pushed right, so it needs no push of its own - only the gap the
+   row's own `gap` gives it and a size that says it is a control on a row and
+   not the subject of one. */
+.hatch-depends-remove {
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--t-small);
+}
+
+/* The picker under the first list, with the rule that closes the list above it
+   - the rows draw their own top borders, so without it the table has no last
+   line. Only where there is a list to close, exactly as the child composer
+   does it: on an issue waiting on nothing, a rule under a heading with nothing
+   above it is a line about nothing. */
+.hatch-depends-add {
+  margin-top: var(--sp-4);
+}
+
+.hatch-progress-list + .hatch-depends-add {
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+
+/* One line under a section title saying what the list below it means. Muted
+   and tight to the heading, so the card reads as heading-then-list and not as
+   two paragraphs. The second heading in the card needs the space the first
+   one gets from the card itself. */
+.hatch-section-hint {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--t-small);
+}
+
+.hatch-depends-add + .hatch-section-title {
+  margin-top: var(--sp-5);
+}
+
 .hatch-comment {
   border-top: 1px solid var(--line);
   padding-top: var(--sp-3);
