@@ -181,6 +181,14 @@ public class AdminSurfaceTests
         "PlaybooksController.PatchPlaybook",
         "PlaybooksController.DeletePlaybook",
 
+        // A playbook's power routed through a different table, and cut the
+        // same way: an issue's model and effort override every playbook that
+        // could speak for it, so an agent that could set one could raise its
+        // own budget. Reading it is open - it rides IssueDto, which is
+        // Hatch-scoped - and only the write is here. See
+        // IssuePlaybookController.
+        "IssuePlaybookController.PatchIssuePlaybook",
+
         // The whole controller, reads included. See SettingsController.
         "SettingsController.GetAll",
         "SettingsController.Get",

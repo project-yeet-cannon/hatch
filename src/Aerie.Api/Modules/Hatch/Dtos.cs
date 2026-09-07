@@ -90,6 +90,13 @@ public record IssueCardDto(
 /// http(s) URL - see <see cref="EfHatchIssue.PullRequestUrl"/> for why it is one
 /// and not a list of them.
 /// </param>
+/// <param name="ModelOverride">
+/// The model every increment dispatched for this issue runs on, or null for
+/// whatever the playbook for its next move names. Readable by a key - an agent
+/// may see what it is being spent on - and writable only by a person, through
+/// <see cref="IssuePlaybookController"/>.
+/// </param>
+/// <param name="EffortOverride">The same, for the thinking budget, and independent of it.</param>
 public record IssueDto(
     string Key,
     int ProjectId,
@@ -104,6 +111,8 @@ public record IssueDto(
     string? ReadyAt,
     string? DueAt,
     string? PullRequestUrl,
+    string? ModelOverride,
+    string? EffortOverride,
     string CreatedBy,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
@@ -396,6 +405,20 @@ public record PlaybookPatchRequest(
     string? Prompt,
     string? Model,
     string? Effort);
+
+/// <summary>
+/// What one issue overrides its playbooks with. Null leaves a field alone and
+/// <c>""</c> hands it back to the playbook, as everywhere else in Hatch; the
+/// two fields are independent, so an issue may carry a model and no effort.
+/// </summary>
+/// <remarks>
+/// Its own request, and its own route, because
+/// <see cref="IssuesController"/> accepts the <c>hatch</c> scope and this must
+/// not - see <see cref="IssuePlaybookController"/>. There is no prompt here on
+/// purpose: a prompt is the <em>method</em> for a transition, and a per-issue
+/// method is a paragraph, which is what a description is.
+/// </remarks>
+public record IssuePlaybookRequest(string? Model, string? Effort);
 
 // ---- Work ----
 
