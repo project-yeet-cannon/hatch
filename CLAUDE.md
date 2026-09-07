@@ -310,9 +310,34 @@ Two optional dates go on the same `PATCH`, and either may be a date
 - **Never move a ticket to a terminal status.** Only the operator decides that
   something shipped. Implementation ends in *in progress*, with a comment
   saying what landed and what did not.
+- **End by saying what you did**, in a fenced block:
+
+  ~~~
+  ```work-log
+  A title naming what this session did
+
+  The summary, under 100 words.
+  ```
+  ~~~
+
+  `hatch.sh` lifts that out of the last thing the session says and posts it
+  with what the increment cost - tokens, notional dollars, turns and how long
+  it ran - as one row of the **work log** on the ticket. That log is the only
+  record anywhere that knows *which* ticket the money went on: account-wide
+  utilization is honest and anonymous, and no arithmetic over it can say which
+  epic ate the evening.
+
+  The row goes up either way. A session that never writes the block still gets
+  its metrics, marked as never having said what it did, because losing an
+  evening of spend to a missing summary would be the wrong trade - the block
+  is what turns a number into something somebody can read six months later.
+  Write it last, and write it once: whichever block comes last wins, so
+  quoting the format earlier in your own prose costs nothing.
 
 Every one of those calls writes an event carrying the key's name as the actor,
-so the trail says who did what without anybody being asked to record it.
+so the trail says who did what without anybody being asked to record it. The
+work log is the deliberate exception - a meter reading is not a decision, and
+doubling it into the trail would say nothing the row does not.
 
 ## House rules
 
