@@ -101,7 +101,7 @@ renders a blank page with nothing in the network panel to explain it.
 
 ## Domain model
 
-Six tables in the `hatch` schema, all carrying the house `Ef` prefix. The
+Seven tables in the `hatch` schema, all carrying the house `Ef` prefix. The
 authority is [`Entities.cs`](../src/Aerie.Api/Modules/Hatch/Entities.cs), which
 carries the per-field reasoning; this is the shape and the decisions worth
 having in one place.
@@ -359,6 +359,70 @@ Four smaller decisions, each of which reads as arbitrary until it is said:
   also what lets the drag stay optimistic, with no card springing back out of a
   column it was deliberately dropped in.
 
+### Dependency
+
+`EfHatchIssueDependency` — `IssueId` (the one that waits), `DependsOnId` (the
+one waited on), `CreatedBy`, `CreatedAt`. Unique on the pair, and indexed on
+`DependsOnId` alone for the reverse direction, which the **Blocks** list and the
+dispatcher both read.
+
+**An edge is what serialises work — not shared parentage.** The board used to
+guess: no unattended run started an issue while a sibling of it was awaiting
+review, which was right about the epics whose stories touch the same files and
+wrong about every epic whose stories are independent, and said nothing at all
+about two issues that must land in order under different parents. The guess is
+gone and the fact is written down. An epic whose five stories must land one
+after another gets a chain of them, a linked list the loop walks in order; an
+epic whose five stories are independent gets none, and the loop takes them in
+whatever order the board puts them in.
+
+**A dependency gates implementation, and nothing else.** The old rule folded an
+issue past every move it could make; this one holds exactly one. An issue
+waiting on another still goes through Breakdown, still lands in Backlog, and is
+still analysed — everything left of the writing keeps moving, which is the
+point. What it does not do is get picked up and written.
+
+That column is **measured rather than named**: the implementation column is the
+one whose own next move is into the awaiting-review column, which is itself the
+column immediately left of the first terminal one — exactly where the migration
+that added `review` placed it. On a stock board that is `To Do` to `In
+Progress`, the one transition where code gets written. Named, both would be
+rules that quietly stopped applying the day an operator renamed a column.
+
+An issue **already in** the implementation column is never gated. The move into
+review is not a dependency's to refuse, so work that started finishes rather
+than stalling half-written.
+
+**Satisfied means done.** An edge clears when the issue it names is in a
+terminal column — merged, not merely up for review. Anything softer and story
+two starts on top of story one's unmerged branch, which is the failure the whole
+feature exists to prevent, and it is why the chain advances at the operator's
+merge rather than at an agent's move.
+
+**A dependency an ancestor holds reaches everything below it.** A task under a
+blocked story is blocked and every story under a blocked epic is blocked, which
+is what lets "phase two after phase one" be said once at the top. The fold names
+the *nearest* holder and stops: clearing that one is what the reader has to do
+first, and the pass after it says what is behind it.
+
+An issue may wait on any number of issues, **including issues in another
+project** — a dependency is not containment, and the same-project rule that
+governs a parent does not govern this. It may not wait on itself, on an issue
+above or below it in the tree (a parent is not done until its work is, so an
+edge either way round could never be satisfied), or on anything that already
+waits on it directly or through a chain. Each is refused with the sentence
+saying which, and nothing is written. Adding an edge that is already there
+writes nothing and is not an error, as re-applying any edit here is not.
+
+**Writing one is open to a key**, unlike a [playbook](#playbooks) or a per-issue
+override. An edge is a statement about the work rather than about an agent's
+budget, and a planning session that has just filed five stories is exactly who
+should chain them. Both verbs — `POST` and `DELETE` on
+`/api/hatch/issues/{key}/dependencies` — answer with the whole issue, and there
+is no `GET`: both lists ride `IssueDto`, where the board, the page and the shell
+need them anyway. Both directions land in the issue's history, on the issue that
+waits and on it alone.
+
 ### Comment, question and answer
 
 `EfHatchComment` — `IssueId`, `Author`, `Body` (markdown), `Kind`, `AnswersId`,
@@ -408,7 +472,8 @@ except with its issue.
 
 Kinds: `created`, `retitled`, `redescribed`, `retyped`, `status_changed`,
 `parent_changed`, `ready_changed`, `due_changed`, `pull_request_changed`,
-`commented`, `asked`, `answered`, `imported`.
+`model_override_changed`, `effort_override_changed`, `dependency_added`,
+`dependency_removed`, `commented`, `asked`, `answered`, `imported`.
 
 Nothing renders this, and it has been written since the first release anyway,
 because an event log is the one feature that cannot be added retroactively:
@@ -684,12 +749,12 @@ useful answer and a list of reasons is not — while `work/{key}`, which somebod
 asked for by name, returns the refusal rather than a 404, because a person who
 named a ticket is owed the sentence saying why it cannot move.
 
-### Two more, on `next` alone
+### One more, on `next` alone
 
-The five refusals above are facts about an issue. Two further rules are the
+The five refusals above are facts about an issue. One further rule is the
 *loop's policy* — what an unattended run may **start**, as opposed to what may
-move — so they are asked on `work/next` and not on `work/{key}`. A person who
-names a ticket is giving an instruction, and housekeeping does not overrule it.
+move — so it is asked on `work/next` and not on `work/{key}`. A person who names
+a ticket is giving an instruction, and housekeeping does not overrule it.
 
 The issue's **type** is not among them, and was never the loop's to decide:
 which types a move applies to is [the playbook row's](#playbooks) to state, and
@@ -702,14 +767,11 @@ Playbooks page because that is where the fix is.
    not one an unattended pass should be spending an increment on — but somebody
    who names a ticket ahead of its date has said the date is not the point
    today, and is given the dispatch rather than a lecture about it.
-2. **No sibling of it is awaiting review** — two open pull requests under one
-   parent is one too many. "Awaiting review" is measured, not named: the column
-   immediately left of the first terminal one, which is exactly where the
-   migration that added `review` placed it, so an operator who renames the
-   column does not silently turn the rule off. Same-parent only — a null parent
-   is not a group, so two loose issues are not siblings of each other — and a
-   sibling in a terminal column blocks nothing, because merged work is not work
-   in flight.
+
+An [unmet dependency](#dependency) is deliberately **not** here. It looks like
+housekeeping and is not: a ready date is a decision about scheduling, while an
+edge is a fact about the work, so `work/{key}` refuses on one too. Somebody who
+disagrees takes the edge off, which is one press.
 
 ### What a pass skipped
 
@@ -741,20 +803,20 @@ the order of the board is precisely the bug this endpoint exists to expose.
 
 Every fold therefore lives in one place and in one order, most fundamental
 first: a next column that is terminal, then a ready date, then an unanswered
-question, then a sibling awaiting review, and last the missing playbook — last
-because it is only worth saying about an issue that is otherwise a candidate.
-The two that are the *loop's* policy rather than facts about an issue are asked
-only when the pass is asking, so `work/{key}` still ignores them.
+question, then an unmet dependency, and last the missing playbook — last because
+it is only worth saying about an issue that is otherwise a candidate. The one
+that is the *loop's* policy rather than a fact about an issue is asked only when
+the pass is asking, so `work/{key}` still ignores it.
 
 The columns with nowhere to go — a terminal one, and a rightmost one that is not
 terminal — are absent rather than listed as blocked. An issue the dispatcher
 never reaches is not something the pass skipped, and shipped work is not a
 backlog.
 
-It is a read, and it costs what a read should: the statuses, the scope, what is
-awaiting review, the open-question counts and the whole playbook matrix are each
-read once for the pass rather than once per row, and the issues are projected in
-one batch.
+It is a read, and it costs what a read should: the statuses, the scope, which
+dependencies are unmet, the open-question counts and the whole playbook matrix
+are each read once for the pass rather than once per row, and the issues are
+projected in one batch.
 
 **And it is read rather than left on the server.** Everything needed to tell a
 jammed board from a finished one was computed and served here long before
@@ -853,8 +915,10 @@ the sentence saying which one it failed is what `work/queue` reports:
    card folded off the board is not one to spend an increment on tonight.
 3. **It holds no unanswered question.** It is waiting on a person, and another
    agent sent at it would ask the same thing again or guess at the answer.
-4. **No sibling of it is awaiting review.** Two open pull requests under one
-   parent is one too many.
+4. **Nothing it depends on is unfinished** — and only when the move is into the
+   column where the code gets written. Everything left of that still moves; an
+   edge is satisfied only once the issue it names is in a terminal column. See
+   [Dependency](#dependency).
 5. **A playbook covers that transition for that type.** Without one there is
    nothing to say to the session — and a column no playbook leads out of is
    exactly [how a column becomes the operator's](#status), which is why the
@@ -863,9 +927,9 @@ the sentence saying which one it failed is what `work/queue` reports:
    pick up is a type no row names for that move, said in the words that name
    the fix.
 
-Three of them — 1, 3 and 5 — are facts about the issue, and `work/{key}` asks
-them too. The other two are the loop's policy and are asked only when the pass
-is asking; see [two more, on `next` alone](#two-more-on-next-alone).
+Four of them — 1, 3, 4 and 5 — are facts about the issue, and `work/{key}` asks
+them too. The other is the loop's policy and is asked only when the pass is
+asking; see [one more, on `next` alone](#one-more-on-next-alone).
 
 **The board is worked right to left**, for the reason the dispatcher gives, and
 overnight it is the difference between a shape and a mess: a loop working left
@@ -1053,8 +1117,8 @@ from.
 
 [`scripts/hatch.sh`](../scripts/hatch.sh) wraps the calls a working session
 actually makes — `board`, `next`, `queue`, `show`, `start`, `move`, `comment`,
-`pr`, `ask`, `questions`, `answer`, `work`, `go-to-work`, and `api` for
-everything else. It
+`pr`, `depends`, `ask`, `questions`, `answer`, `work`, `go-to-work`, and `api`
+for everything else. It
 finds a column by name rather than by id — on the letters and digits alone, so
 `todo` at a terminal reaches the column the board calls `To Do` — and folds off
 cards whose ready date has not arrived, exactly as the board does.
@@ -1174,9 +1238,10 @@ code already settles is a round trip through a person for nothing.
   claim the dispatcher honours — with an expiry, and a heartbeat behind the
   expiry — and the lock exists precisely so that none of that has to be right
   before the first unattended night can run. It is also not obviously wanted:
-  the [sibling rule](#two-more-on-next-alone) already says one open pull
-  request per parent, and the operator reading them is the one thing that does
-  not parallelise.
+  what makes an epic serial is now a [chain somebody filed](#dependency) rather
+  than a rule about siblings, so two loops would produce exactly the parallelism
+  the chain was written to prevent wherever nobody filed one — and the operator
+  reading the pull requests is the one thing that does not parallelise.
 - **A second scope for agents**, which would stop a key answering its own
   question. Worth a column when somebody wants it; see
   [the one edge](#the-one-edge-that-is-deliberately-cut).

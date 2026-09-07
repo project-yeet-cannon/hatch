@@ -44,6 +44,9 @@
 #   ./hatch.sh pr AER-12              # where it is being reviewed
 #   ./hatch.sh pr AER-12 https://...  # ...or say where, having opened one
 #   ./hatch.sh pr AER-12 --clear      # ...or take it off the one it has
+#   ./hatch.sh depends AER-12         # what it waits on, and what waits on it
+#   ./hatch.sh depends AER-12 AER-11  # AER-12 waits on AER-11
+#   ./hatch.sh depends AER-12 --remove AER-11   # ...no longer
 #   ./hatch.sh ask AER-12 "how should retries be scoped?" \
 #       --recommend "Per-node: one budget per node, so a slow node cannot starve" \
 #       --option "Global: one budget for the drain, simpler to reason about"
@@ -437,6 +440,8 @@ cmd_show() {
       "status:   \((($statuses | map(select(.id == $i.statusId)) | first | .name) // ($i.statusId | tostring)))",
       (if $i.parentKey then "parent:   \($i.parentKey)" else empty end),
       (if ($i.childKeys | length) > 0 then "children: \($i.childKeys | join(", "))" else empty end),
+      (if ($i.dependsOnKeys | length) > 0 then "depends:  \($i.dependsOnKeys | join(", "))" else empty end),
+      (if ($i.dependentKeys | length) > 0 then "blocks:   \($i.dependentKeys | join(", "))" else empty end),
       (if $i.readyAt then "ready:    \($i.readyAt)" else empty end),
       (if $i.dueAt then "due:      \($i.dueAt)" else empty end),
       "",
@@ -508,6 +513,60 @@ cmd_pr() {
 
   api PATCH "/api/hatch/issues/${key}" "$(jq -nc --arg url "$url" '{pullRequestUrl: $url}')" \
     | jq -r '.pullRequestUrl // "\(.key) points at no pull request"'
+}
+
+# ---- Dependencies ----
+
+# What an issue waits on, and what waits on it.
+#
+# An edge is what serialises work - not shared parentage, which the board used
+# to guess from. A planning session that has just filed five stories that must
+# land one after another chains them here, and the loop then walks the chain in
+# order; five stories that are independent get nothing and go in whatever order
+# the board puts them in.
+#
+# It gates one move: the one into the column where the code gets written. An
+# issue waiting on another is still broken down, still lands in the backlog and
+# is still analysed - and the edge clears only when the issue it names is in a
+# terminal column, because the point is that story two is not written on story
+# one's unmerged branch.
+cmd_depends() {
+  local key="${1:?usage: hatch.sh depends AER-12 [<key>|--remove <key>]}" issue blocker
+
+  # No second argument is a read, distinguished by the count rather than by the
+  # value - so an empty one is the mistake below and not a silent nothing.
+  # cmd_pr splits on the same rule and for the same reason.
+  if [ $# -lt 2 ]; then
+    issue=$(_get "/api/hatch/issues/${key}")
+  elif [ "$2" = "--remove" ]; then
+    blocker="${3:-}"
+    [ -n "$blocker" ] || { echo "hatch: say which issue ${key} should stop waiting on" >&2; exit 1; }
+    issue=$(api DELETE "/api/hatch/issues/${key}/dependencies/${blocker}")
+  elif [ -n "$2" ]; then
+    issue=$(api POST "/api/hatch/issues/${key}/dependencies" \
+      "$(jq -nc --arg k "$2" '{dependsOnKey: $k}')")
+  else
+    echo "hatch: say which issue ${key} waits on, or --remove one" >&2
+    exit 1
+  fi
+
+  depends_lines "$issue"
+}
+
+# Both directions, printed even when empty - "there is nothing" and "something
+# went wrong and printed nothing" look identical otherwise, which is the reason
+# cmd_queue says so out loud. Keys alone, as `show` prints children: this is one
+# read of the issue and no fan-out.
+depends_lines() {
+  jq -r '
+    . as $i
+    | (if ($i.dependsOnKeys | length) > 0
+       then "\($i.key) waits on \($i.dependsOnKeys | join(", "))"
+       else "\($i.key) waits on nothing" end),
+      (if ($i.dependentKeys | length) > 0
+       then "\($i.dependentKeys | join(", ")) \(if ($i.dependentKeys | length) == 1 then "waits" else "wait" end) on \($i.key)"
+       else "nothing waits on \($i.key)" end)
+  ' <<<"$1"
 }
 
 # ---- Questions ----
@@ -2018,7 +2077,7 @@ load_env
 # machine which has neither yet. Named rather than defaulted, so that a typo
 # still comes back as a typo below.
 case "${1:-}" in
-  board|next|queue|show|start|move|comment|pr|ask|questions|answer|work|go-to-work|api) require_env ;;
+  board|next|queue|show|start|move|comment|pr|depends|ask|questions|answer|work|go-to-work|api) require_env ;;
 esac
 
 case "${1:-}" in
@@ -2031,6 +2090,7 @@ case "${1:-}" in
   move)    shift; cmd_move "$@" ;;
   comment) shift; cmd_comment "$@" ;;
   pr)      shift; cmd_pr "$@" ;;
+  depends) shift; cmd_depends "$@" ;;
   ask)       shift; cmd_ask "$@" ;;
   questions) shift; cmd_questions "$@" ;;
   answer)    shift; cmd_answer "$@" ;;
