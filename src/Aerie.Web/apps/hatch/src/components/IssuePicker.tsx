@@ -41,9 +41,25 @@ export interface IssuePickerProps {
       already takes. The caller owns the request and the refusal; this awaits
       only to know when the press is over, so `onChange` must not throw. */
   onChange: (key: string) => Promise<unknown>;
+  /** Whether the pinned clear row is offered. False on a picker whose press
+      adds something rather than replacing what is there - there is nothing to
+      clear, and removing is a button on the row that was added. */
+  allowNone?: boolean;
+  /** The face when `value` is null. Defaults to the clear row's own label,
+      which is the right face for a field that holds one value and reads as
+      empty, and the wrong one for a control that adds. */
+  placeholder?: string;
 }
 
-export function IssuePicker({ value, candidates, label, emptyMessage, onChange }: IssuePickerProps) {
+export function IssuePicker({
+  value,
+  candidates,
+  label,
+  emptyMessage,
+  onChange,
+  allowNone = true,
+  placeholder,
+}: IssuePickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   // Nullable: when nothing matches what was typed there is nothing to take,
@@ -67,16 +83,23 @@ export function IssuePicker({ value, candidates, label, emptyMessage, onChange }
   const listId = `${base}-list`;
   const rowId = (index: number) => `${base}-row-${index}`;
 
-  /* null is the — none — row. It is always first and is never filtered, so
-     clearing the value is always one press away and every index below is
-     arithmetic on one list. */
-  const rows: (IssueCard | null)[] = [null, ...pickerRows(candidates, query)];
+  /* null is the — none — row. Where it is offered it is always first and is
+     never filtered, so clearing the value is always one press away and every
+     index below is arithmetic on one list - `offset` is the whole of the
+     difference when it is not. */
+  const offset = allowNone ? 1 : 0;
+  const rows: (IssueCard | null)[] = allowNone
+    ? [null, ...pickerRows(candidates, query)]
+    : pickerRows(candidates, query);
 
   function openList() {
     const all = pickerRows(candidates, '');
     const at = all.findIndex((c) => c.key === value);
     setQuery(''); // The last query is not remembered: a remembered filter is a list that opens lying about how many candidates there are.
-    setHighlight(at === -1 ? 0 : at + 1); // The row in force, or — none — when there is no value or it is not a candidate.
+    // The row in force, or the top of the list - which is — none — where it is
+    // offered, and nowhere at all on an empty list, since Enter must never
+    // reach past the end of one.
+    setHighlight(at === -1 ? (rows.length > 0 ? 0 : null) : at + offset);
     setOpen(true);
   }
 
@@ -91,13 +114,14 @@ export function IssuePicker({ value, candidates, label, emptyMessage, onChange }
        highlight sits on the first row that matches" is a control where typing
        `745` and pressing Enter clears the value: — none — is pinned rather
        than matched, so ↑ is what reaches it. */
-    setHighlight(pickerRows(candidates, next).length > 0 ? 1 : null);
+    setHighlight(pickerRows(candidates, next).length > 0 ? offset : null);
   }
 
   // One row at a time, stopping at the ends rather than wrapping - a wrap makes
   // "am I at the bottom" unanswerable without counting, and this list can be
   // sixty rows. From nowhere, ↓ lands on the first row and ↑ stays nowhere.
-  const down = () => setHighlight((h) => (h === null ? 0 : Math.min(h + 1, rows.length - 1)));
+  const down = () =>
+    setHighlight((h) => (rows.length === 0 ? null : h === null ? 0 : Math.min(h + 1, rows.length - 1)));
   const up = () => setHighlight((h) => (h === null ? null : Math.max(h - 1, 0)));
 
   async function take(row: IssueCard | null) {
@@ -162,7 +186,7 @@ export function IssuePicker({ value, candidates, label, emptyMessage, onChange }
   }, [open, highlight, query]);
 
   const chosen = candidates.find((c) => c.key === value) ?? null;
-  const face = value === null ? NONE : chosen ? `${chosen.key} — ${chosen.title}` : value;
+  const face = value === null ? (placeholder ?? NONE) : chosen ? `${chosen.key} — ${chosen.title}` : value;
 
   return (
     <div
@@ -219,7 +243,7 @@ export function IssuePicker({ value, candidates, label, emptyMessage, onChange }
           />
 
           {candidates.length === 0 && <p className="hatch-issue-picker-note">{emptyMessage}</p>}
-          {candidates.length > 0 && rows.length === 1 && (
+          {candidates.length > 0 && rows.length === offset && (
             <p className="hatch-issue-picker-note">Nothing matches “{query.trim()}”.</p>
           )}
 

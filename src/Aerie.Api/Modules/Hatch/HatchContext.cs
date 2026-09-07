@@ -4,7 +4,7 @@ namespace Aerie.Api.Modules.Hatch;
 
 /// <summary>
 /// Hatch's slice of the Aerie database: the <c>hatch</c> schema, its own
-/// migration history, six tables.
+/// migration history, seven tables.
 /// </summary>
 public class HatchContext(DbContextOptions<HatchContext> options) : DbContext(options), IModuleContext
 {
@@ -16,6 +16,7 @@ public class HatchContext(DbContextOptions<HatchContext> options) : DbContext(op
     public DbSet<EfHatchComment> Comments => Set<EfHatchComment>();
     public DbSet<EfHatchIssueEvent> IssueEvents => Set<EfHatchIssueEvent>();
     public DbSet<EfHatchPlaybook> Playbooks => Set<EfHatchPlaybook>();
+    public DbSet<EfHatchIssueDependency> Dependencies => Set<EfHatchIssueDependency>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -104,6 +105,24 @@ public class HatchContext(DbContextOptions<HatchContext> options) : DbContext(op
                 .WithMany()
                 .HasForeignKey(p => p.ToStatusId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Cascade from both ends, which is the one place in this module where
+        // that is obviously right: an edge has no meaning without either issue,
+        // so deleting either takes the edges pointing at it in both directions.
+        // No inverse navigation on the issue for either end - two collections
+        // told apart only by name, and nothing reads them.
+        modelBuilder.Entity<EfHatchIssueDependency>(e =>
+        {
+            e.HasOne(d => d.Issue)
+                .WithMany()
+                .HasForeignKey(d => d.IssueId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(d => d.DependsOn)
+                .WithMany()
+                .HasForeignKey(d => d.DependsOnId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         base.OnModelCreating(modelBuilder);

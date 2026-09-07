@@ -66,6 +66,14 @@ export interface Issue {
   rank: number;
   parentKey: string | null;
   childKeys: string[];
+  /** What must be done before this is implemented, in key order. An edge is
+      satisfied only once the issue it names is in a terminal column, so a
+      blocker sitting in review still blocks. */
+  dependsOnKeys: string[];
+  /** The issues waiting on this one - the same edges read backwards. Not
+      editable from this issue's page: an edge is owned by the issue that
+      waits. */
+  dependentKeys: string[];
   readyAt: string | null;
   dueAt: string | null;
   /** Where the work is being reviewed, or null while it is nowhere. An absolute
@@ -136,6 +144,8 @@ export type IssueEventKind =
   | 'pull_request_changed'
   | 'model_override_changed'
   | 'effort_override_changed'
+  | 'dependency_added'
+  | 'dependency_removed'
   | 'commented'
   | 'asked'
   | 'answered'
@@ -277,6 +287,13 @@ export interface IssuePatchRequest {
 export interface IssuePlaybookRequest {
   model?: string | null;
   effort?: string | null;
+}
+
+/** One edge: this issue waits on `dependsOnKey`. Open to an API key, unlike
+    IssuePlaybookRequest - an edge is a statement about the work rather than
+    about an agent's budget. See IssueDependenciesController. */
+export interface IssueDependencyRequest {
+  dependsOnKey: string;
 }
 
 /** A filter, as the search endpoint reads it. Every field is optional and they

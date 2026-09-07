@@ -79,6 +79,16 @@ public record IssueCardDto(
 
 /// <summary>One issue, whole - the detail page's payload.</summary>
 /// <param name="ChildKeys">Its stories, or its tasks. Keys rather than nested issues: the page links to them and does not draw them.</param>
+/// <param name="DependsOnKeys">
+/// What must be done before this is implemented, in key order. An edge is
+/// satisfied only once the issue it names sits in a terminal column, so a
+/// blocker in review still blocks - anything softer and the second story is
+/// built on the first one's unmerged branch.
+/// </param>
+/// <param name="DependentKeys">
+/// The issues waiting on this one - the same edges read backwards. Named for
+/// what they are rather than "blocked", which has two readings.
+/// </param>
 /// <param name="ReadyAt">
 /// When the issue becomes workable, or null if it always was. A bare date
 /// (<c>2026-09-12</c>) or an instant (<c>2026-09-12T17:00:00Z</c>) - the two
@@ -108,6 +118,8 @@ public record IssueDto(
     long Rank,
     string? ParentKey,
     IReadOnlyList<string> ChildKeys,
+    IReadOnlyList<string> DependsOnKeys,
+    IReadOnlyList<string> DependentKeys,
     string? ReadyAt,
     string? DueAt,
     string? PullRequestUrl,
@@ -419,6 +431,17 @@ public record PlaybookPatchRequest(
 /// method is a paragraph, which is what a description is.
 /// </remarks>
 public record IssuePlaybookRequest(string? Model, string? Effort);
+
+/// <summary>
+/// One edge: this issue waits on <paramref name="DependsOnKey"/>.
+/// </summary>
+/// <remarks>
+/// Unlike a playbook or a per-issue override, writing one of these is open to a
+/// key. A dependency is a statement about the work rather than about an agent's
+/// budget, and a planning session that has just filed five stories is exactly
+/// who should chain them.
+/// </remarks>
+public record IssueDependencyRequest(string DependsOnKey);
 
 // ---- Work ----
 

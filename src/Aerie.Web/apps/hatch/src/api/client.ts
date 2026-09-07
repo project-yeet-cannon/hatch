@@ -10,6 +10,7 @@ import type {
   IssueBulkResult,
   IssueCard,
   IssueCreateRequest,
+  IssueDependencyRequest,
   IssueEvent,
   IssueMoveRequest,
   IssuePatchRequest,
@@ -153,6 +154,13 @@ export const patchIssue = (key: string, request: IssuePatchRequest) =>
     setting one is closed to an API key - see IssuePlaybookController. */
 export const patchIssuePlaybook = (key: string, request: IssuePlaybookRequest) =>
   fetchJson<Issue>(`/api/hatch/issues/${seg(key)}/playbook`, { method: 'PATCH', ...asJson(request) });
+/** What an issue waits on. Both verbs answer with the whole issue, so the page
+    repaints from one response instead of composing the new state itself, and
+    there is no GET: the two lists ride the issue. */
+export const addDependency = (key: string, request: IssueDependencyRequest) =>
+  fetchJson<Issue>(`/api/hatch/issues/${seg(key)}/dependencies`, { method: 'POST', ...asJson(request) });
+export const removeDependency = (key: string, dependsOnKey: string) =>
+  fetchJson<Issue>(`/api/hatch/issues/${seg(key)}/dependencies/${seg(dependsOnKey)}`, { method: 'DELETE' });
 export const deleteIssue = (key: string) =>
   fetchJson<void>(`/api/hatch/issues/${seg(key)}`, { method: 'DELETE' });
 export const moveIssue = (key: string, request: IssueMoveRequest) =>

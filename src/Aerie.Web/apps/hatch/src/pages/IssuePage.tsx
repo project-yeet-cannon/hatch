@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Badge, Button, Card, Field, PageHeader } from '@aerie/ui';
 import {
   addComment,
+  addDependency,
   createIssue,
   deleteIssue,
   getBoard,
@@ -13,6 +14,7 @@ import {
   getNextWorkUnder,
   patchIssue,
   patchIssuePlaybook,
+  removeDependency,
 } from '../api/client';
 import { Choice } from '../components/Choice';
 import { CloseSubtreeDialog } from '../components/CloseSubtreeDialog';
@@ -28,6 +30,7 @@ import { TypeBadge } from '../components/TypeBadge';
 import { childTypes } from '../lib/childTypes';
 import { statusVars } from '../lib/color';
 import { closeOffer } from '../lib/closeSubtree';
+import { dependencyCandidates } from '../lib/dependencies';
 import { message } from '../lib/errors';
 import { renderMarkdown } from '../lib/markdown';
 import { waitingChild } from '../lib/next';
@@ -40,6 +43,7 @@ import type {
   ChildRollup,
   Comment,
   Issue,
+  IssueCard,
   IssueEvent,
   IssueRollup,
   IssueType,
@@ -146,6 +150,23 @@ export function IssuePage() {
       }
     },
     [key, load],
+  );
+
+  /* An edge added or taken off. Its own call rather than a field on the patch
+     for the reason `savePlaybook` is - it is its own endpoint - and otherwise
+     exactly `save`: it re-reads, and a refusal lands in `error` above in the
+     server's own words, which are the sentences naming which rule the edge
+     broke. */
+  const saveDependency = useCallback(
+    async (write: () => Promise<unknown>) => {
+      try {
+        await write();
+        await load();
+      } catch (err) {
+        setError(message(err));
+      }
+    },
+    [load],
   );
 
   // Handed `load`, so a confirmed cascade re-reads the rollup too and the
@@ -311,6 +332,13 @@ export function IssuePage() {
         </div>
       </Card>
 
+      <Dependencies
+        issue={issue}
+        board={board}
+        onAdd={(dependsOnKey) => saveDependency(() => addDependency(key, { dependsOnKey }))}
+        onRemove={(dependsOnKey) => saveDependency(() => removeDependency(key, dependsOnKey))}
+      />
+
       <Description issue={issue} onSave={(description) => save({ description })} />
 
       {/* Drawn where something may be filed under this issue, and where
@@ -405,6 +433,134 @@ function StatusBar({
         })}
       </div>
     </section>
+  );
+}
+
+/**
+ * What this issue waits on, and what waits on it.
+ *
+ * Two lists of the same edges read from the two ends. Only the first is
+ * editable here, because an edge is owned by the issue that waits: taking one
+ * off from the blocker's page would be one issue deciding another issue's
+ * order.
+ *
+ * A dependency gates one thing - the move into the column where the code gets
+ * written - and gates it until the issue it names is in a terminal column. So
+ * a blocker sitting in review still blocks, which is why each row wears the
+ * column it is in: that pill is the answer to "why is this still waiting".
+ */
+function Dependencies({
+  issue,
+  board,
+  onAdd,
+  onRemove,
+}: {
+  issue: Issue;
+  board: Board;
+  onAdd: (dependsOnKey: string) => Promise<unknown>;
+  onRemove: (dependsOnKey: string) => Promise<unknown>;
+}) {
+  const candidates = dependencyCandidates(board.issues, issue.key, issue.dependsOnKeys);
+
+  return (
+    <Card>
+      <h2 className="hatch-section-title">Depends on</h2>
+      <p className="hatch-section-hint text-muted">
+        Done before this is implemented. Everything to the left of that still moves.
+      </p>
+
+      {issue.dependsOnKeys.length === 0 ? (
+        <p className="text-muted">&mdash;</p>
+      ) : (
+        <ul className="hatch-progress-list">
+          {issue.dependsOnKeys.map((key) => (
+            <DependencyRow key={key} issueKey={key} board={board} onRemove={onRemove} />
+          ))}
+        </ul>
+      )}
+
+      {/* `as="div"` for the reason the Parent field is - see there. `allowNone`
+          off and a placeholder in its place: taking a row here adds an edge
+          rather than replacing the one value a field holds, so there is
+          nothing for a clear row to clear, and removing is the button on the
+          row itself. */}
+      <div className="hatch-depends-add">
+        <Field label="Add a dependency" as="div">
+          <IssuePicker
+            label="Add a dependency"
+            value={null}
+            allowNone={false}
+            placeholder="Add a dependency…"
+            candidates={candidates}
+            emptyMessage="Nothing else on the board can be depended on."
+            onChange={onAdd}
+          />
+        </Field>
+      </div>
+
+      <h2 className="hatch-section-title">Blocks</h2>
+      <p className="hatch-section-hint text-muted">
+        Waiting on this one. Taken off from their own pages &mdash; an edge belongs to the issue that
+        waits.
+      </p>
+
+      {issue.dependentKeys.length === 0 ? (
+        <p className="text-muted">&mdash;</p>
+      ) : (
+        <ul className="hatch-progress-list">
+          {issue.dependentKeys.map((key) => (
+            <DependencyRow key={key} issueKey={key} board={board} />
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * One edge, drawn from the board rather than fetched: the key, what it is, its
+ * title and the column it is in.
+ *
+ * An issue the board does not carry is drawn as its key alone rather than
+ * dropped. A key with nothing behind it is a thing somebody has to be able to
+ * see in order to take it off; a silently missing row is not.
+ */
+function DependencyRow({
+  issueKey,
+  board,
+  onRemove,
+}: {
+  issueKey: string;
+  board: Board;
+  /** Absent on the Blocks list, which is read-only from this page. */
+  onRemove?: (dependsOnKey: string) => Promise<unknown>;
+}) {
+  const [removing, setRemoving] = useState(false);
+  const card: IssueCard | undefined = board.issues.find((i) => i.key === issueKey);
+  const status = board.statuses.find((s) => s.id === card?.statusId);
+
+  return (
+    <li className="hatch-progress-row">
+      <Link to={`/issues/${issueKey}`} className="hatch-plan-key">
+        {issueKey}
+      </Link>
+      {card && <TypeBadge type={card.type} />}
+      <span className="hatch-progress-title">{card?.title ?? ''}</span>
+      {status && <StatusPill status={status} />}
+      {onRemove && (
+        <Button
+          className="hatch-depends-remove"
+          loading={removing}
+          aria-label={`Stop waiting on ${issueKey}`}
+          onClick={() => {
+            setRemoving(true);
+            void onRemove(issueKey).finally(() => setRemoving(false));
+          }}
+        >
+          Remove
+        </Button>
+      )}
+    </li>
   );
 }
 

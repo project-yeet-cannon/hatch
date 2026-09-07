@@ -46,11 +46,11 @@ working and the route is not one a key may take; ask the operator.
 
 [`scripts/hatch.sh`](scripts/hatch.sh) wraps the calls a working session
 actually makes — `board`, `next`, `queue`, `show`, `start`, `move`, `comment`,
-`pr`, `ask`, `questions`, `answer`, `work`, `go-to-work`, and `api` for
-everything else. It reads its settings from `scripts/.env` or the environment, finds a
-column by name rather than by id — on the letters and digits alone, so `todo`
-reaches the column the board calls `To Do` — and folds off the cards whose ready
-date has not arrived, exactly as the board does. Prefer it to raw `curl`; the
+`pr`, `depends`, `ask`, `questions`, `answer`, `work`, `go-to-work`, and `api`
+for everything else. It reads its settings from `scripts/.env` or the
+environment, finds a column by name rather than by id — on the letters and
+digits alone, so `todo` reaches the column the board calls `To Do` — and folds
+off the cards whose ready date has not arrived, exactly as the board does. Prefer it to raw `curl`; the
 raw calls below are what it is doing.
 
 ### One increment, unattended
@@ -122,7 +122,7 @@ stops it by default; the flags above are how a night is bounded, and three
 failed increments in a row stop it on their own.
 
 **This is most likely how you got here.** Assume nobody is reading the terminal,
-and that the next increment starts the moment yours ends. Four things follow,
+and that the next increment starts the moment yours ends. Five things follow,
 and they are why this section is in a file an agent reads:
 
 - **Leave the ticket somewhere new.** An increment that ends with the ticket in
@@ -134,11 +134,23 @@ and they are why this section is in a file an agent reads:
 - **Asking is a full stop, not a pause.** An open question blocks the ticket
   from being dispatched at all. The loop takes the next thing and yours waits
   for a person, so ask and stop — do not ask and keep building.
-- **Record the pull request**: `./scripts/hatch.sh pr AER-12 <url>`. The loop
-  will not start a second story under the same parent while one is awaiting
-  review, so the operator reading yours is what unblocks the rest of that epic.
-  A URL somebody has to find in a comment makes that read take longer than it
-  needs to.
+- **Record the pull request**: `./scripts/hatch.sh pr AER-12 <url>`. It is a
+  field on the issue and a link on the issue page; a URL somebody has to find in
+  a comment makes the review take longer than it needs to.
+- **Say what has to land in order.** The loop starts whatever is next, and two
+  stories under one epic are two independent pieces of work unless somebody said
+  otherwise. Work that must land in order says so with a dependency:
+
+  ```
+  ./scripts/hatch.sh depends AER-13 AER-12   # AER-13 waits on AER-12
+  ```
+
+  It gates one move — the one into the column where the code gets written — and
+  clears only when the issue it names is merged. Everything left of that keeps
+  moving: a blocked issue is still broken down, still lands in the backlog, and
+  is still analysed. A planning session that has just filed five stories that
+  must land one after another chains them here, in four calls, and the loop then
+  walks the chain.
 - **Read the board before assuming it is empty.** `./scripts/hatch.sh queue`
   prints every issue a pass would look at, in the order it looks, each with the
   reason it would be folded past — or the transition it is clear for.
@@ -147,7 +159,7 @@ and they are why this section is in a file an agent reads:
   from outside and is not one, and this is where that shows up.
 
 The rules deciding all of this live on the server, not in the script:
-[`docs/hatch.md`](docs/hatch.md) has the six conditions that make an issue
+[`docs/hatch.md`](docs/hatch.md) has the five conditions that make an issue
 actionable and the reasoning behind each.
 
 ### When a decision is not yours to make
@@ -265,6 +277,11 @@ A planning session leaves the plan **on the ticket**, not in a chat log:
   criteria — what "done" means, in a form somebody else could check.
 - `POST /api/hatch/issues` with `parentKey: "AER-12"` for each story or task the
   work breaks into. An epic takes stories; a story takes tasks.
+- `./scripts/hatch.sh depends <waits> <waited on>` for each pair that must land
+  in order. Filing them is not saying so: the loop takes siblings in whatever
+  order the board puts them in, and five stories that are a sequence are a chain
+  of four edges. Five that are independent get none, and go in parallel over
+  several nights.
 - Move it out of the drafting column: `POST /api/hatch/issues/AER-12/move` with
   the `statusId` of the column that holds specified work awaiting selection
   (**Backlog** on a stock board). `GET /api/hatch/board` names the columns.

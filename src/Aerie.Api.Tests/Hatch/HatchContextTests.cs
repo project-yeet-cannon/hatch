@@ -30,12 +30,12 @@ public class HatchContextTests
     }
 
     [Fact]
-    public void TheModuleOwnsSixTables()
+    public void TheModuleOwnsSevenTables()
     {
         using var db = NewContext();
 
         Assert.Equal(
-            ["Comments", "IssueEvents", "Issues", "Playbooks", "Projects", "Statuses"],
+            ["Comments", "IssueDependencies", "IssueEvents", "Issues", "Playbooks", "Projects", "Statuses"],
             db.Model.GetEntityTypes().Select(TableName).OrderBy(n => n, StringComparer.Ordinal));
     }
 
@@ -134,6 +134,8 @@ public class HatchContextTests
     [InlineData(typeof(EfHatchProject), new[] { nameof(EfHatchProject.Key) })]
     [InlineData(typeof(EfHatchStatus), new[] { nameof(EfHatchStatus.Name) })]
     [InlineData(typeof(EfHatchIssue), new[] { nameof(EfHatchIssue.ProjectId), nameof(EfHatchIssue.Number) })]
+    [InlineData(typeof(EfHatchIssueDependency),
+        new[] { nameof(EfHatchIssueDependency.IssueId), nameof(EfHatchIssueDependency.DependsOnId) })]
     public void TheUniquenessTheBoardDependsOn_IsInTheDatabase(Type entity, string[] properties)
     {
         using var db = NewContext();
@@ -190,6 +192,24 @@ public class HatchContextTests
         using var db = NewContext();
 
         Assert.Equal(DeleteBehavior.Cascade, ForeignKeyOn(db, entity, foreignKey).DeleteBehavior);
+    }
+
+    /// <summary>
+    /// An edge has no meaning without either issue, so deleting either takes
+    /// it - in both directions. Pinned as model metadata rather than exercised,
+    /// because the in-memory provider does not enforce a foreign key and every
+    /// other delete behaviour in this file is pinned the same way.
+    /// </summary>
+    [Theory]
+    [InlineData(nameof(EfHatchIssueDependency.IssueId))]
+    [InlineData(nameof(EfHatchIssueDependency.DependsOnId))]
+    public void DependencyEdges_CascadeWithEitherIssue(string foreignKey)
+    {
+        using var db = NewContext();
+
+        Assert.Equal(
+            DeleteBehavior.Cascade,
+            ForeignKeyOn(db, typeof(EfHatchIssueDependency), foreignKey).DeleteBehavior);
     }
 
     [Fact]

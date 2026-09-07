@@ -45,9 +45,8 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     ///
     /// <para>Nothing else changes - still right to left, still top of the
     /// column down, still folding past a ready date, an open question, a
-    /// terminal column, a missing playbook, or a sibling already awaiting
-    /// review. The scope narrows the candidates and decides nothing about
-    /// them.</para>
+    /// terminal column, a missing playbook, or an unfinished dependency. The
+    /// scope narrows the candidates and decides nothing about them.</para>
     ///
     /// <para>The issue itself is not a candidate. "Under AER-1" is a question
     /// about what hangs beneath it, which is how <c>ancestorKey</c> already
@@ -70,7 +69,7 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
         var clear = scan.Rows.FirstOrDefault(r => r.Blocked is null);
         if (clear is null) return NoContent();
 
-        return await ResolveAsync(clear.Issue, scan.Statuses, scan.Loop, ct);
+        return await ResolveAsync(clear.Issue, scan.Statuses, scan.Loop, scan.Gate, ct);
     }
 
     /// <summary>
@@ -131,9 +130,9 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// </summary>
     /// <remarks>
     /// Everything a row is judged against is read once here rather than once
-    /// per row - the statuses, the scope, what is awaiting review, how many
-    /// questions each issue is waiting on, and the whole playbook matrix. A
-    /// board's worth of rows against a handful of queries, because a scan that
+    /// per row - the statuses, the scope, which dependencies are unmet, how
+    /// many questions each issue is waiting on, and the whole playbook matrix.
+    /// A board's worth of rows against a handful of queries, because a scan that
     /// cost a query a row would be a scan nobody leaves running.
     /// </remarks>
     private async Task<Scan> ScanAsync(int offsetMinutes, string? ancestorKey, CancellationToken ct)
@@ -160,11 +159,9 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
             scope = await Rollup.DescendantIdsAsync(db, ancestorId.Value, ct);
         }
 
-        var loop = new LoopScope(
-            DayNumber(time.GetUtcNow(), offsetMinutes),
-            offsetMinutes,
-            await InFlightAsync(statuses, ct));
+        var loop = new LoopScope(DayNumber(time.GetUtcNow(), offsetMinutes), offsetMinutes);
 
+        var gate = await DependencyGate.ForAsync(db, statuses, ct);
         var open = await Questions.OpenCountsAsync(db, ct);
         var playbooks = await db.Playbooks.AsNoTracking()
             .Include(p => p.FromStatus)
@@ -187,6 +184,8 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
 
         var byColumn = candidates.GroupBy(i => i.StatusId).ToDictionary(g => g.Key, g => g.ToList());
 
+        var implementation = Implementation(statuses);
+
         var rows = new List<ScanRow>();
         foreach (var status in Enumerable.Reverse(statuses))
         {
@@ -197,11 +196,13 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
             {
                 var playbook = Match(playbooks, status.Id, to.Id, issue.Type);
                 open.TryGetValue(issue.Id, out var waiting);
-                rows.Add(new ScanRow(issue, status, to, Blocked(issue, status, to, playbook, waiting, loop)));
+                rows.Add(new ScanRow(
+                    issue, status, to,
+                    Blocked(issue, status, to, playbook, waiting, loop, gate, implementation)));
             }
         }
 
-        return new Scan(statuses, rows, loop, null);
+        return new Scan(statuses, rows, loop, gate, null);
     }
 
     /// <summary>One issue the pass looked at, and what it decided.</summary>
@@ -211,26 +212,29 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// A finished pass, or the argument it would not accept. A refusal carries
     /// the sentence and nothing else; both endpoints turn it into the same 400.
     /// </summary>
-    private sealed record Scan(List<EfHatchStatus> Statuses, List<ScanRow> Rows, LoopScope? Loop, string? Failure)
+    private sealed record Scan(
+        List<EfHatchStatus> Statuses, List<ScanRow> Rows, LoopScope? Loop, DependencyGate Gate, string? Failure)
     {
-        public static Scan Refused(string why) => new([], [], null, why);
+        public static Scan Refused(string why) => new([], [], null, DependencyGate.None, why);
     }
 
     /// <summary>
     /// What the loop is asking of the board this pass: which day it is in the
-    /// caller's zone, and what is already in flight. Absent when somebody named
-    /// a ticket by hand - see <see cref="Blocked"/>.
+    /// caller's zone. Absent when somebody named a ticket by hand - see
+    /// <see cref="Blocked"/>.
     /// </summary>
-    private sealed record LoopScope(long Today, int OffsetMinutes, List<InFlightIssue> InFlight);
+    private sealed record LoopScope(long Today, int OffsetMinutes);
 
     // ---- The loop's own policy ----
     //
-    // Two rules that are not facts about an issue but decisions about what an
-    // unattended run may start. They are asked in Blocked like every other
-    // fold - a scan that could not name them would be a scan with holes in it -
-    // but only when a LoopScope is present, which is to say only when the pass
-    // is asking. A person who names a ticket is giving an instruction;
-    // housekeeping does not overrule it.
+    // One rule that is not a fact about an issue but a decision about what an
+    // unattended run may start: the ready date. It is asked in Blocked like
+    // every other fold - a scan that could not name it would be a scan with
+    // holes in it - but only when a LoopScope is present, which is to say only
+    // when the pass is asking. A person who names a ticket is giving an
+    // instruction; housekeeping does not overrule it.
+
+    // ---- Dependencies ----
 
     /// <summary>
     /// The last stop before shipped: the column immediately left of the first
@@ -241,6 +245,9 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// column was placed by the migration that added it
     /// (20260903204217_Playbooks.cs). An operator renames columns, and a
     /// hardcoded "review" would be a rule that quietly stopped applying.
+    ///
+    /// <para>It is now a landmark as well as a column: <see cref="Implementation"/>
+    /// is measured from it.</para>
     /// </summary>
     private static EfHatchStatus? AwaitingReview(List<EfHatchStatus> statuses)
     {
@@ -250,47 +257,137 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     }
 
     /// <summary>
-    /// Every issue sitting in the awaiting-review column, with the parent it
-    /// hangs under - one read, for a rule asked of every candidate.
+    /// The column where an agent writes the code: the one whose own next move
+    /// is into the awaiting-review column. Null on a board too short to have
+    /// one, where a dependency therefore gates nothing.
     /// </summary>
-    private async Task<List<InFlightIssue>> InFlightAsync(List<EfHatchStatus> statuses, CancellationToken ct)
+    /// <remarks>
+    /// On a stock board that is "In Progress", and the gated move is "To Do" to
+    /// "In Progress" - the one transition where code gets written. Measured and
+    /// not named, for the reason <see cref="AwaitingReview"/> is: an operator
+    /// renames columns, and a hardcoded name is a rule that quietly stops
+    /// applying.
+    /// </remarks>
+    private static EfHatchStatus? Implementation(List<EfHatchStatus> statuses) =>
+        AwaitingReview(statuses) is { } review
+            ? statuses.FirstOrDefault(s => Advance(statuses, s)?.Id == review.Id)
+            : null;
+
+    /// <summary>
+    /// Every unmet dependency on the board, read once, and the question "what
+    /// stands in this issue's way" answered against it.
+    ///
+    /// <para>Unmet means the issue waited on is not in a terminal column.
+    /// Merged, not merely up for review - anything softer and the second story
+    /// starts on top of the first one's unmerged branch, which is the failure
+    /// the whole feature exists to prevent.</para>
+    /// </summary>
+    /// <remarks>
+    /// One gate serves the whole pass and another serves a single named issue,
+    /// and they cannot come to disagree about what "unmet" means because there
+    /// is one definition and both call it. Two board-wide reads for a single
+    /// dispatch is the deliberate trade: the table is small, and a scan that
+    /// could disagree with a named dispatch is precisely the bug the queue
+    /// endpoint exists to expose.
+    /// </remarks>
+    private sealed class DependencyGate
     {
-        if (AwaitingReview(statuses) is not { } awaiting) return [];
+        /// <summary>A gate that blocks nothing, for a refused scan - so <c>Scan.Gate</c> is never null and no call site needs a <c>!</c>.</summary>
+        public static readonly DependencyGate None = new([], []);
 
-        // A null parent is not a group: two parentless issues are not siblings
-        // of each other, so they are never loaded as one another's blocker.
-        var rows = await db.Issues.AsNoTracking()
-            .Where(i => i.StatusId == awaiting.Id && i.ParentId != null)
-            .Select(i => new { i.Id, ParentId = i.ParentId!.Value, ProjectKey = i.Project!.Key, i.Number })
-            .ToListAsync(ct);
+        private readonly Dictionary<long, List<string>> _unmetByIssue;
+        private readonly Dictionary<long, (long? ParentId, string Key)> _tree;
 
-        return rows
-            .Select(r => new InFlightIssue(r.Id, r.ParentId, IssueKey.Format(r.ProjectKey, r.Number), awaiting.Name))
-            .ToList();
+        private DependencyGate(
+            Dictionary<long, List<string>> unmetByIssue, Dictionary<long, (long?, string)> tree)
+        {
+            _unmetByIssue = unmetByIssue;
+            _tree = tree;
+        }
+
+        public static async Task<DependencyGate> ForAsync(
+            HatchContext db, List<EfHatchStatus> statuses, CancellationToken ct)
+        {
+            var terminal = statuses.Where(s => s.IsTerminal).Select(s => s.Id).ToList();
+
+            // The unmet edges, and nothing else. Ordered by the blocker's key
+            // so the sentence a fold prints is stable between two passes over
+            // an unchanged board.
+            var unmet = await db.Dependencies.AsNoTracking()
+                .Where(d => !terminal.Contains(d.DependsOn!.StatusId))
+                .OrderBy(d => d.DependsOn!.Project!.Key).ThenBy(d => d.DependsOn!.Number)
+                .Select(d => new { d.IssueId, ProjectKey = d.DependsOn!.Project!.Key, d.DependsOn!.Number })
+                .ToListAsync(ct);
+
+            var tree = await db.Issues.AsNoTracking()
+                .Select(i => new { i.Id, i.ParentId, ProjectKey = i.Project!.Key, i.Number })
+                .ToListAsync(ct);
+
+            return new DependencyGate(
+                unmet.GroupBy(r => r.IssueId).ToDictionary(
+                    g => g.Key,
+                    g => g.Select(r => IssueKey.Format(r.ProjectKey, r.Number)).ToList()),
+                tree.ToDictionary(
+                    r => r.Id,
+                    r => ((long?)r.ParentId, IssueKey.Format(r.ProjectKey, r.Number))));
+        }
+
+        /// <summary>
+        /// The unmet edges standing in this issue's way: its own, or - where it
+        /// has none - the nearest ancestor's that does. Empty when nothing is
+        /// in the way.
+        /// </summary>
+        /// <remarks>
+        /// The nearest holder, and only it. Naming every holder in a tree would
+        /// be a paragraph where a fold gets a sentence, and it would still be a
+        /// sentence about the nearest one afterwards: clearing that holder is
+        /// what the reader has to do next, and the pass after it says what is
+        /// behind it. One walk rather than the rule written twice, which is
+        /// also how an ancestor's dependency reaches everything below it.
+        /// </remarks>
+        public IReadOnlyList<UnmetEdge> Unmet(long issueId)
+        {
+            var seen = new HashSet<long>();
+            long? at = issueId;
+
+            while (at is { } id && seen.Add(id))
+            {
+                if (_unmetByIssue.TryGetValue(id, out var blockers))
+                {
+                    var holder = id == issueId ? null : _tree.TryGetValue(id, out var row) ? row.Key : null;
+                    return blockers.Select(b => new UnmetEdge(b, holder)).ToList();
+                }
+
+                at = _tree.TryGetValue(id, out var found) ? found.ParentId : null;
+            }
+
+            return [];
+        }
     }
 
     /// <summary>
-    /// Why this issue is not an unattended run's to start yet: a sibling of it
-    /// is already awaiting review, and two open pull requests under one parent
-    /// is one too many. Null when nothing under its parent is in flight.
-    ///
-    /// <para>The sentence is written here rather than at the caller even though
-    /// <c>next</c> discards it - <c>next</c> folds in silence on purpose, and
-    /// the scan that explains a whole pass reads the same fold and prints
-    /// it.</para>
+    /// One thing being waited on. <see cref="HolderKey"/> is null when the edge
+    /// is the issue's own, and the ancestor's key when it is not.
     /// </summary>
-    private static string? SiblingInFlight(EfHatchIssue issue, List<InFlightIssue> inFlight)
+    private sealed record UnmetEdge(string BlockerKey, string? HolderKey);
+
+    /// <summary>
+    /// Why an unattended run - or anybody - should not start writing this yet:
+    /// the issues it waits on that are not done.
+    /// </summary>
+    private static string WaitingOn(IReadOnlyList<UnmetEdge> edges)
     {
-        if (issue.ParentId is not { } parent) return null;
+        var keys = edges.Select(e => e.BlockerKey).ToList();
+        var list = keys.Count == 1
+            ? keys[0]
+            : $"{string.Join(", ", keys.Take(keys.Count - 1))} and {keys[^1]}";
 
-        var sibling = inFlight.FirstOrDefault(o => o.ParentId == parent && o.Id != issue.Id);
-        return sibling is null
-            ? null
-            : $"{sibling.Key} is in \"{sibling.Column}\", and two open pull requests under one parent is one too many";
+        var subject = edges[0].HolderKey is { } holder ? $"{holder} above this" : "this";
+
+        return keys.Count == 1
+            ? $"{list} is not done, and {subject} cannot be implemented until it is"
+            : $"{list} are not done, and {subject} cannot be implemented until they are";
     }
-
-    /// <summary>An issue in the awaiting-review column, and what it takes to name it.</summary>
-    private sealed record InFlightIssue(long Id, long ParentId, string Key, string Column);
 
     /// <summary>
     /// The same answer for an issue somebody named. Blocked or not, it is
@@ -306,7 +403,12 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
             .WithKey(projectKey, number).FirstOrDefaultAsync(ct);
         if (issue is null) return NotFound();
 
-        return await ResolveAsync(issue, await OrderedStatusesAsync(ct), null, ct);
+        var statuses = await OrderedStatusesAsync(ct);
+
+        // Its own gate rather than the scan's, because nothing scanned here -
+        // built from the same rows and the same rule, so a named dispatch and a
+        // pass cannot disagree about what an issue is waiting on.
+        return await ResolveAsync(issue, statuses, null, await DependencyGate.ForAsync(db, statuses, ct), ct);
     }
 
     // ---- Resolution ----
@@ -321,8 +423,12 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// Passed straight through to <see cref="Blocked"/> so that a row the scan
     /// called clear cannot come back blocked here.
     /// </param>
+    /// <param name="gate">
+    /// The unmet dependencies, for the same reason and with the same guarantee:
+    /// the scan's own, so a row it called clear cannot come back blocked here.
+    /// </param>
     private async Task<WorkDto> ResolveAsync(
-        EfHatchIssue issue, List<EfHatchStatus> statuses, LoopScope? loop, CancellationToken ct)
+        EfHatchIssue issue, List<EfHatchStatus> statuses, LoopScope? loop, DependencyGate gate, CancellationToken ct)
     {
         var from = statuses.First(s => s.Id == issue.StatusId);
         var to = Advance(statuses, from);
@@ -376,7 +482,7 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
             },
             childCards,
             questions,
-            Blocked(issue, from, to, playbook, waiting, loop));
+            Blocked(issue, from, to, playbook, waiting, loop, gate, Implementation(statuses)));
     }
 
     /// <summary>
@@ -387,10 +493,10 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// <remarks>
     /// <para>The order is what it costs to change the answer, most fundamental
     /// first: a terminal column, no column after this one, a terminal next
-    /// column, a ready date, an unanswered question, a sibling awaiting review,
-    /// and last a missing playbook. A column with nowhere an agent may go is a
-    /// fact about the board and no argument alters it; a ready date needs time;
-    /// a question needs a person; a sibling needs other work to land; and a
+    /// column, a ready date, an unanswered question, an unmet dependency, and
+    /// last a missing playbook. A column with nowhere an agent may go is a fact
+    /// about the board and no argument alters it; a ready date needs time; a
+    /// question needs a person; a dependency needs other work to land; and a
     /// missing playbook needs the operator, which is last because it is only
     /// worth saying about an issue that is otherwise a candidate.</para>
     ///
@@ -414,9 +520,21 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// </param>
     /// <param name="loop">
     /// The pass's own policy, or null when somebody named this ticket by hand.
-    /// The two folds it adds are decisions about what an unattended run may
+    /// The one fold it adds is a decision about what an unattended run may
     /// *start*, as opposed to what may move, and a person who names a ticket is
     /// giving an instruction that housekeeping does not overrule.
+    /// </param>
+    /// <param name="gate">
+    /// What is unfinished that this issue waits on. Not the loop's policy - a
+    /// dependency is a fact about the work, so an issue somebody named by hand
+    /// is refused too, and somebody who disagrees removes the edge.
+    /// </param>
+    /// <param name="implementation">
+    /// The column a dependency gates the move into, and the only one it gates.
+    /// Everything left of it moves: an issue waiting on another still goes
+    /// through breakdown, still lands in the backlog, and is still analysed.
+    /// An issue already in it is never gated either - the move into review is
+    /// not a dependency's to refuse, so work that started finishes.
     /// </param>
     private static string? Blocked(
         EfHatchIssue issue,
@@ -424,7 +542,9 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
         EfHatchStatus? to,
         EfHatchPlaybook? playbook,
         int waiting,
-        LoopScope? loop)
+        LoopScope? loop,
+        DependencyGate gate,
+        EfHatchStatus? implementation)
     {
         if (from.IsTerminal)
             return $"\"{from.Name}\" is where work ends - there is nothing after it";
@@ -444,8 +564,8 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
         if (waiting > 0)
             return $"{waiting} unanswered question{(waiting == 1 ? "" : "s")} - it is waiting on a person, not on an agent";
 
-        if (loop is not null && SiblingInFlight(issue, loop.InFlight) is { } sibling)
-            return sibling;
+        if (to.Id == implementation?.Id && gate.Unmet(issue.Id) is { Count: > 0 } waitingOn)
+            return WaitingOn(waitingOn);
 
         return playbook is null
             ? $"no playbook covers \"{from.Name}\" to \"{to.Name}\" for {An(issue.Type)} - add one on the Playbooks page"

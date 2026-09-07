@@ -181,6 +181,14 @@ public class AdminSurfaceTests
         "PlaybooksController.PatchPlaybook",
         "PlaybooksController.DeletePlaybook",
 
+        // The two verbs that say one issue waits on another, and deliberately
+        // *unlike* the playbook and the override below: an edge is a statement
+        // about the work, not about an agent's budget, so a planning session
+        // that has just filed five stories can chain them itself. Hatch-scoped
+        // like the rest of the module. See IssueDependenciesController.
+        "IssueDependenciesController.AddDependency",
+        "IssueDependenciesController.RemoveDependency",
+
         // A playbook's power routed through a different table, and cut the
         // same way: an issue's model and effort override every playbook that
         // could speak for it, so an agent that could set one could raise its
