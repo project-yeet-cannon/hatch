@@ -338,6 +338,17 @@ page's own heading, which is what `<PageHeader>` owns. An app that needs more in
 the bar passes `leading`/`trailing`. Nothing app-specific compiles into it, and
 extending it by forking it is the failure this package exists to prevent.
 
+`<Modal>` has one slot worth naming. Its panel caps at the viewport and scrolls,
+which is right until the dialog holds a row that has to stay reachable — its
+actions. Passing `footer` moves that row out of the scroll: the panel becomes a
+frame, the body takes the slack and scrolls inside it, and the foot is pinned
+under both. Reach for it when the content has no ceiling — a list as long as
+the subtree, a description as long as the brief — and leave it off otherwise,
+because a dialog of four fields is better as one block than as three. It is a
+modifier and not a new default for the same reason: the dialogs that pass no
+footer are laid out against the panel being the scroller, and they stay that
+way.
+
 ### Pages that are not React apps
 
 Two pages in the house cannot render `<TopBar>`: **Swagger UI**, which is
