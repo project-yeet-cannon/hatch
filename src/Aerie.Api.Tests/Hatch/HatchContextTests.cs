@@ -30,12 +30,12 @@ public class HatchContextTests
     }
 
     [Fact]
-    public void TheModuleOwnsSevenTables()
+    public void TheModuleOwnsEightTables()
     {
         using var db = NewContext();
 
         Assert.Equal(
-            ["Comments", "IssueDependencies", "IssueEvents", "Issues", "Playbooks", "Projects", "Statuses"],
+            ["Comments", "IssueDependencies", "IssueEvents", "Issues", "Playbooks", "Projects", "Statuses", "WorkLogEntries"],
             db.Model.GetEntityTypes().Select(TableName).OrderBy(n => n, StringComparer.Ordinal));
     }
 
@@ -182,11 +182,13 @@ public class HatchContextTests
 
     /// <summary>
     /// The accepted MVP gap, written down as a test so it stays a decision: a
-    /// deleted issue takes its comments and its audit trail with it.
+    /// deleted issue takes its comments, its audit trail and its work log with
+    /// it.
     /// </summary>
     [Theory]
     [InlineData(typeof(EfHatchComment), nameof(EfHatchComment.IssueId))]
     [InlineData(typeof(EfHatchIssueEvent), nameof(EfHatchIssueEvent.IssueId))]
+    [InlineData(typeof(EfHatchWorkLogEntry), nameof(EfHatchWorkLogEntry.IssueId))]
     public void CommentsAndEvents_CascadeWithTheirIssue(Type entity, string foreignKey)
     {
         using var db = NewContext();
@@ -221,6 +223,45 @@ public class HatchContextTests
             .FindProperty(nameof(EfHatchIssueEvent.Payload))!;
 
         Assert.Equal("jsonb", payload.FindAnnotation(RelationalAnnotationNames.ColumnType)?.Value);
+    }
+
+    [Fact]
+    public void AWorkLogEntry_IsUniquePerSessionAndIssue()
+    {
+        using var db = NewContext();
+
+        var entry = db.Model.FindEntityType(typeof(EfHatchWorkLogEntry))!;
+
+        // What makes the dispatcher's post idempotent rather than a second row
+        // every time a run is re-run. The endpoint reads first and updates in
+        // place; this is the backstop under it.
+        var unique = entry.GetIndexes().Single(i => i.IsUnique);
+        Assert.Equal(
+            [nameof(EfHatchWorkLogEntry.IssueId), nameof(EfHatchWorkLogEntry.SessionId)],
+            unique.Properties.Select(p => p.Name));
+
+        // And the page's one query, which is this issue's entries newest first.
+        Assert.Contains(
+            entry.GetIndexes(),
+            i => !i.IsUnique
+                 && i.Properties.Select(p => p.Name)
+                     .SequenceEqual([nameof(EfHatchWorkLogEntry.IssueId), nameof(EfHatchWorkLogEntry.EndedAt)]));
+    }
+
+    [Fact]
+    public void AWorkLogEntry_KeepsEightPlacesOfDollarsAndItsBreakdownAsJsonb()
+    {
+        using var db = NewContext();
+
+        var entry = db.Model.FindEntityType(typeof(EfHatchWorkLogEntry))!;
+
+        // Two places would round a night of cheap sessions to nothing.
+        var cost = entry.FindProperty(nameof(EfHatchWorkLogEntry.CostUsd))!;
+        Assert.Equal(18, cost.GetPrecision());
+        Assert.Equal(8, cost.GetScale());
+
+        var models = entry.FindProperty(nameof(EfHatchWorkLogEntry.ModelUsage))!;
+        Assert.Equal("jsonb", models.FindAnnotation(RelationalAnnotationNames.ColumnType)?.Value);
     }
 
     // ---- Key format ----
