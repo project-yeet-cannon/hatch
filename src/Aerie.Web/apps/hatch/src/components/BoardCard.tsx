@@ -15,6 +15,9 @@ export interface CardProps {
   terminal?: boolean;
 }
 
+/** Owed an answer, and drawn as such wherever the card is drawn. */
+const askingClass = (card: IssueCard) => (card.openQuestions > 0 ? ' asking' : '');
+
 /**
  * One card. A <Link> as well as a draggable, so middle-click, copy-link and
  * open-in-new-tab all work - an issue key is meant to be passed around, and a
@@ -42,7 +45,7 @@ export function BoardCard({
     <Link
       ref={setNodeRef}
       to={`/issues/${card.key}`}
-      className={`hatch-card${isDragging ? ' dragging' : ''}${waiting ? ' waiting' : ''}`}
+      className={`hatch-card${isDragging ? ' dragging' : ''}${waiting ? ' waiting' : ''}${askingClass(card)}`}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       onClick={(e) => {
         if (!isPlainClick(e)) return;
@@ -67,7 +70,7 @@ export function BoardCard({
  */
 export function CardPreview({ card, waiting = false, terminal = false }: CardProps) {
   return (
-    <div className="hatch-card hatch-card-preview">
+    <div className={`hatch-card hatch-card-preview${askingClass(card)}`}>
       <CardFace card={card} waiting={waiting} terminal={terminal} />
     </div>
   );
