@@ -1224,6 +1224,55 @@ public class IssuesControllerTests
         Assert.Null(board.Issues.Single(i => i.Key == "AER-2").ReadyAt);
     }
 
+    /// <summary>
+    /// The assignee, on the two reads a client actually draws from - and the
+    /// one thing that has to be true of both: an id that no longer resolves is
+    /// nobody, in the same breath and without a 500.
+    /// </summary>
+    [Fact]
+    public async Task AnAssignee_RidesTheIssueAndTheCard()
+    {
+        var h = await NewAsync();
+        var ada = h.Actors.AddPerson("Ada");
+        await h.CreateAsync("task", "hers");
+        await h.AssignAsync("AER-1", ada.Id);
+
+        var issue = Value(await h.Issues.GetIssue("AER-1", default));
+        Assert.Equal("person", issue.Assignee!.Kind);
+        Assert.Equal(ada.Id, issue.Assignee.Id);
+        Assert.Equal("Ada", issue.Assignee.Name);
+
+        var card = Value(await h.Board.GetBoard(default)).Issues.Single(i => i.Key == "AER-1");
+        Assert.Equal(ada.Id, card.Assignee!.Id);
+    }
+
+    [Fact]
+    public async Task AnIssueNobodyOwns_SaysSoAsNull()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "nobody's");
+
+        // Null is the only way "nobody" is said - there is no empty-object form
+        // for a client to have to know about.
+        Assert.Null(Value(await h.Issues.GetIssue("AER-1", default)).Assignee);
+        Assert.Null(Value(await h.Board.GetBoard(default)).Issues.Single().Assignee);
+    }
+
+    [Fact]
+    public async Task AnAssigneeWhoIsGone_ReadsAsNobodyRatherThanThrowing()
+    {
+        var h = await NewAsync();
+        await h.CreateAsync("task", "was somebody's");
+
+        // The column holds an id the directory does not know: a deleted person,
+        // or a key that has since been revoked. Nothing swept it and nothing
+        // needs to.
+        await h.AssignAsync("AER-1", Guid.NewGuid());
+
+        Assert.Null(Value(await h.Issues.GetIssue("AER-1", default)).Assignee);
+        Assert.Null(Value(await h.Board.GetBoard(default)).Issues.Single().Assignee);
+    }
+
     // ---- Delete guards ----
 
     [Fact]
@@ -1978,6 +2027,21 @@ public class IssuesControllerTests
                 new IssueCreateRequest(projectId ?? ProjectId, type, title, null, parentKey, readyAt, dueAt), default);
 
             return Created(result);
+        }
+
+        /// <summary>
+        /// An issue given to a person, written straight to the column - what
+        /// the route that writes one accepts and refuses is
+        /// <see cref="AssigneeControllerTests"/>'s business, and these tests are
+        /// about what the two reads make of it once it is set. An id the
+        /// directory does not know is how a deleted person is written here.
+        /// </summary>
+        public async Task AssignAsync(string key, Guid personId)
+        {
+            IssueKey.TryParse(key, out var projectKey, out var number);
+            var issue = await Db.Issues.WithKey(projectKey, number).FirstAsync();
+            issue.AssigneePersonId = personId;
+            await Db.SaveChangesAsync();
         }
 
         public async Task<IReadOnlyList<IssueEventDto>> EventsAsync(string key) =>
