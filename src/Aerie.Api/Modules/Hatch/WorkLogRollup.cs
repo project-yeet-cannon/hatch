@@ -72,17 +72,14 @@ public static class WorkLogRollup
     {
         var to = window.From + window.Length * window.Buckets;
 
-        // No IssueId filter at all when nothing was named: the whole log is the
-        // ordinary case here, unlike TotalsAsync, which is always about one
-        // issue.
-        var query = db.WorkLog.AsQueryable();
-        if (ancestorId is { } id)
-        {
-            var ids = await ScopeAsync(db, id, includeDescendants: true, ct);
-            query = query.Where(w => ids.Contains(w.IssueId));
-        }
+        // Null is no IssueId filter at all - the whole log, which is the
+        // ordinary case here and never the case in TotalsAsync. Resolved once
+        // and shared with the bound reads below, so an ancestor costs one tree
+        // walk rather than three.
+        var scope = ancestorId is { } id ? await ScopeAsync(db, id, includeDescendants: true, ct) : null;
 
-        var rows = await Project(query.Where(w => w.EndedAt >= window.From && w.EndedAt < to)).ToListAsync(ct);
+        var rows = await Project(Scoped(db, scope).Where(w => w.EndedAt >= window.From && w.EndedAt < to))
+            .ToListAsync(ct);
 
         var byBucket = rows
             // The range filter above is what guarantees this index lands inside.
@@ -104,8 +101,8 @@ public static class WorkLogRollup
             to,
             Name(bucket),
             Fold(rows),
-            await FirstEndedAsync(db, ancestorId, ascending: true, ct),
-            await FirstEndedAsync(db, ancestorId, ascending: false, ct),
+            await FirstEndedAsync(db, scope, ascending: true, ct),
+            await FirstEndedAsync(db, scope, ascending: false, ct),
             buckets);
     }
 
@@ -181,6 +178,10 @@ public static class WorkLogRollup
     /// <summary>Shared, because an empty bucket is the common case and each one would otherwise allocate a list to say so.</summary>
     private static readonly List<Row> NoRows = [];
 
+    /// <summary>The log, narrowed to a set of issues - or the whole of it when there is none.</summary>
+    private static IQueryable<EfHatchWorkLogEntry> Scoped(HatchContext db, List<long>? scope) =>
+        scope is null ? db.WorkLog : db.WorkLog.Where(w => scope.Contains(w.IssueId));
+
     private static IQueryable<Row> Project(IQueryable<EfHatchWorkLogEntry> entries) =>
         entries.AsNoTracking()
             .Select(w => new Row(
@@ -236,15 +237,9 @@ public static class WorkLogRollup
     /// the span to choose a range at all.
     /// </remarks>
     private static async Task<DateTimeOffset?> FirstEndedAsync(
-        HatchContext db, long? ancestorId, bool ascending, CancellationToken ct)
+        HatchContext db, List<long>? scope, bool ascending, CancellationToken ct)
     {
-        var query = db.WorkLog.AsNoTracking();
-        if (ancestorId is { } id)
-        {
-            var ids = await ScopeAsync(db, id, includeDescendants: true, ct);
-            query = query.Where(w => ids.Contains(w.IssueId));
-        }
-
+        var query = Scoped(db, scope).AsNoTracking();
         var ordered = ascending ? query.OrderBy(w => w.EndedAt) : query.OrderByDescending(w => w.EndedAt);
 
         // Projected to a nullable rather than read as a row, so an empty log is
