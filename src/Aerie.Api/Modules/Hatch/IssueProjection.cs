@@ -27,10 +27,10 @@ public static class IssueProjection
     /// number *per issue*.
     /// </summary>
     /// <remarks>
-    /// The three things an <see cref="IssueDto"/> needs beyond its own row -
-    /// its project's key, its parent's key, and its children's keys - are each
-    /// one query for the whole batch. That is what makes a whole-board read
-    /// affordable: <see cref="WorkController"/>'s scan projects every issue the
+    /// The five things an <see cref="IssueDto"/> needs beyond its own row -
+    /// its project's key, its parent's key, its children's keys, what it waits
+    /// on and what waits on it - are each one query for the whole batch. That is
+    /// what makes a whole-board read affordable: <see cref="WorkController"/>'s scan projects every issue the
     /// dispatcher would consider, and a per-row parent lookup would turn one
     /// answer into a few hundred round trips.
     /// </remarks>
@@ -65,6 +65,32 @@ public static class IssueProjection
             .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g
                 .Select(r => IssueKey.Format(r.ProjectKey, r.Number)).ToList());
 
+        // The two directions of the dependency edge, each one query for the
+        // batch and each ordered by the *other* end's key, so the two lists a
+        // page draws are stable between reads and a scan of the board does not
+        // become two queries a row.
+        var dependsOnRows = await db.Dependencies.AsNoTracking()
+            .Where(d => ids.Contains(d.IssueId))
+            .OrderBy(d => d.DependsOn!.Project!.Key).ThenBy(d => d.DependsOn!.Number)
+            .Select(d => new { d.IssueId, ProjectKey = d.DependsOn!.Project!.Key, d.DependsOn!.Number })
+            .ToListAsync(ct);
+
+        var dependsOnKeys = dependsOnRows
+            .GroupBy(r => r.IssueId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g
+                .Select(r => IssueKey.Format(r.ProjectKey, r.Number)).ToList());
+
+        var dependentRows = await db.Dependencies.AsNoTracking()
+            .Where(d => ids.Contains(d.DependsOnId))
+            .OrderBy(d => d.Issue!.Project!.Key).ThenBy(d => d.Issue!.Number)
+            .Select(d => new { d.DependsOnId, ProjectKey = d.Issue!.Project!.Key, d.Issue!.Number })
+            .ToListAsync(ct);
+
+        var dependentKeys = dependentRows
+            .GroupBy(r => r.DependsOnId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g
+                .Select(r => IssueKey.Format(r.ProjectKey, r.Number)).ToList());
+
         return issues.ToDictionary(issue => issue.Id, issue =>
         {
             var projectKey = issue.Project?.Key ?? projectKeys[issue.ProjectId];
@@ -80,6 +106,8 @@ public static class IssueProjection
                 issue.Rank,
                 issue.ParentId is { } parentId && parentKeys.TryGetValue(parentId, out var found) ? found : null,
                 childKeys.TryGetValue(issue.Id, out var children) ? children : [],
+                dependsOnKeys.TryGetValue(issue.Id, out var dependsOn) ? dependsOn : [],
+                dependentKeys.TryGetValue(issue.Id, out var dependents) ? dependents : [],
                 IssueMoment.Format(issue.ReadyAt, issue.ReadyAtHasTime),
                 IssueMoment.Format(issue.DueAt, issue.DueAtHasTime),
                 issue.PullRequestUrl,

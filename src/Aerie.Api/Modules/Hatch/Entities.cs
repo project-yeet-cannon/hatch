@@ -511,6 +511,16 @@ public class EfHatchIssueEvent
     /// <summary>The same, for the thinking budget - see <see cref="EfHatchIssue.EffortOverride"/>.</summary>
     public const string EffortOverrideChanged = "effort_override_changed";
 
+    /// <summary>
+    /// The issue was made to wait on another, or freed from one. Written on the
+    /// issue that waits and on it alone - the edge is that issue's, and a second
+    /// event on the blocker would be the same fact filed twice.
+    /// </summary>
+    public const string DependencyAdded = "dependency_added";
+
+    /// <summary>The reverse - see <see cref="DependencyAdded"/>.</summary>
+    public const string DependencyRemoved = "dependency_removed";
+
     public const string Commented = "commented";
 
     /// <summary>A question was asked, and the issue is waiting on a person until it is answered.</summary>
@@ -686,4 +696,50 @@ public class EfHatchPlaybook
         model is not null &&
         (ModelAliases.Contains(model) ||
          Regex.IsMatch(model, FullModelPattern, RegexOptions.None, TimeSpan.FromSeconds(1)));
+}
+
+/// <summary>
+/// One issue waits on another: an edge saying that <see cref="DependsOn"/> must
+/// be done before <see cref="Issue"/> is implemented.
+///
+/// The dependency, and not shared parentage, is what serialises work. An epic
+/// whose five stories must land one after another gets a chain of these and the
+/// loop walks it in order; an epic whose five stories are independent gets none
+/// and they go in whatever order the board puts them in. The rule this replaced
+/// - no sibling awaiting review - was a guess about every parent on the board,
+/// true of the epics whose stories touch the same files and wrong about the
+/// rest.
+/// </summary>
+/// <remarks>
+/// A row with an <c>Id</c> and an author rather than a bare join table, for the
+/// reason every other table in the module has one: who said two things must
+/// land in order, and when, is worth keeping, and a join entity that already
+/// exists is where the next field goes.
+///
+/// The unique index is what makes re-adding an edge a no-op rather than a
+/// second row - a property of the table instead of a check somebody remembered.
+/// The index on <see cref="DependsOnId"/> alone is the reverse direction, which
+/// the <c>Blocks</c> list and the dispatcher's gate both read, and is there for
+/// the reason <see cref="EfHatchComment.AnswersId"/> carries one.
+/// </remarks>
+[Table("IssueDependencies")]
+[Index(nameof(IssueId), nameof(DependsOnId), IsUnique = true)]
+[Index(nameof(DependsOnId))]
+public class EfHatchIssueDependency
+{
+    [Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+    public long Id { get; set; }
+
+    /// <summary>The issue that waits.</summary>
+    public required long IssueId { get; set; }
+    public EfHatchIssue? Issue { get; set; }
+
+    /// <summary>The issue waited on. Satisfied only once it sits in a terminal column.</summary>
+    public required long DependsOnId { get; set; }
+    public EfHatchIssue? DependsOn { get; set; }
+
+    [MaxLength(Common.PersonName.MaxChars)]
+    public required string CreatedBy { get; set; }
+
+    public required DateTimeOffset CreatedAt { get; set; }
 }

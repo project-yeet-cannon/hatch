@@ -166,9 +166,11 @@ public class WorkControllerTests
     // ---- What the loop may pick up ----
     //
     // Which types a move applies to is the playbook row's to say and nowhere
-    // else's. What is left here is the loop's own policy - a ready date and a
-    // sibling awaiting review - and both are `next`-only: a person who names a
-    // ticket is giving an instruction, and housekeeping does not overrule it.
+    // else's. What is left here is the loop's own policy - the ready date, and
+    // nothing else since a dependency replaced the sibling rule. It is
+    // `next`-only: a person who names a ticket is giving an instruction, and
+    // housekeeping does not overrule it. A dependency is not housekeeping and
+    // is asked of a named ticket too - see the dependency section below.
 
     [Fact]
     public async Task NextWork_TakesTheTopOfTheColumnWhateverTypeThePlaybookNames()
@@ -185,61 +187,19 @@ public class WorkControllerTests
     }
 
     [Fact]
-    public async Task NextWork_PassesOverAnIssueWhoseSiblingIsAwaitingReview()
+    public async Task Work_OnANamedIssueIgnoresTheLoopsPolicy()
     {
         var h = await NewAsync();
-        var mine = await h.FileAsync("epic", "the effort", h.Todo, rank: 8192);
-        await h.FileAsync("story", "already up for review", h.Review, rank: 1024, parentId: mine.Id);
-        await h.FileAsync("story", "the next one under it", h.Todo, rank: 1024, parentId: mine.Id);
+        var held = await h.FileAsync("story", "not until the soak test", h.Todo, readyAt: Now.AddDays(3));
+        await h.FileAsync("story", "workable now", h.Todo, rank: 2048);
 
-        var other = await h.FileAsync("epic", "another effort", h.Todo, rank: 8192);
-        var elsewhere = await h.FileAsync("story", "under nothing in flight", h.Todo, rank: 2048, parentId: other.Id);
-
-        // The folded one is above it in the column: two open pull requests
-        // under one parent is one too many, so the loop opens the other one.
-        Assert.Equal(Key(elsewhere), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
-    }
-
-    [Fact]
-    public async Task NextWork_DoesNotTreatTwoParentlessIssuesAsSiblings()
-    {
-        var h = await NewAsync();
-        await h.FileAsync("story", "up for review, under nothing", h.Review, rank: 1024);
-        var workable = await h.FileAsync("story", "also under nothing", h.Todo, rank: 1024);
-
-        // A null parent is not a group. Otherwise one loose story in review
-        // would stop every other loose story on the board.
-        Assert.Equal(Key(workable), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
-    }
-
-    [Fact]
-    public async Task NextWork_IsNotHeldUpByASiblingThatShipped()
-    {
-        var h = await NewAsync();
-        var mine = await h.FileAsync("epic", "the effort", h.Todo, rank: 8192);
-        await h.FileAsync("story", "merged last week", h.Done, rank: 1024, parentId: mine.Id);
-        var workable = await h.FileAsync("story", "the next one under it", h.Todo, rank: 2048, parentId: mine.Id);
-
-        // The rule is about work in flight, and merged work is not in flight.
-        Assert.Equal(Key(workable), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
-    }
-
-    [Fact]
-    public async Task Work_OnANamedIssueIgnoresTheSiblingRule()
-    {
-        var h = await NewAsync();
-        var parent = await h.FileAsync("epic", "the effort", h.Todo, rank: 8192);
-        await h.FileAsync("story", "already up for review", h.Review, rank: 1024, parentId: parent.Id);
-        var held = await h.FileAsync("story", "the next one under it", h.Todo, rank: 2048, parentId: parent.Id);
-
-        // A pass folds it - and the parent epic above it is itself a candidate
-        // now, so the board is not empty and the fold has to be read off the
-        // scan rather than off a 204.
+        // A pass folds it, and the second story is why the board is not empty
+        // and the fold has to be read off the scan rather than off a 204.
         var folded = Value(await h.Work.GetQueue(0, null, default)).Single(e => e.Issue.Key == Key(held));
-        Assert.Contains("two open pull requests under one parent", folded.Blocked);
+        Assert.Contains("not workable until", folded.Blocked);
 
-        // Named by hand, nothing refuses it: the sibling rule is a decision
-        // about what an unattended run may *start*, not a fact about the issue.
+        // Named by hand, nothing refuses it: a ready date is a decision about
+        // what an unattended run may *start*, not a fact about the issue.
         Assert.Null(Value(await h.Work.GetWork(Key(held), default)).Blocked);
     }
 
@@ -259,6 +219,143 @@ public class WorkControllerTests
         // which type stopped agreeing rather than that something did.
         foreach (var (type, key) in filed)
             Assert.Equal((type, Value(await h.Work.GetWork(key, default)).Blocked), (type, queue[key]));
+    }
+
+    // ---- What it waits on ----
+    //
+    // A dependency gates one move: the one into the column an agent writes the
+    // code in, which on this board is todo to in progress exactly as it is on a
+    // stock one. Everything left of it still moves, an issue already in it
+    // finishes, and satisfied means terminal - a blocker in review still
+    // blocks, or the second story starts on the first one's unmerged branch.
+
+    [Fact]
+    public async Task NextWork_PassesOverAnIssueWaitingOnUnfinishedWork()
+    {
+        var h = await NewAsync();
+        var first = await h.FileAsync("story", "phase one", h.Review, rank: 1024);
+        var second = await h.FileAsync("story", "phase two", h.Todo, rank: 1024);
+        await h.DependsAsync(second, first);
+
+        var next = await h.FileAsync("story", "unrelated", h.Todo, rank: 2048);
+
+        Assert.Equal(Key(next), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
+    }
+
+    [Fact]
+    public async Task ADependency_DoesNotHoldUpTheColumnsBeforeImplementation()
+    {
+        var h = await NewAsync();
+        var first = await h.FileAsync("story", "phase one", h.Review);
+        var second = await h.FileAsync("story", "phase two", h.Inbox);
+        await h.DependsAsync(second, first);
+
+        // The seeded matrix says nothing about inbox to todo, so this test
+        // supplies the row - the fold under examination is the dependency's,
+        // and a missing playbook would hide it.
+        h.Db.Add(Playbook(h.Inbox, h.Todo, "", "sonnet"));
+        await h.Db.SaveChangesAsync();
+
+        // Still broken down, still landed in the backlog, still analysed. Only
+        // the writing waits.
+        Assert.Null(Value(await h.Work.GetWork(Key(second), default)).Blocked);
+    }
+
+    [Fact]
+    public async Task ADependency_DoesNotStopWorkThatHasAlreadyStarted()
+    {
+        var h = await NewAsync();
+        var first = await h.FileAsync("story", "phase one", h.Review);
+        var second = await h.FileAsync("story", "phase two, half written", h.InProgress);
+        await h.DependsAsync(second, first);
+
+        // The move into review is not a dependency's to refuse: an issue that
+        // is already being written finishes rather than stalling half-done.
+        Assert.Null(Value(await h.Work.GetWork(Key(second), default)).Blocked);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ADependency_IsSatisfiedOnlyByATerminalColumn(bool merged)
+    {
+        var h = await NewAsync();
+        var first = await h.FileAsync("story", "phase one", merged ? h.Done : h.Review);
+        var second = await h.FileAsync("story", "phase two", h.Todo);
+        await h.DependsAsync(second, first);
+
+        var blocked = Value(await h.Work.GetWork(Key(second), default)).Blocked;
+
+        if (merged) Assert.Null(blocked);
+        else Assert.Contains($"{Key(first)} is not done", blocked);
+    }
+
+    [Fact]
+    public async Task ADependencyAnAncestorHolds_ReachesEverythingBelowIt()
+    {
+        var h = await NewAsync();
+        var first = await h.FileAsync("story", "phase one", h.Review);
+        var second = await h.FileAsync("story", "phase two", h.Todo);
+        await h.DependsAsync(second, first);
+
+        var task = await h.FileAsync("task", "a piece of phase two", h.Todo, parentId: second.Id);
+
+        // The task holds no edge of its own, and an epic-level "phase two after
+        // phase one" would say nothing at all if it did not reach down.
+        var blocked = Value(await h.Work.GetWork(Key(task), default)).Blocked;
+
+        Assert.Contains($"{Key(first)} is not done", blocked);
+        Assert.Contains($"{Key(second)} above this", blocked);
+    }
+
+    [Fact]
+    public async Task NextWork_StartsASecondStoryUnderAParentThatIsAwaitingReview()
+    {
+        var h = await NewAsync();
+        var parent = await h.FileAsync("epic", "the effort", h.Todo, rank: 8192);
+        await h.FileAsync("story", "already up for review", h.Review, rank: 1024, parentId: parent.Id);
+        var next = await h.FileAsync("story", "independent of it", h.Todo, rank: 1024, parentId: parent.Id);
+
+        // What the sibling rule refused. Two stories under one epic with no
+        // edge between them are two independent pieces of work, and the loop
+        // says so by taking the second one.
+        Assert.Equal(Key(next), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
+    }
+
+    [Fact]
+    public async Task Work_OnANamedIssueStillRefusesAnUnmetDependency()
+    {
+        var h = await NewAsync();
+        var first = await h.FileAsync("story", "phase one", h.Review);
+        var second = await h.FileAsync("story", "phase two", h.Todo);
+        await h.DependsAsync(second, first);
+
+        // Unlike the ready date, this is a fact about the work rather than
+        // housekeeping - somebody who disagrees takes the edge off.
+        Assert.Equal(
+            $"{Key(first)} is not done, and this cannot be implemented until it is",
+            Value(await h.Work.GetWork(Key(second), default)).Blocked);
+    }
+
+    [Fact]
+    public async Task TheSentence_NamesEveryBlockerInKeyOrder()
+    {
+        var h = await NewAsync();
+        var one = await h.FileAsync("story", "phase one", h.Review);
+        var two = await h.FileAsync("story", "phase one and a half", h.Todo);
+        var three = await h.FileAsync("story", "phase one and three quarters", h.Todo);
+        var last = await h.FileAsync("story", "phase two", h.Todo);
+
+        await h.DependsAsync(last, three);
+        await h.DependsAsync(last, one);
+        await h.DependsAsync(last, two);
+
+        // Key order and not insertion order, so two passes over an unchanged
+        // board print the same sentence.
+        Assert.Equal(
+            $"{Key(one)}, {Key(two)} and {Key(three)} are not done, "
+            + "and this cannot be implemented until they are",
+            Value(await h.Work.GetWork(Key(last), default)).Blocked);
     }
 
     // ---- Refusals ----
@@ -609,18 +706,38 @@ public class WorkControllerTests
     }
 
     [Fact]
-    public async Task Queue_NamesTheSiblingThatIsAlreadyAwaitingReview()
+    public async Task Queue_NamesTheUnfinishedWorkAnIssueWaitsOn()
     {
         var h = await NewAsync();
-        var parent = await h.FileAsync("epic", "the effort", h.Todo);
-        var inFlight = await h.FileAsync("story", "already up for review", h.Review, parentId: parent.Id);
-        var held = await h.FileAsync("story", "held back", h.Todo, parentId: parent.Id);
+        var first = await h.FileAsync("story", "phase one", h.Review);
+        var second = await h.FileAsync("story", "phase two", h.Todo);
+        await h.DependsAsync(second, first);
 
         var blocked = Value(await h.Work.GetQueue(0, null, default))
-            .Single(e => e.Issue.Key == Key(held)).Blocked;
+            .Single(e => e.Issue.Key == Key(second)).Blocked;
 
-        Assert.Contains(Key(inFlight), blocked);
-        Assert.Contains("two open pull requests under one parent", blocked);
+        Assert.Equal(
+            $"{Key(first)} is not done, and this cannot be implemented until it is",
+            blocked);
+    }
+
+    [Fact]
+    public async Task Queue_NamesTheAncestorHoldingTheEdge()
+    {
+        var h = await NewAsync();
+        var first = await h.FileAsync("story", "phase one", h.Review);
+        var second = await h.FileAsync("story", "phase two", h.Todo);
+        await h.DependsAsync(second, first);
+        var task = await h.FileAsync("task", "a piece of phase two", h.Todo, parentId: second.Id);
+
+        var blocked = Value(await h.Work.GetQueue(0, null, default))
+            .Single(e => e.Issue.Key == Key(task)).Blocked;
+
+        // Whose edge it is matters to whoever reads the queue: the fix is on
+        // the story, not on the task in front of them.
+        Assert.Equal(
+            $"{Key(first)} is not done, and {Key(second)} above this cannot be implemented until it is",
+            blocked);
     }
 
     [Fact]
@@ -862,6 +979,25 @@ public class WorkControllerTests
             Db.Comments.Add(comment);
             await Db.SaveChangesAsync();
             return comment;
+        }
+
+        /// <summary>
+        /// One issue made to wait on another, written straight to the table -
+        /// these tests are about what an edge does to a dispatch, and what the
+        /// route that writes one refuses is
+        /// <see cref="IssueDependenciesControllerTests"/>'s business.
+        /// </summary>
+        public async Task DependsAsync(EfHatchIssue issue, EfHatchIssue blocker)
+        {
+            Db.Dependencies.Add(new EfHatchIssueDependency
+            {
+                IssueId = issue.Id,
+                DependsOnId = blocker.Id,
+                CreatedBy = "hatch-agent",
+                CreatedAt = Now,
+            });
+
+            await Db.SaveChangesAsync();
         }
 
         public async Task AnswerAsync(EfHatchIssue issue, EfHatchComment question, string body)
