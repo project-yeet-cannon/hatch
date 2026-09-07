@@ -612,7 +612,7 @@ public record WorkLogModelUseDto(
 /// <param name="EndedAt">Wall clock as the stream closed.</param>
 /// <param name="DurationMs">The session's own <c>duration_ms</c>, which is the smaller number and the honest one.</param>
 /// <param name="Title">What the session did, in a few words, or null when it never said.</param>
-/// <param name="Summary">The same at length. Clipped rather than refused when it runs long - see <see cref="WorkLogController"/>.</param>
+/// <param name="Summary">The same at length. Clipped rather than refused when it runs long - see <see cref="IssueWorkLogController"/>.</param>
 /// <param name="Models">
 /// The per-model breakdown. Absent on a run that fell over before the accounting
 /// arrived, which records zero tokens and whatever cost was reported: a session
