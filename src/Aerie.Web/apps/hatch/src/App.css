@@ -523,15 +523,23 @@
   margin-bottom: 0;
 }
 
-/* The same shape and the same reasoning as .hatch-grows below, with the
-   dialog's chrome as the allowance instead of the page's. The 22rem is the
-   panel's padding and head, the meta row, a title that wraps, the dates, this
-   section's own head and the row of actions; .aerie-modal__panel is itself
-   max-height: calc(100vh - var(--sp-8)) and scrolls, so .hatch-grows' 30rem
-   floor alone would push the buttons out of view. The 12rem is the height
-   rows={8} opens at, kept as the floor for the reason .hatch-grows gives. */
-.hatch-peek-grows {
-  max-height: max(12rem, calc(100dvh - 22rem));
+/* The description gets a box rather than the run of the dialog. A brief can be
+   a page long, and a dialog opened to remind somebody what a card is should not
+   have to be scrolled through to reach the way out of it - so it is a
+   paragraph's worth of space, the same in both views, and the rest is under a
+   scrollbar.
+
+   12rem is the height rows={8} opens the editor at, which is what makes
+   toggling Edit and Preview leave the dialog where it is. It is a flat number
+   rather than a share of the screen because it is a reading measure and not a
+   fit: the modal's body is the scroller now, so there is no chrome left to
+   count and nothing above this that has to be subtracted from anything. That
+   arithmetic - calc(100dvh - 22rem), hand-counted off the panel's padding, its
+   head, the meta row, a wrapped title, the dates and the actions - is what went
+   away with the panel that scrolled. */
+.hatch-peek-box {
+  max-height: 12rem;
+  overflow-y: auto;
 }
 
 /* ---- The offer to close a subtree ----
