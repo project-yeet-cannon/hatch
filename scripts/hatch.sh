@@ -16,9 +16,11 @@
 #   AERIE_HATCH_KEY  aerie_ak_...                  - minted on the admin app's
 #                                                    API keys page, shown once
 #
-# And one optional, for `work`:
+# And two optional, for the commands that spawn a session:
 #
 #   HATCH_CLAUDE_BIN path to the claude CLI, if it is not on PATH
+#   HATCH_BASE_BRANCH  the trunk `go-to-work` resets to between increments,
+#                      when it is not the one origin calls its default
 #
 # `./hatch.sh config` asks for them and writes scripts/.env, mode 600 and
 # ignored by git. Every command reads that file, and anything already exported
@@ -1844,6 +1846,142 @@ duration() {
   fi
 }
 
+# ---- The workspace ----
+
+# What a branch is cut from, and the one thing about it that cannot be written
+# down here: a repository's trunk is called whatever its operator calls it.
+#
+# origin/HEAD is what `git clone` recorded and is a local read, so it is asked
+# first. Some checkouts never got one - an `init` and a `remote add`, or a
+# mirror that did not publish a default - and for those the remote is asked
+# directly, which is a round trip and so is the fallback rather than the rule.
+# HATCH_BASE_BRANCH settles it without either.
+base_branch() {
+  local root="$1" ref
+
+  if [ -n "${HATCH_BASE_BRANCH:-}" ]; then echo "$HATCH_BASE_BRANCH"; return 0; fi
+
+  # A clone writes refs/remotes/origin/<name> here. Anything else was written
+  # by hand and is not a branch name this can take the tail of - a name may
+  # have slashes in it, so there is no guessing at where one starts - and the
+  # remote is asked instead.
+  ref=$(git -C "$root" symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null) || ref=""
+  ref="${ref#refs/remotes/origin/}"
+  case "$ref" in refs/*) ref="" ;; esac
+  if [ -n "$ref" ]; then echo "$ref"; return 0; fi
+
+  ref=$(git -C "$root" ls-remote --symref origin HEAD 2>/dev/null |
+    awk '$1 == "ref:" { sub(/^refs\/heads\//, "", $2); print $2; exit }') || ref=""
+  [ -n "$ref" ] || return 1
+  echo "$ref"
+}
+
+# The slate every increment starts on: the trunk, as the remote has it now.
+#
+# This is the loop's guarantee rather than a session's good intentions. A
+# playbook can say "fetch first, then branch from the trunk" and be edited by
+# an operator who did not know that sentence was load-bearing, or read by a
+# session already most of the way through something else. What a night of
+# unattended increments cannot have is one run cutting its branch off the last
+# run's leftovers - so the tree is made current here, before anything is
+# spawned, and a playbook that says nothing at all about git still gets a
+# correct base.
+#
+# Nothing here destroys work that is not recoverable:
+#
+#   - Uncommitted and untracked changes go into a stash, named for the hour it
+#     was taken, and stay on this machine. A stash rather than a discard
+#     because whatever is in the tree at two in the morning was probably left
+#     there by a person, and `git stash pop` is how they get it back.
+#   - Committed work is never at risk from a checkout. Branches are refs, and
+#     the branch the last increment pushed is still under its own name.
+#   - The exception is a commit sitting on the trunk and nowhere else, which
+#     the reset moves off. That is what the "ahead" line is for: it says the
+#     count out loud while there is still something to count, and the reflog
+#     holds the commits themselves.
+#
+# Answers:
+#   0  the tree is on the trunk, at the remote's tip
+#   1  something transient - the fetch did not answer. Worth asking again.
+#   2  something that will not fix itself. Worth stopping for.
+reset_workspace() {
+  local root base head ahead count stamp dirty
+
+  root=$(repo_root)
+
+  if ! git -C "$root" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "hatch: ${root} is not a git repository, so there is no trunk to reset to" >&2
+    return 2
+  fi
+
+  # The fetch comes before the trunk is named, and the order is the whole
+  # difference between waiting a minute and ending a night. Naming the trunk
+  # can need the remote too - a checkout with no origin/HEAD asks it - and a
+  # remote that cannot be reached would come back from there as "there is no
+  # trunk", which reads as a broken repository and stops the loop. Asked in
+  # this order, an unreachable origin is always the fetch's answer, and
+  # everything after it has a remote known to be answering.
+  #
+  # Every remote-tracking ref and not only the trunk's: an increment that goes
+  # looking for what a sibling ticket landed reads a ref that is current, and
+  # --prune takes away the ones whose branches went when their pull request
+  # merged.
+  if ! git -C "$root" fetch --quiet --prune origin; then
+    echo "hatch: could not fetch from origin" >&2
+    return 1
+  fi
+
+  base=$(base_branch "$root") || base=""
+  if [ -z "$base" ]; then
+    echo "hatch: cannot tell which branch is the trunk here - name it in HATCH_BASE_BRANCH" >&2
+    return 2
+  fi
+
+  if ! git -C "$root" rev-parse --verify --quiet "refs/remotes/origin/${base}" >/dev/null; then
+    echo "hatch: origin has no ${base} - HATCH_BASE_BRANCH names the trunk if it is called something else" >&2
+    return 2
+  fi
+
+  # Everything in the tree, tracked or not, ignored files aside - so a stash
+  # never swallows node_modules or a .env. Named for where it came from,
+  # because a stash list read a week later is otherwise a column of "WIP on
+  # main".
+  dirty=$(git -C "$root" status --porcelain) || dirty=""
+  if [ -n "$dirty" ]; then
+    stamp=$(date '+%Y-%m-%d %H:%M')
+    count=$(printf '%s\n' "$dirty" | wc -l | tr -d ' ')
+    if ! git -C "$root" stash push --include-untracked --quiet \
+        --message "hatch: workspace at ${stamp}" >/dev/null 2>&1; then
+      echo "hatch: the tree has changes in it that would not stash - clear them by hand" >&2
+      return 2
+    fi
+    echo "hatch:   stashed ${count} change(s) the tree was carrying - git stash pop takes them back"
+  fi
+
+  if git -C "$root" rev-parse --verify --quiet "refs/heads/${base}" >/dev/null; then
+    ahead=$(git -C "$root" rev-list --count "origin/${base}..${base}" 2>/dev/null) || ahead=0
+    if [ "${ahead:-0}" -gt 0 ]; then
+      echo "hatch:   ${base} was ${ahead} commit(s) ahead of origin and is not now - git reflog has them"
+    fi
+  fi
+
+  # "HEAD" is what rev-parse calls a detached one, and "was HEAD" is not a
+  # sentence anybody can act on.
+  head=$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null) || head=""
+  [ "$head" != "HEAD" ] || head="a detached head"
+
+  # -B rather than a checkout and then a reset: it creates the trunk in a
+  # checkout that never had it, moves it in one that has drifted, and lands on
+  # it either way.
+  if ! git -C "$root" checkout --quiet -B "$base" "refs/remotes/origin/${base}"; then
+    echo "hatch: could not put the tree on ${base}" >&2
+    return 2
+  fi
+
+  echo "hatch:   workspace on ${base} at $(git -C "$root" rev-parse --short HEAD)${head:+, was ${head}}"
+  return 0
+}
+
 # The scan the last pass made, for whoever reports what it found.
 #
 # work_pass runs in the caller's shell, so this survives it the way the INC_
@@ -1868,8 +2006,12 @@ PASS_QUEUE=""
 #   2  the board could not be read - a reason to wait, not a reason to stop. A
 #      loop that ends on one bad minute of network is a loop somebody has to sit
 #      with, which is the thing being built away from here.
+#   3  the workspace could not be reset, for a reason that may pass. Also a
+#      reason to wait.
+#   4  ...and for one that will not. Nothing is spawned onto a tree this
+#      function could not make current, so this is where the night ends.
 work_pass() {
-  local under="$1" quiet="$2" scope="" queue clear work model effort digest folded
+  local under="$1" quiet="$2" scope="" queue clear work model effort digest folded reset
 
   [ -z "$under" ] || scope="&ancestorKey=${under}"
 
@@ -1915,6 +2057,17 @@ work_pass() {
   # already, so there is nothing to ask for here.
   model=$(jq -r '.playbook.model' <<<"$work")
   effort=$(jq -r '.playbook.effort' <<<"$work")
+
+  # Here rather than at the top of the pass, and the difference is only ever
+  # visible on an idle board: a reset before the board is read is a fetch every
+  # interval all night, against a remote that has nothing to say to a loop with
+  # nothing to run. The guarantee is the same either way, because it is about
+  # the spawn and not about the pass - nothing reaches a session without going
+  # through this line first.
+  reset=0
+  reset_workspace || reset=$?
+  if [ "$reset" = 2 ]; then return 4; fi
+  if [ "$reset" != 0 ]; then return 3; fi
 
   echo
   run_increment "$work" "$model" "$effort" "$quiet"
@@ -2201,6 +2354,20 @@ cmd_go_to_work() {
           idle_said=$now
           echo "hatch: still nothing an agent may move, $(duration $((now - idle_since))) now"
         fi
+        ;;
+
+      3)
+        # reset_workspace already said what it could not do. Nothing was
+        # spawned, nothing was spent, and the tree is where it was.
+        echo "hatch: the workspace is not ready - trying again in ${interval}s" >&2
+        ;;
+
+      4)
+        # The one condition that ends a night without an increment having
+        # failed: a tree that cannot be made current is a tree every ticket
+        # would be built wrong on, and the loop has no way to make it right.
+        STOP_WHY="the workspace could not be reset"
+        break
         ;;
 
       *)

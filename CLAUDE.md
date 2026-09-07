@@ -122,9 +122,18 @@ stops it by default; the flags above are how a night is bounded, and three
 failed increments in a row stop it on their own.
 
 **This is most likely how you got here.** Assume nobody is reading the terminal,
-and that the next increment starts the moment yours ends. Five things follow,
+and that the next increment starts the moment yours ends. Six things follow,
 and they are why this section is in a file an agent reads:
 
+- **The tree is already the trunk, and it is current.** The loop fetches and
+  resets the checkout onto the default branch before it spawns you, so branch
+  straight from where you are and do not go looking for a base. Two things
+  follow from it. Anything you leave uncommitted is stashed before the next
+  increment starts — recoverable with `git stash pop`, but not where you left
+  it — so work that matters is work that is committed and pushed. And a tree
+  that cannot be reset ends the night, which is why a half-finished merge or a
+  conflicted file is worth clearing before you stop rather than leaving for
+  whoever runs next.
 - **Leave the ticket somewhere new.** An increment that ends with the ticket in
   the column it started in is a *stall*: the loop writes a comment naming the
   session that ran, opens a question against the issue, and moves on — and

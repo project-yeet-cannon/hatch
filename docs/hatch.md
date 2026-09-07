@@ -1059,6 +1059,54 @@ directory says exactly that and nothing else. Two loops against one Hatch is
 [parallelism](#deferred-on-purpose), and it is deferred rather than
 half-answered here.
 
+### The workspace, between increments
+
+Every increment starts on the trunk, at the tip the remote has it at right now.
+The loop fetches, stashes anything the tree was carrying, and puts the checkout
+back on the default branch before it spawns anything — so a session's first act
+is cutting a branch, and the thing it cuts from is not in question.
+
+This is the loop's job rather than a [playbook](#playbooks)'s for the reason
+every load-bearing sentence in a prompt eventually demonstrates: a playbook is
+prose, edited by an operator who cannot be expected to know which of its
+sentences the next four hours depend on, and read by a model that has a ticket
+to think about. A night of unattended increments cannot have one run branching
+off the last run's leftovers — that is how one session's unpushed commits arrive
+inside another session's pull request — and the way to make something certain is
+to stop asking for it. A playbook that says nothing at all about git now gets a
+correct base.
+
+Nothing it does destroys work that cannot be got back:
+
+- **Uncommitted and untracked changes go into a stash**, named for the hour it
+  was taken, and stay on the machine that took them. A stash rather than a
+  discard because whatever is in the tree at two in the morning was probably
+  left there by a person, and `git stash pop` is how they get it back. Ignored
+  files are not touched, so a dependency directory or a local `.env` is never
+  swallowed by one.
+- **Committed work is never at risk.** A checkout moves `HEAD`; branches are
+  refs, and the branch the last increment pushed is still under its own name.
+- The exception is **a commit on the trunk itself and nowhere else**, which the
+  reset moves off. The count is printed while there is still something to count,
+  and `git reflog` holds the commits.
+
+It runs once an increment is known to be due, not once per pass — on an idle
+board the difference is a `git fetch` every interval until morning, against a
+remote with nothing to say. The guarantee is about the spawn either way.
+
+Two things can go wrong, and they are not the same thing. A fetch that does not
+answer is **a minute of network**, and the loop waits its interval and asks
+again, exactly as it does for a board that did not answer. A tree that cannot be
+made current — not a repository, a trunk nobody can name, changes that will not
+stash because something is half-merged — **ends the night**, because it is the
+one condition under which every remaining ticket would be built wrong and no
+further increment could tell the difference. Nothing is spawned and nothing is
+spent on either.
+
+The branch the trunk is is asked of the repository, not written down here:
+`origin/HEAD` first, the remote itself for a checkout that never got one, and
+`HATCH_BASE_BRANCH` for an installation that calls it something else.
+
 ### When an increment does nothing
 
 The one failure mode of an unattended loop that is dangerous rather than merely
