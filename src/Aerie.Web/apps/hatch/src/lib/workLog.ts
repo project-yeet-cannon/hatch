@@ -19,7 +19,7 @@
      about the entries: an epic whose stories cost money has a log worth drawing
      with no session of its own. */
 
-import type { WorkLog, WorkLogEntry } from '../types';
+import type { WorkLog, WorkLogTotals } from '../types';
 
 /**
  * The headline figure, short enough to sit in a row: `1.4M`, `912k`, `840`.
@@ -83,14 +83,20 @@ export const resumeCommand = (sessionId: string): string => `claude --resume ${s
 
 /** What is wrong with an entry, if anything - one predicate rather than two
     conditions in a component. An errored run is the louder fact of the two, so
-    it wins when a row is both. */
-export function entryMark(entry: WorkLogEntry): 'error' | 'undescribed' | null {
+    it wins when a row is both.
+
+    Takes the two fields it reads rather than a whole `WorkLogEntry`, so the
+    leaderboard's narrower session row passes through the same predicate. A
+    second copy of this in a second file is how a row on one page and the same
+    row on another come to be marked differently. */
+export function entryMark(entry: { isError: boolean; described: boolean }): 'error' | 'undescribed' | null {
   if (entry.isError) return 'error';
   return entry.described ? null : 'undescribed';
 }
 
-/** What an undescribed entry is called, instead of nothing. */
-export const entryTitle = (entry: WorkLogEntry): string =>
+/** What an undescribed entry is called, instead of nothing. Narrowed for the
+    reason `entryMark` is. */
+export const entryTitle = (entry: { described: boolean; title: string | null }): string =>
   entry.described && entry.title ? entry.title : 'A session that did not say what it did';
 
 /**
@@ -116,12 +122,16 @@ export const hasDescendantSpend = (log: WorkLog): boolean => log.totals.sessions
 
 /** What the totals line says: `3 sessions · 1.4M tokens · $3.41`. Singular at
     one, because "1 sessions" is the kind of thing that makes a page look
-    unfinished. */
-export const totalsPhrase = (log: WorkLog): string =>
+    unfinished.
+
+    Takes the totals rather than the whole log, so an issue's subtree and a
+    leaderboard filter say their numbers the same way. `1.4M` on one page and
+    `1,433,201` on another is one number in two vocabularies. */
+export const totalsPhrase = (totals: WorkLogTotals): string =>
   [
-    `${log.totals.sessions} ${log.totals.sessions === 1 ? 'session' : 'sessions'}`,
-    `${compactTokens(log.totals.totalTokens)} tokens`,
-    moneyPhrase(log.totals.costUsd),
+    `${totals.sessions} ${totals.sessions === 1 ? 'session' : 'sessions'}`,
+    `${compactTokens(totals.totalTokens)} tokens`,
+    moneyPhrase(totals.costUsd),
   ].join(' · ');
 
 /** The same for what this issue spent on its own, said only when it differs -
@@ -132,8 +142,9 @@ export const ownPhrase = (log: WorkLog): string =>
     : `${compactTokens(log.own.totalTokens)} of it on this issue itself`;
 
 /** How many of the sessions in the total ended badly, or null when none did.
-    Null rather than "0 errors": a log with nothing wrong should say nothing. */
-export const errorPhrase = (log: WorkLog): string | null =>
-  log.totals.errors === 0
+    Null rather than "0 errors": a log with nothing wrong should say nothing.
+    Narrowed for the reason `totalsPhrase` is. */
+export const errorPhrase = (totals: WorkLogTotals): string | null =>
+  totals.errors === 0
     ? null
-    : `${log.totals.errors} ${log.totals.errors === 1 ? 'session' : 'sessions'} ended with an error`;
+    : `${totals.errors} ${totals.errors === 1 ? 'session' : 'sessions'} ended with an error`;

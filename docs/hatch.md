@@ -677,6 +677,9 @@ Everything under `/api/hatch`, every route `[RequireAdmin(AcceptScope =
 | `/playbooks` | GET | **Reads only.** POST/PATCH/DELETE are plain `[RequireAdmin]` |
 | `/import/preview`, `/import/preview-text`, `/import` | POST | See [the importer](#the-importer) |
 | `/utilization` | GET | The account's Claude headroom, read by the server. `204` when no token is configured; `?refresh=true` bypasses the cache — see [the battery](#the-battery) |
+| `/issues/{key}/work-log` | GET, POST | What each session on this issue cost. **POST is a key only** — a browser is refused outright, because the only honest writer of a meter reading is the dispatcher that read it. See [the leaderboard](#the-leaderboard) |
+| `/work-log/sessions` | GET | The sessions in a range, ranked, with the range's own totals — see [the leaderboard](#the-leaderboard) |
+| `/work-log/history` | GET | The same rows folded into equal buckets of time, for the graph |
 
 Two of the filters are worth knowing: `ancestorKey` returns everything below an
 issue at any depth — an epic's stories and their tasks in one request — and
@@ -785,6 +788,83 @@ Two floors bound how often somebody else's endpoint is asked:
 
 `?refresh=true` ignores both. It is the modal's refresh control: one person
 pressing a button once, which is not what the floors exist to bound.
+
+
+## The leaderboard
+
+The battery says how much Claude is left. The leaderboard says **what the nights
+cost, and on what** — which is a question account-wide utilization cannot answer
+at all, because it is honest and anonymous and no arithmetic over it can say
+which epic ate the evening.
+
+Every number on the page comes from one table: `hatch.work_log_entries`, the row
+the dispatcher writes at the end of every unattended increment. It carries the
+session id, the issue, both instants, the duration, the turns, the four token
+counts, the notional USD, whether the run errored, and what the session said it
+did in its `work-log` block. **No Claude credential is anywhere in this path.**
+A leaderboard on an installation with no subscription token is the whole
+leaderboard rather than a reduced one.
+
+The page is at `/leaderboard` in the Hatch app, beside Plan in the primary nav —
+the two pages that read across the whole board rather than about one ticket. It
+holds three things over one window and one optional issue filter:
+
+- a **ranking** of the top-billing sessions, captioned in the house's own voice.
+  A leaderboard of most expensive agent runs is funnier than it is useful, and
+  being funny is how it gets read; it should still be exactly right.
+- a **table** of the sessions in the window, filterable to one issue and
+  everything beneath it, sortable by tokens, by notional USD or by when it ran.
+- a **graph** of spend over time, one bar per bucket.
+
+Tokens are the headline everywhere and notional USD is beside them, sortable —
+so the day an account is billed per token, the money becomes the headline and
+nothing has to be rebuilt.
+
+### The two reads behind it
+
+```
+GET /api/hatch/work-log/sessions?from=&to=&ancestorKey=&sort=&limit=
+GET /api/hatch/work-log/history?from=&to=&ancestorKey=&bucket=&offsetMinutes=
+```
+
+They take the same range and the same `ancestorKey`, and **`ancestorKey` means
+the same thing on both**: the issue itself *and* everything beneath it at any
+depth, from `Rollup.DescendantIdsAsync`. That is deliberately not how the same
+word reads on `GET /api/hatch/issues`, and the reason is that a planning session
+run against an epic is money no child holds. It is also what keeps the ranking,
+the table and the graph from ever describing different populations.
+
+Four rules worth knowing before reading either:
+
+- **A session is in the range when `from ≤ EndedAt < to`**, half-open on both
+  reads, so a session on a boundary lands the same way in the table and in the
+  graph. `EndedAt` is the instant the spend was known.
+- **The totals cover the whole filter, not the page that came back.** `sessions`
+  answers at most `limit` rows (100 by default, 500 at the most) and folds every
+  row in the filter for its totals, so a capped table adds up honestly — and a
+  caller tells the two apart by comparing `totals.sessions` with the rows it
+  got. The page says so on screen rather than leaving a larger total to read as
+  a bug.
+- **`firstSessionAt` and `lastSessionAt` ignore the range** and respect the
+  filter. They are what tell *nothing has ever been logged here* apart from
+  *nothing ran in the window you asked for* — two different sentences, and the
+  page says whichever is true once rather than in each empty section.
+- **`sessions` uses the range as given; `history` snaps it outward onto the
+  bucket grid** and names the bucket size it chose. The page's range presets are
+  computed on that same grid, so for every range it offers the two reads
+  describe one window and their totals are equal. A `from`/`to` typed into the
+  URL by hand may be off-grid, and then the graph covers a little more than the
+  table — so the page labels its window from what came back rather than from
+  what it asked for.
+
+An errored session's spend counts in all of it. It ran, and it was billed for
+running; `totals.errors` says how many, and the table marks them.
+
+**Nothing on this page writes**, and the absence is the guarantee rather than a
+convention: there is no control that could, and the browser API client has no
+function that could. A work log row is written by the dispatcher with an API
+key, and `POST /api/hatch/issues/{key}/work-log` refuses a person outright — see
+`IssueWorkLogController.NotAKey`.
 
 
 ## The dispatcher

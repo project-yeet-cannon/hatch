@@ -1267,6 +1267,138 @@
   padding-left: var(--sp-3);
 }
 
+/* ---- The leaderboard ----
+
+   Cousins of the work log block above it, and drawn in the same vocabulary on
+   purpose: a session on the issue page and the same session here should read as
+   one kind of thing said twice. */
+
+/* The controls sit on one line and wrap onto two on a narrow screen rather
+   than shrinking - a range preset that has to be guessed at is worse than one
+   on its own row. */
+.hatch-leaderboard-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+}
+
+.hatch-leaderboard-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.hatch-leaderboard-preset {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  border-radius: var(--r-ctl);
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--t-label);
+  cursor: pointer;
+}
+
+.hatch-leaderboard-preset:hover {
+  border-color: var(--primary);
+}
+
+/* The one in force, marked by more than colour: aria-pressed says it to a
+   screen reader and the fill says it to everybody else. */
+.hatch-leaderboard-preset.active {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+  color: var(--primary-ink);
+  font-weight: 600;
+}
+
+.hatch-leaderboard-issue {
+  min-width: 14rem;
+}
+
+/* Pushed to the end of the row: it is a label on what the controls resolved
+   to, not another control. */
+.hatch-leaderboard-window {
+  margin-left: auto;
+  font-size: var(--t-label);
+}
+
+.hatch-leaderboard-totals {
+  margin: var(--sp-2) 0 0;
+}
+
+/* The podium. An <ol> because the order is the whole point, with the numbers
+   drawn rather than left to the browser's own marker - a marker sits outside
+   the row and this one belongs inside it. */
+.hatch-leaderboard-podium {
+  list-style: none;
+  counter-reset: rank;
+  margin: var(--sp-4) 0 0;
+  padding: 0;
+}
+
+.hatch-leaderboard-rank {
+  counter-increment: rank;
+  border-top: 1px solid var(--line);
+  padding: var(--sp-3) 0 var(--sp-1) var(--sp-5);
+  margin-top: var(--sp-3);
+  position: relative;
+}
+
+.hatch-leaderboard-rank:first-child {
+  margin-top: 0;
+}
+
+.hatch-leaderboard-rank::before {
+  content: counter(rank);
+  position: absolute;
+  left: 0;
+  top: var(--sp-3);
+  font-size: var(--t-label);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.hatch-leaderboard-rank-head {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.hatch-leaderboard-rank-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  align-items: baseline;
+  font-size: var(--t-label);
+  margin: var(--sp-2) 0;
+}
+
+.hatch-leaderboard-key {
+  font-family: var(--mono);
+}
+
+/* A column header that sorts. It has to look like the header it replaced, so
+   nothing but the pointer and the mark on the active one distinguishes it. */
+.hatch-leaderboard-sort {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+
+.hatch-leaderboard-sort:hover {
+  color: var(--primary);
+}
+
+.hatch-leaderboard-sort.active {
+  color: var(--primary-ink);
+  font-weight: 600;
+}
+
 /* Rendered markdown - descriptions and comments. Only the spacing is stated:
    base.css already dresses headings, lists, code and links. */
 .hatch-markdown > :first-child {

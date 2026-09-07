@@ -26,12 +26,14 @@ import type {
   Project,
   ProjectCreateRequest,
   ProjectPatchRequest,
+  SessionSort,
   Status,
   StatusCreateRequest,
   StatusPatchRequest,
   Utilization,
   Work,
   WorkLog,
+  WorkLogSessions,
 } from '../types';
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -264,3 +266,32 @@ export const getUtilization = (refresh = false) =>
  * one for symmetry.
  */
 export const getWorkLog = (key: string) => fetchJson<WorkLog>(`/api/hatch/issues/${seg(key)}/work-log`);
+
+/** What a range of the log holds, ranked - and what that whole range cost.
+
+    The leaderboard asks this twice over one range: once pinned to the top five
+    by tokens for the ranking, and once at the URL's own sort for the table. Two
+    reads rather than one re-sorted in the browser, because a browser re-ranking
+    a capped hundred rows would be ranking a sample and calling it a
+    leaderboard.
+
+    Anything null or undefined is left out rather than sent empty - the rule
+    `searchIssues` states, and it matters here for the same reason: an empty
+    `ancestorKey` is not the same question as no `ancestorKey`. */
+export const getWorkLogSessions = (query: WorkLogSessionQuery) => {
+  const params = new URLSearchParams();
+  for (const [name, value] of Object.entries(query)) {
+    if (value !== null && value !== undefined) params.set(name, String(value));
+  }
+  return fetchJson<WorkLogSessions>(`/api/hatch/work-log/sessions?${params.toString()}`);
+};
+
+export interface WorkLogSessionQuery {
+  from: string;
+  to: string;
+  /** One issue and everything beneath it, that issue included. */
+  ancestorKey?: string | null;
+  sort?: SessionSort;
+  /** 1 to 500; the server refuses anything outside it. */
+  limit?: number;
+}
