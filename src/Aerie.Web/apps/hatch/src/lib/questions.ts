@@ -1,4 +1,5 @@
-/* Threading a comment list into questions and their answers.
+/* Questions on an issue: threading a comment list into questions and their
+   answers, and counting the cards on a board that are owed one.
 
    The server has the same notion (Modules/Hatch/Questions.cs) and the page
    could ask it for one. It does not, because the issue page already fetches
@@ -11,7 +12,7 @@
    having: a question with nothing pointing at it. Never a flag, so it cannot be
    set wrong. */
 
-import type { Comment } from '../types';
+import type { Comment, IssueCard } from '../types';
 
 export interface QuestionThread {
   question: Comment;
@@ -37,3 +38,14 @@ export function threadQuestions(comments: Comment[]): QuestionThread[] {
 /** The ones nobody has answered - what a person is being asked to decide. */
 export const openQuestions = (comments: Comment[]): QuestionThread[] =>
   threadQuestions(comments).filter((thread) => thread.answers.length === 0);
+
+/**
+ * How many of a column's cards are owed an answer.
+ *
+ * Counted over the cards a column is handed, which is after the board filter
+ * and before the fold: a card held back by its ready date still counts, because
+ * a question on work that cannot start yet is still a question owed to a
+ * person, and a card the filter removed is already gone.
+ */
+export const askingCount = (cards: IssueCard[]): number =>
+  cards.filter((card) => card.openQuestions > 0).length;

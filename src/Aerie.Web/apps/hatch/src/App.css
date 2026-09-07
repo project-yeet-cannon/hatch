@@ -1328,6 +1328,23 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A column says in its header that it is holding a question, because the card
+   that is owed an answer may be folded behind `+N waiting` or ten cards down,
+   and the header is the part of a column that is always on screen. The pill
+   .hatch-card-asking and .hatch-meter-waiting already wear, carrying the count
+   so it is an attention-getter that also says how many. */
+.hatch-column-asking {
+  flex: 0 0 auto;
+  padding: 0 var(--sp-1-5);
+  border-radius: var(--r-pill);
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+  font-size: var(--t-micro);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+}
+
 .hatch-waiting-toggle.on {
   background: var(--warn);
   border-color: var(--warn);
