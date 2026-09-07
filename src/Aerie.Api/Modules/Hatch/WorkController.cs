@@ -45,31 +45,21 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     ///
     /// <para>Nothing else changes - still right to left, still top of the
     /// column down, still folding past a ready date, an open question, a
-    /// terminal column, a type the loop does not take, or a sibling already
-    /// awaiting review. The scope narrows the candidates and decides nothing
-    /// about them.</para>
+    /// terminal column, a missing playbook, or a sibling already awaiting
+    /// review. The scope narrows the candidates and decides nothing about
+    /// them.</para>
     ///
     /// <para>The issue itself is not a candidate. "Under AER-1" is a question
     /// about what hangs beneath it, which is how <c>ancestorKey</c> already
     /// reads on the search endpoint.</para>
     /// </param>
-    /// <param name="types">
-    /// Which types an unattended run may pick up, comma separated. Absent is
-    /// <see cref="LoopTypes"/>; a type nobody defined is a 400 naming it rather
-    /// than a filter that silently matches nothing.
-    ///
-    /// <para>A widening, and it belongs to the caller because the narrow set is
-    /// the loop's policy rather than a fact about the board: an operator who
-    /// means to have an evening spent on tasks says so.</para>
-    /// </param>
     [HttpGet("next")]
     public async Task<ActionResult<WorkDto>> GetNextWork(
         [FromQuery] int offsetMinutes = 0,
         [FromQuery] string? ancestorKey = null,
-        [FromQuery] string? types = null,
         CancellationToken ct = default)
     {
-        var scan = await ScanAsync(offsetMinutes, ancestorKey, types, ct);
+        var scan = await ScanAsync(offsetMinutes, ancestorKey, ct);
         if (scan.Failure is not null) return BadRequest(scan.Failure);
 
         // The first clear row of the queue, and nothing else. Not a second
@@ -99,6 +89,12 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// <para>The first entry with no reason is what <see cref="GetNextWork"/>
     /// returns for the same arguments, because it is the same walk. The
     /// arguments mean exactly what they mean there.</para>
+    ///
+    /// <para>The rows arrive in the dispatcher's order: the rightmost column
+    /// first, and within a column the board's own <c>(Rank, Id)</c> - the same
+    /// tuple <see cref="BoardController"/> serves. So a card's position in the
+    /// queue is its position in its column on the board, and nothing between
+    /// the two re-sorts.</para>
     /// </summary>
     /// <remarks>
     /// The columns with nowhere to go - a terminal one, and a rightmost one
@@ -110,10 +106,9 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     public async Task<ActionResult<IReadOnlyList<QueueEntryDto>>> GetQueue(
         [FromQuery] int offsetMinutes = 0,
         [FromQuery] string? ancestorKey = null,
-        [FromQuery] string? types = null,
         CancellationToken ct = default)
     {
-        var scan = await ScanAsync(offsetMinutes, ancestorKey, types, ct);
+        var scan = await ScanAsync(offsetMinutes, ancestorKey, ct);
         if (scan.Failure is not null) return BadRequest(scan.Failure);
 
         // One projection for the whole list. The per-issue one would be three
@@ -141,12 +136,9 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// board's worth of rows against a handful of queries, because a scan that
     /// cost a query a row would be a scan nobody leaves running.
     /// </remarks>
-    private async Task<Scan> ScanAsync(int offsetMinutes, string? ancestorKey, string? types, CancellationToken ct)
+    private async Task<Scan> ScanAsync(int offsetMinutes, string? ancestorKey, CancellationToken ct)
     {
         var statuses = await OrderedStatusesAsync(ct);
-
-        if (!TryReadTypes(types, out var wanted, out var unknown))
-            return Scan.Refused($"there is no \"{unknown}\" type - the types are {string.Join(", ", EfHatchIssue.Types)}");
 
         // The scope, resolved once before the columns are walked. Null is the
         // whole board; a list is the subtree, and an empty one is a childless
@@ -169,7 +161,6 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
         }
 
         var loop = new LoopScope(
-            wanted,
             DayNumber(time.GetUtcNow(), offsetMinutes),
             offsetMinutes,
             await InFlightAsync(statuses, ct));
@@ -181,8 +172,9 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
             .ToListAsync(ct);
 
         // The columns a pass looks in at all: the ones with a column to their
-        // right. No type filter - which types the loop picks up is a reason a
-        // row is folded, and the scan's job is to say so rather than to hide it.
+        // right. No type filter - which types a move applies to is the
+        // playbook's to say, and a row no playbook covers is folded with the
+        // sentence naming that rather than dropped before it is judged.
         var walkable = statuses.Where(s => Advance(statuses, s) is not null).Select(s => s.Id).ToList();
 
         var query = db.Issues.Where(i => walkable.Contains(i.StatusId));
@@ -225,52 +217,20 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     }
 
     /// <summary>
-    /// What the loop is asking of the board this pass: which types it may pick
-    /// up, which day it is in the caller's zone, and what is already in flight.
-    /// Absent when somebody named a ticket by hand - see <see cref="Blocked"/>.
+    /// What the loop is asking of the board this pass: which day it is in the
+    /// caller's zone, and what is already in flight. Absent when somebody named
+    /// a ticket by hand - see <see cref="Blocked"/>.
     /// </summary>
-    private sealed record LoopScope(string[] Wanted, long Today, int OffsetMinutes, List<InFlightIssue> InFlight);
+    private sealed record LoopScope(long Today, int OffsetMinutes, List<InFlightIssue> InFlight);
 
     // ---- The loop's own policy ----
     //
-    // Three rules that are not facts about an issue but decisions about what an
+    // Two rules that are not facts about an issue but decisions about what an
     // unattended run may start. They are asked in Blocked like every other
     // fold - a scan that could not name them would be a scan with holes in it -
     // but only when a LoopScope is present, which is to say only when the pass
     // is asking. A person who names a ticket is giving an instruction;
     // housekeeping does not overrule it.
-
-    /// <summary>
-    /// The types an unattended run picks up when the caller does not say.
-    ///
-    /// An epic is out because choosing what an effort contains is a product
-    /// call, and a task because a task is a seam inside a story - the story is
-    /// the unit that ships, and it carries its tasks across the board with it.
-    /// Neither is a rule about the issue: both are still worked the moment
-    /// somebody names one.
-    /// </summary>
-    private static readonly string[] LoopTypes = ["story", "bug"];
-
-    /// <summary>
-    /// The caller's type list, or <see cref="LoopTypes"/> when there is not
-    /// one. False, with the offending name, for a type nobody defined - a
-    /// misspelling that quietly matched nothing would read as a finished board.
-    /// </summary>
-    private static bool TryReadTypes(string? types, out string[] wanted, out string? unknown)
-    {
-        unknown = null;
-        wanted = LoopTypes;
-        if (string.IsNullOrWhiteSpace(types)) return true;
-
-        var named = types.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        if (named.Length == 0) return true;
-
-        unknown = named.FirstOrDefault(t => !EfHatchIssue.Types.Contains(t, StringComparer.OrdinalIgnoreCase));
-        if (unknown is not null) return false;
-
-        wanted = named.Select(t => t.ToLowerInvariant()).Distinct().ToArray();
-        return true;
-    }
 
     /// <summary>
     /// The last stop before shipped: the column immediately left of the first
@@ -426,12 +386,19 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// </summary>
     /// <remarks>
     /// <para>The order is what it costs to change the answer, most fundamental
-    /// first. A column with nowhere an agent may go is a fact about the board
-    /// and no argument alters it; the type is the caller's own argument; a
-    /// ready date needs time; a question needs a person; a sibling needs other
-    /// work to land; and a missing playbook needs the operator, which is last
-    /// because it is only worth saying about an issue that is otherwise a
-    /// candidate.</para>
+    /// first: a terminal column, no column after this one, a terminal next
+    /// column, a ready date, an unanswered question, a sibling awaiting review,
+    /// and last a missing playbook. A column with nowhere an agent may go is a
+    /// fact about the board and no argument alters it; a ready date needs time;
+    /// a question needs a person; a sibling needs other work to land; and a
+    /// missing playbook needs the operator, which is last because it is only
+    /// worth saying about an issue that is otherwise a candidate.</para>
+    ///
+    /// <para>The issue's type is not in that list, and deliberately: which
+    /// types a move applies to is the playbook row's to state, and a constant
+    /// here saying it a second time is what shadowed the matrix. A type an
+    /// unattended run does not pick up is a transition no playbook covers for
+    /// that type, and it is folded with the sentence that names the fix.</para>
     ///
     /// <para>Two of them are load-bearing rules rather than missing
     /// configuration: only the operator decides that something shipped, so a
@@ -447,7 +414,7 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// </param>
     /// <param name="loop">
     /// The pass's own policy, or null when somebody named this ticket by hand.
-    /// The three folds it adds are decisions about what an unattended run may
+    /// The two folds it adds are decisions about what an unattended run may
     /// *start*, as opposed to what may move, and a person who names a ticket is
     /// giving an instruction that housekeeping does not overrule.
     /// </param>
@@ -470,9 +437,6 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
 
         if (loop is not null)
         {
-            if (!loop.Wanted.Contains(issue.Type))
-                return $"{An(issue.Type)} is not a type an unattended run picks up";
-
             if (IsWaiting(issue, loop.Today, loop.OffsetMinutes))
                 return $"not workable until {IssueMoment.Format(issue.ReadyAt, issue.ReadyAtHasTime)}";
         }
