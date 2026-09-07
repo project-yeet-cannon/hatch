@@ -194,8 +194,8 @@ through the gate that was supposed to stop it.
 
 `EfHatchIssue` — `ProjectId`, `Number`, `Type`, `Title`, `Description`,
 `StatusId`, `ParentId`, `Rank`, `ReadyAt`/`ReadyAtHasTime`,
-`DueAt`/`DueAtHasTime`, `PullRequestUrl`, `CreatedBy`, `CreatedAt`,
-`UpdatedAt`.
+`DueAt`/`DueAtHasTime`, `PullRequestUrl`, `ModelOverride`, `EffortOverride`,
+`CreatedBy`, `CreatedAt`, `UpdatedAt`.
 
 The display key `AER-12` is **computed** (`Project.Key + "-" + Number`) and
 never stored, so there is exactly one fact about a key anywhere and no chance of
@@ -244,6 +244,25 @@ job is to be clicked should not hold something that does not open. Nothing
 parses the host: a self-hosted forge on a private address is a pull request like
 any other, and a column that only accepted one company's would be a fact about
 exactly one installation.
+
+**`ModelOverride` and `EffortOverride` are what this ticket costs**, and null on
+every issue until somebody says otherwise. A playbook prices a *transition*,
+which is the right unit almost always; what it cannot say is that *this* story
+is the hard one. Where one is set it beats every playbook that could speak for
+the issue — all of them, not one transition's worth — and where it is null the
+playbook decides exactly as it did before. The two are independent: an issue may
+carry a model and no effort, an effort and no model, both, or neither.
+
+They reach the issue and nothing beneath it. An epic set to `opus` does not
+spend `opus` on its stories; a task that needs the big model says so itself, and
+the alternative is one expensive decision made at the top of a tree and
+inherited by work nobody weighed.
+
+The values are a playbook's own values — the four aliases or a pinned
+`claude-…` id for a model, the five efforts — validated by the playbook's own
+rule and refused in the playbook's own sentence, so what an issue may be set to
+and what a playbook may be set to cannot drift apart. Setting one is closed to
+an API key; see [The one edge that is deliberately cut](#the-one-edge-that-is-deliberately-cut).
 
 `CreatedBy` is a **name**, not a foreign key to `People`. The audit trail has to
 read the same after a person row is deleted, and an API key's name goes in this
@@ -533,6 +552,16 @@ may take.
 `PlaybooksController` carry plain `[RequireAdmin]` naming no scope, while the
 read carries the scope like everything else.
 
+**So is writing an issue's override**, and it is the same edge rather than a
+second one: `PATCH /api/hatch/issues/{key}/playbook` sets the model and the
+effort every increment on that ticket runs on, which is a playbook's power
+routed through another table. It lives on its own controller
+(`IssuePlaybookController`) for exactly that reason — `IssuesController` accepts
+the `hatch` scope on everything it holds, so two more fields on the ordinary
+issue patch would have been an agent that can raise its own budget. Reading an
+override is open, like everything else a dispatch needs: an agent is entitled to
+know what it is being spent on, and both fields ride `IssueDto`.
+
 This is the one edge in the graph that would close a loop. A playbook chooses
 the model, the effort and the prompt for the next agent, so an agent able to
 edit one could widen its own instructions and raise its own budget — and that
@@ -569,6 +598,7 @@ Everything under `/api/hatch`, every route `[RequireAdmin(AcceptScope =
 | `/issues/{key}/comments` | GET, POST | POST carries the kind, the `answersId`, and a question's options |
 | `/issues/{key}/questions` | GET | `?open=false` for the answered ones too |
 | `/issues/{key}/events` | GET | Newest first |
+| `/issues/{key}/playbook` | PATCH | **Person only** — plain `[RequireAdmin]`. The issue's own model and effort; `""` hands either back to the playbook |
 | `/questions` | GET | Every open question in the house |
 | `/plan`, `/plan/{key}` | GET | See [the level above the board](#the-level-above-the-board) |
 | `/work/next`, `/work/{key}` | GET | See [the dispatcher](#the-dispatcher) |
@@ -609,6 +639,20 @@ under an epic is a bug nobody notices until the two are on one screen.
 
 `?offsetMinutes=` is how a ready date is read against the caller's calendar day
 rather than the server's.
+
+**The playbook a dispatch carries holds the *effective* model and effort.**
+Where the issue names one of its own it is folded in over the matched row's,
+and everything else on that row — the transition, the types, the prompt — stays
+its own, so the answer names the playbook that spoke *and* the values that won.
+In place rather than in a second pair of fields beside them, deliberately: a
+client that had to remember to check the second pair is a client that will one
+day spawn `sonnet` on a ticket set to `opus`, and that failure is silent.
+Nothing is hidden by it — `issue.modelOverride` rides the same payload, and is
+what a printed line reads to say where the value came from.
+
+An override changes what a dispatch costs and never whether one happens.
+Nothing in the refusals below consults one: an issue with no playbook for its
+next move is refused in the same sentence whether it names a model or not.
 
 **Four refusals**, and two of them are rules of the whole loop rather than
 missing configuration:
@@ -723,6 +767,19 @@ now; a full `claude-…` id is accepted for an operator with a reason to pin.
 not recognise is one it refuses at spawn time, long after the operator has
 stopped looking at the page they typed it on.
 
+**One issue can say the matrix is wrong about it.** An issue carries an optional
+`ModelOverride` and an optional `EffortOverride` of its own, and where one is
+set it beats whichever playbook speaks for the issue's next move — every one of
+them, not a single transition's worth, since a story that is harder than its
+column suggests is still the hard one wherever it sits. One pair per issue, good
+for every move it ever makes; independent of each other; reaching that issue and
+nothing beneath it. They take exactly what a playbook takes, refused in the same
+sentence, because it is the same rule called twice. There is no per-issue
+*prompt*: a prompt is the method for a transition, and a per-issue method is a
+paragraph, which is what the description is for. Setting one is a person's
+(`PATCH /api/hatch/issues/{key}/playbook`); reading one is anybody's who can
+read the issue.
+
 Seven rows are seeded, for the same reason the columns are: a Hatch whose agent
 loop cannot run until somebody fills in a table is a Hatch that ships broken.
 They cover every transition an agent owns, so `go-to-work` on a fresh install
@@ -753,9 +810,15 @@ answer to "is anything left" can change while nobody is watching.
 told to keep going, and it was rejected for two reasons that point the same way:
 it would carry six hours of context into its last ticket, and the earliest
 decisions in that context are exactly the ones nobody can audit afterwards. A
-process per increment starts each ticket cold, on the model and effort that
-ticket's own [playbook](#playbooks) names rather than whatever the session
-started as, and costs less for the privilege.
+process per increment starts each ticket cold, on the model and effort the
+ticket itself names — or, where it names neither, the ones its
+[playbook](#playbooks) does — rather than whatever the session started as, and
+costs less for the privilege.
+
+A `--model` or `--effort` typed at `hatch.sh work` still beats both, and is
+still not carried across a night: a flag is one operator's opinion about one
+increment, while an override is a fact recorded on a ticket somebody read. The
+line naming the two values says which of them the issue chose.
 
 ### What makes an issue actionable
 

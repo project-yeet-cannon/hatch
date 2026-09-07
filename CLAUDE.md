@@ -98,7 +98,10 @@ Two things about it are worth knowing before working on this repo:
   of the rightmost column that still has something an agent may advance.
 - **Playbooks are readable by a key and writable only by a person.** If a
   playbook is wrong, say so on the ticket. Do not try to route around it: the
-  API refuses, and it refuses on purpose.
+  API refuses, and it refuses on purpose. The same is true of a single ticket's
+  own model and effort — an operator can pin either on the issue page, where it
+  beats every playbook that could speak for that issue, and an agent cannot set
+  one for the same reason it cannot write a playbook.
 
 ### The same thing, all night
 
