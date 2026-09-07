@@ -25,6 +25,7 @@ import { message } from '../lib/errors';
 import { NO_FILTER, filterCards, isFiltering } from '../lib/filter';
 import type { CardFilter } from '../lib/filter';
 import { columnDroppableId, place, targetStatusId } from '../lib/place';
+import { askingCount } from '../lib/questions';
 import { isWaiting } from '../lib/schedule';
 import { useCloseSubtree } from '../lib/useCloseSubtree';
 import { useLoaded } from '../lib/useLoaded';
@@ -244,12 +245,24 @@ function Column({
   const workable = cards.filter((c) => !waiting.includes(c));
   const shown = showWaiting ? [...workable, ...waiting] : workable;
 
+  // Counted over `cards` and not over `shown`: the card that is owed an answer
+  // is exactly the one that may be folded away behind `+N waiting`, and a
+  // header that went quiet when the fold closed would hide the thing it exists
+  // to point at.
+  const asking = askingCount(cards);
+  const askingWords = `${asking} card${asking === 1 ? '' : 's'} waiting on an answer`;
+
   return (
     <section className={`hatch-column${dropping ? ' dropping' : ''}`} style={statusVars(status.color)}>
       <header className="hatch-column-head">
         <StatusDot status={status} />
         <span className="hatch-column-name">{status.name}</span>
         <span className="hatch-column-count">{workable.length}</span>
+        {asking > 0 && (
+          <span className="hatch-column-asking" role="img" aria-label={askingWords} title={askingWords}>
+            ?{asking}
+          </span>
+        )}
       </header>
 
       <div className="hatch-column-cards" ref={setNodeRef}>

@@ -1284,6 +1284,32 @@
    past, so it is drawn in the same warn colours a due date warms into rather
    than in a neutral badge: this is not information, it is something owed. */
 
+/* The whole card, not only the badge. The chips' rule two hundred lines up -
+   colour on the chip, never on the card - is about a treatment every card would
+   eventually carry; this one is rare, it is owed to a person, and being unlike
+   the eight cards below it is the entire point.
+
+   A wash rather than a fill, and background-image rather than background:
+   --warn-bg is translucent, so it has to be laid over the card's own surface
+   instead of replacing it. background-color is pinned to --bg so the drag
+   preview - which is --card otherwise - washes over the same surface a resting
+   card does; over --card, --muted at --t-micro falls to 3.56:1 in the dark
+   theme, and over --bg it holds 4.54:1.
+
+   border-color and not the border shorthand, so a card that is also `waiting`
+   keeps the dashed edge that says it is held back. */
+.hatch-card.asking {
+  background-color: var(--bg);
+  background-image: linear-gradient(var(--warn-bg), var(--warn-bg));
+  border-color: var(--warn);
+}
+
+/* Said again, because .hatch-card:hover carries the same specificity and this
+   rule is below it: without this, hovering an asking card would do nothing. */
+.hatch-card.asking:hover {
+  border-color: var(--primary);
+}
+
 .hatch-card-asking {
   margin-left: auto;
   display: inline-flex;
@@ -1300,6 +1326,23 @@
 
 .hatch-card-asking-count {
   font-variant-numeric: tabular-nums;
+}
+
+/* A column says in its header that it is holding a question, because the card
+   that is owed an answer may be folded behind `+N waiting` or ten cards down,
+   and the header is the part of a column that is always on screen. The pill
+   .hatch-card-asking and .hatch-meter-waiting already wear, carrying the count
+   so it is an attention-getter that also says how many. */
+.hatch-column-asking {
+  flex: 0 0 auto;
+  padding: 0 var(--sp-1-5);
+  border-radius: var(--r-pill);
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+  font-size: var(--t-micro);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
 }
 
 .hatch-waiting-toggle.on {

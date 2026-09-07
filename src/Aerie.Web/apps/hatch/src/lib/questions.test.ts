@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { openQuestions, threadQuestions } from './questions';
-import type { Comment, CommentKind } from '../types';
+import { askingCount, openQuestions, threadQuestions } from './questions';
+import type { Comment, CommentKind, IssueCard } from '../types';
 
 let next = 1;
 
@@ -74,5 +74,55 @@ describe('openQuestions', () => {
   it('is empty when everything has been decided', () => {
     const question = comment('question', 'decided');
     expect(openQuestions([question, comment('answer', 'yes', question.id)])).toEqual([]);
+  });
+});
+
+const card = (over: Partial<IssueCard> = {}): IssueCard => ({
+  key: 'AER-1',
+  projectKey: 'AER',
+  type: 'task',
+  title: 'Renew the wildcard certificate',
+  statusId: 1,
+  rank: 1024,
+  parentKey: null,
+  readyAt: null,
+  dueAt: null,
+  openQuestions: 0,
+  ...over,
+});
+
+describe('askingCount', () => {
+  it('is zero for a column with nothing in it', () => {
+    expect(askingCount([])).toBe(0);
+  });
+
+  it('is zero when nothing is owed an answer', () => {
+    expect(askingCount([card(), card({ key: 'AER-2' }), card({ key: 'AER-3' })])).toBe(0);
+  });
+
+  it('finds the one asking among several that are not', () => {
+    expect(
+      askingCount([card(), card({ key: 'AER-2', openQuestions: 1 }), card({ key: 'AER-3' })]),
+    ).toBe(1);
+  });
+
+  /* The count is of cards, not of questions: two questions on one card is one
+     card a person has to go and look at. */
+  it('counts cards rather than questions when several are asking', () => {
+    expect(
+      askingCount([
+        card({ openQuestions: 2 }),
+        card({ key: 'AER-2', openQuestions: 1 }),
+        card({ key: 'AER-3' }),
+      ]),
+    ).toBe(2);
+  });
+
+  /* The helper never reads readyAt, and that is the point: the call site hands
+     it a column's cards before the fold, so a card folded behind `+N waiting`
+     is still counted. A question on work that cannot start yet is still owed to
+     a person. */
+  it('counts a card whose ready date has not arrived', () => {
+    expect(askingCount([card({ readyAt: '2099-01-01', openQuestions: 1 })])).toBe(1);
   });
 });
