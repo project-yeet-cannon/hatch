@@ -119,6 +119,39 @@ public class WorkLogController(HatchContext db, TimeProvider time, ICallerIdenti
     }
 
     /// <summary>
+    /// This issue's sessions and what its whole subtree has cost.
+    /// </summary>
+    /// <remarks>
+    /// Entries are the issue's own; totals cover everything beneath it too. See
+    /// <see cref="WorkLogDto"/> for why the two differ and
+    /// <see cref="WorkLogRollup"/> for why the addition is plain addition.
+    /// </remarks>
+    [HttpGet]
+    public async Task<ActionResult<WorkLogDto>> GetWorkLog(string key, CancellationToken ct)
+    {
+        if (!IssueKey.TryParse(key, out var projectKey, out var number)) return NotFound();
+
+        var issue = await db.Issues.AsNoTracking().WithKey(projectKey, number)
+            .Select(i => new { i.Id, i.Number, ProjectKey = i.Project!.Key })
+            .FirstOrDefaultAsync(ct);
+        if (issue is null) return NotFound();
+
+        var entries = await db.WorkLog.AsNoTracking()
+            .Where(w => w.IssueId == issue.Id)
+            // Newest first: the question a work log gets asked is "what did this
+            // cost last night", not "how did it begin".
+            .OrderByDescending(w => w.EndedAt)
+            .ThenByDescending(w => w.Id)
+            .ToListAsync(ct);
+
+        return new WorkLogDto(
+            IssueKey.Format(issue.ProjectKey, issue.Number),
+            await WorkLogRollup.TotalsAsync(db, issue.Id, includeDescendants: true, ct),
+            await WorkLogRollup.TotalsAsync(db, issue.Id, includeDescendants: false, ct),
+            entries.Select(Project).ToList());
+    }
+
+    /// <summary>
     /// <c>403</c> when the caller is a person rather than a program, or null
     /// when it is a key.
     /// </summary>

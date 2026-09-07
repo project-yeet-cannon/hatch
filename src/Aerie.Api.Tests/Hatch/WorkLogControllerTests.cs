@@ -191,6 +191,102 @@ public class WorkLogControllerTests
         Assert.Single(await h.RowsAsync(two.Key));
     }
 
+    // ---- Reading it back ----
+
+    [Fact]
+    public async Task TheLog_ComesBackNewestFirst()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync();
+
+        await h.PostAsync(issue.Key, Reported("first") with { EndedAt = Ended.AddHours(-3), Title = "earlier" });
+        await h.PostAsync(issue.Key, Reported("second") with { EndedAt = Ended, Title = "later" });
+
+        var log = await h.ReadAsync(issue.Key);
+
+        // The question a work log gets asked is "what did this cost last night".
+        Assert.Equal(["later", "earlier"], log.Entries.Select(e => e.Title));
+        Assert.Equal(issue.Key, log.Key);
+    }
+
+    [Fact]
+    public async Task EntriesAreTheIssuesOwnAndTotalsAreTheSubtrees()
+    {
+        var h = await NewAsync();
+        var epic = await h.FileAsync("epic", "the effort");
+        var story = await h.FileAsync("story", "under it", parentKey: epic.Key);
+
+        await h.PostAsync(epic.Key, Reported("planning") with { CostUsd = 1m });
+        await h.PostAsync(story.Key, Reported("building") with { CostUsd = 4m });
+
+        var log = await h.ReadAsync(epic.Key);
+
+        // The asymmetry the page exists to say out loud, on the wire: one
+        // session of its own, two beneath it.
+        Assert.Single(log.Entries);
+        Assert.Equal(1, log.Own.Sessions);
+        Assert.Equal(2, log.Totals.Sessions);
+        Assert.Equal(5m, log.Totals.CostUsd);
+        Assert.Equal(1m, log.Own.CostUsd);
+    }
+
+    [Fact]
+    public async Task AnIssueWithNoSessionsAnywhere_ReadsAsEmptyRatherThanFailing()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync();
+
+        var log = await h.ReadAsync(issue.Key);
+
+        Assert.Empty(log.Entries);
+        Assert.Equal(0, log.Totals.Sessions);
+        Assert.Equal(0, log.Totals.TotalTokens);
+    }
+
+    [Fact]
+    public async Task ThePerModelBreakdown_SurvivesTheRoundTrip()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync();
+
+        await h.PostAsync(issue.Key, Reported() with
+        {
+            Models =
+            [
+                new WorkLogModelUseDto("claude-opus-5", 900, 280, 3_200, 59_000, 0.0140m),
+                new WorkLogModelUseDto("claude-haiku-4-5", 47, 1, 14, 57, 0.0006m),
+            ],
+        });
+
+        var entry = (await h.ReadAsync(issue.Key)).Entries.Single();
+
+        Assert.Equal(["claude-opus-5", "claude-haiku-4-5"], entry.Models.Select(m => m.Model));
+        Assert.Equal(59_000, entry.Models[0].CacheReadTokens);
+        Assert.Equal(entry.TotalTokens, entry.Models.Sum(m => m.InputTokens + m.OutputTokens + m.CacheCreationTokens + m.CacheReadTokens));
+    }
+
+    [Fact]
+    public async Task ThePerson_MayReadTheLogEvenThoughOnlyAKeyMayWriteIt()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync();
+        await h.PostAsync(issue.Key, Reported());
+
+        h.Caller.Key = null;
+
+        // Reading is the whole point of the page. It is writing that is closed.
+        Assert.Single((await h.ReadAsync(issue.Key)).Entries);
+    }
+
+    [Fact]
+    public async Task ReadingAnIssueThatDoesNotExist_IsNotFound()
+    {
+        var h = await NewAsync();
+
+        Assert.IsType<NotFoundResult>((await h.WorkLog.GetWorkLog("AER-404", default)).Result);
+        Assert.IsType<NotFoundResult>((await h.WorkLog.GetWorkLog("nonsense", default)).Result);
+    }
+
     // ---- What it refuses ----
 
     [Fact]
@@ -287,6 +383,8 @@ public class WorkLogControllerTests
 
         public async Task<WorkLogEntryDto> PostAsync(string key, WorkLogEntryRequest request) =>
             Value(await WorkLog.PostEntry(key, request, default));
+
+        public async Task<WorkLogDto> ReadAsync(string key) => Value(await WorkLog.GetWorkLog(key, default));
 
         public async Task<IReadOnlyList<EfHatchWorkLogEntry>> RowsAsync(string key)
         {
