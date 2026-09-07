@@ -672,3 +672,36 @@ export interface WorkLogSessions {
   lastSessionAt: string | null;
   sessions: WorkLogSession[];
 }
+
+/** One equal slice of the work log's time axis, and what ended inside it.
+    Mirrors WorkLogBucketDto.
+
+    A bucket with no sessions carries zeroed totals rather than being left out:
+    an hour in which nothing ran is an hour that cost nothing, which is a
+    measurement. A poll's history has gaps because a missing reading means
+    nobody looked; a work log has none. */
+export interface WorkLogBucket {
+  start: string;
+  end: string;
+  totals: WorkLogTotals;
+}
+
+/** What the log recorded over a range, in equal buckets. Mirrors
+    WorkLogHistoryDto. */
+export interface WorkLogHistory {
+  /** The requested range **snapped outward onto the bucket grid** - which is
+      the one way this read differs from `WorkLogSessions`. A page labels its
+      axis from here rather than from what it asked for. */
+  from: string;
+  to: string;
+  /** The size the server used, which may not be the one that was asked for. */
+  bucket: 'hour' | 'day';
+  /** The whole range, so nobody has to add the buckets up. */
+  totals: WorkLogTotals;
+  /** The filtered population's own span, ignoring the range - read exactly as
+      `WorkLogSessions` reads it. */
+  firstSessionAt: string | null;
+  lastSessionAt: string | null;
+  /** Oldest first, one per bucket, the empty ones included. */
+  buckets: WorkLogBucket[];
+}

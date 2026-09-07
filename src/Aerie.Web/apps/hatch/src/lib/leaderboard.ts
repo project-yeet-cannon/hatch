@@ -32,13 +32,27 @@ export const PODIUM = 5;
     up honestly and says that it is capped. */
 export const TABLE_LIMIT = 100;
 
-/** The URL's whole vocabulary. `measure` belongs to the graph and is resolved
-    in lib/spend.ts, off the same params. */
+/** The URL's whole vocabulary. `measure` belongs to the graph and is read here
+    with the rest of it - the URL is one state, and one file resolves it. */
 export const RANGE = 'range';
 export const ISSUE = 'issue';
 export const SORT = 'sort';
 export const FROM = 'from';
 export const TO = 'to';
+export const MEASURE = 'measure';
+
+/** Which of the two figures the graph draws. They differ by six orders of
+    magnitude and never share an axis - a second y-axis would draw two lies
+    crossing - so the graph shows one at a time with a control between them.
+
+    The type and its parser live here rather than in lib/spend.ts because this
+    is the file that owns the URL's vocabulary, and lib/spend.ts reads from here
+    rather than the other way round. */
+export type SpendMeasure = 'tokens' | 'cost';
+
+/** Tokens, per AERIE-735 decision 2: on a subscription the dollars are notional
+    list price rather than money that left an account. */
+export const DEFAULT_MEASURE: SpendMeasure = 'tokens';
 
 export type RangePreset = '24h' | 'today' | '7d' | '14d' | '30d';
 
@@ -110,6 +124,10 @@ export interface LeaderboardQuery {
   preset: RangePreset | null;
   issue: string | null;
   sort: SessionSort;
+  /** The graph's, and in the URL with the rest for the same reason the sort is:
+      a pasted link that opens on dollars is the same argument as a pasted
+      sort. */
+  measure: SpendMeasure;
 }
 
 /**
@@ -127,14 +145,15 @@ export interface LeaderboardQuery {
 export function resolveQuery(params: URLSearchParams, now: Date, offsetMinutes: number): LeaderboardQuery {
   const issue = params.get(ISSUE)?.trim() || null;
   const sort = parseSort(params.get(SORT));
+  const measure = parseMeasure(params.get(MEASURE));
 
   const from = params.get(FROM)?.trim();
   const to = params.get(TO)?.trim();
-  if (from && to) return { from, to, preset: null, issue, sort };
+  if (from && to) return { from, to, preset: null, issue, sort, measure };
 
   const preset = parsePreset(params.get(RANGE));
 
-  return { ...presetRange(preset, now, offsetMinutes), preset, issue, sort };
+  return { ...presetRange(preset, now, offsetMinutes), preset, issue, sort, measure };
 }
 
 export const parsePreset = (raw: string | null): RangePreset =>
@@ -142,6 +161,9 @@ export const parsePreset = (raw: string | null): RangePreset =>
 
 export const parseSort = (raw: string | null): SessionSort =>
   raw === 'tokens' || raw === 'cost' || raw === 'ended' ? raw : DEFAULT_SORT;
+
+export const parseMeasure = (raw: string | null): SpendMeasure =>
+  raw === 'tokens' || raw === 'cost' ? raw : DEFAULT_MEASURE;
 
 /**
  * The podium, off a list the server already ranked.

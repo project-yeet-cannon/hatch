@@ -103,21 +103,26 @@ describe('resolveQuery', () => {
 
     expect(query.preset).toBe(DEFAULT_PRESET);
     expect(query.sort).toBe('tokens');
+    expect(query.measure).toBe('tokens');
     expect(query.issue).toBeNull();
     expect(query).toMatchObject(presetRange(DEFAULT_PRESET, now, 0));
   });
 
   it('falls back rather than refusing what it does not recognise', () => {
-    const query = resolveQuery(new URLSearchParams({ range: 'fortnight', sort: 'turns' }), now, 0);
+    const query = resolveQuery(new URLSearchParams({ range: 'fortnight', sort: 'turns', measure: 'turns' }), now, 0);
 
     expect(query.preset).toBe(DEFAULT_PRESET);
     expect(query.sort).toBe('tokens');
+    expect(query.measure).toBe('tokens');
   });
 
-  it('takes the sort and the issue filter as written', () => {
-    const query = resolveQuery(new URLSearchParams({ sort: 'cost', issue: 'AER-12' }), now, 0);
+  it('takes the sort, the measure and the issue filter as written', () => {
+    const query = resolveQuery(new URLSearchParams({ sort: 'cost', measure: 'cost', issue: 'AER-12' }), now, 0);
 
     expect(query.sort).toBe('cost');
+    // The graph's choice is state like any other: a pasted link that opens on
+    // dollars is the same argument as a pasted sort.
+    expect(query.measure).toBe('cost');
     expect(query.issue).toBe('AER-12');
   });
 

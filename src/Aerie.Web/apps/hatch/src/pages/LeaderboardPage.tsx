@@ -1,11 +1,13 @@
 import { useCallback, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Badge, Card, EmptyState, Field, PageHeader, Table } from '@aerie/ui';
-import { getBoard, getWorkLogSessions } from '../api/client';
+import { getBoard, getWorkLogHistory, getWorkLogSessions } from '../api/client';
 import { IssuePicker } from '../components/IssuePicker';
+import { SpendGraph } from '../components/SpendGraph';
 import {
   FROM,
   ISSUE,
+  MEASURE,
   PODIUM,
   PRESETS,
   RANGE,
@@ -30,13 +32,15 @@ import {
   moneyPhrase,
   totalsPhrase,
 } from '../lib/workLog';
-import type { Board, SessionSort, WorkLogSession, WorkLogSessions } from '../types';
+import type { Board, SessionSort, WorkLogHistory, WorkLogSession, WorkLogSessions } from '../types';
 
-/** The podium and the table, arriving together so a half-drawn page is never a
-    state. */
+/** The podium, the table and the graph, arriving together so a half-drawn page
+    is never a state - and so the three cannot end up describing different
+    windows. */
 interface LeaderboardView {
   podium: WorkLogSessions;
   table: WorkLogSessions;
+  history: WorkLogHistory;
 }
 
 /** The three sortable columns, in the order they are drawn. */
@@ -91,13 +95,19 @@ export function LeaderboardPage() {
      sort beats a branch that only sometimes fetches. */
   const load = useCallback(async (): Promise<LeaderboardView> => {
     const window = { from: query.from, to: query.to, ancestorKey: query.issue };
-    const [podium, table] = await Promise.all([
+    const [podium, table, history] = await Promise.all([
       getWorkLogSessions({ ...window, sort: 'tokens', limit: PODIUM }),
       getWorkLogSessions({ ...window, sort: query.sort, limit: TABLE_LIMIT }),
+      /* No bucket size is sent: the server chooses it from the length of the
+         range and names it back, and the graph labels its axis from that. The
+         offset is the one the presets were computed on, so the daily grid the
+         page aligned to and the daily grid the server buckets on are one
+         grid. */
+      getWorkLogHistory({ ...window, offsetMinutes }),
     ]);
 
-    return { podium, table };
-  }, [query]);
+    return { podium, table, history };
+  }, [query, offsetMinutes]);
 
   const { data, error } = useLoaded<LeaderboardView>(load);
 
@@ -128,7 +138,7 @@ export function LeaderboardPage() {
   if (error && !data) return <p className="text-danger">{error}</p>;
   if (!data) return <p className="text-muted">Loading…</p>;
 
-  const { podium, table } = data;
+  const { podium, table, history } = data;
   const empty = emptiness(table, query.issue);
   const top = rankedTop(podium.sessions);
   const errors = errorPhrase(table.totals);
@@ -186,9 +196,23 @@ export function LeaderboardPage() {
 
       {/* Whichever is true, said once for the whole page rather than three
           times in three empty sections. */}
-      {empty ? (
-        <EmptyState message={empty.text} />
-      ) : (
+      {empty && <EmptyState message={empty.text} />}
+
+      {/* Drawn on an empty range and not on an empty log: a window nobody
+          worked is a row of zeroed buckets, which is a measurement, and a log
+          that has never been written is a sentence. */}
+      {empty?.kind !== 'never' && (
+        <Card>
+          <h2 className="hatch-section-title">Spend over time</h2>
+          <SpendGraph
+            history={history}
+            measure={query.measure}
+            onMeasure={(measure) => write(MEASURE, measure)}
+          />
+        </Card>
+      )}
+
+      {empty ? null : (
         <>
           <Card>
             <h2 className="hatch-section-title">Top billing</h2>

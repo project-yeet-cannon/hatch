@@ -860,6 +860,30 @@ Four rules worth knowing before reading either:
 An errored session's spend counts in all of it. It ran, and it was billed for
 running; `totals.errors` says how many, and the table marks them.
 
+### The graph
+
+`history` folds the same rows along a time axis instead of the hierarchy, and
+the page draws one bar per bucket, oldest at the left.
+
+- **The page asks for no bucket size.** The server chooses one from the length
+  of the range — hourly up to two days, daily past it — and names it back, and
+  the graph labels its axis from the answer. A caller that asked in days and got
+  hours has to say hours.
+- **A bucket in which nothing ran is drawn as a zero, not as a gap**, and its
+  slot stays hoverable. A poll's history has gaps because a missing reading
+  means nobody looked; a work log has none, and drawing an empty hour as a break
+  would assert an absence where there is a measurement.
+- **Tokens or notional USD, one at a time, never on a shared axis.** They differ
+  by six orders of magnitude and a second y-axis would draw two lies crossing,
+  so the control rescales the whole graph. The choice is in the URL as `measure`
+  with the rest of the page's state.
+- `offsetMinutes` puts a daily bucket on the reader's midnight. An overnight run
+  split across UTC midnight is two half-nights nobody worked.
+
+It is hand-cut SVG in the house's own tokens — the Hatch app carries no charting
+dependency, and the geometry lives in a tested function rather than in the
+component.
+
 **Nothing on this page writes**, and the absence is the guarantee rather than a
 convention: there is no control that could, and the browser API client has no
 function that could. A work log row is written by the dispatcher with an API

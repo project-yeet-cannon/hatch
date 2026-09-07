@@ -33,6 +33,7 @@ import type {
   Utilization,
   Work,
   WorkLog,
+  WorkLogHistory,
   WorkLogSessions,
 } from '../types';
 
@@ -285,6 +286,31 @@ export const getWorkLogSessions = (query: WorkLogSessionQuery) => {
   }
   return fetchJson<WorkLogSessions>(`/api/hatch/work-log/sessions?${params.toString()}`);
 };
+
+/** The same rows, folded along a time axis - one bucket per bar.
+
+    **No bucket size is sent.** The server chooses it from the length of the
+    range and names it back, and the graph labels its axis from that rather than
+    from what it asked for. `offsetMinutes` is the same value the page's range
+    presets were computed on, so the daily grid the page aligned to and the
+    daily grid the server buckets on are one grid. */
+export const getWorkLogHistory = (query: WorkLogHistoryQuery) => {
+  const params = new URLSearchParams();
+  for (const [name, value] of Object.entries(query)) {
+    if (value !== null && value !== undefined) params.set(name, String(value));
+  }
+  return fetchJson<WorkLogHistory>(`/api/hatch/work-log/history?${params.toString()}`);
+};
+
+export interface WorkLogHistoryQuery {
+  from: string;
+  to: string;
+  ancestorKey?: string | null;
+  /** Minutes east of UTC. It puts a daily bucket on the reader's midnight; an
+      overnight run split across UTC midnight is two half-nights nobody
+      worked. */
+  offsetMinutes: number;
+}
 
 export interface WorkLogSessionQuery {
   from: string;
