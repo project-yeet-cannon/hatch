@@ -697,3 +697,48 @@ public record WorkLogDto(
     WorkLogTotalsDto Totals,
     WorkLogTotalsDto Own,
     IReadOnlyList<WorkLogEntryDto> Entries);
+
+/// <summary>
+/// One equal slice of the work log's time axis, and what ended inside it.
+/// </summary>
+/// <remarks>
+/// Half-open: a session belongs to the bucket with
+/// <c>Start &lt;= EndedAt &lt; End</c>, so it is counted once and the buckets add
+/// up to the range's own total.
+///
+/// A bucket with no sessions in it carries a zeroed
+/// <see cref="WorkLogTotalsDto"/> rather than being left out, and that is the
+/// rule worth stating: an hour in which nothing ran is an hour that cost
+/// nothing, which is a measurement. A poll's history has gaps because a missing
+/// reading means nobody looked; a work log has none.
+/// </remarks>
+public record WorkLogBucketDto(DateTimeOffset Start, DateTimeOffset End, WorkLogTotalsDto Totals);
+
+/// <summary>
+/// What the work log recorded over a range of time, in equal buckets - the
+/// shape a graph is drawn from.
+/// </summary>
+/// <remarks>
+/// <paramref name="From"/> and <paramref name="To"/> are the requested range
+/// snapped outward onto whole buckets, so the range, the bucket list and
+/// <paramref name="Totals"/> all describe one window and the totals are the sum
+/// of the buckets by construction.
+/// </remarks>
+/// <param name="Bucket">The size actually used, <c>hour</c> or <c>day</c> - which may be one the server chose rather than one the caller asked for.</param>
+/// <param name="Totals">The whole range, so a caller does not have to add the buckets up.</param>
+/// <param name="FirstSessionAt">
+/// The earliest session in the filtered log, <em>ignoring the range</em>, or
+/// null when nothing has ever run under this filter. It is what lets a page
+/// choose a sensible range, and tell "nothing has run yet" apart from "nothing
+/// ran in the range you asked for".
+/// </param>
+/// <param name="LastSessionAt">The latest, read the same way.</param>
+/// <param name="Buckets">Oldest first, one per bucket in the range, empty ones included.</param>
+public record WorkLogHistoryDto(
+    DateTimeOffset From,
+    DateTimeOffset To,
+    string Bucket,
+    WorkLogTotalsDto Totals,
+    DateTimeOffset? FirstSessionAt,
+    DateTimeOffset? LastSessionAt,
+    IReadOnlyList<WorkLogBucketDto> Buckets);
