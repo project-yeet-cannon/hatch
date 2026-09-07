@@ -37,6 +37,38 @@ export interface Status {
   color: string;
 }
 
+/** Which kind of thing an assignee is. Mirrors ActorKind. */
+export type AssigneeKind = 'person' | 'key';
+
+/** Who owns an issue - a person, or an API key. Mirrors AssigneeDto.
+
+    Absent is written as `null` everywhere and never as an empty object, so the
+    test is always `assignee && …`. An assignee whose person has been deleted or
+    whose key has been revoked arrives as null too: the server resolves only a
+    live identity, and does it at every reader at once. */
+export interface Assignee {
+  kind: AssigneeKind;
+  id: string;
+  name: string;
+}
+
+/** The picker's rows and the answer to "who am I", in one read - see
+    AssigneeDirectoryDto. `me` is null where nobody is signed in, which is the
+    ordinary state of local development, and the **Assign to me** press is
+    simply absent there. */
+export interface AssigneeDirectory {
+  me: Assignee | null;
+  assignees: Assignee[];
+}
+
+/** Who an issue is to belong to. Both fields null is the unassign; exactly one
+    of them is refused by the server with a sentence. Mirrors AssigneeRequest -
+    what you read minus the name, so there is one shape to learn. */
+export interface AssigneeRequest {
+  kind: AssigneeKind | null;
+  id: string | null;
+}
+
 /** A card on the board. No description and no comments - see IssueCardDto. */
 export interface IssueCard {
   key: string;
@@ -53,6 +85,9 @@ export interface IssueCard {
   /** Questions on this issue nobody has answered. Non-zero means it is waiting
       on a person, and the board says so - see IssueCardDto.OpenQuestions. */
   openQuestions: number;
+  /** Who owns this card, or null for nobody - which is most of the board, and
+      why the card draws no element at all rather than an empty chip. */
+  assignee: Assignee | null;
 }
 
 export interface Issue {
@@ -88,6 +123,10 @@ export interface Issue {
       Independent of `modelOverride`: an issue may carry either, both or
       neither. One of PLAYBOOK_EFFORTS. */
   effortOverride: string | null;
+  /** Who owns it, or null for nobody. Readable by anybody a dispatch reaches
+      and writable only by a person, through its own route - see
+      AssigneeController. */
+  assignee: Assignee | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;

@@ -6,6 +6,7 @@ import {
   addDependency,
   createIssue,
   deleteIssue,
+  getAssignees,
   getBoard,
   getComments,
   getEvents,
@@ -16,7 +17,9 @@ import {
   patchIssue,
   patchIssuePlaybook,
   removeDependency,
+  setAssignee,
 } from '../api/client';
+import { AssigneeField } from '../components/AssigneeField';
 import { Choice } from '../components/Choice';
 import { CloseSubtreeDialog } from '../components/CloseSubtreeDialog';
 import { Command } from '../components/Command';
@@ -29,6 +32,7 @@ import { MomentField } from '../components/MomentField';
 import { PullRequestLink } from '../components/PullRequestLink';
 import { TypeBadge } from '../components/TypeBadge';
 import { WorkLog } from '../components/WorkLog';
+import { assigneeHint } from '../lib/assignee';
 import { childTypes } from '../lib/childTypes';
 import { statusVars } from '../lib/color';
 import { closeOffer } from '../lib/closeSubtree';
@@ -41,6 +45,8 @@ import { useAutoGrow } from '../lib/useAutoGrow';
 import { useCloseSubtree } from '../lib/useCloseSubtree';
 import { ISSUE_TYPES, LEGAL_PARENT_TYPES, PLAYBOOK_EFFORTS, PLAYBOOK_MODELS } from '../types';
 import type {
+  AssigneeDirectory,
+  AssigneeRequest,
   Board,
   ChildRollup,
   Comment,
@@ -61,6 +67,7 @@ export function IssuePage() {
 
   const [issue, setIssue] = useState<Issue | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
+  const [directory, setDirectory] = useState<AssigneeDirectory | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [events, setEvents] = useState<IssueEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -101,6 +108,16 @@ export function IssuePage() {
       (err: unknown) => ({ loaded: null, failure: message(err) }),
     );
 
+    /* And the eighth: everybody this issue could belong to, and who is signed
+       in. Its own failure and no error line of its own - a directory that could
+       not be read leaves the field disabled with the assignee still drawn on
+       it, which is the honest state of "I know whose this is and cannot offer
+       to change it". */
+    const whom = getAssignees().then(
+      (loaded) => loaded,
+      () => null,
+    );
+
     try {
       const [loaded, loadedBoard, loadedComments, loadedEvents] = await Promise.all([
         getIssue(key),
@@ -116,6 +133,8 @@ export function IssuePage() {
     } catch (err) {
       setError(message(err));
     }
+
+    setDirectory(await whom);
 
     const settled = await rolling;
     setRollup(settled.loaded);
@@ -162,6 +181,23 @@ export function IssuePage() {
     async (patch: Parameters<typeof patchIssuePlaybook>[1]) => {
       try {
         await patchIssuePlaybook(key, patch);
+        await load();
+      } catch (err) {
+        setError(message(err));
+      }
+    },
+    [key, load],
+  );
+
+  /* Who owns it. Its own call for the reason `savePlaybook` is - it is its own
+     endpoint, and writing one is closed to an API key - and otherwise exactly
+     `save`: it re-reads, so the card, the hint and the directory's idea of who
+     is signed in all redraw together, and a refusal lands in `error` above in
+     the server's own words. */
+  const saveAssignee = useCallback(
+    async (request: AssigneeRequest) => {
+      try {
+        await setAssignee(key, request);
         await load();
       } catch (err) {
         setError(message(err));
@@ -302,6 +338,17 @@ export function IssuePage() {
               candidates={parents}
               emptyMessage={`Nothing in ${issue.projectKey} can be a parent of a ${issue.type} yet.`}
               onChange={(parentKey) => save({ parentKey })}
+            />
+          </Field>
+
+          {/* `as="div"` for the reason the Parent field is - see there: a
+              <label> wrapping a control with text in it swallows the
+              accessible name, and the field carries its own aria-label. */}
+          <Field label="Assignee" as="div" hint={assigneeHint(issue.assignee)}>
+            <AssigneeField
+              assignee={issue.assignee}
+              directory={directory}
+              onChange={(request) => void saveAssignee(request)}
             />
           </Field>
 

@@ -101,6 +101,22 @@ function CardFace({ card, waiting, terminal }: Required<Omit<CardProps, 'card'>>
             ?{card.openQuestions > 1 && <span className="hatch-card-asking-count">{card.openQuestions}</span>}
           </span>
         )}
+        {/* Nothing at all where there is no assignee - not an empty chip and
+            not a dash. Most of the board owns nothing, and a placeholder on
+            every card would be noise the eye has to skip past to find the
+            three that do. */}
+        {card.assignee && (
+          <span
+            className="hatch-card-assignee"
+            title={
+              card.assignee.kind === 'person'
+                ? `Assigned to ${card.assignee.name} - an unattended pass leaves it alone`
+                : `Assigned to the API key ${card.assignee.name}`
+            }
+          >
+            {card.assignee.name}
+          </span>
+        )}
       </div>
       <div className="hatch-card-title" title={card.title}>
         {truncate(card.title)}

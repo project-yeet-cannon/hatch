@@ -1,5 +1,7 @@
 import { handledUnauthorized } from '../lib/signIn';
 import type {
+  AssigneeDirectory,
+  AssigneeRequest,
   Board,
   Comment,
   CommentCreateRequest,
@@ -154,6 +156,19 @@ export const patchIssue = (key: string, request: IssuePatchRequest) =>
   fetchJson<Issue>(`/api/hatch/issues/${seg(key)}`, { method: 'PATCH', ...asJson(request) });
 /** The two things an issue overrides its playbooks with. Its own route because
     setting one is closed to an API key - see IssuePlaybookController. */
+/** Everybody an issue could belong to, and who the caller is. One read, because
+    the picker needs the first and **Assign to me** needs the second. */
+export const getAssignees = () => fetchJson<AssigneeDirectory>('/api/hatch/assignees');
+
+/** Give an issue to somebody, or - with both fields null - to nobody. Its own
+    route rather than a field on the patch: writing one is closed to an API key,
+    and that refusal is a property of the route. */
+export const setAssignee = (key: string, request: AssigneeRequest) =>
+  fetchJson<Issue>(`/api/hatch/issues/${seg(key)}/assignee`, {
+    method: 'PUT',
+    body: JSON.stringify(request),
+  });
+
 export const patchIssuePlaybook = (key: string, request: IssuePlaybookRequest) =>
   fetchJson<Issue>(`/api/hatch/issues/${seg(key)}/playbook`, { method: 'PATCH', ...asJson(request) });
 /** What an issue waits on. Both verbs answer with the whole issue, so the page

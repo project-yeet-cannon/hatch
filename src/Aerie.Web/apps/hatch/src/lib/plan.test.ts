@@ -23,6 +23,7 @@ const epic = (key: string, leaves: number, done: number, children: PlanEntry[] =
     readyAt: null,
     dueAt: null,
     openQuestions: 0,
+    assignee: null,
   },
   isLeaf: children.length === 0 && leaves === 0,
   rollup: rollup(leaves, done),

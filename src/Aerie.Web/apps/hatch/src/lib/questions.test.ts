@@ -88,6 +88,7 @@ const card = (over: Partial<IssueCard> = {}): IssueCard => ({
   readyAt: null,
   dueAt: null,
   openQuestions: 0,
+  assignee: null,
   ...over,
 });
 

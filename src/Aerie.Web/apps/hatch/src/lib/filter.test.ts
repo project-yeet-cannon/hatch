@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { NO_FILTER, filterCards, isFiltering, matchesQuery, toggleType, toggleWaiting } from './filter';
-import type { IssueCard, IssueType } from '../types';
+import { UNASSIGNED, assigneeToken } from './assignee';
+import { NO_FILTER, assigneeFacets, filterCards, isFiltering, matchesQuery, toggleType, toggleWaiting } from './filter';
+import type { Assignee, IssueCard, IssueType } from '../types';
 
 const card = (over: Partial<IssueCard> = {}): IssueCard => ({
   key: 'AER-1',
@@ -13,8 +14,12 @@ const card = (over: Partial<IssueCard> = {}): IssueCard => ({
   readyAt: null,
   dueAt: null,
   openQuestions: 0,
+  assignee: null,
   ...over,
 });
+
+const person = (name: string, id = `p-${name}`): Assignee => ({ kind: 'person', id, name });
+const key = (name: string, id = `k-${name}`): Assignee => ({ kind: 'key', id, name });
 
 /* Every literal filter below is spread onto this rather than written whole, so
    that adding a switch to CardFilter is one edit here and not one per case. */
@@ -106,6 +111,67 @@ describe('isFiltering', () => {
     expect(isFiltering(filter({ types: ['bug'] }))).toBe(true);
     expect(isFiltering(filter({ query: 'cert' }))).toBe(true);
     expect(isFiltering(filter({ waiting: true }))).toBe(true);
+    expect(isFiltering(filter({ assignee: UNASSIGNED }))).toBe(true);
+    expect(isFiltering(filter({ assignee: assigneeToken(person('Ada')) }))).toBe(true);
+  });
+});
+
+describe('the assignee facet', () => {
+  const ada = person('Ada');
+  const claude = key('Claude');
+
+  const board = [
+    card({ key: 'AER-1', assignee: ada }),
+    card({ key: 'AER-2', assignee: claude }),
+    card({ key: 'AER-3', assignee: null }),
+    card({ key: 'AER-4', assignee: { ...ada, name: 'Ada Lovelace' } }),
+  ];
+
+  it('shows the whole board when nobody was chosen', () => {
+    expect(filterCards(board, NO_FILTER)).toHaveLength(4);
+  });
+
+  it('draws one identity\'s cards, whatever name they were drawn under', () => {
+    // The token is the kind and the id; a rename between reads does not split
+    // one person into two facets.
+    const mine = filter({ assignee: assigneeToken(ada) });
+    expect(filterCards(board, mine).map((c) => c.key)).toEqual(['AER-1', 'AER-4']);
+  });
+
+  it('draws only the cards nobody owns', () => {
+    expect(filterCards(board, filter({ assignee: UNASSIGNED })).map((c) => c.key)).toEqual(['AER-3']);
+  });
+
+  it('ANDs with the other facets, as they AND with each other', () => {
+    const bug = card({ key: 'AER-5', type: 'bug', assignee: ada });
+    const narrowed = filter({ assignee: assigneeToken(ada), types: ['bug'] });
+
+    expect(filterCards([...board, bug], narrowed).map((c) => c.key)).toEqual(['AER-5']);
+  });
+});
+
+describe('assigneeFacets', () => {
+  it('is the assignees the board actually has, deduped and in picker order', () => {
+    const ada = person('Ada');
+    const zoe = person('Zoe');
+    const claude = key('Claude');
+
+    const facets = assigneeFacets([
+      card({ assignee: claude }),
+      card({ assignee: zoe }),
+      card({ assignee: null }),
+      card({ assignee: ada }),
+      card({ assignee: ada }),
+    ]);
+
+    expect(facets.map((a) => a.name)).toEqual(['Ada', 'Zoe', 'Claude']);
+  });
+
+  it('offers nobody at all for a board nobody owns anything on', () => {
+    // An "Unassigned" entry is BoardFilters' own, added above these rows:
+    // deriving one from cards that have no assignee would be deriving a fact
+    // from its own absence.
+    expect(assigneeFacets([card(), card()])).toEqual([]);
   });
 });
 

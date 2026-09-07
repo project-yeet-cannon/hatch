@@ -1,4 +1,6 @@
 import { ISSUE_TYPES } from '../types';
+import type { Assignee } from '../types';
+import { UNASSIGNED, assigneeToken } from '../lib/assignee';
 import { isFiltering, toggleType, toggleWaiting } from '../lib/filter';
 import type { CardFilter } from '../lib/filter';
 import { NO_FILTER } from '../lib/filter';
@@ -18,11 +20,14 @@ import { NO_FILTER } from '../lib/filter';
 export function BoardFilters({
   filter,
   onChange,
+  assignees,
   showing,
   total,
 }: {
   filter: CardFilter;
   onChange: (next: CardFilter) => void;
+  /** The assignees this board actually has cards for - see assigneeFacets. */
+  assignees: Assignee[];
   /** How many cards survive the filter, and how many there are - the count is the only feedback a search box gives. */
   showing: number;
   total: number;
@@ -69,6 +74,29 @@ export function BoardFilters({
       >
         waiting on me
       </button>
+
+      {/* A native <select> and not IssuePicker, deliberately: that component
+          exists because prefix typeahead fails over sixty options that all
+          start with the same project key, and neither half of that is true of
+          a household's worth of names.
+
+          "Unassigned" is its own row above the identities rather than derived
+          from the cards, because it is the one choice that is a fact about
+          absence - assigneeFacets can only report who is there. */}
+      <select
+        className="hatch-assignee-filter"
+        aria-label="Assignee"
+        value={filter.assignee}
+        onChange={(e) => onChange({ ...filter, assignee: e.target.value })}
+      >
+        <option value="">— anyone —</option>
+        <option value={UNASSIGNED}>Unassigned</option>
+        {assignees.map((assignee) => (
+          <option key={assigneeToken(assignee)} value={assigneeToken(assignee)}>
+            {assignee.name}
+          </option>
+        ))}
+      </select>
 
       {filtering && (
         <>
