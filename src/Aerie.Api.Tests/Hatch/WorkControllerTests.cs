@@ -810,7 +810,7 @@ public class WorkControllerTests
         await h.FileAsync("task", "todo, second", h.Todo, rank: 2048);
         await h.FileAsync("epic", "in progress, third", h.InProgress, rank: 4096);
 
-        var board = Value(await new BoardController(h.Db).GetBoard(default));
+        var board = Value(await new BoardController(h.Db, h.Actors).GetBoard(default));
         var queue = Value(await h.Work.GetQueue(0, null, default));
 
         // Per column, not flat: the board is ordered by status id and the
@@ -905,6 +905,9 @@ public class WorkControllerTests
     private sealed class Harness
     {
         public required HatchContext Db { get; init; }
+
+        /// <summary>Who the house knows. Empty until a test says otherwise, which reads as "nobody is assigned to anything".</summary>
+        public required StubActorDirectory Actors { get; init; }
         public required WorkController Work { get; init; }
         public required PlaybooksController Playbooks { get; init; }
         public required int ProjectId { get; init; }
@@ -1041,10 +1044,13 @@ public class WorkControllerTests
             Playbook(doing.Id, review.Id, "", "sonnet"));
         await db.SaveChangesAsync();
 
+        var actors = new StubActorDirectory();
+
         return new Harness
         {
             Db = db,
-            Work = new WorkController(db, new FakeTimeProvider(Now)),
+            Actors = actors,
+            Work = new WorkController(db, actors, new FakeTimeProvider(Now)),
             Playbooks = new PlaybooksController(db, new FakeTimeProvider(Now)),
             ProjectId = project.Id,
             Inbox = inbox.Id,

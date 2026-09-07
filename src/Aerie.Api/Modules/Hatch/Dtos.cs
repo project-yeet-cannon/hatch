@@ -48,6 +48,25 @@ public record StatusPatchRequest(string? Name, int? SortOrder, bool? IsTerminal,
 // ---- Issues ----
 
 /// <summary>
+/// Who an issue belongs to: a person, or an API key, or - said as
+/// <c>null</c> wherever this appears - nobody at all.
+/// </summary>
+/// <remarks>
+/// <para>Hatch's own wire shape built from
+/// <see cref="Aerie.Api.Services.Auth.Actor"/>, so the module's payload stays
+/// the module's and the platform record can grow a field without changing what
+/// a board read looks like.</para>
+///
+/// <para>Null is the only way "nobody" is said: there is no empty-object form,
+/// so a client's test is <c>assignee &amp;&amp; …</c> and never a comparison
+/// against a sentinel id. An assignee whose person has been deleted or whose
+/// key has been revoked reads as null too, at every reader at once - see
+/// <see cref="Aerie.Api.Services.Auth.IActorDirectory"/>.</para>
+/// </remarks>
+/// <param name="Kind"><c>person</c> or <c>key</c> - see <see cref="Aerie.Api.Services.Auth.ActorKind"/>.</param>
+public record AssigneeDto(string Kind, Guid Id, string Name);
+
+/// <summary>
 /// A card. What the board draws, and nothing more - descriptions and comments
 /// are a detail-page request, because the board holds every issue in the house
 /// and shipping every description with it would make the first paint the
@@ -65,6 +84,14 @@ public record StatusPatchRequest(string? Name, int? SortOrder, bool? IsTerminal,
 /// an issue's children, a search result - are not places anybody answers a
 /// question from, and counting for them would be a query nobody reads.
 /// </param>
+/// <param name="Assignee">
+/// Who owns this card, or null for nobody - which is most of the board, and
+/// which is why the card draws no element at all rather than an empty chip.
+/// Trailing and defaulted for the reason <paramref name="OpenQuestions"/> is,
+/// though every list that draws a card fills it: an assignee that read one way
+/// through the board and another through the plan is the divergence this record
+/// exists to prevent.
+/// </param>
 public record IssueCardDto(
     string Key,
     string ProjectKey,
@@ -75,7 +102,8 @@ public record IssueCardDto(
     string? ParentKey,
     string? ReadyAt,
     string? DueAt,
-    int OpenQuestions = 0);
+    int OpenQuestions = 0,
+    AssigneeDto? Assignee = null);
 
 /// <summary>One issue, whole - the detail page's payload.</summary>
 /// <param name="ChildKeys">Its stories, or its tasks. Keys rather than nested issues: the page links to them and does not draw them.</param>
@@ -107,6 +135,14 @@ public record IssueCardDto(
 /// <see cref="IssuePlaybookController"/>.
 /// </param>
 /// <param name="EffortOverride">The same, for the thinking budget, and independent of it.</param>
+/// <param name="Assignee">
+/// Who owns it, or null for nobody. Beside <paramref name="CreatedBy"/> because
+/// the two are the same kind of fact - who filed it, and whose it is now -
+/// though only one of them can change. Readable by a key, and writable only by
+/// a person through <see cref="AssigneeController"/>: under the loop's
+/// <c>people only</c> rule an assignee is a dispatch gate, and a key that could
+/// write one could hand itself work somebody had reserved.
+/// </param>
 public record IssueDto(
     string Key,
     int ProjectId,
@@ -125,6 +161,7 @@ public record IssueDto(
     string? PullRequestUrl,
     string? ModelOverride,
     string? EffortOverride,
+    AssigneeDto? Assignee,
     string CreatedBy,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
@@ -431,6 +468,37 @@ public record PlaybookPatchRequest(
 /// method is a paragraph, which is what a description is.
 /// </remarks>
 public record IssuePlaybookRequest(string? Model, string? Effort);
+
+/// <summary>
+/// Who an issue is to belong to. Both fields null is the unassign; exactly one
+/// of them is refused with a sentence, because a kind with no id is a request
+/// that meant something and did not say what.
+/// </summary>
+/// <remarks>
+/// What you read is what you write: this is <see cref="AssigneeDto"/> minus the
+/// name, so no client has to learn two shapes for one fact. The name is the
+/// directory's to say and not a caller's to assert - a request naming a person
+/// "Nathan" who is really somebody else would be a second source of truth about
+/// a row this process owns.
+/// </remarks>
+public record AssigneeRequest(string? Kind, Guid? Id);
+
+/// <summary>
+/// The picker's rows and the answer to "who am I", in one read.
+/// </summary>
+/// <remarks>
+/// One request rather than two because <em>Assign to me</em> needs both and a
+/// browser that inferred the second from a cookie would be a second
+/// implementation of who the caller is. <paramref name="Me"/> is null where
+/// nobody is signed in, which is the ordinary state of local development with
+/// <c>Auth:Enabled</c> false - and the press is simply absent there.
+/// </remarks>
+/// <param name="Assignees">
+/// Every person and every live key, people first and each A→Z. A revoked key is
+/// not in it, which is the same predicate that makes an issue already pointing
+/// at one read as unassigned.
+/// </param>
+public record AssigneeDirectoryDto(AssigneeDto? Me, IReadOnlyList<AssigneeDto> Assignees);
 
 /// <summary>
 /// One edge: this issue waits on <paramref name="DependsOnKey"/>.

@@ -1951,6 +1951,9 @@ public class IssuesControllerTests
     private sealed class Harness
     {
         public required HatchContext Db { get; init; }
+
+        /// <summary>Who the house knows. Empty until a test says otherwise, which reads as "nobody is assigned to anything".</summary>
+        public required StubActorDirectory Actors { get; init; }
         public required IssuesController Issues { get; init; }
         public required IssueThreadController Thread { get; init; }
         public required QuestionsController Questions { get; init; }
@@ -2018,14 +2021,16 @@ public class IssuesControllerTests
         var time = new FakeTimeProvider(Now);
         var caller = new StubCallerIdentity { Person = new EfPerson { Name = "Nathan", CreatedAt = Now, UpdatedAt = Now } };
         var ranks = new RankService(db);
+        var actors = new StubActorDirectory();
 
         return new Harness
         {
             Db = db,
-            Issues = new IssuesController(db, ranks, caller, time),
+            Actors = actors,
+            Issues = new IssuesController(db, ranks, actors, caller, time),
             Thread = new IssueThreadController(db, caller, time),
             Questions = new QuestionsController(db),
-            Board = new BoardController(db),
+            Board = new BoardController(db, actors),
             Projects = new ProjectsController(db, time),
             Statuses = new StatusesController(db),
             ProjectId = aerie.Id,

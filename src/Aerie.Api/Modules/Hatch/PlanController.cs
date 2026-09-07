@@ -1,5 +1,6 @@
 using Aerie.Api.Common;
 using Aerie.Api.Ef;
+using Aerie.Api.Services.Auth;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -20,7 +21,7 @@ namespace Aerie.Api.Modules.Hatch;
 [ApiController]
 [Route("api/hatch/plan")]
 [RequireAdmin(AcceptScope = ApiKeyScopes.Hatch)]
-public class PlanController(HatchContext db) : ControllerBase
+public class PlanController(HatchContext db, IActorDirectory actors) : ControllerBase
 {
     /// <summary>The type the Plan page is a list of. Everything else is what an epic is a total over.</summary>
     private const string Epic = "epic";
@@ -59,24 +60,29 @@ public class PlanController(HatchContext db) : ControllerBase
                 i.ReadyAtHasTime,
                 i.DueAt,
                 i.DueAtHasTime,
+                i.AssigneePersonId,
+                i.AssigneeApiKeyId,
             })
             .ToListAsync(ct);
 
         var parentKey = IssueKey.Format(issue.ProjectKey, issue.Number);
 
-        var rows = children.Select(c => new ChildRollupDto(
-            new IssueCardDto(
-                IssueKey.Format(c.ProjectKey, c.Number),
-                c.ProjectKey,
-                c.Type,
-                c.Title,
-                c.StatusId,
-                c.Rank,
-                parentKey,
-                IssueMoment.Format(c.ReadyAt, c.ReadyAtHasTime),
-                IssueMoment.Format(c.DueAt, c.DueAtHasTime)),
-            tree.IsLeaf(c.Id),
-            tree.Of(c.Id))).ToList();
+        var rows = new List<ChildRollupDto>(children.Count);
+        foreach (var c in children)
+            rows.Add(new ChildRollupDto(
+                new IssueCardDto(
+                    IssueKey.Format(c.ProjectKey, c.Number),
+                    c.ProjectKey,
+                    c.Type,
+                    c.Title,
+                    c.StatusId,
+                    c.Rank,
+                    parentKey,
+                    IssueMoment.Format(c.ReadyAt, c.ReadyAtHasTime),
+                    IssueMoment.Format(c.DueAt, c.DueAtHasTime),
+                    Assignee: await IssueProjection.ToAssigneeAsync(actors, c.AssigneePersonId, c.AssigneeApiKeyId, ct)),
+                tree.IsLeaf(c.Id),
+                tree.Of(c.Id)));
 
         return new IssueRollupDto(parentKey, tree.Of(issue.Id), rows);
     }
@@ -118,6 +124,8 @@ public class PlanController(HatchContext db) : ControllerBase
                 i.ReadyAtHasTime,
                 i.DueAt,
                 i.DueAtHasTime,
+                i.AssigneePersonId,
+                i.AssigneeApiKeyId,
             })
             .ToListAsync(ct);
 
@@ -155,6 +163,14 @@ public class PlanController(HatchContext db) : ControllerBase
         // finishes.
         var drawn = new HashSet<long>();
 
+        // Resolved up front rather than inside Entries, which is a synchronous
+        // recursive walk and the wrong place to await anything. The directory is
+        // memoized either way, so this is a dictionary build and not a second
+        // read.
+        var assignees = new Dictionary<long, AssigneeDto?>();
+        foreach (var e in epics)
+            assignees[e.Id] = await IssueProjection.ToAssigneeAsync(actors, e.AssigneePersonId, e.AssigneeApiKeyId, ct);
+
         return new PlanDto(
             Entries(epics.Where(e => e.ParentId is null).Select(e => e.Id).ToList()),
             tree.Of(looseRoots));
@@ -181,7 +197,8 @@ public class PlanController(HatchContext db) : ControllerBase
                         row.Rank,
                         row.ParentId is { } parent ? keys.GetValueOrDefault(parent) : null,
                         IssueMoment.Format(row.ReadyAt, row.ReadyAtHasTime),
-                        IssueMoment.Format(row.DueAt, row.DueAtHasTime)),
+                        IssueMoment.Format(row.DueAt, row.DueAtHasTime),
+                        Assignee: assignees[id]),
                     tree.IsLeaf(id),
                     // The whole subtree, not the epics below it: an epic's
                     // meter is its stories and their tasks, and the nested

@@ -339,8 +339,8 @@ public class IssueDependenciesControllerTests
 
         return new Harness
         {
-            Dependencies = new IssueDependenciesController(db, caller, time),
-            Issues = new IssuesController(db, new RankService(db), caller, time),
+            Dependencies = new IssueDependenciesController(db, new StubActorDirectory(), caller, time),
+            Issues = new IssuesController(db, new RankService(db), new StubActorDirectory(), caller, time),
             Thread = new IssueThreadController(db, caller, time),
             Time = time,
             ProjectId = aerie.Id,

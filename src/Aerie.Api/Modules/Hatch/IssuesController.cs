@@ -21,7 +21,12 @@ namespace Aerie.Api.Modules.Hatch;
 [ApiController]
 [Route("api/hatch/issues")]
 [RequireAdmin(AcceptScope = ApiKeyScopes.Hatch)]
-public class IssuesController(HatchContext db, RankService ranks, ICallerIdentity caller, TimeProvider time) : ControllerBase
+public class IssuesController(
+    HatchContext db,
+    RankService ranks,
+    IActorDirectory actors,
+    ICallerIdentity caller,
+    TimeProvider time) : ControllerBase
 {
     /// <summary>
     /// How many times a create will re-read the project and try again. Five is
@@ -150,19 +155,29 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
                 i.ReadyAtHasTime,
                 i.DueAt,
                 i.DueAtHasTime,
+                i.AssigneePersonId,
+                i.AssigneeApiKeyId,
             })
             .ToListAsync(ct);
 
-        return rows.Select(i => new IssueCardDto(
-            IssueKey.Format(i.ProjectKey, i.Number),
-            i.ProjectKey,
-            i.Type,
-            i.Title,
-            i.StatusId,
-            i.Rank,
-            i.ParentNumber is { } n ? IssueKey.Format(i.ParentProjectKey!, n) : null,
-            IssueMoment.Format(i.ReadyAt, i.ReadyAtHasTime),
-            IssueMoment.Format(i.DueAt, i.DueAtHasTime))).ToList();
+        var cards = new List<IssueCardDto>(rows.Count);
+        foreach (var i in rows)
+            cards.Add(new IssueCardDto(
+                IssueKey.Format(i.ProjectKey, i.Number),
+                i.ProjectKey,
+                i.Type,
+                i.Title,
+                i.StatusId,
+                i.Rank,
+                i.ParentNumber is { } n ? IssueKey.Format(i.ParentProjectKey!, n) : null,
+                IssueMoment.Format(i.ReadyAt, i.ReadyAtHasTime),
+                IssueMoment.Format(i.DueAt, i.DueAtHasTime),
+                // A search result is a card, and a card that read one way here
+                // and another on the board is the divergence IssueCardDto's own
+                // docstring exists to prevent.
+                Assignee: await IssueProjection.ToAssigneeAsync(actors, i.AssigneePersonId, i.AssigneeApiKeyId, ct)));
+
+        return cards;
     }
 
     // ---- Creating ----
@@ -630,7 +645,7 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
         IssueProjection.KeyOfAsync(db, issueId, ct);
 
     private Task<IssueDto> ToDtoAsync(EfHatchIssue issue, CancellationToken ct) =>
-        IssueProjection.ToDtoAsync(db, issue, ct);
+        IssueProjection.ToDtoAsync(db, actors, issue, ct);
 
     /// <summary>
     /// The bottom of each column, for a request that appends to one more than
