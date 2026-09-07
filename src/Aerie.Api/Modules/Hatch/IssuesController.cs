@@ -21,7 +21,9 @@ namespace Aerie.Api.Modules.Hatch;
 [ApiController]
 [Route("api/hatch/issues")]
 [RequireAdmin(AcceptScope = ApiKeyScopes.Hatch)]
-public class IssuesController(HatchContext db, RankService ranks, ICallerIdentity caller, TimeProvider time) : ControllerBase
+public class IssuesController(
+    HatchContext db, RankService ranks, IssueClaims claims, ICallerIdentity caller, TimeProvider time)
+    : ControllerBase
 {
     /// <summary>
     /// How many times a create will re-read the project and try again. Five is
@@ -150,8 +152,13 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
                 i.ReadyAtHasTime,
                 i.DueAt,
                 i.DueAtHasTime,
+                Claim = new ClaimSnapshot(
+                    i.ClaimToken, i.ClaimedBy, i.ClaimRunner,
+                    i.ClaimedAt, i.ClaimHeartbeatAt, i.ClaimChatter, i.ClaimChatterAt),
             })
             .ToListAsync(ct);
+
+        var now = time.GetUtcNow();
 
         return rows.Select(i => new IssueCardDto(
             IssueKey.Format(i.ProjectKey, i.Number),
@@ -162,7 +169,8 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
             i.Rank,
             i.ParentNumber is { } n ? IssueKey.Format(i.ParentProjectKey!, n) : null,
             IssueMoment.Format(i.ReadyAt, i.ReadyAtHasTime),
-            IssueMoment.Format(i.DueAt, i.DueAtHasTime))).ToList();
+            IssueMoment.Format(i.DueAt, i.DueAtHasTime),
+            Claim: claims.Project(i.Claim, now))).ToList();
     }
 
     // ---- Creating ----
@@ -630,7 +638,7 @@ public class IssuesController(HatchContext db, RankService ranks, ICallerIdentit
         IssueProjection.KeyOfAsync(db, issueId, ct);
 
     private Task<IssueDto> ToDtoAsync(EfHatchIssue issue, CancellationToken ct) =>
-        IssueProjection.ToDtoAsync(db, issue, ct);
+        IssueProjection.ToDtoAsync(db, issue, claims, time.GetUtcNow(), ct);
 
     /// <summary>
     /// The bottom of each column, for a request that appends to one more than

@@ -28,6 +28,20 @@ test: test-api test-web
 test-api:
 	dotnet test ./src/Aerie.Api.Tests/Aerie.Api.Tests.csproj
 
+# The same suite with the claim's tests turned on. They need a real Postgres and
+# skip loudly without one (src/Aerie.Api.Tests/Hatch/HatchDatabase.cs): the claim
+# is built out of conditional UPDATEs, and EF's in-memory provider cannot execute
+# one at all - so `make test-api` alone can be green having verified none of
+# them, and CI runs this lane rather than that one.
+#
+# The database named here is dropped and recreated. It is deliberately not the
+# `aerie` database `make db` serves the app from, and nothing discovers a
+# connection string on its own for the same reason: a test that TRUNCATEs what
+# it finds should have been told exactly what to find.
+test-api-db: db
+	AERIE_TEST_DATABASE_URL="Host=localhost;Port=5432;Database=aerie_hatch_test;Username=user;Password=password" \
+		dotnet test ./src/Aerie.Api.Tests/Aerie.Api.Tests.csproj
+
 # One `npm ci` at the workspace root, then each app in turn. The apps are still
 # named one at a time rather than run with `--workspaces` so that the "==>" line
 # says which one is building when something fails.

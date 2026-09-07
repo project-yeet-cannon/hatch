@@ -19,7 +19,7 @@ namespace Aerie.Api.Modules.Hatch;
 [ApiController]
 [Route("api/hatch/work")]
 [RequireAdmin(AcceptScope = ApiKeyScopes.Hatch)]
-public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
+public class WorkController(HatchContext db, IssueClaims claims, TimeProvider time) : ControllerBase
 {
     /// <summary>
     /// The issue an unattended run should pick up: the top of the rightmost
@@ -52,13 +52,20 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// about what hangs beneath it, which is how <c>ancestorKey</c> already
     /// reads on the search endpoint.</para>
     /// </param>
+    /// <param name="heldToken">
+    /// A claim token the caller already holds, so an issue it is itself working
+    /// is not folded past on that account. Re-reading the dispatch for a ticket
+    /// one already holds is not a conflict. Absent is a caller holding nothing,
+    /// which is every caller before the claim existed.
+    /// </param>
     [HttpGet("next")]
     public async Task<ActionResult<WorkDto>> GetNextWork(
         [FromQuery] int offsetMinutes = 0,
         [FromQuery] string? ancestorKey = null,
+        [FromQuery] Guid? heldToken = null,
         CancellationToken ct = default)
     {
-        var scan = await ScanAsync(offsetMinutes, ancestorKey, ct);
+        var scan = await ScanAsync(offsetMinutes, ancestorKey, heldToken, ct);
         if (scan.Failure is not null) return BadRequest(scan.Failure);
 
         // The first clear row of the queue, and nothing else. Not a second
@@ -69,7 +76,7 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
         var clear = scan.Rows.FirstOrDefault(r => r.Blocked is null);
         if (clear is null) return NoContent();
 
-        return await ResolveAsync(clear.Issue, scan.Statuses, scan.Loop, scan.Gate, ct);
+        return await ResolveAsync(clear.Issue, scan.Statuses, scan.Loop, scan.Gate, scan.Claims, ct);
     }
 
     /// <summary>
@@ -107,13 +114,16 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
         [FromQuery] string? ancestorKey = null,
         CancellationToken ct = default)
     {
-        var scan = await ScanAsync(offsetMinutes, ancestorKey, ct);
+        // No heldToken here, and deliberately: the queue is a report on what a
+        // pass would do, not a pass, and a caller reading it holds nothing.
+        var scan = await ScanAsync(offsetMinutes, ancestorKey, null, ct);
         if (scan.Failure is not null) return BadRequest(scan.Failure);
 
         // One projection for the whole list. The per-issue one would be three
         // queries a row, which is what makes a scan of a board a thing nobody
         // runs twice.
-        var issues = await IssueProjection.ToDtosAsync(db, scan.Rows.Select(r => r.Issue).ToList(), ct);
+        var issues = await IssueProjection.ToDtosAsync(
+            db, scan.Rows.Select(r => r.Issue).ToList(), claims, scan.Claims.Now, ct);
 
         return scan.Rows.Select(r => new QueueEntryDto(
             issues[r.Issue.Id],
@@ -135,7 +145,8 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// A board's worth of rows against a handful of queries, because a scan that
     /// cost a query a row would be a scan nobody leaves running.
     /// </remarks>
-    private async Task<Scan> ScanAsync(int offsetMinutes, string? ancestorKey, CancellationToken ct)
+    private async Task<Scan> ScanAsync(
+        int offsetMinutes, string? ancestorKey, Guid? heldToken, CancellationToken ct)
     {
         var statuses = await OrderedStatusesAsync(ct);
 
@@ -159,7 +170,13 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
             scope = await Rollup.DescendantIdsAsync(db, ancestorId.Value, ct);
         }
 
-        var loop = new LoopScope(DayNumber(time.GetUtcNow(), offsetMinutes), offsetMinutes);
+        var now = time.GetUtcNow();
+        var loop = new LoopScope(DayNumber(now, offsetMinutes), offsetMinutes);
+
+        // One instant for the whole pass. A scan in which the clock moved
+        // between two rows could fold one card and not its neighbour for a
+        // reason nobody could reconstruct afterwards.
+        var claimed = new ClaimGate(claims, now, heldToken);
 
         var gate = await DependencyGate.ForAsync(db, statuses, ct);
         var open = await Questions.OpenCountsAsync(db, ct);
@@ -198,11 +215,11 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
                 open.TryGetValue(issue.Id, out var waiting);
                 rows.Add(new ScanRow(
                     issue, status, to,
-                    Blocked(issue, status, to, playbook, waiting, loop, gate, implementation)));
+                    Blocked(issue, status, to, playbook, waiting, loop, gate, claimed, implementation)));
             }
         }
 
-        return new Scan(statuses, rows, loop, gate, null);
+        return new Scan(statuses, rows, loop, gate, claimed, null);
     }
 
     /// <summary>One issue the pass looked at, and what it decided.</summary>
@@ -213,9 +230,42 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// the sentence and nothing else; both endpoints turn it into the same 400.
     /// </summary>
     private sealed record Scan(
-        List<EfHatchStatus> Statuses, List<ScanRow> Rows, LoopScope? Loop, DependencyGate Gate, string? Failure)
+        List<EfHatchStatus> Statuses, List<ScanRow> Rows, LoopScope? Loop, DependencyGate Gate,
+        ClaimGate Claims, string? Failure)
     {
-        public static Scan Refused(string why) => new([], [], null, DependencyGate.None, why);
+        public static Scan Refused(string why) => new([], [], null, DependencyGate.None, ClaimGate.None, why);
+    }
+
+    /// <summary>
+    /// The claims on the board, judged against one instant - and the one token
+    /// whose own claim does not count as somebody else's.
+    /// </summary>
+    /// <remarks>
+    /// Built once per pass and once per named dispatch, out of rows the scan
+    /// already materialised: <c>ScanAsync</c> loads whole
+    /// <see cref="EfHatchIssue"/> entities, so the seven claim columns arrive
+    /// for free and this gate costs no query at all - unlike
+    /// <see cref="DependencyGate"/>, which is a table away.
+    /// </remarks>
+    private sealed record ClaimGate(IssueClaims? Claims, DateTimeOffset Now, Guid? HeldToken)
+    {
+        /// <summary>A gate that folds nothing, for a refused scan - so <c>Scan.Claims</c> is never null.</summary>
+        public static readonly ClaimGate None = new(null, default, null);
+
+        /// <summary>
+        /// The sentence naming who is working this right now, or null - which
+        /// is a dead claim, no claim at all, or a live one this caller holds
+        /// itself.
+        /// </summary>
+        public string? Held(EfHatchIssue issue)
+        {
+            if (Claims is null) return null;
+
+            var claim = ClaimSnapshot.Of(issue);
+            if (!Claims.IsLive(claim, Now)) return null;
+
+            return claim.Token == HeldToken ? null : Claims.Sentence(claim, Now);
+        }
     }
 
     /// <summary>
@@ -394,8 +444,15 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// returned rather than refused: a person who asked for <c>AER-12</c> is
     /// owed the sentence saying why it cannot move, not a 404.
     /// </summary>
+    /// <param name="heldToken">
+    /// A claim token the caller already holds - see <see cref="GetNextWork"/>.
+    /// A claim is a fact about the issue, so it folds a named dispatch too, and
+    /// this is what keeps a runner re-reading its own ticket from being refused
+    /// by its own lease.
+    /// </param>
     [HttpGet("{key}")]
-    public async Task<ActionResult<WorkDto>> GetWork(string key, CancellationToken ct)
+    public async Task<ActionResult<WorkDto>> GetWork(
+        string key, [FromQuery] Guid? heldToken = null, CancellationToken ct = default)
     {
         if (!IssueKey.TryParse(key, out var projectKey, out var number)) return NotFound();
 
@@ -408,7 +465,13 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
         // Its own gate rather than the scan's, because nothing scanned here -
         // built from the same rows and the same rule, so a named dispatch and a
         // pass cannot disagree about what an issue is waiting on.
-        return await ResolveAsync(issue, statuses, null, await DependencyGate.ForAsync(db, statuses, ct), ct);
+        return await ResolveAsync(
+            issue,
+            statuses,
+            null,
+            await DependencyGate.ForAsync(db, statuses, ct),
+            new ClaimGate(claims, time.GetUtcNow(), heldToken),
+            ct);
     }
 
     // ---- Resolution ----
@@ -427,8 +490,14 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// The unmet dependencies, for the same reason and with the same guarantee:
     /// the scan's own, so a row it called clear cannot come back blocked here.
     /// </param>
+    /// <param name="claimed">
+    /// Who holds what, and what this caller holds. Not the loop's policy: a
+    /// claim is a fact about the issue, so an issue somebody named by hand is
+    /// refused too.
+    /// </param>
     private async Task<WorkDto> ResolveAsync(
-        EfHatchIssue issue, List<EfHatchStatus> statuses, LoopScope? loop, DependencyGate gate, CancellationToken ct)
+        EfHatchIssue issue, List<EfHatchStatus> statuses, LoopScope? loop, DependencyGate gate,
+        ClaimGate claimed, CancellationToken ct)
     {
         var from = statuses.First(s => s.Id == issue.StatusId);
         var to = Advance(statuses, from);
@@ -440,6 +509,9 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
                 ProjectKey = i.Project!.Key,
                 i.Number, i.Type, i.Title, i.StatusId, i.Rank,
                 i.ReadyAt, i.ReadyAtHasTime, i.DueAt, i.DueAtHasTime,
+                Claim = new ClaimSnapshot(
+                    i.ClaimToken, i.ClaimedBy, i.ClaimRunner,
+                    i.ClaimedAt, i.ClaimHeartbeatAt, i.ClaimChatter, i.ClaimChatterAt),
             })
             .ToListAsync(ct);
 
@@ -452,7 +524,8 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
             c.Rank,
             IssueKey.Format(issue.Project!.Key, issue.Number),
             IssueMoment.Format(c.ReadyAt, c.ReadyAtHasTime),
-            IssueMoment.Format(c.DueAt, c.DueAtHasTime))).ToList();
+            IssueMoment.Format(c.DueAt, c.DueAtHasTime),
+            Claim: claims.Project(c.Claim, claimed.Now))).ToList();
 
         var playbook = to is null ? null : await MatchAsync(from.Id, to.Id, issue.Type, ct);
 
@@ -463,7 +536,7 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
         var waiting = questions.Count(q => q.Answers.Count == 0);
 
         return new WorkDto(
-            await IssueProjection.ToDtoAsync(db, issue, ct),
+            await IssueProjection.ToDtoAsync(db, issue, claims, claimed.Now, ct),
             ToStatusDto(from),
             to is null ? null : ToStatusDto(to),
             // The values the increment will actually run on, in place rather
@@ -482,7 +555,7 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
             },
             childCards,
             questions,
-            Blocked(issue, from, to, playbook, waiting, loop, gate, Implementation(statuses)));
+            Blocked(issue, from, to, playbook, waiting, loop, gate, claimed, Implementation(statuses)));
     }
 
     /// <summary>
@@ -493,12 +566,19 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// <remarks>
     /// <para>The order is what it costs to change the answer, most fundamental
     /// first: a terminal column, no column after this one, a terminal next
-    /// column, a ready date, an unanswered question, an unmet dependency, and
-    /// last a missing playbook. A column with nowhere an agent may go is a fact
+    /// column, a live claim, a ready date, an unanswered question, an unmet
+    /// dependency, and last a missing playbook. A column with nowhere an agent may go is a fact
     /// about the board and no argument alters it; a ready date needs time; a
     /// question needs a person; a dependency needs other work to land; and a
     /// missing playbook needs the operator, which is last because it is only
     /// worth saying about an issue that is otherwise a candidate.</para>
+    ///
+    /// <para>The claim sits above all of those and below the column checks, for
+    /// a different reason than the rest of the order. It is the only fold that
+    /// says <em>this is being worked right now</em>; everything after it is
+    /// about whether the issue could be worked at all. Printing "no playbook
+    /// covers this" about a ticket another runner is three minutes into is a
+    /// true sentence about the wrong thing.</para>
     ///
     /// <para>The issue's type is not in that list, and deliberately: which
     /// types a move applies to is the playbook row's to state, and a constant
@@ -529,6 +609,12 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
     /// dependency is a fact about the work, so an issue somebody named by hand
     /// is refused too, and somebody who disagrees removes the edge.
     /// </param>
+    /// <param name="claimed">
+    /// Who is holding this issue, and what the caller holds itself. Not the
+    /// loop's policy either, and for the same reason: a second agent sent at a
+    /// ticket somebody is mid-increment on is the failure the claim exists to
+    /// prevent, whoever asked for it.
+    /// </param>
     /// <param name="implementation">
     /// The column a dependency gates the move into, and the only one it gates.
     /// Everything left of it moves: an issue waiting on another still goes
@@ -544,6 +630,7 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
         int waiting,
         LoopScope? loop,
         DependencyGate gate,
+        ClaimGate claimed,
         EfHatchStatus? implementation)
     {
         if (from.IsTerminal)
@@ -554,6 +641,9 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
 
         if (to.IsTerminal)
             return $"the next column is \"{to.Name}\", and only the operator moves work there";
+
+        if (claimed.Held(issue) is { } holder)
+            return holder;
 
         if (loop is not null)
         {

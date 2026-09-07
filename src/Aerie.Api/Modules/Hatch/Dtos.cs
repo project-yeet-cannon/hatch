@@ -75,7 +75,30 @@ public record IssueCardDto(
     string? ParentKey,
     string? ReadyAt,
     string? DueAt,
-    int OpenQuestions = 0);
+    int OpenQuestions = 0,
+    IssueClaimDto? Claim = null);
+
+/// <summary>
+/// The lease a running dispatcher holds on an issue, or null where nothing
+/// holds it - see <see cref="EfHatchIssue.ClaimToken"/>. An expired claim
+/// projects as null rather than as a claim with an old heartbeat: the
+/// arithmetic is the server's, and a card drawing a holder that stopped
+/// existing four hours ago is worse than a card drawing nothing.
+/// </summary>
+/// <remarks>
+/// There is deliberately no token here. The token is a capability - it is what
+/// a heartbeat and a release present - and a board read that carried it would
+/// let anybody holding a board read steal or refresh a lease. What a client
+/// needs is who, from where, and how recently, which is all of this.
+/// </remarks>
+/// <param name="Chatter">A line the holder is carrying: what it is doing right now, or null if it has not said.</param>
+public record IssueClaimDto(
+    string ClaimedBy,
+    string Runner,
+    DateTimeOffset ClaimedAt,
+    DateTimeOffset HeartbeatAt,
+    string? Chatter,
+    DateTimeOffset? ChatterAt);
 
 /// <summary>One issue, whole - the detail page's payload.</summary>
 /// <param name="ChildKeys">Its stories, or its tasks. Keys rather than nested issues: the page links to them and does not draw them.</param>
@@ -127,7 +150,35 @@ public record IssueDto(
     string? EffortOverride,
     string CreatedBy,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    IssueClaimDto? Claim = null);
+
+/// <summary>Taking the lease: who is asking is the credential's to say, so the body names only where from.</summary>
+/// <param name="Runner">The checkout holding it - <c>host:/path/to/checkout</c>, as the runner names itself.</param>
+public record ClaimRequest(string Runner);
+
+/// <summary>
+/// A lease, just taken. The TTL rides back with it rather than being configured
+/// on both sides: the server is what honours it, so the server is what says
+/// what it is.
+/// </summary>
+/// <param name="Token">
+/// The capability. Presented by every heartbeat and by the release, and the
+/// only place it is ever handed out - it is on no read anywhere.
+/// </param>
+public record ClaimTakenDto(Guid Token, string ClaimedBy, DateTimeOffset ClaimedAt, int TtlSeconds);
+
+/// <summary>
+/// Still here. The token is the whole authorization; the line is optional and
+/// cosmetic.
+/// </summary>
+/// <param name="Chatter">
+/// What the holder is doing right now. Absent leaves whatever the claim was
+/// carrying alone, and <c>""</c> clears it. Trimmed to its first line and
+/// truncated rather than refused - a lease is not worth losing to a wide
+/// terminal.
+/// </param>
+public record ClaimHeartbeatRequest(Guid Token, string? Chatter);
 
 /// <summary>
 /// A new issue. It lands in the leftmost status and at the bottom of that

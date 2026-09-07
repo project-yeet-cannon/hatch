@@ -212,6 +212,20 @@ public class AdminSurfaceTests
         "IssueDependenciesController.AddDependency",
         "IssueDependenciesController.RemoveDependency",
 
+        // The lease on an issue, and the one place in the module where the
+        // scope is accepted *because* the caller is a machine: a mutex only an
+        // operator could operate would mutex nothing. All three carry the
+        // ordinary guard.
+        //
+        // The one narrowing is not expressible here. A DELETE with no token is
+        // the operator prising a ticket off whoever holds it, and that lane
+        // alone refuses an API key - checked in the action, because AdminGate
+        // is dormant wherever Auth:EnforceAdmin is off. See
+        // IssueClaimController.NotAPerson.
+        "IssueClaimController.TakeClaim",
+        "IssueClaimController.Heartbeat",
+        "IssueClaimController.ReleaseClaim",
+
         // A playbook's power routed through a different table, and cut the
         // same way: an issue's model and effort override every playbook that
         // could speak for it, so an agent that could set one could raise its

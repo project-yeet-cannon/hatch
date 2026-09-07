@@ -19,8 +19,9 @@ public static class IssueProjection
     /// issue and the scan that hands out a hundred should not be able to
     /// disagree about what an issue looks like.
     /// </summary>
-    public static async Task<IssueDto> ToDtoAsync(HatchContext db, EfHatchIssue issue, CancellationToken ct) =>
-        (await ToDtosAsync(db, [issue], ct))[issue.Id];
+    public static async Task<IssueDto> ToDtoAsync(
+        HatchContext db, EfHatchIssue issue, IssueClaims claims, DateTimeOffset now, CancellationToken ct) =>
+        (await ToDtosAsync(db, [issue], claims, now, ct))[issue.Id];
 
     /// <summary>
     /// A batch of issues, in a fixed number of queries rather than a fixed
@@ -34,8 +35,18 @@ public static class IssueProjection
     /// dispatcher would consider, and a per-row parent lookup would turn one
     /// answer into a few hundred round trips.
     /// </remarks>
+    /// <param name="claims">
+    /// The rule a claim is judged by. Passed in rather than held, because this
+    /// is a static and the alternative is every caller re-deriving whether a
+    /// lease is still alive.
+    /// </param>
+    /// <param name="now">
+    /// The instant the whole batch is judged against, so a scan cannot fold one
+    /// card and not its neighbour because the clock moved between them.
+    /// </param>
     public static async Task<Dictionary<long, IssueDto>> ToDtosAsync(
-        HatchContext db, IReadOnlyList<EfHatchIssue> issues, CancellationToken ct)
+        HatchContext db, IReadOnlyList<EfHatchIssue> issues, IssueClaims claims, DateTimeOffset now,
+        CancellationToken ct)
     {
         if (issues.Count == 0) return [];
 
@@ -115,7 +126,8 @@ public static class IssueProjection
                 issue.EffortOverride,
                 issue.CreatedBy,
                 issue.CreatedAt,
-                issue.UpdatedAt);
+                issue.UpdatedAt,
+                claims.Project(ClaimSnapshot.Of(issue), now));
         });
     }
 

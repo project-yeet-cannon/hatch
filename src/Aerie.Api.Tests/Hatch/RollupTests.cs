@@ -1,6 +1,7 @@
 using Aerie.Api.Modules.Hatch;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Aerie.Api.Tests.Hatch;
 
@@ -347,7 +348,7 @@ public class RollupTests
         return new Harness
         {
             Db = db,
-            Plan = new PlanController(db),
+            Plan = new PlanController(db, TestClaims.With(), new FakeTimeProvider(Now)),
             ProjectId = project.Id,
             Todo = todo.Id,
             InProgress = doing.Id,

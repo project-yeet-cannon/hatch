@@ -16,7 +16,7 @@ namespace Aerie.Api.Modules.Hatch;
 [ApiController]
 [Route("api/hatch/board")]
 [RequireAdmin(AcceptScope = ApiKeyScopes.Hatch)]
-public class BoardController(HatchContext db) : ControllerBase
+public class BoardController(HatchContext db, IssueClaims claims, TimeProvider time) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<BoardDto>> GetBoard(CancellationToken ct)
@@ -55,8 +55,15 @@ public class BoardController(HatchContext db) : ControllerBase
                 i.ReadyAtHasTime,
                 i.DueAt,
                 i.DueAtHasTime,
+                Claim = new ClaimSnapshot(
+                    i.ClaimToken, i.ClaimedBy, i.ClaimRunner,
+                    i.ClaimedAt, i.ClaimHeartbeatAt, i.ClaimChatter, i.ClaimChatterAt),
             })
             .ToListAsync(ct);
+
+        // One instant for the whole board, so two cards claimed a second apart
+        // are not judged against two different clocks.
+        var now = time.GetUtcNow();
 
         var cards = issues.Select(i => new IssueCardDto(
             IssueKey.Format(i.ProjectKey, i.Number),
@@ -68,7 +75,8 @@ public class BoardController(HatchContext db) : ControllerBase
             i.ParentNumber is { } number ? IssueKey.Format(i.ParentProjectKey!, number) : null,
             IssueMoment.Format(i.ReadyAt, i.ReadyAtHasTime),
             IssueMoment.Format(i.DueAt, i.DueAtHasTime),
-            waiting.GetValueOrDefault(i.Id))).ToList();
+            waiting.GetValueOrDefault(i.Id),
+            claims.Project(i.Claim, now))).ToList();
 
         return new BoardDto(statuses, cards);
     }

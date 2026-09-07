@@ -8,6 +8,43 @@ on:
 jobs:
   api:
     runs-on: ubuntu-latest
+    env:
+      # Hatch's claim (docs/hatch.md, "Claim") is built out of conditional
+      # UPDATEs, and its tests skip when this is unset - which keeps
+      # `make test-api` runnable on a laptop with no Postgres, and makes this
+      # variable the difference between the claim's guarantee being *asserted*
+      # here and merely being assertable. See
+      # src/Aerie.Api.Tests/Hatch/HatchDatabase.cs for why the tests demand an
+      # explicit database rather than discovering one: they drop what they
+      # connect to.
+      AERIE_TEST_DATABASE_URL: postgresql://aerie:aerie@localhost:5432/aerie_test
+    # A real Postgres, because the claim is a Postgres statement. Whether a
+    # conditional UPDATE matches one row or zero is what decides which of two
+    # runners holds a ticket, and EF's in-memory provider refuses the statement
+    # outright while SQLite cannot translate the DateTimeOffset comparison the
+    # expiry rule is. Either substitute would pass while the SQL was wrong,
+    # which is the one failure mode this service exists to prevent - the same
+    # argument the trading lane below makes about its queue.
+    #
+    # 18, matching the major the cluster runs. The minor floats, as it does
+    # there: this is a test service, not the cluster's data.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: aerie
+          POSTGRES_PASSWORD: aerie
+          POSTGRES_DB: aerie_test
+        ports:
+          - 5432:5432
+        # Without this the test step can start before the server accepts
+        # connections, which reads as a flaky suite rather than as a race in
+        # this file.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
