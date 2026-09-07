@@ -1,6 +1,7 @@
 import { NavLink, Route, Routes } from 'react-router-dom';
 import { TopBar } from '@aerie/ui';
 import './App.css';
+import { NavUtilization } from './components/NavUtilization';
 import { BoardPage } from './pages/BoardPage';
 import { PlanPage } from './pages/PlanPage';
 import { IssuePage } from './pages/IssuePage';
@@ -33,6 +34,12 @@ export function App() {
           <NavLink to="/statuses" className={navLinkClass}>Statuses</NavLink>
           <NavLink to="/playbooks" className={navLinkClass}>Playbooks</NavLink>
           <NavLink to="/import" className={navLinkClass}>Import</NavLink>
+
+          {/* Pushed to the right of the links by the auto margin in App.css.
+              It draws nothing at all on an installation with no Claude token,
+              which is most of them - so the strip is a row of links and no gap
+              where something used to be. */}
+          <NavUtilization />
         </div>
       </nav>
 
