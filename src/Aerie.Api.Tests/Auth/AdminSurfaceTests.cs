@@ -184,9 +184,15 @@ public class AdminSurfaceTests
         // action, because the only honest writer of a meter reading is the
         // dispatcher that read the meter. That check cannot live in the
         // attribute, which is dormant wherever Auth:EnforceAdmin is off. See
-        // WorkLogController.NotAKey.
-        "WorkLogController.GetWorkLog",
-        "WorkLogController.PostEntry",
+        // IssueWorkLogController.NotAKey.
+        "IssueWorkLogController.GetWorkLog",
+        "IssueWorkLogController.PostEntry",
+
+        // The same log read across issues, for the leaderboard's graph.
+        // Hatch-scoped like the module's other reads and, deliberately unlike
+        // the write above it, open to a person: reading what the nights cost is
+        // the whole point of the page.
+        "WorkLogController.GetHistory",
 
         // Playbooks are guarded twice over. Reading one is Hatch-scoped like
         // the rest; writing one names no scope at all, so an API key is

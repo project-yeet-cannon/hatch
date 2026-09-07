@@ -1,9 +1,7 @@
-using System.Reflection;
 using Aerie.Api.Common;
 using Aerie.Api.Ef;
 using Aerie.Api.Modules.Hatch;
 using Aerie.Api.Services.Auth;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
@@ -11,322 +9,244 @@ using Microsoft.Extensions.Time.Testing;
 namespace Aerie.Api.Tests.Hatch;
 
 /// <summary>
-/// The one verb that writes a meter reading: what it derives rather than
-/// accepts, what it does when the same session reports twice, and who it
-/// refuses.
+/// The work log read across issues: what a caller may ask for, what the server
+/// decides when they ask for nothing, and the six things it refuses in a
+/// sentence.
 /// </summary>
 public class WorkLogControllerTests
 {
-    // ---- Writing a row ----
+    // ---- Choosing what to look at ----
 
     [Fact]
-    public async Task ASession_LeavesARowCarryingEverythingItReported()
+    public async Task NoRangeAtAll_IsTheFourteenDaysEndingNow()
     {
         var h = await NewAsync();
-        var issue = await h.FileAsync();
 
-        var entry = await h.PostAsync(issue.Key, Reported() with
-        {
-            Title = "Wired the battery into the nav",
-            Summary = "Read the account's headroom server-side and drew the ring.",
-            Turns = 41,
-            DurationMs = 842_000,
-            CostUsd = 3.41m,
-        });
+        var history = await h.HistoryAsync();
 
-        Assert.Equal(Session, entry.SessionId);
-        Assert.Equal("Wired the battery into the nav", entry.Title);
-        Assert.Equal(842_000, entry.DurationMs);
-        Assert.Equal(41, entry.Turns);
-        Assert.Equal(3.41m, entry.CostUsd);
-        Assert.False(entry.IsError);
-        Assert.True(entry.Described);
-
-        // Wall clock either side of the CLI, kept as sent rather than reconciled
-        // with the duration the session reported.
-        Assert.Equal(Started, entry.StartedAt);
-        Assert.Equal(Ended, entry.EndedAt);
+        // Fourteen days back from Now, snapped outward onto whole days - so the
+        // range, the buckets and the totals describe one window.
+        Assert.Equal("day", history.Bucket);
+        Assert.Equal(new DateTimeOffset(2026, 8, 24, 0, 0, 0, TimeSpan.Zero), history.From);
+        Assert.Equal(new DateTimeOffset(2026, 9, 8, 0, 0, 0, TimeSpan.Zero), history.To);
+        Assert.Equal(15, history.Buckets.Count);
+        Assert.Equal(history.From, history.Buckets[0].Start);
+        Assert.Equal(history.To, history.Buckets[^1].End);
     }
 
     [Fact]
-    public async Task TheFourCounts_AreTheSumOfTheBreakdownAndNotSentByTheCaller()
+    public async Task OneBoundOnItsOwn_GetsTheOthersDefault()
     {
         var h = await NewAsync();
-        var issue = await h.FileAsync();
 
-        var entry = await h.PostAsync(issue.Key, Reported() with
-        {
-            Models =
-            [
-                new WorkLogModelUseDto("claude-opus-5", 900, 280, 3_200, 59_000, 0.0140m),
-                new WorkLogModelUseDto("claude-haiku-4-5", 47, 1, 14, 57, 0.0006m),
-            ],
-        });
+        var since = await h.HistoryAsync(from: "2026-09-06T03:00:00Z");
+        var until = await h.HistoryAsync(to: "2026-09-06T03:00:00Z");
 
-        Assert.Equal(947, entry.InputTokens);
-        Assert.Equal(281, entry.OutputTokens);
-        Assert.Equal(3_214, entry.CacheCreationTokens);
-        Assert.Equal(59_057, entry.CacheReadTokens);
-
-        // Carried rather than left for the client, so the headline figure has
-        // one definition - and equal to the breakdown by construction.
-        Assert.Equal(947 + 281 + 3_214 + 59_057, entry.TotalTokens);
-
-        Assert.Equal(["claude-opus-5", "claude-haiku-4-5"], entry.Models.Select(m => m.Model));
-        Assert.Equal(0.0140m, entry.Models[0].CostUsd);
+        // Named `from`, so `to` is now; named `to`, so `from` is fourteen days
+        // before it. Neither is a refusal.
+        Assert.Equal(new DateTimeOffset(2026, 9, 7, 3, 0, 0, TimeSpan.Zero), since.Buckets[^1].End);
+        Assert.Equal(new DateTimeOffset(2026, 8, 23, 0, 0, 0, TimeSpan.Zero), until.From);
     }
 
     [Fact]
-    public async Task ARunThatDiedBeforeTheAccountingArrived_StillGetsItsRow()
+    public async Task AnAbsentBucket_IsHourlyUpToTwoDaysAndDailyPastIt()
     {
         var h = await NewAsync();
-        var issue = await h.FileAsync();
 
-        var entry = await h.PostAsync(issue.Key, Reported() with
-        {
-            Models = null,
-            IsError = true,
-            CostUsd = 0.0012m,
-        });
+        var day = await h.HistoryAsync(from: "2026-09-06T03:00:00Z", to: "2026-09-07T03:00:00Z");
+        var month = await h.HistoryAsync(from: "2026-08-08T03:00:00Z", to: "2026-09-07T03:00:00Z");
 
-        // Zero tokens and whatever it cost: a session that ended badly still had
-        // an id and still cost something, and losing that would be the wrong
-        // trade.
-        Assert.Equal(0, entry.TotalTokens);
-        Assert.Empty(entry.Models);
-        Assert.Equal(0.0012m, entry.CostUsd);
-        Assert.True(entry.IsError);
+        // Named back in the answer, so a client labels its axis from what the
+        // server did rather than from what it asked for.
+        Assert.Equal("hour", day.Bucket);
+        Assert.Equal(24, day.Buckets.Count);
+        Assert.Equal("day", month.Bucket);
     }
 
     [Fact]
-    public async Task ASessionThatNeverSaidWhatItDid_IsMarkedUndescribed()
+    public async Task AnExplicitBucket_IsHonouredInEitherCase()
     {
         var h = await NewAsync();
-        var issue = await h.FileAsync();
 
-        var entry = await h.PostAsync(issue.Key, Reported() with { Title = "   ", Summary = null });
+        var shouted = await h.HistoryAsync(from: "2026-09-06T03:00:00Z", to: "2026-09-07T03:00:00Z", bucket: "HOUR");
+        var daily = await h.HistoryAsync(from: "2026-09-06T03:00:00Z", to: "2026-09-07T03:00:00Z", bucket: " Day ");
 
-        // On the wire, not inferred by a client from an empty title.
-        Assert.False(entry.Described);
-        Assert.Null(entry.Title);
-        Assert.Null(entry.Summary);
-
-        // And its metrics are intact, which is the whole reason the row exists.
-        Assert.Equal(Session, entry.SessionId);
-        Assert.Equal(4_888, entry.DurationMs);
+        Assert.Equal("hour", shouted.Bucket);
+        Assert.Equal("day", daily.Bucket);
     }
 
     [Fact]
-    public async Task ATitleOrSummaryOnItsOwn_IsEnoughToCountAsDescribed()
+    public async Task AnOffset_MovesTheDailyGridToTheReadersMidnight()
     {
         var h = await NewAsync();
-        var issue = await h.FileAsync();
 
-        Assert.True((await h.PostAsync(issue.Key, Reported() with { Title = "did a thing", Summary = null })).Described);
-        Assert.True((await h.PostAsync(issue.Key, Reported("other") with { Title = null, Summary = "did a thing" })).Described);
+        var history = await h.HistoryAsync(
+            from: "2026-09-01T12:00:00Z", to: "2026-09-04T12:00:00Z", bucket: "day", offsetMinutes: -300);
+
+        // Midnight five hours west, not UTC midnight: an overnight run split
+        // across UTC midnight is two half-nights nobody worked.
+        Assert.Equal(new DateTimeOffset(2026, 9, 1, 5, 0, 0, TimeSpan.Zero), history.From);
+        Assert.All(history.Buckets, b => Assert.Equal(5, b.Start.UtcDateTime.Hour));
     }
 
-    [Fact]
-    public async Task OverLongText_IsClippedRatherThanRefused()
-    {
-        var h = await NewAsync();
-        var issue = await h.FileAsync();
-
-        var entry = await h.PostAsync(issue.Key, Reported() with
-        {
-            Title = new string('t', EfHatchWorkLogEntry.MaxTitleLength + 40),
-            Summary = new string('s', EfHatchWorkLogEntry.MaxSummaryLength + 400),
-        });
-
-        // The hundred words are an instruction to the session, not a validation
-        // on the row: refusing a long summary would lose an evening's spend to a
-        // style note.
-        Assert.Equal(EfHatchWorkLogEntry.MaxTitleLength, entry.Title!.Length);
-        Assert.Equal(EfHatchWorkLogEntry.MaxSummaryLength, entry.Summary!.Length);
-        Assert.True(entry.Described);
-    }
-
-    // ---- Reporting twice ----
+    // ---- Narrowing to one project ----
 
     [Fact]
-    public async Task TheSameSessionPostedTwice_LeavesOneEntryAndSucceedsBothTimes()
-    {
-        var h = await NewAsync();
-        var issue = await h.FileAsync();
-
-        var first = await h.PostAsync(issue.Key, Reported() with { Title = "first go", Turns = 3 });
-        var second = await h.PostAsync(issue.Key, Reported() with { Title = "second go", Turns = 9 });
-
-        Assert.Equal(first.Id, second.Id);
-        Assert.Equal("second go", second.Title);
-        Assert.Equal(9, second.Turns);
-        Assert.Single(await h.RowsAsync(issue.Key));
-    }
-
-    [Fact]
-    public async Task TwoSessionsOnOneIssue_AreTwoEntries()
-    {
-        var h = await NewAsync();
-        var issue = await h.FileAsync();
-
-        await h.PostAsync(issue.Key, Reported());
-        await h.PostAsync(issue.Key, Reported("a-second-session"));
-
-        Assert.Equal(2, (await h.RowsAsync(issue.Key)).Count);
-    }
-
-    [Fact]
-    public async Task OneSessionAcrossTwoIssues_IsARowOnEach()
-    {
-        var h = await NewAsync();
-        var one = await h.FileAsync(title: "one");
-        var two = await h.FileAsync(title: "two");
-
-        // Uniqueness is per issue and not per session: an interrupted run
-        // resumed against a second ticket spent money on both.
-        await h.PostAsync(one.Key, Reported());
-        await h.PostAsync(two.Key, Reported());
-
-        Assert.Single(await h.RowsAsync(one.Key));
-        Assert.Single(await h.RowsAsync(two.Key));
-    }
-
-    // ---- Reading it back ----
-
-    [Fact]
-    public async Task TheLog_ComesBackNewestFirst()
-    {
-        var h = await NewAsync();
-        var issue = await h.FileAsync();
-
-        await h.PostAsync(issue.Key, Reported("first") with { EndedAt = Ended.AddHours(-3), Title = "earlier" });
-        await h.PostAsync(issue.Key, Reported("second") with { EndedAt = Ended, Title = "later" });
-
-        var log = await h.ReadAsync(issue.Key);
-
-        // The question a work log gets asked is "what did this cost last night".
-        Assert.Equal(["later", "earlier"], log.Entries.Select(e => e.Title));
-        Assert.Equal(issue.Key, log.Key);
-    }
-
-    [Fact]
-    public async Task EntriesAreTheIssuesOwnAndTotalsAreTheSubtrees()
+    public async Task AnAncestorKey_FiltersToThatIssueAndEverythingBeneathIt()
     {
         var h = await NewAsync();
         var epic = await h.FileAsync("epic", "the effort");
         var story = await h.FileAsync("story", "under it", parentKey: epic.Key);
+        var elsewhere = await h.FileAsync("epic", "another effort");
 
-        await h.PostAsync(epic.Key, Reported("planning") with { CostUsd = 1m });
-        await h.PostAsync(story.Key, Reported("building") with { CostUsd = 4m });
+        await h.SpendAsync(epic, 1_000, Now.AddHours(-2));
+        await h.SpendAsync(story, 20_000, Now.AddHours(-1));
+        await h.SpendAsync(elsewhere, 7_000_000, Now.AddHours(-1));
 
-        var log = await h.ReadAsync(epic.Key);
+        var scoped = await h.HistoryAsync(ancestorKey: epic.Key);
+        var whole = await h.HistoryAsync();
 
-        // The asymmetry the page exists to say out loud, on the wire: one
-        // session of its own, two beneath it.
-        Assert.Single(log.Entries);
-        Assert.Equal(1, log.Own.Sessions);
-        Assert.Equal(2, log.Totals.Sessions);
-        Assert.Equal(5m, log.Totals.CostUsd);
-        Assert.Equal(1m, log.Own.CostUsd);
+        // The named issue's own sessions are in it: a planning session run
+        // against the epic is money no child holds.
+        Assert.Equal(2, scoped.Totals.Sessions);
+        Assert.Equal(21_000, scoped.Totals.TotalTokens);
+        Assert.Equal(3, whole.Totals.Sessions);
     }
 
     [Fact]
-    public async Task AnIssueWithNoSessionsAnywhere_ReadsAsEmptyRatherThanFailing()
+    public async Task AnAncestorKeyNamingNothing_IsRefusedRatherThanAnsweredAsEmpty()
+    {
+        var h = await NewAsync();
+
+        Assert.Equal("there is no AER-999", await h.RefusalAsync(ancestorKey: "AER-999"));
+        Assert.Equal("there is no nonsense", await h.RefusalAsync(ancestorKey: "nonsense"));
+    }
+
+    // ---- When there is nothing yet ----
+
+    [Fact]
+    public async Task AnEmptyLog_IsZeroedBucketsAndNoBounds()
+    {
+        var h = await NewAsync();
+
+        var history = await h.HistoryAsync(from: "2026-09-06T00:00:00Z", to: "2026-09-07T00:00:00Z");
+
+        // The ordinary state on the first day, not a fault.
+        Assert.Equal(24, history.Buckets.Count);
+        Assert.All(history.Buckets, b => Assert.Equal(0, b.Totals.Sessions));
+        Assert.Null(history.FirstSessionAt);
+        Assert.Null(history.LastSessionAt);
+    }
+
+    [Fact]
+    public async Task ARangeBeforeTheFirstSession_AnswersWithTheBoundsStillFilledIn()
     {
         var h = await NewAsync();
         var issue = await h.FileAsync();
 
-        var log = await h.ReadAsync(issue.Key);
+        var ended = Now.AddHours(-1);
+        await h.SpendAsync(issue, 1_000, ended);
 
-        Assert.Empty(log.Entries);
-        Assert.Equal(0, log.Totals.Sessions);
-        Assert.Equal(0, log.Totals.TotalTokens);
+        var history = await h.HistoryAsync(from: "2026-01-01T00:00:00Z", to: "2026-01-03T00:00:00Z");
+
+        // "Nothing ran in the range you asked for" and "nothing has ever run"
+        // are different answers, and a page needs to tell them apart.
+        Assert.Equal(0, history.Totals.Sessions);
+        Assert.Equal(ended, history.FirstSessionAt);
+        Assert.Equal(ended, history.LastSessionAt);
     }
 
+    // ---- Spend over time ----
+
     [Fact]
-    public async Task ThePerModelBreakdown_SurvivesTheRoundTrip()
+    public async Task TheBuckets_ComeBackOldestFirstAndAddUpToTheTotals()
     {
         var h = await NewAsync();
         var issue = await h.FileAsync();
 
-        await h.PostAsync(issue.Key, Reported() with
-        {
-            Models =
-            [
-                new WorkLogModelUseDto("claude-opus-5", 900, 280, 3_200, 59_000, 0.0140m),
-                new WorkLogModelUseDto("claude-haiku-4-5", 47, 1, 14, 57, 0.0006m),
-            ],
-        });
+        await h.SpendAsync(issue, 1_000, new DateTimeOffset(2026, 9, 7, 0, 30, 0, TimeSpan.Zero), usd: 0.10m);
+        await h.SpendAsync(issue, 20_000, new DateTimeOffset(2026, 9, 7, 2, 15, 0, TimeSpan.Zero), usd: 2.00m);
+        await h.SpendAsync(issue, 300_000, new DateTimeOffset(2026, 9, 7, 2, 45, 0, TimeSpan.Zero), usd: 30.00m, isError: true);
 
-        var entry = (await h.ReadAsync(issue.Key)).Entries.Single();
+        var history = await h.HistoryAsync(from: "2026-09-07T00:00:00Z", to: "2026-09-07T03:00:00Z");
 
-        Assert.Equal(["claude-opus-5", "claude-haiku-4-5"], entry.Models.Select(m => m.Model));
-        Assert.Equal(59_000, entry.Models[0].CacheReadTokens);
-        Assert.Equal(entry.TotalTokens, entry.Models.Sum(m => m.InputTokens + m.OutputTokens + m.CacheCreationTokens + m.CacheReadTokens));
-    }
+        Assert.Equal(
+            history.Buckets.Select(b => b.Start).OrderBy(s => s),
+            history.Buckets.Select(b => b.Start));
 
-    [Fact]
-    public async Task ThePerson_MayReadTheLogEvenThoughOnlyAKeyMayWriteIt()
-    {
-        var h = await NewAsync();
-        var issue = await h.FileAsync();
-        await h.PostAsync(issue.Key, Reported());
-
-        h.Caller.Key = null;
-
-        // Reading is the whole point of the page. It is writing that is closed.
-        Assert.Single((await h.ReadAsync(issue.Key)).Entries);
-    }
-
-    [Fact]
-    public async Task ReadingAnIssueThatDoesNotExist_IsNotFound()
-    {
-        var h = await NewAsync();
-
-        Assert.IsType<NotFoundResult>((await h.WorkLog.GetWorkLog("AER-404", default)).Result);
-        Assert.IsType<NotFoundResult>((await h.WorkLog.GetWorkLog("nonsense", default)).Result);
+        Assert.Equal([1, 0, 2], history.Buckets.Select(b => b.Totals.Sessions));
+        Assert.Equal(3, history.Totals.Sessions);
+        Assert.Equal(1, history.Totals.Errors);
+        Assert.Equal(321_000, history.Totals.TotalTokens);
+        Assert.Equal(32.10m, history.Totals.CostUsd);
+        Assert.Equal(history.Totals.CostUsd, history.Buckets.Sum(b => b.Totals.CostUsd));
     }
 
     // ---- What it refuses ----
 
     [Fact]
-    public async Task AnIssueThatDoesNotExist_IsNotFoundAndNothingIsWritten()
+    public async Task AnUnknownBucket_IsRefusedWithTheSentence()
     {
         var h = await NewAsync();
 
-        Assert.IsType<NotFoundResult>((await h.WorkLog.PostEntry("AER-404", Reported(), default)).Result);
-        Assert.IsType<NotFoundResult>((await h.WorkLog.PostEntry("nonsense", Reported(), default)).Result);
-        Assert.Empty(h.Db.WorkLog);
+        Assert.Equal("a bucket is hour or day - not \"week\"", await h.RefusalAsync(bucket: "week"));
     }
 
     [Fact]
-    public async Task ABrowserSession_CannotWriteAnEntryWhateverTheAdminGateSays()
+    public async Task AnUnparseableBound_IsRefusedInTheHousesOwnWords()
     {
         var h = await NewAsync();
-        var issue = await h.FileAsync();
 
-        // A person, not a key. RequireAdmin would let this through - it accepts
-        // both - and the check in the action is what makes the guarantee hold
-        // where Auth:EnforceAdmin is off.
-        h.Caller.Key = null;
-
-        var refused = Assert.IsType<ObjectResult>((await h.WorkLog.PostEntry(issue.Key, Reported(), default)).Result);
-        Assert.Equal(StatusCodes.Status403Forbidden, refused.StatusCode);
-        Assert.Empty(h.Db.WorkLog);
+        Assert.Equal(
+            "a range bound is an instant (2026-09-12T17:00:00Z) - not \"last tuesday\"",
+            await h.RefusalAsync(from: "last tuesday"));
+        Assert.Equal(
+            "a range bound is an instant (2026-09-12T17:00:00Z) - not \"09/12/2026\"",
+            await h.RefusalAsync(to: "09/12/2026"));
     }
 
     [Fact]
-    public async Task ARowWithoutASession_IsRefused()
+    public async Task AnInvertedRange_IsRefusedAndAnEmptyOneIsOneBucket()
+    {
+        var h = await NewAsync();
+
+        Assert.Equal(
+            "a range ends before it begins",
+            await h.RefusalAsync(from: "2026-09-07T03:00:00Z", to: "2026-09-06T03:00:00Z"));
+
+        // Equal is legal: one bucket rather than none.
+        var single = await h.HistoryAsync(from: "2026-09-07T03:00:00Z", to: "2026-09-07T03:00:00Z");
+        Assert.Single(single.Buckets);
+    }
+
+    [Fact]
+    public async Task TooManyBuckets_IsRefusedBeforeAnythingIsScanned()
     {
         var h = await NewAsync();
         var issue = await h.FileAsync();
+        await h.SpendAsync(issue, 1_000, Now.AddHours(-1));
 
-        var refused = Assert.IsType<BadRequestObjectResult>(
-            (await h.WorkLog.PostEntry(issue.Key, Reported(" "), default)).Result);
+        var refusal = await h.RefusalAsync(from: "2026-06-01T00:00:00Z", to: "2026-09-07T00:00:00Z", bucket: "hour");
 
-        Assert.Equal("a work log entry needs the session it is about", refused.Value);
-        Assert.Empty(h.Db.WorkLog);
+        Assert.Contains("1000", refusal);
+        Assert.Contains("ask for daily buckets, or a shorter range", refusal);
+
+        // Untouched: "how far back does this go" is a question the answer should
+        // settle rather than a licence to scan the table.
+        Assert.Single(h.Db.WorkLog);
     }
+
+    [Fact]
+    public async Task AnOffsetThatIsNotAnOffset_IsRefused()
+    {
+        var h = await NewAsync();
+
+        Assert.Equal(
+            "an offset from UTC is minutes between -1440 and 1440 - not 9999",
+            await h.RefusalAsync(offsetMinutes: 9999));
+    }
+
+    // ---- Who may read it ----
 
     [Fact]
     public void TheRoute_AcceptsTheHatchScope()
@@ -339,58 +259,67 @@ public class WorkLogControllerTests
         Assert.Equal(ApiKeyScopes.Hatch, guard.AcceptScope);
     }
 
-    // ---- The trail it deliberately does not write ----
-
-    [Fact]
-    public async Task AnEntry_WritesNothingToTheAuditTrail()
-    {
-        var h = await NewAsync();
-        var issue = await h.FileAsync();
-        var before = h.Db.IssueEvents.Count();
-
-        await h.PostAsync(issue.Key, Reported());
-
-        // The trail records what people and agents decided; a meter reading is
-        // not a decision, and doubling it there would say nothing the row does
-        // not.
-        Assert.Equal(before, h.Db.IssueEvents.Count());
-    }
-
     // ---- Harness ----
 
     private static readonly DateTimeOffset Now = new(2026, 9, 7, 3, 0, 0, TimeSpan.Zero);
-    private static readonly DateTimeOffset Started = new(2026, 9, 7, 2, 40, 0, TimeSpan.Zero);
-    private static readonly DateTimeOffset Ended = new(2026, 9, 7, 2, 54, 0, TimeSpan.Zero);
-
-    private const string Session = "3d1abf4f-0000-4000-8000-000000000001";
-
-    /// <summary>A plain, successful, described session - the shape every test starts from.</summary>
-    private static WorkLogEntryRequest Reported(string sessionId = Session) => new(
-        sessionId, Started, Ended, 4_888, "did the thing", "and here is how", false, 3, 0.0146857m,
-        [new WorkLogModelUseDto("claude-opus-5", 947, 281, 3_214, 59_057, 0.0146857m)]);
 
     private sealed class Harness
     {
-        public required WorkLogController WorkLog { get; init; }
+        public required WorkLogController History { get; init; }
+
         public required IssuesController Issues { get; init; }
+
         public required HatchContext Db { get; init; }
-        public required StubCallerIdentity Caller { get; init; }
+
         public required int ProjectId { get; init; }
 
         public async Task<IssueDto> FileAsync(string type = "task", string title = "a thing", string? parentKey = null) =>
             Created(await Issues.CreateIssue(
                 new IssueCreateRequest(ProjectId, type, title, null, parentKey, null, null), default));
 
-        public async Task<WorkLogEntryDto> PostAsync(string key, WorkLogEntryRequest request) =>
-            Value(await WorkLog.PostEntry(key, request, default));
-
-        public async Task<WorkLogDto> ReadAsync(string key) => Value(await WorkLog.GetWorkLog(key, default));
-
-        public async Task<IReadOnlyList<EfHatchWorkLogEntry>> RowsAsync(string key)
+        /// <summary>
+        /// A row straight into the context rather than through the writer, so
+        /// the test chooses when the session ended.
+        /// </summary>
+        public async Task SpendAsync(
+            IssueDto issue, long tokens, DateTimeOffset endedAt, decimal usd = 0m, bool isError = false)
         {
-            IssueKey.TryParse(key, out var projectKey, out var number);
+            IssueKey.TryParse(issue.Key, out var projectKey, out var number);
             var issueId = await Db.Issues.AsNoTracking().WithKey(projectKey, number).Select(i => i.Id).FirstAsync();
-            return await Db.WorkLog.AsNoTracking().Where(w => w.IssueId == issueId).ToListAsync();
+
+            Db.WorkLog.Add(new EfHatchWorkLogEntry
+            {
+                IssueId = issueId,
+                SessionId = $"session-{Db.WorkLog.Local.Count}-{issueId}-{tokens}",
+                StartedAt = endedAt,
+                EndedAt = endedAt,
+                DurationMs = 1_000,
+                IsError = isError,
+                Turns = 1,
+                CostUsd = usd,
+                InputTokens = tokens,
+                CreatedAt = Now,
+            });
+            await Db.SaveChangesAsync();
+        }
+
+        public async Task<WorkLogHistoryDto> HistoryAsync(
+            string? from = null,
+            string? to = null,
+            string? bucket = null,
+            int offsetMinutes = 0,
+            string? ancestorKey = null) =>
+            Value(await History.GetHistory(from, to, bucket, offsetMinutes, ancestorKey, default));
+
+        public async Task<string> RefusalAsync(
+            string? from = null,
+            string? to = null,
+            string? bucket = null,
+            int offsetMinutes = 0,
+            string? ancestorKey = null)
+        {
+            var result = await History.GetHistory(from, to, bucket, offsetMinutes, ancestorKey, default);
+            return Assert.IsType<BadRequestObjectResult>(result.Result).Value?.ToString() ?? "";
         }
     }
 
@@ -406,11 +335,8 @@ public class WorkLogControllerTests
 
         var time = new FakeTimeProvider(Now);
 
-        // The dispatcher, holding the operator's key. Every test that is not
-        // about the refusal runs as one.
         var caller = new StubCallerIdentity
         {
-            Person = new EfPerson { Name = "Nathan", CreatedAt = Now, UpdatedAt = Now },
             Key = new EfApiKey
             {
                 Name = "hatch",
@@ -423,15 +349,14 @@ public class WorkLogControllerTests
 
         return new Harness
         {
-            WorkLog = new WorkLogController(db, time, caller),
+            History = new WorkLogController(db, time),
             Issues = new IssuesController(db, new RankService(db), caller, time),
             Db = db,
-            Caller = caller,
             ProjectId = aerie.Id,
         };
     }
 
-    /// <summary>Whoever the test says is holding the phone - see IssueDependenciesControllerTests.</summary>
+    /// <summary>Whoever the test says is holding the phone - see IssueWorkLogControllerTests.</summary>
     private sealed class StubCallerIdentity : ICallerIdentity
     {
         public EfPerson? Person { get; set; }

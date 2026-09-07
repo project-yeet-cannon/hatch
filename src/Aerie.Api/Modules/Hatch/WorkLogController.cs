@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Aerie.Api.Common;
 using Aerie.Api.Ef;
 using Aerie.Api.Services.Auth;
@@ -8,224 +7,158 @@ using Microsoft.EntityFrameworkCore;
 namespace Aerie.Api.Modules.Hatch;
 
 /// <summary>
-/// What each ticket actually cost: one row per agent session, written by the
-/// dispatcher at the end of every unattended increment and read back on the
-/// issue page.
+/// The work log read across issues rather than about one: what the nights cost,
+/// and on what.
 ///
-/// The dispatcher is the only thing in the system that knows which ticket a
-/// session's spend was for - account-wide utilization is honest but anonymous -
-/// so this is where that knowledge is kept. See
-/// <see cref="EfHatchWorkLogEntry"/> for what a row holds and why.
+/// A controller of its own because it is the first read of the log that is not
+/// about a single ticket - <see cref="IssueWorkLogController"/> sits at
+/// <c>api/hatch/issues/{key}/work-log</c> and answers for one issue. The
+/// leaderboard's reads live here together, so they parse a range and an ancestor
+/// filter once between them.
 /// </summary>
 /// <remarks>
-/// Nothing here writes an <see cref="EfHatchIssueEvent"/>, and that is
-/// deliberate. The trail is a record of what people and agents <em>decided</em>;
-/// a work log row is the meter reading, and doubling it into the trail would put
-/// a line on every ticket's history saying nothing the row does not.
+/// No <c>ICallerIdentity</c> and no <c>NotAKey</c>: these are reads, and reads in
+/// this module are open to an administrator and to a <c>hatch</c> key alike. The
+/// third cut the write is given is about who may report a meter reading, which
+/// has nothing to say here.
+///
+/// There is no Claude credential anywhere in this path either. A leaderboard on
+/// an installation with no subscription token is the whole leaderboard rather
+/// than a reduced one, because the work log is Hatch's own record and owes
+/// nothing to an outside API.
 /// </remarks>
 [ApiController]
-[Route("api/hatch/issues/{key}/work-log")]
+[Route("api/hatch/work-log")]
 [RequireAdmin(AcceptScope = ApiKeyScopes.Hatch)]
-public class WorkLogController(HatchContext db, TimeProvider time, ICallerIdentity caller) : ControllerBase
+public class WorkLogController(HatchContext db, TimeProvider time) : ControllerBase
 {
     /// <summary>
-    /// Record what one session cost on this issue.
+    /// How many buckets one answer will draw, past which the request is a scan
+    /// rather than a graph. Hourly that is 41 days; daily, 2.7 years.
+    /// </summary>
+    public const int MaxBuckets = 1000;
+
+    /// <summary>What a caller who named no range gets: enough nights to see a shape.</summary>
+    private static readonly TimeSpan DefaultRange = TimeSpan.FromDays(14);
+
+    /// <summary>The range up to which an unnamed bucket size is hourly.</summary>
+    private static readonly TimeSpan HourlyUpTo = TimeSpan.FromHours(48);
+
+    /// <summary>
+    /// Spend over time: what the work log recorded across a range, in equal
+    /// buckets.
     /// </summary>
     /// <remarks>
-    /// Idempotent by <c>(issue, session)</c>: the row is read first and updated
-    /// in place when it is there, inserted when it is not, and the answer is a
-    /// <c>200</c> either way rather than a <c>409</c>. The unique index is the
-    /// backstop and not the mechanism - EF's in-memory provider does not enforce
-    /// one, and the caller is a shell script at the end of a run that can be
-    /// re-run.
+    /// Every parameter is optional and every absence has an answer rather than a
+    /// refusal. The range defaults to the fourteen days ending now; the bucket
+    /// size is chosen from the length of the range and <em>named back in the
+    /// answer</em>, so a client labels its axis from what the server did rather
+    /// than from what it asked for.
+    ///
+    /// Two things that look like errors and are not: an installation where
+    /// nothing has ever run answers a full run of zeroed buckets, because that
+    /// is the ordinary state on the first day; and a range reaching back before
+    /// the first logged session answers with what exists.
+    ///
+    /// The bounds arrive as strings and are parsed with
+    /// <see cref="IssueMoment.TryParse"/> rather than model-bound as
+    /// <c>DateTimeOffset?</c>, so a value written without an offset is read as
+    /// UTC instead of in whatever zone the server happens to sit in - the rule
+    /// the module already states for ready and due dates.
     /// </remarks>
-    [HttpPost]
-    public async Task<ActionResult<WorkLogEntryDto>> PostEntry(
-        string key, WorkLogEntryRequest request, CancellationToken ct)
+    /// <param name="offsetMinutes">
+    /// Minutes east of UTC, so local is UTC plus this. It aligns daily buckets to
+    /// the reader's midnight; an overnight run split across UTC midnight is two
+    /// half-nights nobody worked.
+    /// </param>
+    /// <param name="ancestorKey">
+    /// One issue and everything beneath it, <b>that issue included</b> - which is
+    /// deliberately not how the same parameter reads on
+    /// <c>GET /api/hatch/issues</c>. A planning session run against an epic is
+    /// money no child holds, and a graph that dropped it would disagree with the
+    /// meter on the issue page.
+    /// </param>
+    [HttpGet("history")]
+    public async Task<ActionResult<WorkLogHistoryDto>> GetHistory(
+        [FromQuery] string? from,
+        [FromQuery] string? to,
+        [FromQuery] string? bucket,
+        [FromQuery] int offsetMinutes = 0,
+        [FromQuery] string? ancestorKey = null,
+        CancellationToken ct = default)
     {
-        // A key, not merely an administrator - see NotAKey.
-        if (await NotAKey(ct) is { } refusal) return refusal;
+        if (offsetMinutes is < -1440 or > 1440)
+            return BadRequest($"an offset from UTC is minutes between -1440 and 1440 - not {offsetMinutes}");
 
-        if (!IssueKey.TryParse(key, out var projectKey, out var number)) return NotFound();
+        if (!Bound(to, time.GetUtcNow(), out var end)) return BadRequest(NotAnInstant(to));
+        if (!Bound(from, end - DefaultRange, out var start)) return BadRequest(NotAnInstant(from));
 
-        var issueId = await db.Issues.WithKey(projectKey, number)
-            .Select(i => (long?)i.Id)
-            .FirstOrDefaultAsync(ct);
-        if (issueId is null) return NotFound();
+        // Equal is legal and is one bucket. Inverted is not a range at all.
+        if (start > end) return BadRequest("a range ends before it begins");
 
-        var sessionId = request.SessionId?.Trim();
-        if (string.IsNullOrEmpty(sessionId))
-            return BadRequest("a work log entry needs the session it is about");
-        if (sessionId.Length > EfHatchWorkLogEntry.MaxSessionIdLength)
-            return BadRequest($"a session id is at most {EfHatchWorkLogEntry.MaxSessionIdLength} characters");
-
-        // Clipped rather than refused, and that is the rule for both texts. The
-        // hundred words a session is asked for are an instruction to the session,
-        // not a validation on the row: refusing an over-long summary would lose
-        // an evening's spend to a style note.
-        var title = Clip(request.Title, EfHatchWorkLogEntry.MaxTitleLength);
-        var summary = Clip(request.Summary, EfHatchWorkLogEntry.MaxSummaryLength);
-
-        var models = request.Models is { Count: > 0 } ? request.Models : [];
-
-        var entry = await db.WorkLog
-            .FirstOrDefaultAsync(w => w.IssueId == issueId && w.SessionId == sessionId, ct);
-
-        if (entry is null)
+        var trimmed = bucket?.Trim();
+        WorkLogBucketSize size;
+        if (string.IsNullOrEmpty(trimmed))
         {
-            entry = new EfHatchWorkLogEntry
-            {
-                IssueId = issueId.Value,
-                SessionId = sessionId,
-                StartedAt = request.StartedAt,
-                EndedAt = request.EndedAt,
-                DurationMs = request.DurationMs,
-                CreatedAt = time.GetUtcNow(),
-            };
-            db.WorkLog.Add(entry);
+            // Decided from the range as requested rather than as snapped, so the
+            // choice is a function of what the caller typed.
+            size = end - start <= HourlyUpTo ? WorkLogBucketSize.Hour : WorkLogBucketSize.Day;
+        }
+        else if (string.Equals(trimmed, "hour", StringComparison.OrdinalIgnoreCase))
+        {
+            size = WorkLogBucketSize.Hour;
+        }
+        else if (string.Equals(trimmed, "day", StringComparison.OrdinalIgnoreCase))
+        {
+            size = WorkLogBucketSize.Day;
         }
         else
         {
-            entry.StartedAt = request.StartedAt;
-            entry.EndedAt = request.EndedAt;
-            entry.DurationMs = request.DurationMs;
+            return BadRequest($"a bucket is hour or day - not \"{bucket}\"");
         }
 
-        entry.Title = title;
-        entry.Summary = summary;
+        var window = WorkLogRollup.Align(start, end, size, offsetMinutes);
 
-        // Not the caller's to send: a session that said nothing about itself
-        // still gets its row, and whether it described itself is a fact the
-        // server reads off what actually arrived.
-        entry.Described = title is not null || summary is not null;
+        // After the size is chosen, so an automatically-chosen daily bucket over
+        // a decade is refused too - and before anything has touched the work
+        // log, which is the reason the check is here rather than inside the fold.
+        if (window.Buckets > MaxBuckets)
+            return BadRequest(
+                $"{window.Buckets} buckets is more than the {MaxBuckets} this answers in " +
+                "- ask for daily buckets, or a shorter range");
 
-        entry.IsError = request.IsError;
-        entry.Turns = request.Turns;
-        entry.CostUsd = request.CostUsd;
-
-        // The four counts are the sum of the breakdown and are computed here
-        // rather than accepted, so a row's total and its detail cannot come to
-        // disagree - "the total equals the breakdown" is true by construction
-        // instead of by a check somebody remembered.
-        entry.InputTokens = models.Sum(m => m.InputTokens);
-        entry.OutputTokens = models.Sum(m => m.OutputTokens);
-        entry.CacheCreationTokens = models.Sum(m => m.CacheCreationTokens);
-        entry.CacheReadTokens = models.Sum(m => m.CacheReadTokens);
-        entry.ModelUsage = WriteModels(models);
-
-        await db.SaveChangesAsync(ct);
-
-        return Project(entry);
-    }
-
-    /// <summary>
-    /// This issue's sessions and what its whole subtree has cost.
-    /// </summary>
-    /// <remarks>
-    /// Entries are the issue's own; totals cover everything beneath it too. See
-    /// <see cref="WorkLogDto"/> for why the two differ and
-    /// <see cref="WorkLogRollup"/> for why the addition is plain addition.
-    /// </remarks>
-    [HttpGet]
-    public async Task<ActionResult<WorkLogDto>> GetWorkLog(string key, CancellationToken ct)
-    {
-        if (!IssueKey.TryParse(key, out var projectKey, out var number)) return NotFound();
-
-        var issue = await db.Issues.AsNoTracking().WithKey(projectKey, number)
-            .Select(i => new { i.Id, i.Number, ProjectKey = i.Project!.Key })
-            .FirstOrDefaultAsync(ct);
-        if (issue is null) return NotFound();
-
-        var entries = await db.WorkLog.AsNoTracking()
-            .Where(w => w.IssueId == issue.Id)
-            // Newest first: the question a work log gets asked is "what did this
-            // cost last night", not "how did it begin".
-            .OrderByDescending(w => w.EndedAt)
-            .ThenByDescending(w => w.Id)
-            .ToListAsync(ct);
-
-        return new WorkLogDto(
-            IssueKey.Format(issue.ProjectKey, issue.Number),
-            await WorkLogRollup.TotalsAsync(db, issue.Id, includeDescendants: true, ct),
-            await WorkLogRollup.TotalsAsync(db, issue.Id, includeDescendants: false, ct),
-            entries.Select(Project).ToList());
-    }
-
-    /// <summary>
-    /// <c>403</c> when the caller is a person rather than a program, or null
-    /// when it is a key.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="RequireAdminAttribute"/> accepts both an administrator and a
-    /// scoped key; this route accepts only the key, because the only honest
-    /// writer of a meter reading is the thing that read the meter. There is no
-    /// control for writing an entry anywhere in the browser and there is not
-    /// meant to be one.
-    ///
-    /// Checked in the action rather than expressed in the attribute on purpose:
-    /// <c>AdminGate</c> is dormant wherever <c>Auth:EnforceAdmin</c> is off,
-    /// which is all of local development, and a guarantee that evaporates under
-    /// a switch is not a guarantee.
-    /// </remarks>
-    private async Task<ObjectResult?> NotAKey(CancellationToken ct) =>
-        await caller.ApiKeyAsync(ct) is null
-            ? new ObjectResult("a work log entry is written by the dispatcher, with an API key")
-            {
-                StatusCode = StatusCodes.Status403Forbidden,
-            }
-            : null;
-
-    private static WorkLogEntryDto Project(EfHatchWorkLogEntry w) => new(
-        w.Id,
-        w.SessionId,
-        w.StartedAt,
-        w.EndedAt,
-        w.DurationMs,
-        w.Title,
-        w.Summary,
-        w.Described,
-        w.IsError,
-        w.Turns,
-        w.CostUsd,
-        w.InputTokens,
-        w.OutputTokens,
-        w.CacheCreationTokens,
-        w.CacheReadTokens,
-        w.InputTokens + w.OutputTokens + w.CacheCreationTokens + w.CacheReadTokens,
-        ReadModels(w.ModelUsage));
-
-    /// <summary>What goes in the column, or null when the run reported no models at all.</summary>
-    private static string? WriteModels(IReadOnlyList<WorkLogModelUseDto> models) =>
-        models.Count > 0 ? JsonSerializer.Serialize(models, Json) : null;
-
-    /// <summary>
-    /// The stored breakdown, or nothing at all. A column that will not parse -
-    /// hand-edited, or written by a shape this build does not know - reads as
-    /// empty rather than throwing the whole log away, the way
-    /// <c>IssueThreadController.Payload</c> does.
-    /// </summary>
-    private static IReadOnlyList<WorkLogModelUseDto> ReadModels(string? stored)
-    {
-        if (string.IsNullOrWhiteSpace(stored)) return [];
-
-        try
+        long? ancestorId = null;
+        if (!string.IsNullOrWhiteSpace(ancestorKey))
         {
-            return JsonSerializer.Deserialize<List<WorkLogModelUseDto>>(stored, Json) ?? [];
+            if (!IssueKey.TryParse(ancestorKey, out var projectKey, out var number))
+                return BadRequest($"there is no {ancestorKey}");
+
+            ancestorId = await db.Issues.AsNoTracking().WithKey(projectKey, number)
+                .Select(i => (long?)i.Id).FirstOrDefaultAsync(ct);
+
+            // Refused rather than answered as if it matched nothing: a graph of
+            // zeroes is a worse answer to a typo than a sentence is.
+            if (ancestorId is null) return BadRequest($"there is no {ancestorKey}");
         }
-        catch (JsonException)
-        {
-            return [];
-        }
+
+        return await WorkLogRollup.SeriesAsync(db, window, size, ancestorId, ct);
     }
 
-    /// <summary>Whitespace off, over-long text cut - or null when nothing was said.</summary>
-    private static string? Clip(string? text, int max)
+    /// <summary>A bound as it was typed, or the default when nothing was.</summary>
+    private static bool Bound(string? text, DateTimeOffset fallback, out DateTimeOffset at)
     {
-        var trimmed = text?.Trim();
-        if (string.IsNullOrEmpty(trimmed)) return null;
-        return trimmed.Length > max ? trimmed[..max] : trimmed;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            at = fallback;
+            return true;
+        }
+
+        var parsed = IssueMoment.TryParse(text, out var moment);
+        at = parsed ? moment.At : default;
+        return parsed;
     }
 
-    /// <summary>camelCase, matching the wire - see <see cref="Questions"/>.</summary>
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    /// <summary>In the house's own words, rather than as a framework 400.</summary>
+    private static string NotAnInstant(string? text) =>
+        $"a range bound is an instant (2026-09-12T17:00:00Z) - not \"{text}\"";
 }
