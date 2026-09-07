@@ -168,6 +168,12 @@ while a story in Breakdown is the agent's, because a playbook names types. A
 second "whose column is this" flag would be free to disagree with the first, and
 a flag the loop could read is one step from a flag the loop could set.
 
+**The loop reads the matrix and holds no list of its own.** It once held both,
+and the copy in the source was asked *first*, so an epic in Breakdown was
+folded on its type while the row the operator had written for exactly that move
+sat unread. Two statements of which types a move applies to is one too many,
+and the one that goes is the one nobody can edit.
+
 The order is the point. `Backlog` is the gate between "somebody wrote a
 paragraph" and "a pull request is open", and `In Review` is the gate before
 shipped — which is what makes "never move a ticket to a terminal status"
@@ -678,25 +684,25 @@ useful answer and a list of reasons is not — while `work/{key}`, which somebod
 asked for by name, returns the refusal rather than a 404, because a person who
 named a ticket is owed the sentence saying why it cannot move.
 
-### Three more, on `next` alone
+### Two more, on `next` alone
 
-The five refusals above are facts about an issue. Three further rules are the
+The five refusals above are facts about an issue. Two further rules are the
 *loop's policy* — what an unattended run may **start**, as opposed to what may
 move — so they are asked on `work/next` and not on `work/{key}`. A person who
 names a ticket is giving an instruction, and housekeeping does not overrule it.
 
-1. **Its type is `story` or `bug`.** An epic is out because choosing what an
-   effort contains is a product call; a task because a task is a seam inside a
-   story, and the story is the unit that ships — a task still crosses the board
-   as part of its story's increment. `?types=story,bug,task` widens the set for
-   a caller who means to, and a type nobody defined is a 400 naming it rather
-   than a filter that silently matches nothing and reads as a finished board.
-2. **Its ready date has arrived**, read against the caller's calendar day
+The issue's **type** is not among them, and was never the loop's to decide:
+which types a move applies to is [the playbook row's](#playbooks) to state, and
+a type an unattended run does not pick up is a transition no playbook covers
+for that type. That fold is the last one in the list above, and it names the
+Playbooks page because that is where the fix is.
+
+1. **Its ready date has arrived**, read against the caller's calendar day
    (`?offsetMinutes=`) rather than the server's. A card folded off the board is
    not one an unattended pass should be spending an increment on — but somebody
    who names a ticket ahead of its date has said the date is not the point
    today, and is given the dispatch rather than a lecture about it.
-3. **No sibling of it is awaiting review** — two open pull requests under one
+2. **No sibling of it is awaiting review** — two open pull requests under one
    parent is one too many. "Awaiting review" is measured, not named: the column
    immediately left of the first terminal one, which is exactly where the
    migration that added `review` placed it, so an operator who renames the
@@ -715,11 +721,18 @@ not one.
 
 `GET /api/hatch/work/queue` answers with every issue the dispatcher considers,
 in the order it considers them, each carrying the sentence saying why it cannot
-be advanced — or nothing, where it can. It takes the same `ancestorKey`,
-`offsetMinutes` and `types` and means the same things by them, and each row is
-what a dispatch carries minus the playbook prompt, the children and the
-questions: those are the payload of one agent working one issue, and loading
-them for every row would make a whole-board read expensive for nothing.
+be advanced — or nothing, where it can. It takes the same `ancestorKey` and
+`offsetMinutes` and means the same things by them, and each row is what a
+dispatch carries minus the playbook prompt, the children and the questions:
+those are the payload of one agent working one issue, and loading them for
+every row would make a whole-board read expensive for nothing.
+
+**The rows arrive in the board's own order.** Rightmost column first, and
+within a column the `(rank, id)` that `GET /api/hatch/board` serves that column
+in — so a card's line in the queue is its position on the board, and nothing
+between the two re-sorts. That matters because most of a column being folded in
+silence is indistinguishable from a column being read out of order, and a
+report of one is usually the other.
 
 **The first entry with no reason is what `work/next` returns**, because it is
 the same walk. `GetNextWork` is the first clear row of the scan rather than a
@@ -727,12 +740,11 @@ second loop that happens to agree with it — two walks that could disagree abou
 the order of the board is precisely the bug this endpoint exists to expose.
 
 Every fold therefore lives in one place and in one order, most fundamental
-first: a next column that is terminal, then the type an unattended run picks up,
-then a ready date, then an unanswered question, then a sibling awaiting review,
-and last the missing playbook — last because it is only worth saying about an
-issue that is otherwise a candidate. The three that are the *loop's* policy
-rather than facts about an issue are asked only when the pass is asking, so
-`work/{key}` still ignores them.
+first: a next column that is terminal, then a ready date, then an unanswered
+question, then a sibling awaiting review, and last the missing playbook — last
+because it is only worth saying about an issue that is otherwise a candidate.
+The two that are the *loop's* policy rather than facts about an issue are asked
+only when the pass is asking, so `work/{key}` still ignores them.
 
 The columns with nowhere to go — a terminal one, and a rightmost one that is not
 terminal — are absent rather than listed as blocked. An issue the dispatcher
@@ -743,6 +755,15 @@ It is a read, and it costs what a read should: the statuses, the scope, what is
 awaiting review, the open-question counts and the whole playbook matrix are each
 read once for the pass rather than once per row, and the issues are projected in
 one batch.
+
+**And it is read rather than left on the server.** Everything needed to tell a
+jammed board from a finished one was computed and served here long before
+anything printed it, and for a while nothing did unless somebody thought to run
+`queue` by hand — so ten minutes of an idle loop saying "nothing on the board is
+an agent's to move" read as a broken loop. `hatch.sh` now groups the scan's
+sentences and prints them with a count each whenever a pass finds nothing, and
+a board with nothing on the dispatcher's path at all says *that* instead. Two
+different boards, two different sentences, no second command.
 
 ### Playbooks
 
@@ -822,29 +843,29 @@ line naming the two values says which of them the issue chose.
 
 ### What makes an issue actionable
 
-Six conditions. An issue is the loop's to pick up when it meets every one, and
+Five conditions. An issue is the loop's to pick up when it meets every one, and
 the sentence saying which one it failed is what `work/queue` reports:
 
 1. **There is a column to its right, and that column is not terminal.** The end
    of the board is not a transition, and the step into a terminal column is the
    operator's: *only the operator decides that something shipped*.
-2. **Its type is one an unattended run picks up** — `story` or `bug`, unless the
-   caller widens it with `?types=`. An epic is a product call and a task is a
-   seam inside a story; the story is the unit that ships.
-3. **Its ready date has arrived**, read against the caller's calendar day. A
+2. **Its ready date has arrived**, read against the caller's calendar day. A
    card folded off the board is not one to spend an increment on tonight.
-4. **It holds no unanswered question.** It is waiting on a person, and another
+3. **It holds no unanswered question.** It is waiting on a person, and another
    agent sent at it would ask the same thing again or guess at the answer.
-5. **No sibling of it is awaiting review.** Two open pull requests under one
+4. **No sibling of it is awaiting review.** Two open pull requests under one
    parent is one too many.
-6. **A playbook covers that transition for that type.** Without one there is
+5. **A playbook covers that transition for that type.** Without one there is
    nothing to say to the session — and a column no playbook leads out of is
    exactly [how a column becomes the operator's](#status), which is why the
-   absence is a fold rather than an error.
+   absence is a fold rather than an error. **This is also where the issue's
+   type is decided**, and the only place: a type an unattended run does not
+   pick up is a type no row names for that move, said in the words that name
+   the fix.
 
-Three of them — 1, 4 and 6 — are facts about the issue, and `work/{key}` asks
-them too. The other three are the loop's policy and are asked only when the pass
-is asking; see [three more, on `next` alone](#three-more-on-next-alone).
+Three of them — 1, 3 and 5 — are facts about the issue, and `work/{key}` asks
+them too. The other two are the loop's policy and are asked only when the pass
+is asking; see [two more, on `next` alone](#two-more-on-next-alone).
 
 **The board is worked right to left**, for the reason the dispatcher gives, and
 overnight it is the difference between a shape and a mess: a loop working left
@@ -1061,11 +1082,23 @@ about a ticket that did not move, and what it stops for.
 
 `hatch.sh queue` reads the scan and prints it, one issue a line — key, type,
 column, and either the reason the pass would fold past it or the transition it
-is clear for. `hatch.sh queue AER-1` scopes it to one epic's subtree. It spawns
-nothing and writes nothing, and an empty board prints a sentence saying so
-rather than a blank line: "there is nothing" and "something went wrong and
-printed nothing" look identical otherwise, which is the one thing a run nobody
-watched cannot afford to be unsure about.
+is clear for, in the dispatcher's order: rightmost column first, and within a
+column the order the board itself draws that column in. `hatch.sh queue AER-1`
+scopes it to one epic's subtree. It spawns nothing and writes nothing, and an
+empty board prints a sentence saying so rather than a blank line: "there is
+nothing" and "something went wrong and printed nothing" look identical
+otherwise, which is the one thing a run nobody watched cannot afford to be
+unsure about.
+
+This is the long form, and it is no longer the only way to see the folds.
+`work` and `go-to-work` group the same sentences and print them with a count
+each — worst first, one line per distinct reason, so a column of two hundred
+cards folded for four reasons is four lines — whenever a pass has an increment
+to run or finds nothing at all. A board with nothing on the dispatcher's path
+says *that* instead, which is the difference between a finished board and a
+jammed one, said without anybody having to run a second command. The idle loop
+reprints the digest when it changes and otherwise says it is still alive every
+ten minutes; `queue` is where the counts turn back into tickets.
 
 ### What an agent does with a ticket
 
@@ -1141,7 +1174,7 @@ code already settles is a round trip through a person for nothing.
   claim the dispatcher honours — with an expiry, and a heartbeat behind the
   expiry — and the lock exists precisely so that none of that has to be right
   before the first unattended night can run. It is also not obviously wanted:
-  the [sibling rule](#three-more-on-next-alone) already says one open pull
+  the [sibling rule](#two-more-on-next-alone) already says one open pull
   request per parent, and the operator reading them is the one thing that does
   not parallelise.
 - **A second scope for agents**, which would stop a key answering its own

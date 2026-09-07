@@ -352,10 +352,16 @@ cmd_next() {
 # column and type nobody has written a playbook for reads as a finished board
 # from the outside, and this is where it stops reading that way.
 #
-# The order is the dispatcher's - rightmost column first, top of the column
-# down - and it arrives that way. Nothing here re-sorts it, because a script
-# with its own opinion about which ticket is next is the drift this endpoint
-# exists to rule out.
+# The order is the dispatcher's - rightmost column first, and within a column
+# the board's own, which is the order `GET /api/hatch/board` serves that column
+# in. A card's line here is its place on the board. It arrives that way and
+# nothing here re-sorts it, because a script with its own opinion about which
+# ticket is next is the drift this endpoint exists to rule out.
+#
+# This is the long form. A pass that finds nothing prints the same reasons with
+# a count each (queue_digest), which is what makes a jammed board legible
+# without anybody thinking to run this by hand; this is where the counts are
+# turned back into tickets.
 cmd_queue() {
   local under="${1:-}" scope=""
   [ -z "$under" ] || scope="&ancestorKey=${under}"
@@ -388,6 +394,32 @@ cmd_queue() {
       + (.fromStatus.name | pad($c)) + "  "
       + (.blocked // ("-> " + (.toStatus.name // "?")))
   ' <<<"$queue"
+}
+
+# The same scan, as many lines as it has distinct reasons.
+#
+# The sentence is the group. Two issues held up by the same missing playbook
+# say the same words and are one line; the ones naming an issue or a date stay
+# apart because they are separate facts. Nothing here parses a reason - a
+# script that read one would drift the first time the server reworded it - so
+# the grouping is arithmetic on strings the server wrote, and a board's 227
+# skip lines come out as five.
+#
+# Worst first. `sort_by([-.n, .why])` rather than `sort_by(-.n, .why)`: the
+# array form sorts identically on every jq, including the one macOS ships.
+queue_digest() {
+  [ -n "${1:-}" ] || return 0
+
+  jq -r '
+    def pad($n): ((" " * ($n - (tostring | length))) // "") + tostring;
+    [ .[] | select(.blocked) ] as $rows
+    | if ($rows | length) == 0 then empty
+      else ($rows | group_by(.blocked)
+            | map({n: length, why: .[0].blocked})
+            | sort_by([-.n, .why])) as $g
+        | ($g | map(.n | tostring | length) | max) as $w
+        | $g[] | "hatch:     " + (.n | pad($w)) + "  " + .why
+      end' <<<"$1"
 }
 
 cmd_show() {
@@ -1048,21 +1080,61 @@ compose() {
   ' <<<"$work"
 }
 
-# "There is nothing an agent may move", said properly.
+# "There is nothing an agent may move", said properly - and the one place that
+# tells a finished board from a jammed one.
 #
-# "Nothing to do" and "everything is waiting on you" look identical from here
-# and are not the same situation, so the second one is named. Without this an
-# operator with a board full of open questions would be told the work had run
-# out. Scoped to match the sentence above it: an evening pointed at one epic is
-# not helped by a count of every question in the house.
+# Three situations look identical from here and are not the same situation, so
+# each is named. Nothing is left on the dispatcher's path at all: the work has
+# run out. Everything on it was folded: the board is jammed, and the reasons
+# and their counts say on what. And questions are waiting on a person, which is
+# true of a subtree rather than of the dispatcher's path and so is said last
+# and separately.
+#
+# The scan is the caller's if it has one - work_pass already made it - and read
+# here if not, so `hatch.sh work` on its own says as much as the loop does. A
+# read that fails prints the first sentence and no digest: a count that did not
+# arrive is not a count, and this is said on the way past something else.
 nothing_to_do() {
-  local under="${1:-}" waiting=0
+  local under="${1:-}" queue="${2:-}" waiting=0 scope="" total digest
+
   if [ -n "$under" ]; then
     echo "hatch: nothing under ${under} is an agent's to move"
+  else
+    echo "hatch: nothing on the board is an agent's to move"
+  fi
+
+  if [ -z "$queue" ]; then
+    [ -z "$under" ] || scope="&ancestorKey=${under}"
+    queue=$(_get "/api/hatch/work/queue?offsetMinutes=$(offset_minutes)${scope}") || queue=""
+  fi
+
+  if [ -n "$queue" ]; then
+    total=$(jq 'length' <<<"$queue") || total=""
+    case "$total" in ''|*[!0-9]*) total="" ;; esac
+
+    if [ "$total" = 0 ]; then
+      # A finished board. Nothing the dispatcher looks at at all, as opposed to
+      # a column of cards it looked at and could not take.
+      echo "hatch:   nothing is on the dispatcher's path - what is left is in a terminal column"
+    elif [ -n "$total" ]; then
+      digest=$(queue_digest "$queue")
+      if [ -n "$digest" ]; then
+        echo "hatch:   ${total} issue(s) were on the dispatcher's path, and every one was folded:"
+        printf '%s\n' "$digest"
+        echo "hatch:   ./scripts/hatch.sh queue names them one by one"
+      fi
+    fi
+  fi
+
+  # Scoped to match the sentence above it: an evening pointed at one epic is
+  # not helped by a count of every question in the house. Counted over the
+  # whole subtree rather than over the dispatcher's path, which is a different
+  # and still useful number - a question on a card in a terminal column is
+  # still a question somebody owes an answer to.
+  if [ -n "$under" ]; then
     waiting=$(jq '[.[] | .openQuestions] | add // 0' \
       <<<"$(_get "/api/hatch/issues?ancestorKey=${under}")") || waiting=0
   else
-    echo "hatch: nothing on the board is an agent's to move"
     waiting=$(jq 'length' <<<"$(questions_json '' true)") || waiting=0
   fi
 
@@ -1411,12 +1483,12 @@ cmd_work() {
     # 204: nothing there is an agent's to advance. Not a failure - it is the
     # answer a finished board gives, and a loop should be able to see it.
     #
-    # "Nothing to do" and "everything is waiting on you" look identical from
-    # here and are not the same situation, so the second one is named. Without
-    # this an operator with a board full of open questions would be told the
-    # work had run out.
+    # A finished board, a jammed one and a board full of open questions look
+    # identical from here and are three different situations, so each is named.
+    # No scan in hand - `work` makes one read, not two - so nothing_to_do takes
+    # its own, and this command alone can say which of the three this is.
     if [ -z "$work" ]; then
-      nothing_to_do "$under"
+      nothing_to_do "$under" ""
       exit 2
     fi
   fi
@@ -1558,14 +1630,14 @@ duration() {
   fi
 }
 
-# The skip list the pass before this one printed, as a digest.
+# The scan the last pass made, for whoever reports what it found.
 #
-# An idle loop asking the same question every minute would otherwise reprint
-# the same dozen reasons until morning, and the one pass whose reasons changed
-# is exactly the one nobody would find in that. So the reasons are printed when
-# they change, and whenever an increment is about to run - which is the moment
-# they are context for something.
-LAST_SKIPS=""
+# work_pass runs in the caller's shell, so this survives it the way the INC_
+# globals do. A pass with an increment to run prints its own folds - that is
+# the moment they are context for something - and a pass with nothing to do
+# prints nothing and leaves the scan here, so that the idle path reports it
+# exactly once through nothing_to_do rather than twice in two vocabularies.
+PASS_QUEUE=""
 
 # One pass of the board: everything it folds past and why, and then the one
 # thing it does about the rest.
@@ -1583,35 +1655,41 @@ LAST_SKIPS=""
 #      loop that ends on one bad minute of network is a loop somebody has to sit
 #      with, which is the thing being built away from here.
 work_pass() {
-  local under="$1" quiet="$2" scope="" queue skips clear work model effort digest
+  local under="$1" quiet="$2" scope="" queue clear work model effort digest folded
 
   [ -z "$under" ] || scope="&ancestorKey=${under}"
 
   queue=$(_get "/api/hatch/work/queue?offsetMinutes=$(offset_minutes)${scope}") || return 2
   clear=$(jq -r 'map(select(.blocked == null)) | first | .issue.key // empty' <<<"$queue")
 
-  skips=$(jq -r '
-    def pad($n): . + ((" " * ($n - length)) // "");
-    [ .[] | select(.blocked) ] as $rows
-    | if ($rows | length) == 0 then empty
-      else ($rows | map(.issue.key | length) | max) as $k
-        | $rows[] | "hatch:   skipped " + (.issue.key | pad($k)) + "  " + .blocked
-      end' <<<"$queue")
+  PASS_QUEUE="$queue"
 
-  digest=$(printf '%s' "$skips" | cksum)
-  if [ -n "$skips" ] && { [ -n "$clear" ] || [ "$digest" != "$LAST_SKIPS" ]; }; then
-    printf '%s\n' "$skips"
-  fi
-  LAST_SKIPS="$digest"
-
+  # Nothing to run: say nothing here, and let the idle path say the whole thing
+  # once. A digest printed here and a digest printed there is the same board
+  # reported twice a minute until morning.
   [ -n "$clear" ] || return 1
 
   work=$(_get "/api/hatch/work/next?offsetMinutes=$(offset_minutes)${scope}") || return 2
 
   # The board moved between the two reads - somebody answered a question, or
   # something landed. Not an error, and not worth a sentence: the next pass
-  # asks again.
-  [ -n "$work" ] || return 1
+  # asks again. The scan goes with it, because it describes a board that no
+  # longer exists: an idle report built from it would say every candidate was
+  # folded while naming one that was not.
+  if [ -z "$work" ]; then
+    PASS_QUEUE=""
+    return 1
+  fi
+
+  # An increment is about to run, so what the pass walked past on the way to it
+  # is context rather than noise - counted rather than listed, because a column
+  # of two hundred cards folded for four reasons is four facts.
+  digest=$(queue_digest "$queue")
+  if [ -n "$digest" ]; then
+    folded=$(jq '[ .[] | select(.blocked) ] | length' <<<"$queue")
+    echo "hatch:   folded past ${folded} issue(s) on the way here:"
+    printf '%s\n' "$digest"
+  fi
 
   # No flag reaches this, and that is still deliberate: `work --model` is one
   # operator's opinion about one increment, and a loop that carried it across a
@@ -1804,6 +1882,7 @@ go_to_work_ends() {
 # earliest decisions nobody can audit.
 cmd_go_to_work() {
   local key="" under="" interval=60 once=0 quiet=0 outcome idle_since=0 idle_said=0 now
+  local idle_digest="" digest
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -1884,15 +1963,26 @@ cmd_go_to_work() {
         ;;
 
       1)
-        # Said in full the first time, and then rarely. An idle loop is a thing
-        # somebody left running; it should be able to say it is alive without
-        # filling a scrollback with the same sentence six hundred times.
+        # Said in full the first time, again whenever the answer changes, and
+        # otherwise rarely. An idle loop is a thing somebody left running; it
+        # should be able to say it is alive without filling a scrollback with
+        # the same sentence six hundred times - and the one pass whose reasons
+        # changed, because somebody answered a question at three in the
+        # morning, is exactly the one nobody would find in that.
         now=$(date +%s)
-        if [ "$idle_since" = 0 ]; then
-          idle_since=$now
+        digest=$(queue_digest "$PASS_QUEUE" | cksum)
+        if [ "$idle_since" = 0 ] || [ "$digest" != "$idle_digest" ]; then
           idle_said=$now
-          nothing_to_do "$under"
-          [ "$once" = 1 ] || echo "hatch: waiting, and asking again every ${interval}s"
+          idle_digest="$digest"
+          nothing_to_do "$under" "$PASS_QUEUE"
+
+          # What the loop is going to do about it, said once. A reprint later
+          # is a report about the board having changed, not a fresh
+          # explanation of the interval.
+          if [ "$idle_since" = 0 ]; then
+            idle_since=$now
+            [ "$once" = 1 ] || echo "hatch: waiting, and asking again every ${interval}s"
+          fi
         elif [ $((now - idle_said)) -ge 600 ]; then
           idle_said=$now
           echo "hatch: still nothing an agent may move, $(duration $((now - idle_since))) now"
