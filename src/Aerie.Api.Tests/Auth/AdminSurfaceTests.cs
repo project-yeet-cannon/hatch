@@ -188,11 +188,12 @@ public class AdminSurfaceTests
         "IssueWorkLogController.GetWorkLog",
         "IssueWorkLogController.PostEntry",
 
-        // The same log read across issues, for the leaderboard's graph.
-        // Hatch-scoped like the module's other reads and, deliberately unlike
-        // the write above it, open to a person: reading what the nights cost is
-        // the whole point of the page.
+        // The same log read across issues, for the leaderboard. Hatch-scoped
+        // like the module's other reads and, deliberately unlike the write above
+        // it, open to a person: reading what the nights cost is the whole point
+        // of the page.
         "WorkLogController.GetHistory",
+        "WorkLogController.GetSessions",
 
         // Playbooks are guarded twice over. Reading one is Hatch-scoped like
         // the rest; writing one names no scope at all, so an API key is

@@ -14,8 +14,8 @@
    It stays in apps/hatch rather than @aerie/ui. Admin's ChannelSelect is the
    same idea and older, and merging them is a third screen's worth of argument
    - its ranking by match position, its lack of ARIA, its inline styles -
-   landing on a ticket about the parent field. The bulk page is the second
-   customer, and two customers is when a move to the library is worth
+   landing on a ticket about the parent field. The leaderboard's issue filter is
+   the second screen, and a third is when a move to the library is worth
    proposing. */
 
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';

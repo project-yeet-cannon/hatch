@@ -45,7 +45,7 @@ export function WorkLog({ log, error }: { log: WorkLogData | null; error: string
   // page saying "this feature exists and has failed you".
   if (!showsWorkLog(log)) return null;
 
-  const errors = errorPhrase(log);
+  const errors = errorPhrase(log.totals);
 
   return (
     <Card>
@@ -54,7 +54,7 @@ export function WorkLog({ log, error }: { log: WorkLogData | null; error: string
       {/* Tokens are the headline and the dollars are secondary, because on a
           subscription the dollars are notional list price rather than money
           that left an account. */}
-      <p className="hatch-worklog-totals">{totalsPhrase(log)}</p>
+      <p className="hatch-worklog-totals">{totalsPhrase(log.totals)}</p>
 
       {/* Said only when the two differ, so one number never passes for the
           other: an epic showing four sessions and one of its own is the whole

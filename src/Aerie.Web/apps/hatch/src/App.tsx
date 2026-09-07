@@ -4,6 +4,7 @@ import './App.css';
 import { NavUtilization } from './components/NavUtilization';
 import { BoardPage } from './pages/BoardPage';
 import { PlanPage } from './pages/PlanPage';
+import { LeaderboardPage } from './pages/LeaderboardPage';
 import { IssuePage } from './pages/IssuePage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { StatusesPage } from './pages/StatusesPage';
@@ -29,6 +30,9 @@ export function App() {
               other route is beneath "/" and would otherwise light it too. */}
           <NavLink to="/" className={navLinkClass} end>Board</NavLink>
           <NavLink to="/plan" className={navLinkClass}>Plan</NavLink>
+          {/* Beside Plan: the two pages that read across the whole board rather
+              than about one ticket belong together. */}
+          <NavLink to="/leaderboard" className={navLinkClass}>Leaderboard</NavLink>
           <NavLink to="/bulk" className={navLinkClass}>Bulk edit</NavLink>
           <NavLink to="/projects" className={navLinkClass}>Projects</NavLink>
           <NavLink to="/statuses" className={navLinkClass}>Statuses</NavLink>
@@ -47,6 +51,7 @@ export function App() {
         <Routes>
           <Route path="/" element={<BoardPage />} />
           <Route path="/plan" element={<PlanPage />} />
+          <Route path="/leaderboard" element={<LeaderboardPage />} />
           <Route path="/bulk" element={<BulkPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/statuses" element={<StatusesPage />} />

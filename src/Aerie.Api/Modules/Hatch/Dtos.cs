@@ -810,3 +810,67 @@ public record WorkLogHistoryDto(
     DateTimeOffset? FirstSessionAt,
     DateTimeOffset? LastSessionAt,
     IReadOnlyList<WorkLogBucketDto> Buckets);
+
+/// <summary>
+/// One agent session as the leaderboard reads it: what it was run against, what
+/// it said about itself, and what it cost.
+/// </summary>
+/// <remarks>
+/// Deliberately narrower than <see cref="WorkLogEntryDto"/> in two places, and
+/// both absences are the point. <c>Summary</c> is up to 2000 characters and this
+/// answers a hundred rows - the issue page is where a session is read at length.
+/// <c>Models</c> is a list per row and nothing on the leaderboard draws a
+/// per-model breakdown.
+/// </remarks>
+/// <param name="Title">What the session said it did, or null when it never said - see <paramref name="Described"/>.</param>
+/// <param name="TotalTokens">The four counts added up - one definition of the headline, as everywhere else in the module.</param>
+public record WorkLogSessionDto(
+    long Id,
+    string SessionId,
+    string IssueKey,
+    string IssueTitle,
+    DateTimeOffset StartedAt,
+    DateTimeOffset EndedAt,
+    long DurationMs,
+    string? Title,
+    bool Described,
+    bool IsError,
+    int Turns,
+    decimal CostUsd,
+    long InputTokens,
+    long OutputTokens,
+    long CacheCreationTokens,
+    long CacheReadTokens,
+    long TotalTokens);
+
+/// <summary>
+/// The sessions in a range, ranked - and what that whole range cost, whether or
+/// not every row of it came back.
+/// </summary>
+/// <remarks>
+/// <paramref name="Totals"/> covers <b>the whole filter and not the returned
+/// page</b>, which is what lets a capped table add up honestly; a caller tells
+/// the two apart by comparing <c>Totals.Sessions</c> with the length of
+/// <paramref name="Sessions"/> and says so on screen.
+///
+/// <paramref name="From"/> and <paramref name="To"/> are the range as given.
+/// Nothing is snapped here, deliberately unlike <see cref="WorkLogHistoryDto"/>:
+/// there is no bucket grid on this read to align to.
+/// </remarks>
+/// <param name="Sort">The sort as resolved - <c>tokens</c>, <c>cost</c> or <c>ended</c>.</param>
+/// <param name="FirstSessionAt">
+/// The earliest session in the population <c>ancestorKey</c> names,
+/// <em>ignoring the range</em>, or null when that population is empty. Read
+/// exactly as <see cref="WorkLogHistoryDto.FirstSessionAt"/> is, and here so a
+/// page can tell "nothing has ever been logged" from "nothing ran in the range
+/// you asked for" without fetching the graph's data to say it.
+/// </param>
+/// <param name="LastSessionAt">The latest, read the same way.</param>
+public record WorkLogSessionsDto(
+    DateTimeOffset From,
+    DateTimeOffset To,
+    string Sort,
+    WorkLogTotalsDto Totals,
+    DateTimeOffset? FirstSessionAt,
+    DateTimeOffset? LastSessionAt,
+    IReadOnlyList<WorkLogSessionDto> Sessions);
