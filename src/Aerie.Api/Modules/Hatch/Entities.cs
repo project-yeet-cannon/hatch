@@ -299,6 +299,44 @@ public class EfHatchIssue
     public string? PullRequestUrl { get; set; }
 
     /// <summary>
+    /// The model every agent increment dispatched for this issue runs on,
+    /// whichever playbook speaks for the move - or null, which is every issue
+    /// on a stock board and means "whatever the playbook says".
+    /// </summary>
+    /// <remarks>
+    /// A playbook prices a transition, and that is the right unit almost
+    /// always. What it cannot say is that <em>this</em> story is the hard one:
+    /// the knob for that used to be a flag on one command at a terminal, which
+    /// is no use at three in the morning when the loop is the only thing
+    /// typing. So the fact lives on the ticket somebody looked at.
+    ///
+    /// It reaches this issue and nothing beneath it. An epic set to
+    /// <c>opus</c> does not spend <c>opus</c> on its stories - a task that
+    /// needs the big model says so itself, and the alternative is an
+    /// expensive decision made once at the top of a tree and inherited by
+    /// work nobody weighed.
+    ///
+    /// Sized by the playbook's own constants because it holds the playbook's
+    /// own values, and validated by
+    /// <see cref="EfHatchPlaybook.IsValidModel"/> - one definition of a legal
+    /// model, so what an issue may be set to and what a playbook may be set
+    /// to cannot drift apart. Writing it is closed to an API key
+    /// (<see cref="IssuePlaybookController"/>) for the same reason writing a
+    /// playbook is.
+    /// </remarks>
+    [MaxLength(EfHatchPlaybook.MaxModelLength)]
+    public string? ModelOverride { get; set; }
+
+    /// <summary>
+    /// The thinking budget those increments run at, or null for the
+    /// playbook's - independent of <see cref="ModelOverride"/> in both
+    /// directions, because "this one is subtle" and "this one is large" are
+    /// different complaints about a ticket.
+    /// </summary>
+    [MaxLength(EfHatchPlaybook.MaxEffortLength)]
+    public string? EffortOverride { get; set; }
+
+    /// <summary>
     /// Who filed it, as a name rather than a foreign key. The audit trail wants
     /// to read the same after a person row is deleted, and Phase 6 puts API key
     /// names in this column beside human ones - neither of which a
@@ -461,6 +499,17 @@ public class EfHatchIssueEvent
     /// held - see <see cref="EfHatchIssue.PullRequestUrl"/>.
     /// </summary>
     public const string PullRequestChanged = "pull_request_changed";
+
+    /// <summary>
+    /// The issue was pinned to a model, moved to another, or handed back to
+    /// the playbook. What a ticket was spent on is a question somebody asks
+    /// after the bill, so the trail holds every value the column has held -
+    /// see <see cref="EfHatchIssue.ModelOverride"/>.
+    /// </summary>
+    public const string ModelOverrideChanged = "model_override_changed";
+
+    /// <summary>The same, for the thinking budget - see <see cref="EfHatchIssue.EffortOverride"/>.</summary>
+    public const string EffortOverrideChanged = "effort_override_changed";
 
     public const string Commented = "commented";
 

@@ -921,6 +921,36 @@ MISSING
   exit 1
 }
 
+# Which of the model and the effort the ticket chose rather than the playbook,
+# as half a sentence - or nothing at all, which is every issue on a stock board.
+#
+# The server has already folded an issue's overrides into the playbook it hands
+# back, so `.playbook.model` is the value that won and there is nothing here to
+# decide. What is left is saying where it came from, and this decides that by
+# comparing the value being spawned on against the override the issue carries -
+# not by tracking whether a flag was given. The comparison is derivable from
+# what the caller already holds, it is exactly right on every unattended path
+# (where there are no flags at all), and the one case it softens - an operator
+# typing `--model opus` at a ticket already set to `opus` - prints a sentence
+# that is still true.
+#
+# `// empty` rather than a bare read: `jq -r` prints an absent field as the four
+# characters `null`, which would compare equal to nothing and read as a model.
+override_line() {
+  local work="$1" model="$2" effort="$3" key over which=""
+
+  over=$(jq -r '.issue.modelOverride // empty' <<<"$work")
+  if [ -n "$over" ] && [ "$over" = "$model" ]; then which="model"; fi
+
+  over=$(jq -r '.issue.effortOverride // empty' <<<"$work")
+  if [ -n "$over" ] && [ "$over" = "$effort" ]; then which="${which:+${which} and }effort"; fi
+
+  if [ -n "$which" ]; then
+    key=$(jq -r '.issue.key' <<<"$work")
+    echo "${which} from ${key}, not the playbook"
+  fi
+}
+
 # The whole instruction: the playbook first, because it says what kind of job
 # this is, then the ticket it is a job about. Composed here rather than stored
 # whole in the database so that a playbook stays a method - one row that reads
@@ -1196,7 +1226,7 @@ this issue until somebody answers it."
 # is writing a log nobody will read until morning.
 run_increment() {
   local work="$1" model="$2" effort="$3" quiet="${4:-0}"
-  local bin root prompt facts before after asked out later open
+  local bin root prompt facts before after asked out later open chose
   local -a codes
 
   INC_KEY=$(jq -r '.issue.key' <<<"$work")
@@ -1219,6 +1249,8 @@ run_increment() {
 
   jq -r '"hatch: \(.issue.key) [\(.issue.type)] \(.issue.title)"' <<<"$work"
   echo "hatch: ${model}, effort ${effort}, ${INC_FROM} -> ${INC_TO}"
+  chose=$(override_line "$work" "$model" "$effort")
+  [ -z "$chose" ] || echo "hatch:   ${chose}"
   echo
 
   # What was open before the run, so that what the run asked can be told apart
@@ -1410,14 +1442,20 @@ cmd_work() {
     exit 2
   fi
 
-  # The playbook chooses; the flags override. Nothing here writes back, so an
-  # override is one run's opinion and not a change to the matrix.
+  # What the server decided, unless a flag says otherwise. `.playbook.model` is
+  # already the effective value - an issue carrying its own model has had it
+  # folded in there - so a flag beats an override for free, and typing one is
+  # naming a value for this run.
   [ -n "$model" ]  || model=$(jq -r '.playbook.model' <<<"$work")
   [ -n "$effort" ] || effort=$(jq -r '.playbook.effort' <<<"$work")
+
+  local chose
+  chose=$(override_line "$work" "$model" "$effort")
 
   if [ "$dry" = 1 ]; then
     jq -r '"# \(.issue.key) \(.fromStatus.name) -> \(.toStatus.name)"' <<<"$work"
     echo "# model ${model}, effort ${effort}"
+    [ -z "$chose" ] || echo "# ${chose}"
     echo
     compose "$work"
     return
@@ -1441,6 +1479,7 @@ cmd_work() {
 
     jq -r '"hatch: \(.issue.key) [\(.issue.type)] \(.issue.title)"' <<<"$work"
     echo "hatch: ${model}, effort ${effort}, $(jq -r '"\(.fromStatus.name) -> \(.toStatus.name)"' <<<"$work")"
+    [ -z "$chose" ] || echo "hatch:   ${chose}"
     echo
 
     (cd "$root" && exec "$bin" \
@@ -1574,9 +1613,14 @@ work_pass() {
   # asks again.
   [ -n "$work" ] || return 1
 
-  # The playbook chooses, and here nothing overrides it. `work --model` is one
-  # operator's opinion about one increment; a loop that carried an override
-  # across a night would be applying it to tickets nobody looked at.
+  # No flag reaches this, and that is still deliberate: `work --model` is one
+  # operator's opinion about one increment, and a loop that carried it across a
+  # night would be applying it to tickets nobody looked at.
+  #
+  # What the loop does carry is the ticket's own model and effort, because those
+  # are a fact recorded on an issue somebody read - which is precisely the thing
+  # the flag was a poor substitute for. They arrive folded into `.playbook`
+  # already, so there is nothing to ask for here.
   model=$(jq -r '.playbook.model' <<<"$work")
   effort=$(jq -r '.playbook.effort' <<<"$work")
 

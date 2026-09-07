@@ -158,16 +158,27 @@ public class PlaybooksController(HatchContext db, TimeProvider time) : Controlle
         _ => null,
     };
 
-    private static string? InvalidDispatch(string model, string effort)
-    {
-        if (!EfHatchPlaybook.IsValidModel(model))
-            return $"a model is one of {string.Join(", ", EfHatchPlaybook.ModelAliases)}, " +
-                   $"or a pinned name like claude-opus-5 - not \"{model}\"";
+    private static string? InvalidDispatch(string model, string effort) =>
+        InvalidModel(model) ?? InvalidEffort(effort);
 
-        return EfHatchPlaybook.IsValidEffort(effort)
+    /// <summary>
+    /// Why this is not a model, in the sentence the operator reads. Shared
+    /// with <see cref="IssuePlaybookController"/> rather than written twice:
+    /// an issue's override holds a playbook's value, and two copies of a
+    /// refusal are two things to keep in step. Per field, so a request naming
+    /// only an effort is not judged on a model it never sent.
+    /// </summary>
+    internal static string? InvalidModel(string model) =>
+        EfHatchPlaybook.IsValidModel(model)
+            ? null
+            : $"a model is one of {string.Join(", ", EfHatchPlaybook.ModelAliases)}, " +
+              $"or a pinned name like claude-opus-5 - not \"{model}\"";
+
+    /// <summary>The same, for the thinking budget.</summary>
+    internal static string? InvalidEffort(string effort) =>
+        EfHatchPlaybook.IsValidEffort(effort)
             ? null
             : $"an effort is one of {string.Join(", ", EfHatchPlaybook.Efforts)} - not \"{effort}\"";
-    }
 
     // ---- Reading back ----
 

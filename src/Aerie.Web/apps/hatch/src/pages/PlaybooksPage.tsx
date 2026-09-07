@@ -7,6 +7,7 @@ import {
   getStatuses,
   patchPlaybook,
 } from '../api/client';
+import { Choice } from '../components/Choice';
 import { message } from '../lib/errors';
 import { useLoaded } from '../lib/useLoaded';
 import {
@@ -201,34 +202,6 @@ function TypesCell({ types, onChange }: { types: IssueType[]; onChange: (types: 
       ))}
       {types.length === 0 && <Text tone="muted">any</Text>}
     </div>
-  );
-}
-
-function Choice({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  /** Left off where a <Field> already wraps the select in a <label>: a second
-      name on the control would replace the visible one rather than add to it. */
-  label?: string;
-  value: string;
-  options: readonly string[];
-  onChange: (value: string) => void;
-}) {
-  // A pinned claude-… name an operator typed by hand is offered back to them
-  // rather than silently swapped for an alias the moment they touch the row.
-  const known = options.includes(value) ? options : [value, ...options];
-
-  return (
-    <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
-      {known.map((option) => (
-        <option key={option} value={option}>
-          {option}
-        </option>
-      ))}
-    </select>
   );
 }
 

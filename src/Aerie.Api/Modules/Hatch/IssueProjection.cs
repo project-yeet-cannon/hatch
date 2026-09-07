@@ -83,6 +83,8 @@ public static class IssueProjection
                 IssueMoment.Format(issue.ReadyAt, issue.ReadyAtHasTime),
                 IssueMoment.Format(issue.DueAt, issue.DueAtHasTime),
                 issue.PullRequestUrl,
+                issue.ModelOverride,
+                issue.EffortOverride,
                 issue.CreatedBy,
                 issue.CreatedAt,
                 issue.UpdatedAt);

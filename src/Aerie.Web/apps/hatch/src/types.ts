@@ -72,6 +72,14 @@ export interface Issue {
       http(s) URL - see EfHatchIssue.PullRequestUrl for why it is one and not a
       list of them. */
   pullRequestUrl: string | null;
+  /** The model every agent increment dispatched for this issue runs on, or null
+      for whatever the playbook for its next move names. One of PLAYBOOK_MODELS,
+      or a pinned `claude-…` id somebody set through the API. */
+  modelOverride: string | null;
+  /** The thinking budget those increments run at, or null for the playbook's.
+      Independent of `modelOverride`: an issue may carry either, both or
+      neither. One of PLAYBOOK_EFFORTS. */
+  effortOverride: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -125,6 +133,9 @@ export type IssueEventKind =
   | 'parent_changed'
   | 'ready_changed'
   | 'due_changed'
+  | 'pull_request_changed'
+  | 'model_override_changed'
+  | 'effort_override_changed'
   | 'commented'
   | 'asked'
   | 'answered'
@@ -255,6 +266,17 @@ export interface IssuePatchRequest {
       Anything else is refused with a sentence - the field's only job is to be
       clicked. */
   pullRequestUrl?: string | null;
+}
+
+/** What one issue overrides its playbooks with. Null leaves a field alone and
+    `''` hands it back to the playbook, as everywhere else in Hatch.
+
+    Its own request because it is its own route: setting one is closed to an API
+    key, since an override is a playbook's power routed through another table -
+    see IssuePlaybookController. */
+export interface IssuePlaybookRequest {
+  model?: string | null;
+  effort?: string | null;
 }
 
 /** A filter, as the search endpoint reads it. Every field is optional and they

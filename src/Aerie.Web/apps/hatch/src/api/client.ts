@@ -13,6 +13,7 @@ import type {
   IssueEvent,
   IssueMoveRequest,
   IssuePatchRequest,
+  IssuePlaybookRequest,
   IssueRollup,
   IssueSearch,
   ParsedEpic,
@@ -148,6 +149,10 @@ export const createIssue = (request: IssueCreateRequest) =>
   fetchJson<Issue>('/api/hatch/issues', { method: 'POST', ...asJson(request) });
 export const patchIssue = (key: string, request: IssuePatchRequest) =>
   fetchJson<Issue>(`/api/hatch/issues/${seg(key)}`, { method: 'PATCH', ...asJson(request) });
+/** The two things an issue overrides its playbooks with. Its own route because
+    setting one is closed to an API key - see IssuePlaybookController. */
+export const patchIssuePlaybook = (key: string, request: IssuePlaybookRequest) =>
+  fetchJson<Issue>(`/api/hatch/issues/${seg(key)}/playbook`, { method: 'PATCH', ...asJson(request) });
 export const deleteIssue = (key: string) =>
   fetchJson<void>(`/api/hatch/issues/${seg(key)}`, { method: 'DELETE' });
 export const moveIssue = (key: string, request: IssueMoveRequest) =>

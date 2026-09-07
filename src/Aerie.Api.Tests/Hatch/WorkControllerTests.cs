@@ -390,6 +390,115 @@ public class WorkControllerTests
         Assert.Empty(playbook.Types);
     }
 
+    // ---- The issue's own model and effort ----
+
+    [Fact]
+    public async Task Work_WithNoOverride_ReportsThePlaybooksOwnValues()
+    {
+        var h = await NewAsync();
+        var task = await h.FileAsync("task", "an ordinary one", h.Todo);
+
+        var playbook = Value(await h.Work.GetWork(Key(task), default)).Playbook!;
+
+        Assert.Equal("sonnet", playbook.Model);
+        Assert.Equal("high", playbook.Effort);
+    }
+
+    [Fact]
+    public async Task Work_ReportsAModelOverrideInPlaceOfThePlaybooks()
+    {
+        var h = await NewAsync();
+        var task = await h.FileAsync("task", "harder than its column suggests", h.Todo);
+        await h.OverrideAsync(task, model: "opus");
+
+        var playbook = Value(await h.Work.GetWork(Key(task), default)).Playbook!;
+
+        // The value that won, in place - and the effort still the row's own,
+        // because the two are independent.
+        Assert.Equal("opus", playbook.Model);
+        Assert.Equal("high", playbook.Effort);
+    }
+
+    [Fact]
+    public async Task Work_ReportsAnEffortOverrideTheSameWay()
+    {
+        var h = await NewAsync();
+        var task = await h.FileAsync("task", "subtle rather than large", h.Todo);
+        await h.OverrideAsync(task, effort: "max");
+
+        var playbook = Value(await h.Work.GetWork(Key(task), default)).Playbook!;
+
+        Assert.Equal("sonnet", playbook.Model);
+        Assert.Equal("max", playbook.Effort);
+    }
+
+    [Fact]
+    public async Task Work_ReportsBothOverrides_AndTheRowThatSpoke()
+    {
+        var h = await NewAsync();
+        var task = await h.FileAsync("task", "both", h.Todo);
+        await h.OverrideAsync(task, model: "haiku", effort: "low");
+
+        var work = Value(await h.Work.GetWork(Key(task), default));
+
+        Assert.Equal("haiku", work.Playbook!.Model);
+        Assert.Equal("low", work.Playbook.Effort);
+
+        // The dispatch names the playbook that spoke as well as the values
+        // that won: everything but the two fields is still the matched row's.
+        Assert.Equal("do the thing", work.Playbook.Prompt);
+        Assert.Equal(h.Todo, work.Playbook.FromStatusId);
+        Assert.Equal(h.InProgress, work.Playbook.ToStatusId);
+
+        // ...and the override rides the same payload, which is how a printed
+        // line says where the value came from.
+        Assert.Equal("haiku", work.Issue.ModelOverride);
+        Assert.Equal("low", work.Issue.EffortOverride);
+    }
+
+    [Fact]
+    public async Task Work_NextReportsTheOverrideToo()
+    {
+        var h = await NewAsync();
+        var story = await h.FileAsync("story", "the only thing on the board", h.Todo);
+        await h.OverrideAsync(story, model: "opus");
+
+        // One fold point, both endpoints: `next` and `{key}` reach the same
+        // resolve, so there is no second place to remember.
+        Assert.Equal("opus", Value(await h.Work.GetNextWork(0, null, null, default)).Playbook!.Model);
+    }
+
+    [Fact]
+    public async Task Work_AnOverrideOnAParent_DoesNotReachItsChild()
+    {
+        var h = await NewAsync();
+        var story = await h.FileAsync("story", "the expensive one", h.Todo, rank: 4096);
+        var task = await h.FileAsync("task", "under it", h.Todo, rank: 1024, parentId: story.Id);
+        await h.OverrideAsync(story, model: "opus", effort: "max");
+
+        var playbook = Value(await h.Work.GetWork(Key(task), default)).Playbook!;
+
+        // This issue only. An epic set to opus does not spend opus on its
+        // stories - a task that needs the big model says so itself.
+        Assert.Equal("sonnet", playbook.Model);
+        Assert.Equal("high", playbook.Effort);
+    }
+
+    [Fact]
+    public async Task Work_AnOverrideChangesWhatADispatchCosts_NeverWhetherOneHappens()
+    {
+        var h = await NewAsync();
+        var story = await h.FileAsync("story", "nowhere to go from here", h.Inbox);
+        await h.OverrideAsync(story, model: "opus", effort: "max");
+
+        var work = Value(await h.Work.GetWork(Key(story), default));
+
+        // Nothing in the refusal ladder learns about overrides: an issue with
+        // no playbook for its next move still dispatches nothing.
+        Assert.Null(work.Playbook);
+        Assert.Contains("no playbook covers", work.Blocked);
+    }
+
     [Fact]
     public async Task Work_CarriesTheChildrenSoTheAgentCanDescend()
     {
@@ -708,6 +817,19 @@ public class WorkControllerTests
             Db.Issues.Add(issue);
             await Db.SaveChangesAsync();
             return issue;
+        }
+
+        /// <summary>
+        /// An issue's own model and effort, set straight on the row - what the
+        /// route that writes them refuses and permits is
+        /// <see cref="IssuePlaybookControllerTests"/>'s business, and these
+        /// tests are about what the dispatcher does with them once set.
+        /// </summary>
+        public async Task OverrideAsync(EfHatchIssue issue, string? model = null, string? effort = null)
+        {
+            issue.ModelOverride = model;
+            issue.EffortOverride = effort;
+            await Db.SaveChangesAsync();
         }
 
         /// <summary>
