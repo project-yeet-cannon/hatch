@@ -255,6 +255,17 @@ public static class SiteSettingKeys
     /// Immich, so no tablet ever holds a key to the family library.
     /// </summary>
     public const string ImmichApiKey = "ImmichApiKey";
+
+    /// <summary>
+    /// A Claude subscription OAuth token (<c>sk-ant-oat...</c>), used by Hatch
+    /// to read the account's own headroom - see Modules/Hatch/ClaudeCredential.
+    /// A setting rather than an environment variable for the reason the Immich
+    /// and Anthropic keys above are one, plus a reason of its own: it is
+    /// genuinely optional, and the provisioning path cannot express an optional
+    /// cluster secret. Blank means Hatch simply has no battery in its nav, which
+    /// is a supported state and not an error.
+    /// </summary>
+    public const string ClaudeSubscriptionToken = "ClaudeSubscriptionToken";
 }
 
 /// <summary>A single numeric sample from a DeviceChannel. Replaces the wide EfEnvironmentReading table - every sample is "channel X had value V at time T."</summary>

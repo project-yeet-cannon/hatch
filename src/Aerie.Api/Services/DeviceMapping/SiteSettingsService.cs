@@ -27,7 +27,8 @@ public record SiteSettingsSnapshot(
     int HazardMaxSeverityAgeHours,
     string? AnthropicApiKey,
     string? ImmichBaseUrl,
-    string? ImmichApiKey);
+    string? ImmichApiKey,
+    string? ClaudeSubscriptionToken);
 
 public interface ISiteSettingsService
 {
@@ -127,7 +128,8 @@ public class SiteSettingsService(IDbContextFactory<AerieContext> dbFactory, Time
                 ImmichBaseUrl: NullIfEmpty(values.GetValueOrDefault(SiteSettingKeys.ImmichBaseUrl))?.TrimEnd('/'),
                 // Deobfuscated for the same reason as the two above: the Photos
                 // module hands it to Immich as a header, not to a screen.
-                ImmichApiKey: Deobfuscated(values.GetValueOrDefault(SiteSettingKeys.ImmichApiKey)));
+                ImmichApiKey: Deobfuscated(values.GetValueOrDefault(SiteSettingKeys.ImmichApiKey)),
+                ClaudeSubscriptionToken: Deobfuscated(values.GetValueOrDefault(SiteSettingKeys.ClaudeSubscriptionToken)));
 
             cached = snapshot;
             expiresAt = time.GetUtcNow() + CacheTtl;

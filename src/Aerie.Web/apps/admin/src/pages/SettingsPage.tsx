@@ -95,6 +95,12 @@ const FIELDS: FieldDef[] = [
     help: 'Lets the family Game app write games from what a child types. Billed to this key, so it is yours to supply. Stored obfuscated; leave blank to keep the current value.',
   },
   {
+    key: 'ClaudeSubscriptionToken',
+    label: 'Claude subscription token',
+    type: 'password',
+    help: 'An OAuth token for your own Claude subscription. Lets Hatch show how much headroom the account has left. Entirely optional - without one Hatch simply has no battery in its nav. Stored obfuscated; leave blank to keep the current value.',
+  },
+  {
     key: 'HazardMaxSeverityAgeHours',
     label: 'Hazard window (hours)',
     type: 'number',

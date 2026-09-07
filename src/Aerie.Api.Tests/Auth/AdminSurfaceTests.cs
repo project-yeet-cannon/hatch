@@ -171,6 +171,13 @@ public class AdminSurfaceTests
         "PlanController.GetIssuePlan",
         "PlanController.GetPlan",
 
+        // The account's own Claude headroom, proxied so no browser ever holds
+        // the subscription token. Hatch-scoped like the rest of the module and
+        // guarded for the same reason the board is: what it says is how much
+        // room is left to work tonight, which is a fact about the operator
+        // rather than about the house.
+        "UtilizationController.Get",
+
         // Playbooks are guarded twice over. Reading one is Hatch-scoped like
         // the rest; writing one names no scope at all, so an API key is
         // refused - a playbook chooses the next agent's instructions, its
