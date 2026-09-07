@@ -7,7 +7,7 @@ import { GalleryPage, GallerySection } from '../components/Gallery';
    inline in the page could show the paint and none of that, and the behaviour
    is the part worth checking. */
 
-type Which = 'short' | 'form' | 'long' | 'title' | null;
+type Which = 'short' | 'form' | 'long' | 'pinned' | 'title' | null;
 
 export function ModalPage() {
   const [open, setOpen] = useState<Which>(null);
@@ -29,6 +29,15 @@ export function ModalPage() {
           <Button onClick={() => setOpen('form')}>A form</Button>
           <Button onClick={() => setOpen('long')}>Long content</Button>
           <Button onClick={() => setOpen('title')}>A long title</Button>
+        </div>
+      </GallerySection>
+
+      <GallerySection
+        title="Actions that cannot scroll away"
+        note="Given a footer, the panel stops scrolling and the body scrolls inside it. The two dozen lines below move; the two buttons do not, at any window height. Without a footer the panel is the scroller it has always been, which is what the four other specimens here still are."
+      >
+        <div className="row">
+          <Button onClick={() => setOpen('pinned')}>Long content, pinned actions</Button>
         </div>
       </GallerySection>
 
@@ -86,6 +95,28 @@ export function ModalPage() {
           The panel scrolls; the page behind it does not move. The panel caps at the viewport height less one
           spacing rung, so the scrim is visible above and below it and there is somewhere to click out.
         </Text>
+      </Modal>
+
+      <Modal
+        open={open === 'pinned'}
+        onClose={close}
+        title="Discovery log"
+        footer={
+          <div className="row">
+            <Button variant="primary" onClick={close}>
+              Adopt all 24
+            </Button>
+            <Button onClick={close}>Close</Button>
+          </div>
+        }
+      >
+        <div className="stack">
+          {Array.from({ length: 24 }, (_, index) => (
+            <Text key={index} tone="muted">
+              192.0.2.{index + 10} answered on mDNS and matched no adapter in the catalogue.
+            </Text>
+          ))}
+        </div>
       </Modal>
 
       <Modal

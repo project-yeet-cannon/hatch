@@ -7,6 +7,11 @@ export interface ModalProps {
   onClose: () => void;
   title: string;
   children?: ReactNode;
+  /** The row that has to stay reachable, drawn under the body rather than in
+      it. Given one, the panel stops scrolling and the body scrolls inside it,
+      so a dialog ends in its actions however much is above them. Left off, the
+      panel is the scroller it has always been. */
+  footer?: ReactNode;
 }
 
 /**
@@ -28,6 +33,10 @@ export interface ModalProps {
  *   Tab and walked the page *behind* the scrim.
  * - **Escape is bound to the document, not to the window**, so it still fires
  *   from inside an input in the panel.
+ * - **It can pin its actions.** `footer` puts a row under the body instead of
+ *   in it, and the body becomes the scroller. Before this the only way to keep
+ *   a long dialog's buttons on screen was to cap the content by hand against
+ *   the panel's chrome, which is a number that is wrong on the next display.
  *
  * It is deliberately not a full focus trap. That wants either `<dialog>`'s
  * top-layer behaviour or a well-tested library, and picking between those is a
@@ -39,7 +48,7 @@ export interface ModalProps {
  * <h2> would move it from 18px to 22px, and Phase 4 may not change type a
  * designer has not chosen.
  */
-export function Modal({ open, onClose, title, children }: ModalProps) {
+export function Modal({ open, onClose, title, children, footer }: ModalProps) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<Element | null>(null);
@@ -66,6 +75,8 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
 
   if (!open) return null;
 
+  const framed = Boolean(footer);
+
   return (
     <div
       className="aerie-modal__overlay"
@@ -79,7 +90,7 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="aerie-card aerie-modal__panel"
+        className={`aerie-card aerie-modal__panel${framed ? ' aerie-modal__panel--framed' : ''}`}
       >
         <div className="aerie-modal__head">
           <h3 id={titleId}>{title}</h3>
@@ -87,7 +98,14 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
             ✕
           </button>
         </div>
-        {children}
+        {framed ? (
+          <>
+            <div className="aerie-modal__body">{children}</div>
+            <div className="aerie-modal__foot">{footer}</div>
+          </>
+        ) : (
+          children
+        )}
       </div>
     </div>
   );

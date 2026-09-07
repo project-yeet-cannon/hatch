@@ -36,6 +36,12 @@ interface Asked {
  * parent and the dates. This dialog adds one field, not a second issue page,
  * and it still hands over two ways to go further: the full issue in this tab,
  * or in a new one.
+ *
+ * It is laid out against the modal's `footer`: the three ways out sit under the
+ * body rather than at the end of it, so a card whose brief runs to a page still
+ * opens on a dialog you can close. The description gets a box of its own inside
+ * that - a paragraph's worth, the same in both views - because the field people
+ * open a card to skim should not be the field that fills the dialog.
  */
 export function IssuePeek({
   card,
@@ -112,7 +118,25 @@ export function IssuePeek({
   const head = <h4 className="hatch-section-title">Description</h4>;
 
   return (
-    <Modal open onClose={onClose} title={card.key}>
+    <Modal
+      open
+      onClose={onClose}
+      title={card.key}
+      footer={
+        <div className="hatch-form-actions">
+          <Button onClick={onClose}>Close</Button>
+          {/* An anchor rather than a <Link>: target="_blank" opens a second
+              document, which React Router does not route. appHref is what keeps
+              that second document on the right prefix - see lib/basename.ts. */}
+          <Button as="a" href={appHref(`/issues/${card.key}`)} target="_blank" rel="noreferrer">
+            New tab ↗
+          </Button>
+          <Button as={Link} variant="primary" to={`/issues/${card.key}`} onClick={onClose}>
+            Open the issue
+          </Button>
+        </div>
+      }
+    >
       <div className="hatch-peek">
         <div className="hatch-peek-meta">
           <TypeBadge type={card.type} />
@@ -153,23 +177,11 @@ export function IssuePeek({
               value={asked.description}
               onSave={save}
               error={asked.saveError ?? null}
-              className="hatch-peek-grows"
+              editorClassName="hatch-peek-box"
+              previewClassName="hatch-peek-box"
               rows={8}
             />
           )}
-        </div>
-
-        <div className="hatch-form-actions">
-          <Button onClick={onClose}>Close</Button>
-          {/* An anchor rather than a <Link>: target="_blank" opens a second
-              document, which React Router does not route. appHref is what keeps
-              that second document on the right prefix - see lib/basename.ts. */}
-          <Button as="a" href={appHref(`/issues/${card.key}`)} target="_blank" rel="noreferrer">
-            New tab ↗
-          </Button>
-          <Button as={Link} variant="primary" to={`/issues/${card.key}`} onClick={onClose}>
-            Open the issue
-          </Button>
         </div>
       </div>
     </Modal>

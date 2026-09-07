@@ -21,7 +21,8 @@ export function DescriptionEditor({
   value,
   onSave,
   error,
-  className,
+  editorClassName,
+  previewClassName,
   rows = 16,
 }: {
   /** The section's heading, drawn beside the controls. A node rather than a
@@ -38,7 +39,12 @@ export function DescriptionEditor({
       the section. Left off by a caller that reports errors somewhere else. */
   error?: string | null;
   /** Appended to the textarea's classes: the ceiling differs by call site. */
-  className?: string;
+  editorClassName?: string;
+  /** Appended to the rendered markdown's, for a call site that has to cap the
+      preview too. The issue page does not - the page scrolls, and a brief that
+      runs long should run long there. A dialog does, because a dialog cannot
+      be scrolled past its own actions. */
+  previewClassName?: string;
   /** The height the box opens at, which differs for the same reason. */
   rows?: number;
 }) {
@@ -93,7 +99,10 @@ export function DescriptionEditor({
         // The draft, not the stored text: Preview shows what Save would write.
         draft.trim() ? (
           // Sanitized by renderMarkdown - nothing from the database is trusted markup.
-          <div className="hatch-markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(draft) }} />
+          <div
+            className={`hatch-markdown${previewClassName ? ` ${previewClassName}` : ''}`}
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(draft) }}
+          />
         ) : (
           <p className="text-muted">No description yet.</p>
         )
@@ -102,7 +111,7 @@ export function DescriptionEditor({
         // under; useAutoGrow measures it rather than being told it.
         <textarea
           ref={editor}
-          className={`hatch-description-editor${className ? ` ${className}` : ''}`}
+          className={`hatch-description-editor${editorClassName ? ` ${editorClassName}` : ''}`}
           rows={rows}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
