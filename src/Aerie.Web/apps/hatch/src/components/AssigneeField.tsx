@@ -59,7 +59,11 @@ export function AssigneeField({
         ))}
       </select>
 
-      {me && !sameAssignee(me, assignee) && (
+      {/* `kind === 'person'` as well as "somebody is here": the write is closed
+          to an API key, so a key holding this page would be offered a press
+          that could only be refused. A browser never presents one, which is
+          why this is a guard rather than a branch worth explaining on screen. */}
+      {me?.kind === 'person' && !sameAssignee(me, assignee) && (
         <button
           type="button"
           className="hatch-assignee-mine"
