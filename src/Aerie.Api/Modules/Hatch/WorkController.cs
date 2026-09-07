@@ -400,7 +400,20 @@ public class WorkController(HatchContext db, TimeProvider time) : ControllerBase
             await IssueProjection.ToDtoAsync(db, issue, ct),
             ToStatusDto(from),
             to is null ? null : ToStatusDto(to),
-            playbook is null ? null : PlaybooksController.ToDto(playbook),
+            // The values the increment will actually run on, in place rather
+            // than beside them. An issue's own model and effort beat whichever
+            // playbook speaks for its next move, and a client that had to
+            // remember to check a second pair of fields is a client that will
+            // one day spawn sonnet on a ticket set to opus - silently. Nothing
+            // is hidden by folding them in: issue.modelOverride rides the same
+            // payload, and is how a printed line says where the value came
+            // from. Everything else stays the matched row's own, so the
+            // dispatch names the playbook that spoke *and* the values that won.
+            playbook is null ? null : PlaybooksController.ToDto(playbook) with
+            {
+                Model = issue.ModelOverride ?? playbook.Model,
+                Effort = issue.EffortOverride ?? playbook.Effort,
+            },
             childCards,
             questions,
             Blocked(issue, from, to, playbook, waiting, loop));
