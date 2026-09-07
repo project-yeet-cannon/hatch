@@ -1500,3 +1500,105 @@ button.hatch-option.chosen {
 .hatch-plan-picker .aerie-field__control > select {
   width: auto;
 }
+
+/* ---------------------------------------------------------------------------
+   The issue picker: a button that opens a search box and a list of rows.
+
+   See components/IssuePicker.tsx. Everything here is chrome - the order, the
+   matching and the keyboard are in the component and in lib/issuePicker.ts. */
+.hatch-issue-picker {
+  position: relative;
+  /* So the field does not collapse in the flex row of .hatch-issue-controls:
+     a row is a key and a title, and a picker the width of "— none —" is one
+     that has to be widened before it can be read. */
+  min-width: 18rem;
+}
+
+/* The closed face. <button> in base.css has no border and a control's padding,
+   so this restates the select's appearance rather than inheriting it. */
+.hatch-issue-picker-button {
+  width: 100%;
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-in);
+  background: var(--card);
+  color: var(--ink);
+  font-weight: 400;
+  font-size: var(--t-body);
+}
+
+/* Matching base.css's rule for the native controls this sits beside. */
+.hatch-issue-picker-button:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-bg);
+}
+
+.hatch-issue-picker-popup {
+  position: absolute;
+  top: calc(100% + var(--sp-1));
+  left: 0;
+  right: 0;
+  /* Over the page and under Modal's 100. */
+  z-index: 10;
+  padding: var(--sp-2);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+}
+
+.hatch-issue-picker-search {
+  width: 100%;
+}
+
+.hatch-issue-picker-list {
+  /* So sixty epics do not push the popup off the bottom of the screen. */
+  max-height: 40vh;
+  overflow-y: auto;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hatch-issue-picker-row {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  padding: var(--sp-1-5) var(--sp-2);
+  border-radius: var(--r-in);
+  font-size: var(--t-body);
+  cursor: pointer;
+}
+
+/* Where the keyboard is. */
+.hatch-issue-picker-row.is-highlighted {
+  background: var(--primary-bg);
+}
+
+/* What is in force. A different fact from the highlight, and an eye has to be
+   able to tell them apart - so this is weight and a mark, not a fill. */
+.hatch-issue-picker-row.is-current {
+  font-weight: 600;
+}
+
+/* The mark is markup rather than a ::before, so it can carry aria-hidden: what
+   is in force is already said by aria-selected, and a screen reader reading a
+   tick out loud as well would say it twice. */
+.hatch-issue-picker-mark {
+  margin-left: auto;
+  color: var(--primary);
+}
+
+.hatch-issue-picker-key {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hatch-issue-picker-note {
+  margin: var(--sp-2) 0 0;
+  color: var(--muted);
+  font-size: var(--t-label);
+}
