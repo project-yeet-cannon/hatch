@@ -12,6 +12,7 @@ import {
   getIssue,
   getIssuePlan,
   getNextWorkUnder,
+  getWorkLog,
   patchIssue,
   patchIssuePlaybook,
   removeDependency,
@@ -27,6 +28,7 @@ import { StatusPill } from '../components/StatusPill';
 import { MomentField } from '../components/MomentField';
 import { PullRequestLink } from '../components/PullRequestLink';
 import { TypeBadge } from '../components/TypeBadge';
+import { WorkLog } from '../components/WorkLog';
 import { childTypes } from '../lib/childTypes';
 import { statusVars } from '../lib/color';
 import { closeOffer } from '../lib/closeSubtree';
@@ -50,6 +52,7 @@ import type {
   QuestionOption,
   Status,
   Work,
+  WorkLog as WorkLogData,
 } from '../types';
 
 export function IssuePage() {
@@ -64,6 +67,8 @@ export function IssuePage() {
   const [rollup, setRollup] = useState<IssueRollup | null>(null);
   const [rollupError, setRollupError] = useState<string | null>(null);
   const [next, setNext] = useState<NextAnswer | null>(null);
+  const [workLog, setWorkLog] = useState<WorkLogData | null>(null);
+  const [workLogError, setWorkLogError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     /* The fifth read, sent with the other four and awaited apart from them.
@@ -87,6 +92,15 @@ export function IssuePage() {
       (err: unknown) => ({ work: null, error: message(err) }),
     );
 
+    /* And the seventh, on the same terms as the rollup: what every session run
+       against this issue and everything beneath it has cost. Its own failure,
+       handed to its own section - a meter that could not be read must not blank
+       an issue somebody came here to read. */
+    const metering = getWorkLog(key).then(
+      (loaded) => ({ loaded, failure: null as string | null }),
+      (err: unknown) => ({ loaded: null, failure: message(err) }),
+    );
+
     try {
       const [loaded, loadedBoard, loadedComments, loadedEvents] = await Promise.all([
         getIssue(key),
@@ -108,6 +122,10 @@ export function IssuePage() {
     setRollupError(settled.failure);
 
     setNext(await asking);
+
+    const metered = await metering;
+    setWorkLog(metered.loaded);
+    setWorkLogError(metered.failure);
   }, [key]);
 
   useEffect(() => {
@@ -368,6 +386,11 @@ export function IssuePage() {
       )}
 
       <Comments issueKey={key} comments={comments} onAdded={() => void load()} onError={setError} />
+
+      {/* Between the thread and the trail, and visibly part of neither: a
+          comment is somebody talking, an event is something happening, and this
+          is the meter. */}
+      <WorkLog log={workLog} error={workLogError} />
 
       <EventTrail events={events} />
 
