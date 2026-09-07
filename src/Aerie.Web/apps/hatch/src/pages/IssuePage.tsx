@@ -12,7 +12,9 @@ import {
   getIssuePlan,
   getNextWorkUnder,
   patchIssue,
+  patchIssuePlaybook,
 } from '../api/client';
+import { Choice } from '../components/Choice';
 import { CloseSubtreeDialog } from '../components/CloseSubtreeDialog';
 import { Command } from '../components/Command';
 import { DescriptionEditor } from '../components/DescriptionEditor';
@@ -32,7 +34,7 @@ import { waitingChild } from '../lib/next';
 import { openQuestions } from '../lib/questions';
 import { useAutoGrow } from '../lib/useAutoGrow';
 import { useCloseSubtree } from '../lib/useCloseSubtree';
-import { ISSUE_TYPES, LEGAL_PARENT_TYPES } from '../types';
+import { ISSUE_TYPES, LEGAL_PARENT_TYPES, PLAYBOOK_EFFORTS, PLAYBOOK_MODELS } from '../types';
 import type {
   Board,
   ChildRollup,
@@ -124,6 +126,23 @@ export function IssuePage() {
       } catch (err) {
         setError(message(err));
         return false;
+      }
+    },
+    [key, load],
+  );
+
+  /* The two the ordinary patch route does not carry. Its own call because it
+     is its own endpoint: setting an override is closed to an API key, and that
+     refusal is a property of the route rather than of a rule anybody is asked
+     to follow. Otherwise exactly `save` - it re-reads, and a refusal lands in
+     `error` above in the server's own words. */
+  const savePlaybook = useCallback(
+    async (patch: Parameters<typeof patchIssuePlaybook>[1]) => {
+      try {
+        await patchIssuePlaybook(key, patch);
+        await load();
+      } catch (err) {
+        setError(message(err));
       }
     },
     [key, load],
@@ -260,6 +279,35 @@ export function IssuePage() {
             value={issue.dueAt}
             onChange={(dueAt) => void save({ dueAt })}
           />
+
+          {/* The playbook for a transition prices every ticket that makes it.
+              These two say this one is different, and they beat every playbook
+              that could speak for it - not one transition's worth. `— playbook —`
+              is the empty string the route reads as "clear it", and is where
+              every issue on the board starts.
+
+              Drawn from the constants the Playbooks page draws from, so what an
+              issue may be set to and what a playbook may be set to cannot drift
+              apart. A pinned `claude-…` id somebody set through the API is
+              offered back rather than swapped for an alias - that is Choice's
+              own doing. */}
+          <Field label="Model" hint="What an agent dispatched for this issue runs on.">
+            <Choice
+              value={issue.modelOverride ?? ''}
+              options={PLAYBOOK_MODELS}
+              placeholder="— playbook —"
+              onChange={(model) => void savePlaybook({ model })}
+            />
+          </Field>
+
+          <Field label="Effort" hint="How hard it thinks. Empty means the playbook decides.">
+            <Choice
+              value={issue.effortOverride ?? ''}
+              options={PLAYBOOK_EFFORTS}
+              placeholder="— playbook —"
+              onChange={(effort) => void savePlaybook({ effort })}
+            />
+          </Field>
         </div>
       </Card>
 
@@ -964,7 +1012,7 @@ function EventTrail({ events }: { events: IssueEvent[] }) {
           {events.map((event) => (
             <li key={event.id} className="hatch-event">
               <span className="text-muted">{new Date(event.at).toLocaleString()}</span>
-              <Badge>{event.kind.replace('_', ' ')}</Badge>
+              <Badge>{event.kind.replaceAll('_', ' ')}</Badge>
               <span>{event.actor}</span>
               <span className="text-muted">{describe(event)}</span>
             </li>
