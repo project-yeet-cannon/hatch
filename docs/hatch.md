@@ -1089,6 +1089,14 @@ Nothing it does destroys work that cannot be got back:
 - The exception is **a commit on the trunk itself and nowhere else**, which the
   reset moves off. The count is printed while there is still something to count,
   and `git reflog` holds the commits.
+- **A branch whose upstream on origin has been deleted is deleted here too**,
+  named on the terminal with the short sha it pointed at, so `git branch <name>
+  <sha>` puts it back. Only that shape: a branch that never had an upstream is
+  somebody's half-finished local work and is never touched, nor is one whose
+  upstream is still there, nor one tracking a remote that is not origin — only
+  origin was fetched and pruned, so a `[gone]` anywhere else is a fact the loop
+  did not establish. Otherwise a checkout that has run a week accumulates a
+  branch for every ticket it ever worked, long after the pull requests merged.
 
 It runs once an increment is known to be due, not once per pass — on an idle
 board the difference is a `git fetch` every interval until morning, against a

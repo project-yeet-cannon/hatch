@@ -1979,7 +1979,69 @@ reset_workspace() {
   fi
 
   echo "hatch:   workspace on ${base} at $(git -C "$root" rev-parse --short HEAD)${head:+, was ${head}}"
+
+  # Last, and after the checkout: the branch this is standing on is the trunk
+  # by then, so the two branches that must survive are surviving by where the
+  # call sits rather than by anything it checks. It cannot fail the reset -
+  # nothing it does is a reason not to spawn an increment.
+  prune_gone_branches "$root" "$base"
+
   return 0
+}
+
+# The branches whose pull requests merged, and which origin has since dropped.
+#
+# A checkout that has run a week of increments has a branch for every ticket it
+# ever worked. This reads what the fetch above established and takes those
+# away; it is housekeeping, and it runs where housekeeping is safe, which is
+# standing on the trunk with the tree already stashed clean.
+#
+# `%(upstream:track)` is the entire rule. It is `[gone]` for a branch that had
+# an upstream and has not got one now, and empty for a branch that never had
+# one - and that second case is the one worth being careful about. A rule
+# written as "is this name on origin" deletes somebody's half-finished local
+# work, because unfinished and merged look identical from there. Asking whether
+# there was ever an upstream is what tells them apart.
+#
+# Only branches tracking origin, because only origin was fetched and pruned. A
+# `[gone]` under some other remote is a fact this function did not establish,
+# and it does not act on one.
+#
+# `-D` rather than `-d`: a squash merge leaves the branch's commits nowhere in
+# the trunk's history, so the merge check refuses on exactly the branches this
+# is here to delete. It is asking the wrong question. The sha goes on the
+# terminal instead, and `git branch <name> <sha>` is how one comes back.
+#
+# Nothing here returns non-zero. A branch that will not delete - checked out in
+# another worktree, most likely - is a line on the terminal, not a reason to end
+# a night: reset_workspace's codes say whether an increment may be spawned, and
+# a leftover branch has no opinion about that.
+prune_gone_branches() {
+  local root="$1" base="$2" refs name sha upstream track
+
+  # Track last, because it is the only one of the four that can contain a
+  # space. A branch with no upstream leaves the last two empty, which the
+  # default IFS collapses rather than shifting the line along.
+  refs=$(git -C "$root" for-each-ref \
+    --format='%(refname:short) %(objectname:short) %(upstream) %(upstream:track)' \
+    refs/heads) || return 0
+
+  while read -r name sha upstream track; do
+    [ -n "$name" ] || continue
+    [ "$track" = "[gone]" ] || continue
+    case "$upstream" in refs/remotes/origin/*) ;; *) continue ;; esac
+
+    # The trunk cannot read [gone] - origin has it, which was checked above -
+    # and git will not delete the branch it is standing on either way. The line
+    # is here so the rule says so where somebody reads the rule.
+    [ "$name" != "$base" ] || continue
+
+    if git -C "$root" branch --delete --force --quiet "$name" >/dev/null 2>&1; then
+      echo "hatch:   deleted ${name}, was ${sha} - origin dropped it when it merged"
+    else
+      echo "hatch:   ${name} is gone from origin and would not delete - it is still here" >&2
+    fi
+  done <<<"$refs"
 }
 
 # The scan the last pass made, for whoever reports what it found.
