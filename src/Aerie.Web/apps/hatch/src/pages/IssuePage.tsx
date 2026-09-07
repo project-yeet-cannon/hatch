@@ -16,6 +16,7 @@ import {
 import { CloseSubtreeDialog } from '../components/CloseSubtreeDialog';
 import { Command } from '../components/Command';
 import { DescriptionEditor } from '../components/DescriptionEditor';
+import { IssuePicker } from '../components/IssuePicker';
 import { MomentChip } from '../components/MomentChip';
 import { StatusMeter } from '../components/StatusMeter';
 import { StatusPill } from '../components/StatusPill';
@@ -222,17 +223,28 @@ export function IssuePage() {
             </select>
           </Field>
 
-          {/* The empty option is the clear, and it maps to the empty string the
-              API reads as "no parent" - see IssuePatchRequest. */}
-          <Field label="Parent" hint={`A ${issue.type} hangs under ${legal.join(' or ')}.`}>
-            <select value={issue.parentKey ?? ''} onChange={(e) => void save({ parentKey: e.target.value })}>
-              <option value="">— none —</option>
-              {parents.map((p) => (
-                <option key={p.key} value={p.key}>
-                  {p.key} — {p.title}
-                </option>
-              ))}
-            </select>
+          {/* `as="div"`: Field wraps its children in a <label> for implicit
+              association, and text inside a label joins the control's
+              accessible name - with the popup inside it, the whole candidate
+              list would be read out as the name of this control. The picker
+              carries its own aria-label instead, which is why `label` is
+              passed twice. The hint is unaffected: Field already draws it
+              outside the label, for the same reason.
+
+              The clear is still the empty string the API reads as "no parent"
+              - see IssuePatchRequest - now the `— none —` row rather than an
+              empty <option>. `save` is handed over rather than wrapped in
+              `void`: the picker awaits it to know when the press is over, and
+              `save` catches its own rejection and puts the server's sentence
+              in `error` above. */}
+          <Field label="Parent" as="div" hint={`A ${issue.type} hangs under ${legal.join(' or ')}.`}>
+            <IssuePicker
+              label="Parent"
+              value={issue.parentKey}
+              candidates={parents}
+              emptyMessage={`Nothing in ${issue.projectKey} can be a parent of a ${issue.type} yet.`}
+              onChange={(parentKey) => save({ parentKey })}
+            />
           </Field>
 
           <MomentField
