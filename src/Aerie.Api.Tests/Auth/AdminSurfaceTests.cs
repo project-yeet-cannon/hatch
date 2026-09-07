@@ -220,6 +220,15 @@ public class AdminSurfaceTests
         // IssuePlaybookController.
         "IssuePlaybookController.PatchIssuePlaybook",
 
+        // A related edge, cut the same way and for a different reason: under
+        // the loop's "people only" rule an assignee is a dispatch gate, so a
+        // key that could write one could clear a person's name off a ticket and
+        // hand itself work that was reserved. The directory read beside it is
+        // Hatch-scoped - it is a list of names, and an agent has to be able to
+        // say whose ticket it is declining to take. See AssigneeController.
+        "AssigneeController.GetAssignees",
+        "AssigneeController.PutIssueAssignee",
+
         // The whole controller, reads included. See SettingsController.
         "SettingsController.GetAll",
         "SettingsController.Get",

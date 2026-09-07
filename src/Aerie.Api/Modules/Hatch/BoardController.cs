@@ -1,5 +1,6 @@
 using Aerie.Api.Common;
 using Aerie.Api.Ef;
+using Aerie.Api.Services.Auth;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -16,7 +17,7 @@ namespace Aerie.Api.Modules.Hatch;
 [ApiController]
 [Route("api/hatch/board")]
 [RequireAdmin(AcceptScope = ApiKeyScopes.Hatch)]
-public class BoardController(HatchContext db) : ControllerBase
+public class BoardController(HatchContext db, IActorDirectory actors) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<BoardDto>> GetBoard(CancellationToken ct)
@@ -55,8 +56,19 @@ public class BoardController(HatchContext db) : ControllerBase
                 i.ReadyAtHasTime,
                 i.DueAt,
                 i.DueAtHasTime,
+                i.AssigneePersonId,
+                i.AssigneeApiKeyId,
             })
             .ToListAsync(ct);
+
+        // Two more queries for the whole board, however many cards it holds:
+        // the directory is memoized per request, so this is not a lookup a card.
+        // An id whose person has been deleted or whose key has been revoked
+        // resolves to null and the card draws nothing - the same answer the
+        // issue page and the dispatcher give, at the same instant.
+        var assignees = new Dictionary<long, AssigneeDto?>();
+        foreach (var i in issues)
+            assignees[i.Id] = await IssueProjection.ToAssigneeAsync(actors, i.AssigneePersonId, i.AssigneeApiKeyId, ct);
 
         var cards = issues.Select(i => new IssueCardDto(
             IssueKey.Format(i.ProjectKey, i.Number),
@@ -68,7 +80,8 @@ public class BoardController(HatchContext db) : ControllerBase
             i.ParentNumber is { } number ? IssueKey.Format(i.ParentProjectKey!, number) : null,
             IssueMoment.Format(i.ReadyAt, i.ReadyAtHasTime),
             IssueMoment.Format(i.DueAt, i.DueAtHasTime),
-            waiting.GetValueOrDefault(i.Id))).ToList();
+            waiting.GetValueOrDefault(i.Id),
+            assignees[i.Id])).ToList();
 
         return new BoardDto(statuses, cards);
     }

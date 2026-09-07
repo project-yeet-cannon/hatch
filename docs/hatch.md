@@ -201,7 +201,7 @@ through the gate that was supposed to stop it.
 `EfHatchIssue` — `ProjectId`, `Number`, `Type`, `Title`, `Description`,
 `StatusId`, `ParentId`, `Rank`, `ReadyAt`/`ReadyAtHasTime`,
 `DueAt`/`DueAtHasTime`, `PullRequestUrl`, `ModelOverride`, `EffortOverride`,
-`CreatedBy`, `CreatedAt`, `UpdatedAt`.
+`AssigneePersonId`/`AssigneeApiKeyId`, `CreatedBy`, `CreatedAt`, `UpdatedAt`.
 
 The display key `AER-12` is **computed** (`Project.Key + "-" + Number`) and
 never stored, so there is exactly one fact about a key anywhere and no chance of
@@ -250,6 +250,50 @@ job is to be clicked should not hold something that does not open. Nothing
 parses the host: a self-hosted forge on a private address is a pull request like
 any other, and a column that only accepted one company's would be a fact about
 exactly one installation.
+
+#### Assignee
+
+**Who owns a ticket, said on the ticket.** An issue is assigned to a person, or
+to an API key, or to nobody — two nullable columns, `AssigneePersonId` and
+`AssigneeApiKeyId`, of which at most one is ever set. The controller clears one
+when it writes the other, and a check constraint refuses a row wearing both, so
+the constraint is a backstop and never the error a caller sees.
+
+It is deliberately **not a claim**. A claim is a machine lease that comes and
+goes with an increment, and Hatch does not have one for the reasons [one loop at
+a time](#one-loop-at-a-time) gives. An assignee is a durable statement written
+by a person, changing rarely and surviving every restart — which is why it is a
+column here and a lease would not have been.
+
+Neither column is a foreign key, and neither could be: Hatch owns its own schema
+and its own migration history, and a constraint from a module into
+`public.People` is the coupling `Modules/README.md` exists to prevent — the same
+reason `CreatedBy` is a name. `ON DELETE SET NULL` would not have worked anyway,
+because [revoking a key](auth-architecture.md) sets a column and keeps the row
+on purpose.
+
+What does the work instead is **one predicate every reader applies**: an
+assignee resolves only to a *live* identity — a person row that still exists, or
+a key that exists and is not revoked — and an id that does not resolve reads as
+**unassigned**. In the issue payload, on the card, in the board filter and at
+the dispatcher, at the same instant. Nothing sweeps, nothing is cleaned up, and
+nothing can be half-migrated: a predicate cannot fail to run, which is the same
+argument [one loop at a time](#one-loop-at-a-time) makes for a lock whose owner
+is gone being cleared rather than honoured. The rule lives in one place,
+`Services/Auth/ActorDirectory.cs`, so that the day a second module wants an
+owner there is one thing to ask.
+
+The trade is stated rather than papered over: an issue assigned to a key that is
+later revoked reads as unassigned without announcing it. The `assignee_changed`
+event still names who it was — both sides carry a name beside the id, for the
+reason `CreatedBy` is a name — so the trail answers "whose was this in March".
+
+Setting one is closed to an API key: under the loop's `people only` rule an
+assignee is a dispatch gate, so a key that could write one could hand itself
+work somebody had reserved. See [The one edge that is deliberately
+cut](#the-one-edge-that-is-deliberately-cut), and [what makes an issue
+actionable](#what-makes-an-issue-actionable) for what a name on a ticket does to
+a pass.
 
 **`ModelOverride` and `EffortOverride` are what this ticket costs**, and null on
 every issue until somebody says otherwise. A playbook prices a *transition*,
@@ -472,8 +516,9 @@ except with its issue.
 
 Kinds: `created`, `retitled`, `redescribed`, `retyped`, `status_changed`,
 `parent_changed`, `ready_changed`, `due_changed`, `pull_request_changed`,
-`model_override_changed`, `effort_override_changed`, `dependency_added`,
-`dependency_removed`, `commented`, `asked`, `answered`, `imported`.
+`model_override_changed`, `effort_override_changed`, `assignee_changed`,
+`dependency_added`, `dependency_removed`, `commented`, `asked`, `answered`,
+`imported`.
 
 Nothing renders this, and it has been written since the first release anyway,
 because an event log is the one feature that cannot be added retroactively:
@@ -641,6 +686,17 @@ settle at. Cutting it costs nothing, and it is cut *in the route* rather than
 asked for in a prompt, because a rule an agent is merely told is a rule an agent
 can reason its way past.
 
+**And so is setting an assignee**, which is a *related* edge rather than the
+same one. A playbook widens what an agent may spend; an assignee widens what it
+may be **sent at** — because under the loop's `people only` rule, a name on a
+ticket is what holds it off the night shift. A key that could write one could
+clear a person's name off a ticket and hand itself work somebody had reserved.
+So `PUT /api/hatch/issues/{key}/assignee` lives on its own controller
+(`AssigneeController`) carrying no class-level scope, for the same reason and by
+the same means. Reading is open, and deliberately: an agent has to be able to
+say whose ticket it is leaving alone, so both `GET /api/hatch/assignees` and the
+`assignee` on `IssueDto` are Hatch-scoped like everything else.
+
 One related edge is **not** cut, and is stated rather than papered over:
 **nothing stops a key answering its own question.** A key is what
 `hatch.sh answer` types with and it is also what a spawned agent inherits; the
@@ -670,6 +726,8 @@ Everything under `/api/hatch`, every route `[RequireAdmin(AcceptScope =
 | `/issues/{key}/questions` | GET | `?open=false` for the answered ones too |
 | `/issues/{key}/events` | GET | Newest first |
 | `/issues/{key}/playbook` | PATCH | **Person only** — plain `[RequireAdmin]`. The issue's own model and effort; `""` hands either back to the playbook |
+| `/assignees` | GET | Every person and every live key, plus who the caller is — the picker's rows and *Assign to me* in one read |
+| `/issues/{key}/assignee` | PUT | **Person only** — plain `[RequireAdmin]`. `{ kind, id }`, or both null to unassign — see [Assignee](#assignee) |
 | `/questions` | GET | Every open question in the house |
 | `/plan`, `/plan/{key}` | GET | See [the level above the board](#the-level-above-the-board) |
 | `/work/next`, `/work/{key}` | GET | See [the dispatcher](#the-dispatcher) |
@@ -850,10 +908,10 @@ named a ticket is owed the sentence saying why it cannot move.
 
 ### One more, on `next` alone
 
-The five refusals above are facts about an issue. One further rule is the
-*loop's policy* — what an unattended run may **start**, as opposed to what may
-move — so it is asked on `work/next` and not on `work/{key}`. A person who names
-a ticket is giving an instruction, and housekeeping does not overrule it.
+The refusals above are facts about an issue. Two further rules are the *loop's
+policy* — what an unattended run may **start**, as opposed to what may move — so
+they are asked on `work/next` and not on `work/{key}`. A person who names a
+ticket is giving an instruction, and housekeeping does not overrule it.
 
 The issue's **type** is not among them, and was never the loop's to decide:
 which types a move applies to is [the playbook row's](#playbooks) to state, and
@@ -866,6 +924,19 @@ Playbooks page because that is where the fix is.
    not one an unattended pass should be spending an increment on — but somebody
    who names a ticket ahead of its date has said the date is not the point
    today, and is given the dispatch rather than a lecture about it.
+2. **Nobody's name is on it** — nobody's meaning no *person's*. An issue
+   [assigned](#assignee) to somebody is theirs to do, and a pass that took it
+   anyway would be taking work off a person who had said they wanted it.
+   Assigning something to yourself is therefore how you take it off the night
+   shift, which is a gesture you already had a reason to make.
+
+   **People only**, and the asymmetry is the point: an issue assigned to an API
+   key is picked up exactly as it always was, because assigning a ticket to
+   Claude and having Claude stop working on it would read backwards. An
+   assignee whose person has been deleted, or whose key has been revoked, is
+   nobody at all — the [liveness rule](#assignee) reaches the dispatcher the
+   same as every other reader, so there is no such thing as a ticket held off
+   the board by a name that no longer resolves.
 
 An [unmet dependency](#dependency) is deliberately **not** here. It looks like
 housekeeping and is not: a ready date is a decision about scheduling, while an
@@ -1004,7 +1075,7 @@ line naming the two values says which of them the issue chose.
 
 ### What makes an issue actionable
 
-Five conditions. An issue is the loop's to pick up when it meets every one, and
+Six conditions. An issue is the loop's to pick up when it meets every one, and
 the sentence saying which one it failed is what `work/queue` reports:
 
 1. **There is a column to its right, and that column is not terminal.** The end
@@ -1012,13 +1083,16 @@ the sentence saying which one it failed is what `work/queue` reports:
    operator's: *only the operator decides that something shipped*.
 2. **Its ready date has arrived**, read against the caller's calendar day. A
    card folded off the board is not one to spend an increment on tonight.
-3. **It holds no unanswered question.** It is waiting on a person, and another
+3. **Nobody's name is on it.** An issue [assigned](#assignee) to a person is
+   somebody's to do, and an unattended pass leaves it alone. An issue assigned
+   to an API key, or to nobody, is picked up exactly as it always was.
+4. **It holds no unanswered question.** It is waiting on a person, and another
    agent sent at it would ask the same thing again or guess at the answer.
-4. **Nothing it depends on is unfinished** — and only when the move is into the
+5. **Nothing it depends on is unfinished** — and only when the move is into the
    column where the code gets written. Everything left of that still moves; an
    edge is satisfied only once the issue it names is in a terminal column. See
    [Dependency](#dependency).
-5. **A playbook covers that transition for that type.** Without one there is
+6. **A playbook covers that transition for that type.** Without one there is
    nothing to say to the session — and a column no playbook leads out of is
    exactly [how a column becomes the operator's](#status), which is why the
    absence is a fold rather than an error. **This is also where the issue's
@@ -1026,9 +1100,9 @@ the sentence saying which one it failed is what `work/queue` reports:
    pick up is a type no row names for that move, said in the words that name
    the fix.
 
-Four of them — 1, 3, 4 and 5 — are facts about the issue, and `work/{key}` asks
-them too. The other is the loop's policy and is asked only when the pass is
-asking; see [one more, on `next` alone](#one-more-on-next-alone).
+Four of them — 1, 4, 5 and 6 — are facts about the issue, and `work/{key}` asks
+them too. The other two are the loop's policy and are asked only when the pass
+is asking; see [one more, on `next` alone](#one-more-on-next-alone).
 
 **The board is worked right to left**, for the reason the dispatcher gives, and
 overnight it is the difference between a shape and a mess: a loop working left

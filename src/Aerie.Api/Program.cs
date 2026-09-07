@@ -233,6 +233,14 @@ builder.Services.AddScoped<IAdminGate, AdminGate>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICallerIdentity, CallerIdentity>();
 
+// And "who else is out there", for the things that belong to somebody rather
+// than being done by them. Beside ICallerIdentity because it is the same kind of
+// question and answering it twice is how two modules end up disagreeing about
+// whether a revoked key is still a person you can hand work to - see
+// Services/Auth/ActorDirectory.cs. Scoped for the memoization, which is what
+// makes a whole board's worth of assignees two queries.
+builder.Services.AddScoped<IActorDirectory, ActorDirectory>();
+
 // Redemption is the only endpoint in the app that mints a credential, so it is
 // the only one with a limiter. Bound once at startup rather than per request:
 // AddPolicy's factory runs on the hot path, and the numbers are deploy-time

@@ -22,7 +22,7 @@ import { StatusDot } from '../components/StatusPill';
 import { statusVars } from '../lib/color';
 import { closeOffer } from '../lib/closeSubtree';
 import { message } from '../lib/errors';
-import { NO_FILTER, filterCards, isFiltering } from '../lib/filter';
+import { NO_FILTER, assigneeFacets, filterCards, isFiltering } from '../lib/filter';
 import type { CardFilter } from '../lib/filter';
 import { columnDroppableId, place, targetStatusId } from '../lib/place';
 import { askingCount } from '../lib/questions';
@@ -66,6 +66,10 @@ export function BoardPage() {
 
   const cards = board?.issues;
   const visible = useMemo(() => filterCards(cards ?? [], filter), [cards, filter]);
+
+  /* Derived from the whole board rather than from what survives the filter,
+     so choosing somebody does not empty the list you chose them from. */
+  const assignees = useMemo(() => assigneeFacets(cards ?? []), [cards]);
 
   const onDragEnd = useCallback(
     async (event: DragEndEvent) => {
@@ -132,7 +136,13 @@ export function BoardPage() {
         }
       />
 
-      <BoardFilters filter={filter} onChange={setFilter} showing={visible.length} total={board.issues.length} />
+      <BoardFilters
+        filter={filter}
+        onChange={setFilter}
+        assignees={assignees}
+        showing={visible.length}
+        total={board.issues.length}
+      />
 
       {error && <p className="text-danger">{error}</p>}
 

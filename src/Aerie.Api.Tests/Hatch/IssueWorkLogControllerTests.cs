@@ -424,7 +424,7 @@ public class IssueWorkLogControllerTests
         return new Harness
         {
             WorkLog = new IssueWorkLogController(db, time, caller),
-            Issues = new IssuesController(db, new RankService(db), caller, time),
+            Issues = new IssuesController(db, new RankService(db), new StubActorDirectory(), caller, time),
             Db = db,
             Caller = caller,
             ProjectId = aerie.Id,

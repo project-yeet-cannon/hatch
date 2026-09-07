@@ -315,7 +315,7 @@ public class PlanTests
         return new Harness
         {
             Db = db,
-            Plan = new PlanController(db),
+            Plan = new PlanController(db, new StubActorDirectory()),
             ProjectId = project.Id,
             Other = other.Id,
             Todo = todo.Id,

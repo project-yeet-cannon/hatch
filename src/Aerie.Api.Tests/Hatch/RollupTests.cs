@@ -347,7 +347,7 @@ public class RollupTests
         return new Harness
         {
             Db = db,
-            Plan = new PlanController(db),
+            Plan = new PlanController(db, new StubActorDirectory()),
             ProjectId = project.Id,
             Todo = todo.Id,
             InProgress = doing.Id,

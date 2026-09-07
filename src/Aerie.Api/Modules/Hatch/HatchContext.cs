@@ -44,6 +44,16 @@ public class HatchContext(DbContextOptions<HatchContext> options) : DbContext(op
         // Deleting an epic orphans its stories rather than deleting them.
         // Losing a parent is an outdent; losing an epic should not quietly take
         // eleven stories off the board.
+        // An issue belongs to a person, or to a key, or to nobody - never to
+        // both. The controller clears one column when it writes the other and
+        // refuses a request naming both with a sentence, so this is the backstop
+        // and never the error a caller sees. Tests run on the in-memory
+        // provider, which ignores check constraints; the controller guard is
+        // therefore the one under test, which is the honest split.
+        issue.ToTable(t => t.HasCheckConstraint(
+            "CK_Issues_OneAssignee",
+            "num_nonnulls(\"AssigneePersonId\", \"AssigneeApiKeyId\") <= 1"));
+
         issue.HasOne(i => i.Parent)
             .WithMany(i => i.Children)
             .HasForeignKey(i => i.ParentId)
