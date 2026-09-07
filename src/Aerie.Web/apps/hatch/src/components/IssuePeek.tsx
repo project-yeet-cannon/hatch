@@ -153,7 +153,7 @@ export function IssuePeek({
               value={asked.description}
               onSave={save}
               error={asked.saveError ?? null}
-              className="hatch-peek-grows"
+              editorClassName="hatch-peek-grows"
               rows={8}
             />
           )}

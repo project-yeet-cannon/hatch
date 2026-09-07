@@ -928,7 +928,7 @@ function Description({ issue, onSave }: { issue: Issue; onSave: (description: st
         title={<h2 className="hatch-section-title">Description</h2>}
         value={issue.description}
         onSave={onSave}
-        className="hatch-grows"
+        editorClassName="hatch-grows"
       />
     </Card>
   );
