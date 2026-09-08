@@ -1759,6 +1759,12 @@ This is the part [`CLAUDE.md`](../CLAUDE.md) mirrors, because that is where an
 agent reads it. The rules are here so that they have somewhere to be argued
 from.
 
+That mirror is in two halves, because it is loaded on every increment and most
+increments only write code. `CLAUDE.md` carries what every session needs;
+[`hatch-planning.md`](hatch-planning.md) carries the shapes only a session that
+files or reshapes work does — `parentKey`, the two dates, the bulk endpoint and
+the plan reads — and is read on demand.
+
 ### Reaching Hatch
 
 [`scripts/hatch.sh`](../scripts/hatch.sh) wraps the calls a working session
