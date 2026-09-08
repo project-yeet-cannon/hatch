@@ -257,6 +257,60 @@ and the [cluster cutover](plans/swarm/phase-7-cutover.md) has since retired the
 host and the compose files that described it. The wall is now the only path
 into the app there is.
 
+### Local mode
+
+With `Auth:Enabled=false` nothing authenticates anything — but Hatch still has
+to write a name into every row of its trail, and until this existed that name
+was the literal `operator`. Local mode has an identity now. It has three parts,
+and one paragraph at the end that matters more than the other two.
+
+**The local person.** A caller with no grant, no key and no runner header is
+whoever started the app: `Auth:LocalPerson:Name` (so
+`Auth__LocalPerson__Name` in an environment, which is what the compose file
+passes the host's user in as), overridden by a `LocalPersonName` site setting
+so the name can be changed without a restart, and falling back to `friend`
+when nobody has said. Their id is a fixed literal in `LocalCaller.PersonId`
+and is **not** derived from the name — an id computed from a name changes the
+day somebody fixes a typo in it, and every issue assigned to them would then
+resolve to nobody, which is the liveness rule reading correctly off a fact
+that quietly became false. The id is who you are; the name is only what is
+drawn.
+
+They are an *actor* and not a row in `People`. `ICallerIdentity.PersonAsync`
+and `PersonIdAsync` do not answer with them, deliberately: `AdminGate` reads
+the row for `IsAdmin` and Quill scopes notes by the id, and handing either a
+synthetic person would give a module ownership rows that no person owns. That
+line is why the blast radius of local mode's identity stops at Hatch.
+
+**The runner.** A caller that sets `X-Hatch-Runner` is a program that named
+itself — the dispatcher on a machine with no key to present. Its id is a hash
+of its name, stable within a run and never written to a table, so a collision
+costs nothing. It is never in the actor directory: nothing may be assigned to
+a runner, because a runner is transient and self-named. `scripts/hatch.sh`
+sends this header whenever `AERIE_HATCH_KEY` is empty, with the same
+`host:/path` sentence `Checkout.Runner` builds — so an event written from a
+terminal reads `host:/path`. **The browser is where a person is a person.**
+
+`AuthMiddleware` removes the header wherever the wall is up, one line below
+the unconditional strip of `X-Aerie-Grant` rather than beside it: that strip
+runs before the wall-off return and would delete the header in exactly the
+mode it exists for. `CallerIdentity` also refuses to read it unless
+`Auth:Enabled` is false, so neither the strip nor the check is load-bearing
+alone. Under the canary (`EnforceInProcess=false`, wall up) it is stripped too.
+
+**The header is a name and not a credential.** Nothing in local mode is
+enforceable, because anybody who can set the header can also omit it — and
+`AdminGate.Enabled` reads `Auth:Enabled && Auth:EnforceAdmin`, so with the wall
+off the gate is dormant and no route refuses anything by route at all. The two
+in-action narrowings in Hatch — a work log row is a program's to write
+(`IssueWorkLogController.NotAKey`), a tokenless claim clear is a person's
+(`IssueClaimController.NotAPerson`) — both ask `IsProgramAsync`, which counts
+a keyless runner as a program. They are guardrails against an agent doing a
+person's job by accident, which is the failure that actually happens, and they
+are honest about being only that. Where there is a wall, there is a wall; where
+there is not, there is a name, and the value of a name is that the trail reads
+correctly when everybody is honest.
+
 ## The cookie
 
 `__Secure-aerie_grant`, `Domain=.${DOMAIN}`, `Path=/`, `HttpOnly`, `Secure`,
