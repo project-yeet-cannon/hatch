@@ -614,3 +614,154 @@ jobs:
 
       - name: Push Docker image
         run: docker push --all-tags ghcr.io/eouw0o83hf/aerie-kiosk-files
+
+  # The friend's stack (deploy/local/), stood up against the images this same
+  # push just pushed. Not path-filtered on purpose: the thing most likely to
+  # break "one line brings up Hatch on a laptop" is a change to the API that
+  # quietly starts needing configuration a laptop does not have, and that
+  # change does not touch deploy/local.
+  #
+  # `detect-db-changes` is a dependency only so that this waits for the db
+  # image decision to resolve; a skipped db build is normal and means `latest`
+  # is already correct.
+  smoke-test-local-stack:
+    needs: [build-and-push-api-image, detect-db-changes, build-and-push-db-image]
+    if: >-
+      always()
+      && needs.build-and-push-api-image.result == 'success'
+      && (needs.build-and-push-db-image.result == 'success'
+          || needs.build-and-push-db-image.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            deploy/local
+
+      # First, and before anything is started: the schema check that catches
+      # the file being unpublishable. `publish` is stricter than `up` - a
+      # shorthand port string holding an unresolved variable passes `up` and
+      # fails here - so a file that runs fine locally can still be one nobody
+      # can pull. --dry-run touches no registry and needs no login.
+      - name: Check the compose file is publishable
+        run: |
+          docker compose -f deploy/local/compose.yaml \
+            publish ghcr.io/eouw0o83hf/hatch-local:ci-check --dry-run -y
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bring the stack up
+        run: docker compose -f deploy/local/compose.yaml up -d
+
+      - name: Wait for the API to report ready
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/health/ready >/dev/null; then
+              echo "ready after ${attempt}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "The API never reported ready on http://localhost:8080/health/ready"
+          exit 1
+
+      # The database is not reachable from the host, and this is the guard that
+      # keeps it that way: `port` exits non-zero for a service that publishes
+      # nothing, so a `ports:` entry appearing on `db` fails here rather than
+      # in somebody's living room.
+      - name: The database publishes no port
+        run: |
+          if docker compose -f deploy/local/compose.yaml port db 5432; then
+            echo "The db service is publishing 5432 to the host. It must not."
+            exit 1
+          fi
+          echo "db publishes no port, as intended"
+
+      - name: Dump logs
+        if: failure()
+        run: docker compose -f deploy/local/compose.yaml logs --no-color
+
+      - name: Tear the stack down
+        if: always()
+        run: docker compose -f deploy/local/compose.yaml down -v
+
+  # The compose file itself, published beside the images it names so that
+  # `-f oci://.../hatch-local` needs no checkout. `publish` packages the YAML
+  # as authored - it neither pulls nor resolves the images - which is why this
+  # job needs only a checkout, and why `--resolve-image-digests` is never
+  # passed: pinning the artifact to one image build would break "pull a newer
+  # image, keep your data".
+  publish-local-compose-stack:
+    needs: [smoke-test-local-stack]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+
+    steps:
+      - name: Checkout repository
+        # fetch-depth: 0 so the push range below is resolvable.
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          sparse-checkout: |
+            deploy/local
+            .github/actions/wait-for-ci
+
+      # Deliberately simpler than detect-image-changes, which anchors on the
+      # revision label of the published image so a failed push self-heals on
+      # the next commit. A compose artifact carries no such label to read back,
+      # and republishing an unchanged file costs a few kilobytes, so the push
+      # range is enough. An unresolvable range - the first push to a branch, or
+      # a force-push over the previous head - publishes rather than skips.
+      - name: Did deploy/local change on this push
+        id: changed
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "No usable push range ($BEFORE); publishing."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "$BEFORE" HEAD -- deploy/local; then
+            echo "deploy/local unchanged on this push; nothing to publish."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy/local changed on this push."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to the Container registry
+        if: steps.changed.outputs.changed == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for CI to succeed
+        if: steps.changed.outputs.changed == 'true'
+        uses: ./.github/actions/wait-for-ci
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish the compose stack
+        if: steps.changed.outputs.changed == 'true'
+        run: |
+          docker compose -f deploy/local/compose.yaml \
+            publish ghcr.io/eouw0o83hf/hatch-local:latest -y
+          docker compose -f deploy/local/compose.yaml \
+            publish ghcr.io/eouw0o83hf/hatch-local:${{ github.sha }} -y
