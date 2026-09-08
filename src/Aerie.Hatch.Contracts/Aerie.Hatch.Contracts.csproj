@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Hatch's wire contract, and nothing else: the records the API serves and the
+    records a client sends it.
+
+    A project of its own because there are now two implementations of "a client
+    of Hatch" in this repository - the web apps, which get their types from the
+    OpenAPI document, and Aerie.Hatch, which is compiled against these. A
+    runner that redeclared the shape of a dispatch would drift from the server
+    the first time somebody added a field, and drift silently, because JSON
+    does not complain about what it did not find.
+
+    Nothing here references EF, ASP.NET or the database. A contract that needed
+    a DbContext to compile would be a contract only the server could hold.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

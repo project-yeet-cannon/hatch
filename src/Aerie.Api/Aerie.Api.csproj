@@ -18,6 +18,21 @@
     <PackageReference Include="Quartz.Extensions.Hosting" Version="3.15.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="../Aerie.Hatch.Contracts/Aerie.Hatch.Contracts.csproj" />
+  </ItemGroup>
+
+  <!--
+    The wire records live in Aerie.Hatch.Contracts and are used by name all over
+    Modules/Hatch. Imported globally rather than with a `using` at the top of
+    thirty files, so that moving them out of this assembly cost no call site
+    anything - the compiler still checks every one of them against the same
+    declaration, which is the whole point of the move.
+  -->
+  <ItemGroup>
+    <Using Include="Aerie.Hatch.Contracts" />
+  </ItemGroup>
+
   <!--
     The git identity of this build (docs/plans/version.md). The sha rides in on
     SourceRevisionId, which the SDK already appends to

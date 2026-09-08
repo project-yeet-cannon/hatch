@@ -29,6 +29,8 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <!-- The wire records, imported the way Aerie.Api imports them. -->
+    <Using Include="Aerie.Hatch.Contracts" />
   </ItemGroup>
 
 </Project>

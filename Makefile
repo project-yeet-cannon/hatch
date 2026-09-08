@@ -23,10 +23,24 @@ run:
 	(cd ./src/Aerie.Web && nvm use && npm run dev -w apps/dashboard) & \
 	dotnet run --project ./src/Aerie.Api/Aerie.Api.csproj'
 
-test: test-api test-web
+test: test-api test-hatch test-web
 
 test-api:
 	dotnet test ./src/Aerie.Api.Tests/Aerie.Api.Tests.csproj
+
+# The runner - `hatch.sh work` and `hatch.sh go-to-work`, which live in
+# src/Aerie.Hatch since AERIE-794. Its own target because it is what somebody
+# editing the loop runs, and because it needs neither a database nor a node: a
+# stub wire and a stub session are the whole fixture.
+test-hatch:
+	dotnet test ./src/Aerie.Hatch.Tests/Aerie.Hatch.Tests.csproj
+
+# A built runner, so that `hatch.sh work` starts in milliseconds rather than
+# spending a few seconds in `dotnet run` deciding whether to build first. It is
+# an optimisation and not a requirement - hatch.sh falls back to the SDK, and
+# says so if there is neither.
+build-hatch:
+	dotnet build ./src/Aerie.Hatch/Aerie.Hatch.csproj --configuration Release
 
 # The same suite with the claim's tests turned on. They need a real Postgres and
 # skip loudly without one (src/Aerie.Api.Tests/Hatch/HatchDatabase.cs): the claim

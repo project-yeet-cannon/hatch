@@ -189,14 +189,14 @@ public class EfHatchIssue
     /// itself. The same 240 a person's name takes, because it is the same kind
     /// of thing: a label somebody reads in a refusal.
     /// </summary>
-    public const int MaxClaimRunnerLength = 240;
+    public const int MaxClaimRunnerLength = ClaimRequest.MaxRunnerLength;
 
     /// <summary>
     /// Room for a line of chatter. A sentence, not a log - what is stored is
     /// what a card draws under "working on it", and anything longer is
     /// truncated to this.
     /// </summary>
-    public const int MaxClaimChatterLength = 512;
+    public const int MaxClaimChatterLength = ClaimRequest.MaxChatterLength;
 
     /// <summary>The four types, in the order a picker should offer them.</summary>
     public static readonly string[] Types = ["epic", "story", "task", "bug"];

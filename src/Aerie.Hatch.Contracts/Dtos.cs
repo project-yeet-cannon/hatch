@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace Aerie.Api.Modules.Hatch;
+namespace Aerie.Hatch.Contracts;
 
 // ---- Projects ----
 
@@ -207,7 +207,23 @@ public record IssueDto(
 
 /// <summary>Taking the lease: who is asking is the credential's to say, so the body names only where from.</summary>
 /// <param name="Runner">The checkout holding it - <c>host:/path/to/checkout</c>, as the runner names itself.</param>
-public record ClaimRequest(string Runner);
+public record ClaimRequest(string Runner)
+{
+    /// <summary>
+    /// The longest runner the server will accept. Here rather than on the
+    /// entity because both sides of the wire need it: the API refuses a longer
+    /// one, and the runner shortens its own name to fit rather than discovering
+    /// the limit as a 400 that stops a night's loop.
+    /// </summary>
+    public const int MaxRunnerLength = 240;
+
+    /// <summary>
+    /// The longest line a claim will carry. The server truncates rather than
+    /// refusing - a lease is not worth losing to a wide terminal - so this is
+    /// the length past which a client is writing for nobody.
+    /// </summary>
+    public const int MaxChatterLength = 512;
+}
 
 /// <summary>
 /// A lease, just taken. The TTL rides back with it rather than being configured
@@ -715,9 +731,10 @@ public record PlanDto(IReadOnlyList<PlanEntryDto> Epics, RollupDto Loose);
 /// <remarks>
 /// Hatch's names, not Anthropic's. The CLI's <c>result</c> event spells these
 /// <c>inputTokens</c>, <c>cacheCreationInputTokens</c>, <c>costUSD</c> and so
-/// on, and the translation happens once, in <c>scripts/hatch.sh</c>, exactly as
-/// <see cref="ClaudeUsageClient"/> is the only file that knows the battery's
-/// spelling. Nothing downstream of the wire should have to know two vocabularies.
+/// on, and the translation happens once, in the runner's stream renderer
+/// (<c>src/Aerie.Hatch/StreamRender.cs</c>), exactly as
+/// <c>ClaudeUsageClient</c> is the only file that knows the battery's spelling.
+/// Nothing downstream of the wire should have to know two vocabularies.
 /// </remarks>
 public record WorkLogModelUseDto(
     string Model,
