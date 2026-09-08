@@ -95,7 +95,7 @@ internal static class HatchDatabase
     /// a Makefile target here, and a service container in CI whose credentials
     /// read naturally as a URL.
     /// </summary>
-    private static string ToConnectionString(string configured)
+    internal static string ToConnectionString(string configured)
     {
         if (!configured.Contains("://")) return configured;
 
