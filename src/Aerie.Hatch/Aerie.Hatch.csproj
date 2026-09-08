@@ -1,14 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    The runner: `hatch work` and `hatch go-to-work`, which are the two commands
-    that spawn an agent and therefore the two that hold a claim.
+    `hatch`: the whole CLI, as one program.
 
-    A program rather than a shell function because of what these do rather than
-    what they say. A claim is a lease with a clock on it, and the code around
-    one is a race, a background heartbeat and three signals - none of which a
-    2,500-line bash script can be tested for on any machine in this house. The
-    conversational half of the CLI is still `scripts/hatch.sh`; see docs/hatch.md.
+    It began as `work` and `go-to-work` alone, because of what those two do
+    rather than what they say - a claim is a lease with a clock on it, and the
+    code around one is a race, a background heartbeat and three signals, none of
+    which a 2,500-line bash script can be tested for on any machine in this
+    house.
+
+    AERIE-934 brought the other fourteen commands across for a different reason.
+    An operator who is not in this repository has no scripts/hatch.sh, and a
+    tracker reachable from one clone is a tracker for one person. So this
+    publishes as a single self-contained binary named `hatch` for four
+    platforms - see `make publish-hatch` - and scripts/hatch.sh is a door into
+    it. docs/hatch.md, "Where the loop lives".
   -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -16,8 +22,22 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>Aerie.Hatch</RootNamespace>
-    <AssemblyName>hatch-runner</AssemblyName>
+    <AssemblyName>hatch</AssemblyName>
     <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!--
+    Only when a RID was asked for, which is `make publish-hatch` and nothing
+    else. `dotnet build` and `dotnet test` run RID-less everywhere - in CI, in
+    `make build-hatch`, and on the restart path scripts/hatch.sh takes at two in
+    the morning - and trimming a build nobody is shipping would make all three
+    slower for nothing.
+  -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <PublishTrimmed>true</PublishTrimmed>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
 
   <ItemGroup>

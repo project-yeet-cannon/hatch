@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace Aerie.Hatch;
 
@@ -28,6 +29,17 @@ public readonly record struct Answer(HttpStatusCode? Status, string Body)
 public sealed class HatchException(string message) : Exception(message);
 
 /// <summary>
+/// A body that is already JSON, sent as it was typed.
+/// </summary>
+/// <remarks>
+/// Only <c>hatch api</c> has one. Every other call builds a record and lets the
+/// serialiser write it; the passthrough takes whatever was on the command line,
+/// and re-encoding that as a JSON string would send the text of the object
+/// rather than the object.
+/// </remarks>
+public readonly record struct RawJson(string Value);
+
+/// <summary>
 /// The one place that talks to Hatch, and the one place that decides what a
 /// failure means.
 /// </summary>
@@ -42,16 +54,58 @@ public sealed class HatchException(string message) : Exception(message);
 /// </remarks>
 public sealed class HatchClient : IDisposable
 {
-    /// <summary>Hatch speaks camelCase, and reads it tolerantly.</summary>
+    /// <summary>
+    /// Hatch speaks camelCase, and reads it tolerantly.
+    /// </summary>
+    /// <remarks>
+    /// The resolver is source-generated rather than reflective, because
+    /// <c>make publish-hatch</c> trims the binary and a trimmed application has
+    /// reflection-based serialization switched off outright. See
+    /// <see cref="HatchJson"/>.
+    /// </remarks>
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        TypeInfoResolver = HatchJson.Default,
     };
+
+    /// <summary>
+    /// The reader or writer for a type, from the generated table.
+    /// </summary>
+    /// <remarks>
+    /// Every serialising call goes through here rather than through
+    /// <c>JsonSerializer.Deserialize&lt;T&gt;(string, JsonSerializerOptions)</c>,
+    /// which the trimmer cannot see through and warns about at every call site.
+    /// A type nobody registered throws here, naming itself.
+    /// </remarks>
+    private static JsonTypeInfo TypeInfo(Type type)
+    {
+        try
+        {
+            return Json.GetTypeInfo(type);
+        }
+        catch (Exception e) when (e is InvalidOperationException or NotSupportedException)
+        {
+            throw new HatchException(
+                $"hatch: {type.Name} is not registered in HatchJson - add a [JsonSerializable] for it.");
+        }
+    }
+
+    /// <summary>
+    /// The header a keyless call names itself with. The same one
+    /// <c>LocalCaller</c> reads on the server, spelled once on each side.
+    /// </summary>
+    public const string RunnerHeader = "X-Hatch-Runner";
 
     private readonly HttpClient _http;
     private readonly bool _owned;
 
-    public HatchClient(Settings settings, HttpMessageHandler? handler = null)
+    /// <param name="runnerName">
+    /// What a keyless call calls itself. Only read when there is no key, and
+    /// only read at all by a Hatch with its wall off - see
+    /// docs/auth-architecture.md, "Local mode".
+    /// </param>
+    public HatchClient(Settings settings, string? runnerName = null, HttpMessageHandler? handler = null)
     {
         _owned = handler is null;
         _http = new HttpClient(handler ?? new HttpClientHandler(), disposeHandler: _owned)
@@ -59,14 +113,29 @@ public sealed class HatchClient : IDisposable
             BaseAddress = new Uri(settings.Base + "/"),
             Timeout = TimeSpan.FromMinutes(2),
         };
-        _http.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", settings.Key);
+
+        // One or the other, never both. A key is a credential and outranks a
+        // name; the header is only a name, and only a Hatch with its wall off
+        // reads one.
+        Keyed = !string.IsNullOrWhiteSpace(settings.Key);
+        if (Keyed)
+            _http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", settings.Key);
+        else
+            _http.DefaultRequestHeaders.Add(RunnerHeader, runnerName ?? "hatch");
 
         Origin = settings.Base;
     }
 
     /// <summary>The origin, for the sentences that name it.</summary>
     public string Origin { get; }
+
+    /// <summary>
+    /// Whether a credential was sent. What makes a 401 two different sentences:
+    /// a key that was refused is a key to go and look at, and no key at all is a
+    /// Hatch with its wall on and nothing to look at yet.
+    /// </summary>
+    public bool Keyed { get; }
 
     /// <summary>
     /// The call itself, with no opinion about what a failure means.
@@ -80,9 +149,11 @@ public sealed class HatchClient : IDisposable
     public async Task<Answer> Send(HttpMethod method, string path, object? body, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(method, path.TrimStart('/'));
-        if (body is not null)
+        if (body is RawJson raw)
+            request.Content = new StringContent(raw.Value, Encoding.UTF8, "application/json");
+        else if (body is not null)
             request.Content = new StringContent(
-                JsonSerializer.Serialize(body, Json), Encoding.UTF8, "application/json");
+                JsonSerializer.Serialize(body, TypeInfo(body.GetType())), Encoding.UTF8, "application/json");
 
         try
         {
@@ -112,7 +183,7 @@ public sealed class HatchClient : IDisposable
 
         try
         {
-            return JsonSerializer.Deserialize<T>(answer.Body, Json);
+            return (T?)JsonSerializer.Deserialize(answer.Body, TypeInfo(typeof(T)));
         }
         catch (JsonException e)
         {
@@ -121,19 +192,29 @@ public sealed class HatchClient : IDisposable
     }
 
     /// <summary>A write whose refusal is a fault, answering with whatever came back.</summary>
-    public async Task<T?> PostAsync<T>(string path, object body, CancellationToken ct) where T : class
+    public Task<T?> PostAsync<T>(string path, object body, CancellationToken ct) where T : class =>
+        WriteAsync<T>(HttpMethod.Post, path, body, ct);
+
+    /// <summary>The same, for the verbs a patch and a delete need.</summary>
+    public async Task<T?> WriteAsync<T>(HttpMethod method, string path, object? body, CancellationToken ct)
+        where T : class
     {
-        var answer = await Send(HttpMethod.Post, path, body, ct);
+        var answer = await Send(method, path, body, ct);
         if (!answer.Ok) throw new HatchException(Refusal(answer, path));
         if (answer.Body.Trim().Length == 0) return null;
 
-        return JsonSerializer.Deserialize<T>(answer.Body, Json);
+        return (T?)JsonSerializer.Deserialize(answer.Body, TypeInfo(typeof(T)));
     }
 
     /// <summary>The four refusals worth their own sentence, and everything else.</summary>
-    private string Refusal(Answer answer, string path) => answer.Status switch
+    internal string Refusal(Answer answer, string path) => answer.Status switch
     {
         null => $"hatch: could not reach {Origin} - {answer.Body}",
+        // No credential was sent, so nothing was rejected: this Hatch has its wall
+        // up and wants one. Said plainly, because "the key was not accepted"
+        // would send somebody looking at a key they never set.
+        HttpStatusCode.Unauthorized when !Keyed =>
+            "hatch: 401 - no key was sent and this Hatch has its wall on. Run `hatch config`.",
         HttpStatusCode.Unauthorized =>
             "hatch: 401 - the key was not accepted. Minted, not revoked, copied whole?",
         HttpStatusCode.Forbidden =>

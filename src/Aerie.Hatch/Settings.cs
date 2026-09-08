@@ -5,25 +5,53 @@ namespace Aerie.Hatch;
 /// cannot be written down in the repository.
 /// </summary>
 /// <remarks>
-/// The same two sources <c>scripts/hatch.sh</c> reads, in the same order and
-/// with the same allowlist: <c>scripts/.env</c> underneath, and anything
-/// already exported over the top of it. That order is what makes a one-off
-/// origin a prefix on a command line rather than an edit to a file - and the
-/// allowlist is why the file is parsed rather than sourced, since a credential
-/// file that is also a program is a larger promise than "a few values".
+/// <para>Three sources, highest first: anything already exported, then
+/// <c>scripts/.env</c> in the checkout the command was run from, then the
+/// per-user file at <see cref="UserConfigPath"/>. That order is what makes a
+/// one-off origin a prefix on a command line rather than an edit to a file -
+/// and what lets one person's settings follow them into every checkout while a
+/// single repository can still pin its own.</para>
+///
+/// <para>Each layer is parsed against an allowlist rather than sourced, since a
+/// credential file that is also a program is a larger promise than "a few
+/// values".</para>
+///
+/// <para>The key is optional. A Hatch started with its wall off has no
+/// credential to present and names its callers by the runner header instead
+/// (docs/auth-architecture.md, "Local mode"), so a missing key is a mode and
+/// not a failure to load; <see cref="HatchClient"/> is where the two diverge.</para>
 /// </remarks>
 public sealed record Settings
 {
-    /// <summary>Everything the file may carry. A line naming anything else is skipped, loudly.</summary>
+    /// <summary>Everything a settings file may carry. A line naming anything else is skipped, loudly.</summary>
     public static readonly string[] FileNames =
     [
         "AERIE_BASE", "AERIE_HATCH_KEY", "HATCH_CLAUDE_BIN", "HATCH_BASE_BRANCH", "HATCH_RUNNER",
     ];
 
+    /// <summary>Which of the three layers a value came from, for <c>config --show</c>.</summary>
+    public enum Layer
+    {
+        /// <summary>Nowhere. Nothing set it.</summary>
+        Unset,
+
+        /// <summary>Exported into this process. Wins over both files.</summary>
+        Environment,
+
+        /// <summary>This checkout's <c>scripts/.env</c>.</summary>
+        Checkout,
+
+        /// <summary>The per-user file, which follows the person between checkouts.</summary>
+        User,
+    }
+
     /// <summary>The origin, with no trailing slash.</summary>
     public required string Base { get; init; }
 
-    /// <summary>The <c>aerie_ak_…</c> key. Never printed, never logged, never written down here.</summary>
+    /// <summary>
+    /// The <c>aerie_ak_…</c> key, or empty against a Hatch with its wall off.
+    /// Never printed, never logged, never written down here.
+    /// </summary>
     public required string Key { get; init; }
 
     /// <summary>The claude CLI, if it is not simply on PATH.</summary>
@@ -41,53 +69,132 @@ public sealed record Settings
     /// </summary>
     public int HeartbeatSeconds { get; init; } = 20;
 
-    /// <summary>
-    /// Read the environment, layered over <paramref name="envFile"/> if it is
-    /// there. Answers the settings or the sentence saying what is missing.
-    /// </summary>
-    public static bool TryLoad(
-        string? envFile, IDictionary<string, string?> environment, out Settings settings, out string refusal)
-    {
-        var file = ReadFile(envFile);
+    /// <summary>Where each value came from, so <c>config --show</c> can say.</summary>
+    public IReadOnlyDictionary<string, Layer> Sources { get; init; } =
+        new Dictionary<string, Layer>(StringComparer.Ordinal);
 
-        string? Read(string name) =>
-            environment.TryGetValue(name, out var exported) && !string.IsNullOrWhiteSpace(exported)
-                ? exported
-                : file.GetValueOrDefault(name);
+    /// <summary>
+    /// The settings file that belongs to the person rather than to a checkout:
+    /// <c>ApplicationData/hatch/config</c>, which is <c>~/.config/hatch/config</c>
+    /// on Unix and <c>%APPDATA%\hatch\config</c> on Windows.
+    /// </summary>
+    /// <remarks>
+    /// The whole reason this story exists: an installed <c>hatch</c> is run from
+    /// wherever somebody happens to be standing, and settings that lived in one
+    /// repository's <c>scripts/</c> directory were settings that only worked in
+    /// one repository.
+    /// </remarks>
+    public static string UserConfigPath() => Path.Combine(
+        Environment.GetFolderPath(
+            Environment.SpecialFolder.ApplicationData, Environment.SpecialFolderOption.DoNotVerify),
+        "hatch",
+        "config");
+
+    /// <summary>
+    /// The three layers, folded. Answers the settings, or the sentence saying
+    /// what is missing - which is the origin alone, since the key is optional.
+    /// </summary>
+    /// <param name="checkoutEnvFile">
+    /// This checkout's <c>scripts/.env</c>, or null where the command was not
+    /// run inside one. Fourteen of the sixteen commands do not need a checkout
+    /// and pass null here.
+    /// </param>
+    /// <param name="userConfigFile">
+    /// The per-user file. Named rather than looked up so a test can put one
+    /// somewhere that is not the machine's own.
+    /// </param>
+    public static bool TryLoad(
+        string? checkoutEnvFile,
+        IDictionary<string, string?> environment,
+        out Settings settings,
+        out string refusal,
+        string? userConfigFile = null)
+    {
+        var sources = new Dictionary<string, Layer>(StringComparer.Ordinal);
+        var fold = Layers(checkoutEnvFile, environment, userConfigFile);
+
+        string? Read(string name)
+        {
+            var (value, from) = fold(name);
+            sources[name] = from;
+            return value;
+        }
 
         settings = null!;
         refusal = "";
 
         var origin = Read("AERIE_BASE");
         var key = Read("AERIE_HATCH_KEY");
+        var claudeBin = Read("HATCH_CLAUDE_BIN");
+        var baseBranch = Read("HATCH_BASE_BRANCH");
+        var runner = Read("HATCH_RUNNER");
+        var heartbeat = Read("HATCH_HEARTBEAT");
 
-        if (string.IsNullOrWhiteSpace(origin) || string.IsNullOrWhiteSpace(key))
+        // The origin alone. A key is not required, because a Hatch with its wall
+        // off has no credential to present - and a load that refused without one
+        // would make local mode unreachable from the command that configures it.
+        if (string.IsNullOrWhiteSpace(origin))
         {
             refusal = string.Join('\n',
-                "hatch: needs an origin and a key.",
+                "hatch: not configured - it needs an origin.",
                 "",
-                "    ./scripts/hatch.sh config          asks for them, and writes scripts/.env",
-                "    ./scripts/hatch.sh config --show   says what is set, and where it came from",
+                "    hatch config          asks for it, and writes it where it follows you",
+                "    hatch config --show   says what is set, and which layer it came from",
                 "",
-                "  Or export AERIE_BASE and AERIE_HATCH_KEY. Never in this repository:",
-                "  Aerie ships to other operators, and a key in the artifact is one",
-                "  operator's key inherited by everybody who clones it.");
+                "  Or export AERIE_BASE. The key may be left empty for a Hatch running with",
+                "  its wall off. Never in a repository, either way: Aerie ships to other",
+                "  operators, and a key in the artifact is one operator's key inherited by",
+                "  everybody who clones it.");
             return false;
         }
 
         var pulse = 20;
-        if (Read("HATCH_HEARTBEAT") is { } beat && int.TryParse(beat, out var parsed) && parsed >= 0) pulse = parsed;
+        if (heartbeat is { } beat && int.TryParse(beat, out var parsed) && parsed >= 0) pulse = parsed;
 
         settings = new Settings
         {
             Base = origin.TrimEnd('/'),
-            Key = key.Trim(),
-            ClaudeBin = Read("HATCH_CLAUDE_BIN"),
-            BaseBranch = Read("HATCH_BASE_BRANCH"),
-            Runner = Read("HATCH_RUNNER"),
+            Key = key?.Trim() ?? "",
+            ClaudeBin = claudeBin,
+            BaseBranch = baseBranch,
+            Runner = runner,
             HeartbeatSeconds = pulse,
+            Sources = sources,
         };
         return true;
+    }
+
+    /// <summary>Where a value came from, or <see cref="Layer.Unset"/> if nothing set it.</summary>
+    public Layer SourceOf(string name) => Sources.GetValueOrDefault(name, Layer.Unset);
+
+    /// <summary>
+    /// The three layers as one lookup: the value, and which layer it came from.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="TryLoad"/> because <c>config --show</c> has to
+    /// answer on a machine that has nothing configured yet, and a load that
+    /// refuses for want of an origin cannot say where the origin is missing
+    /// from.
+    /// </remarks>
+    public static Func<string, (string? Value, Layer From)> Layers(
+        string? checkoutEnvFile, IDictionary<string, string?> environment, string? userConfigFile = null)
+    {
+        var checkout = ReadFile(checkoutEnvFile);
+        var user = ReadFile(userConfigFile ?? UserConfigPath());
+
+        return name =>
+        {
+            if (environment.TryGetValue(name, out var exported) && !string.IsNullOrWhiteSpace(exported))
+                return (exported, Layer.Environment);
+
+            if (checkout.TryGetValue(name, out var here) && !string.IsNullOrWhiteSpace(here))
+                return (here, Layer.Checkout);
+
+            if (user.TryGetValue(name, out var mine) && !string.IsNullOrWhiteSpace(mine))
+                return (mine, Layer.User);
+
+            return (null, Layer.Unset);
+        };
     }
 
     /// <summary>

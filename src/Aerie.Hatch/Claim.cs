@@ -110,7 +110,7 @@ public sealed class Claim : IAsyncDisposable
         if (answer.Conflict) return (null, new NotClaimed(answer.Sentence, Held: true));
         if (!answer.Ok) return (null, new NotClaimed($"the claim was refused - {answer.Sentence}", Held: false));
 
-        var taken = System.Text.Json.JsonSerializer.Deserialize<ClaimTakenDto>(answer.Body, HatchClient.Json);
+        var taken = System.Text.Json.JsonSerializer.Deserialize(answer.Body, HatchJson.Default.ClaimTakenDto);
         if (taken is null || taken.Token == Guid.Empty)
             return (null, new NotClaimed("the claim came back without a token", Held: false));
 

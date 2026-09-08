@@ -12,7 +12,7 @@ public static class Questions
         foreach (var q in questions)
         {
             yield return $"{q.IssueKey}  #{q.Id}  {q.IssueTitle}";
-            yield return $"  asked by {q.AskedBy}, {q.AskedAt:O}";
+            yield return $"  asked by {q.AskedBy}, {Format.Stamp(q.AskedAt)}";
             yield return "";
 
             foreach (var line in q.Body.ReplaceLineEndings("\n").Split('\n')) yield return $"  {line}";

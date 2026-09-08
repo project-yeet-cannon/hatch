@@ -194,7 +194,7 @@ public sealed record NightState
 
         try
         {
-            return JsonSerializer.Deserialize<NightState>(File.ReadAllText(path), HatchClient.Json);
+            return JsonSerializer.Deserialize(File.ReadAllText(path), HatchJson.Default.NightState);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -209,7 +209,7 @@ public sealed record NightState
 
         try
         {
-            File.WriteAllText(path, JsonSerializer.Serialize(this, HatchClient.Json));
+            File.WriteAllText(path, JsonSerializer.Serialize(this, HatchJson.Default.NightState));
             return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)

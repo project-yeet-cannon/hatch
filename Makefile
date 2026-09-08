@@ -28,19 +28,46 @@ test: test-api test-hatch test-web
 test-api:
 	dotnet test ./src/Aerie.Api.Tests/Aerie.Api.Tests.csproj
 
-# The runner - `hatch.sh work` and `hatch.sh go-to-work`, which live in
-# src/Aerie.Hatch since AERIE-794. Its own target because it is what somebody
-# editing the loop runs, and because it needs neither a database nor a node: a
-# stub wire and a stub session are the whole fixture.
+# The CLI - `hatch`, which lives in src/Aerie.Hatch. Its own target because it
+# is what somebody editing the loop runs, and because it needs neither a
+# database nor a node: a stub wire and a stub session are the whole fixture.
 test-hatch:
 	dotnet test ./src/Aerie.Hatch.Tests/Aerie.Hatch.Tests.csproj
 
-# A built runner, so that `hatch.sh work` starts in milliseconds rather than
-# spending a few seconds in `dotnet run` deciding whether to build first. It is
-# an optimisation and not a requirement - hatch.sh falls back to the SDK, and
-# says so if there is neither.
+# A built CLI for this machine, so that `hatch.sh work` starts in milliseconds
+# rather than spending a few seconds in `dotnet run` deciding whether to build
+# first. It is an optimisation and not a requirement - hatch.sh falls back to
+# the SDK, and says so if there is neither.
+#
+# Deliberately still a plain, fast, host-RID Release build. `go-to-work` asks to
+# be restarted as a newer build when its own source changes, and hatch.sh's
+# supervisor calls this to make one - at two in the morning, between increments.
+# The shippable artifact is `publish-hatch` below, which is a different and much
+# slower thing aimed at a different consumer.
 build-hatch:
 	dotnet build ./src/Aerie.Hatch/Aerie.Hatch.csproj --configuration Release
+
+# The artifact somebody else downloads: one file, no SDK on the far side, for
+# every platform this house runs on. Self-contained because an operator taking
+# Aerie for the first time has no .NET; single-file because the whole promise is
+# "put it on your PATH"; trimmed because the alternative is 70MB of framework
+# nobody calls.
+#
+# Each RID lands in artifacts/hatch/<rid>/, which is what AERIE-935's Runner
+# page serves from.
+HATCH_RIDS = win-x64 osx-arm64 osx-x64 linux-x64
+
+publish-hatch:
+	for rid in $(HATCH_RIDS); do \
+		echo "==> $$rid"; \
+		dotnet publish ./src/Aerie.Hatch/Aerie.Hatch.csproj \
+			--runtime $$rid \
+			--configuration Release \
+			--output ./artifacts/hatch/$$rid \
+			-p:PublishSingleFile=true \
+			-p:SelfContained=true \
+			-p:PublishTrimmed=true || exit 1; \
+	done
 
 # The same suite with the claim's tests turned on. They need a real Postgres and
 # skip loudly without one (src/Aerie.Api.Tests/Hatch/HatchDatabase.cs): the claim
