@@ -716,9 +716,10 @@ public record PlanDto(IReadOnlyList<PlanEntryDto> Epics, RollupDto Loose);
 /// <remarks>
 /// Hatch's names, not Anthropic's. The CLI's <c>result</c> event spells these
 /// <c>inputTokens</c>, <c>cacheCreationInputTokens</c>, <c>costUSD</c> and so
-/// on, and the translation happens once, in <c>scripts/hatch.sh</c>, exactly as
-/// <see cref="ClaudeUsageClient"/> is the only file that knows the battery's
-/// spelling. Nothing downstream of the wire should have to know two vocabularies.
+/// on, and the translation happens once, in the runner's stream renderer
+/// (<c>src/Aerie.Hatch/StreamRender.cs</c>), exactly as
+/// <c>ClaudeUsageClient</c> is the only file that knows the battery's spelling.
+/// Nothing downstream of the wire should have to know two vocabularies.
 /// </remarks>
 public record WorkLogModelUseDto(
     string Model,

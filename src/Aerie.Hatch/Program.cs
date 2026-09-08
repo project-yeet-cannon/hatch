@@ -64,7 +64,7 @@ var runtime = new Runtime(
     Say: say,
     Root: root,
     RunnerName: Checkout.Runner(settings.Runner, Host(), root),
-    TempDirectory: Path.GetTempPath());
+    TempDirectory: Path.GetTempPath()).WithGit();
 
 // Every way out through one door. A signal that is not handled kills the
 // process outright, and the increment that ends in an interrupt is exactly the
@@ -126,7 +126,7 @@ static string Host()
     return dot > 0 ? name[..dot] : name;
 }
 
-static partial class Program
+internal partial class Program
 {
     public static readonly string[] Usage =
     [

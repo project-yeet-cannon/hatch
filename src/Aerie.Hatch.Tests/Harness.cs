@@ -67,6 +67,29 @@ public sealed class FakeSessions : ISessionRunner
     }
 }
 
+/// <summary>The tree between increments, without a remote to fetch from.</summary>
+public sealed class FakeWorkspace : IWorkspace
+{
+    public Reset Answer { get; set; } = Reset.Ready;
+
+    /// <summary>How many times a pass asked for the tree to be made current.</summary>
+    public int Prepared { get; private set; }
+
+    /// <summary>
+    /// Run at the moment the reset is asked for, so a test can look at what had
+    /// already happened by then. The order is the acceptance criterion: a ticket
+    /// is claimed before the fetch, not after it.
+    /// </summary>
+    public Action? Watching { get; set; }
+
+    public Reset Prepare()
+    {
+        Prepared++;
+        Watching?.Invoke();
+        return Answer;
+    }
+}
+
 /// <summary>One test's runner: a stub wire, a stub session, a temporary tree.</summary>
 public sealed class Harness : IDisposable
 {
@@ -102,8 +125,14 @@ public sealed class Harness : IDisposable
             Root: Root,
             RunnerName: "test:/checkout",
             TempDirectory: Temp,
-            Heartbeat: heartbeat ?? Beat);
+            Heartbeat: heartbeat ?? Beat)
+        {
+            Workspace = () => Workspace,
+        };
     }
+
+    /// <summary>The tree, as the pass finds it. Ready unless a test says otherwise.</summary>
+    public FakeWorkspace Workspace { get; } = new();
 
     public Runtime Runtime { get; }
 

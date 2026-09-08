@@ -193,9 +193,13 @@ public sealed class Claim : IAsyncDisposable
             {
                 await beat;
             }
-            catch (OperationCanceledException)
+            catch (Exception)
             {
-                // The delay, cancelled. That is what stopping looks like.
+                // Whatever the heartbeat died of, it is not a reason to fail the
+                // release - and the release is on the path out of an increment
+                // that has already happened. A cancelled delay is the ordinary
+                // case and the rest is weather; both end the same way, with the
+                // lease given back below.
             }
         }
 

@@ -83,6 +83,19 @@ API for now" costs nothing architecturally.
 pod — the arrangement the admin and docs apps already use. It is an operator's
 tool, and the family shell is the household's.
 
+**The wire contract: its own project.** `src/Aerie.Hatch.Contracts` holds the
+records the API serves and the records a client sends it — nothing else, and
+nothing that needs a `DbContext` to compile. It is a project rather than a file
+in the module because there are now two kinds of client compiled against it: the
+API on one side, and the runner below on the other. A runner that redeclared the
+shape of a dispatch would drift from the server the first time somebody added a
+field, and drift *silently*, because JSON does not complain about what it did
+not find.
+
+**The runner: a program.** `src/Aerie.Hatch` is `work` and `go-to-work` — see
+[where the loop lives](#where-the-loop-lives), which is about why they stopped
+being shell.
+
 **Host: `hatch.${DOMAIN}`**, pointed at the existing `api` Service with a
 Traefik `replacePathRegex` rewriting `/…` to `/apps/hatch/…`
 (`charts/aerie/templates/middleware-hatch.yaml`). No new container, no new
@@ -463,8 +476,8 @@ override. An edge is a statement about the work rather than about an agent's
 budget, and a planning session that has just filed five stories is exactly who
 should chain them. Both verbs — `POST` and `DELETE` on
 `/api/hatch/issues/{key}/dependencies` — answer with the whole issue, and there
-is no `GET`: both lists ride `IssueDto`, where the board, the page and the shell
-need them anyway. Both directions land in the issue's history, on the issue that
+is no `GET`: both lists ride `IssueDto`, where the board, the page and a client
+at a terminal need them anyway. Both directions land in the issue's history, on the issue that
 waits and on it alone.
 
 ### Claim
@@ -1247,7 +1260,7 @@ an agent may move, and then waits — asking again every interval, saying so onc
 and then rarely — which is what "leave it running overnight" has to mean if the
 answer to "is anything left" can change while nobody is watching.
 
-**The loop is the shell, not the model.** The alternative was one long session
+**The loop is a program, not the model.** The alternative was one long session
 told to keep going, and it was rejected for two reasons that point the same way:
 it would carry six hours of context into its last ticket, and the earliest
 decisions in that context are exactly the ones nobody can audit afterwards. A
@@ -1308,17 +1321,36 @@ request somebody can read.
 
 ### One loop at a time
 
-One loop at a time on one machine, and what says so is a directory under
-`TMPDIR`, holding the pid of the run that took it. A directory because `mkdir` is atomic on every filesystem this could land on and a lock file
-written with `>` is not; outside the repository because a lock in a tracked tree
-is a lock somebody commits. A lock whose owner is gone — killed outright, or a
-machine that rebooted out from under it — is cleared rather than honoured, which
-is the difference between a loop that survives a crash and one somebody has to
-let back in.
+**One loop per checkout**, and what says so is a directory under `TMPDIR`,
+holding the pid of the run that took it. A directory because creating one is
+atomic on every filesystem this could land on and a file written with a redirect
+is not; outside the repository because a lock in a tracked tree is a lock
+somebody commits, and one that outlives a reboot is one somebody has to come and
+clear by hand. A lock whose owner is gone — killed outright, or a machine that
+rebooted out from under it — is cleared rather than honoured, which is the
+difference between a loop that survives a crash and one somebody has to let back
+in. The refusal names the pid *and* the checkout, because "already running here"
+is ambiguous the moment there are two heres.
 
-The lock says one loop per machine. What says one loop per *ticket* is the
-[claim](#claim), and it now exists — so the two questions the `TMPDIR` directory
-used to answer together are answered separately, each by the thing that can.
+Per checkout rather than per machine, and that is the whole of what makes a
+second loop possible. It was per machine while the [claim](#claim) did not
+exist, because two loops with no way to divide the board between them would both
+take the same ticket. The board divides it now, and the only thing two loops in
+*one tree* would still collide over is the tree — one increment's reset landing
+in the middle of another's branch.
+
+**Two spellings of one path are one checkout.** On a case-insensitive filesystem
+`/x/code/Aerie` and `/x/code/aerie` are one directory, and a lock keyed on the
+string would let two loops into it, which is the one thing the lock is for. So
+the key is the canonical path: each segment resolved to the name the directory
+it sits in actually holds, with symlinks followed first. That is the answer
+device-and-inode would give on Unix and is a question Windows can also answer —
+and where a filesystem *is* case-sensitive, both spellings are separate entries
+and both survive untouched, which is right there too.
+
+So the two questions the `TMPDIR` directory used to answer together are answered
+separately, each by the thing that can: the claim says one runner per ticket,
+and the lock says one runner per tree.
 
 The claim was once deferred, and each reason it was deferred has an answer.
 A lease needs an expiry, and the expiry is lazy: a claim is dead when its
@@ -1327,12 +1359,53 @@ no timeout to tune and no sweeper to notice has stopped. An expiry needs a
 heartbeat, and the heartbeat is the runner's own — it is sent by the process
 holding the lease, not by anything the board has to run. And a run that dies
 mid-increment leaves a row nothing may touch for exactly one TTL, after which
-the next pass takes it with no operator action.
+the next pass takes it with no operator action — and the lock it left behind is
+cleared by the next loop in that checkout, so a `kill -9` needs nobody to tidy
+up after it.
 
-What remains machine-local is the `TMPDIR` lock, and it is now the smaller
-claim: *this checkout is already looping*. Making it one lock per checkout
-rather than one per machine — so two checkouts on one box may both run — is
-AERIE-794's, and the claim is what makes it safe.
+### What a runner does, in order
+
+One pass, from the board to the release:
+
+1. **Read the queue.** `work/queue` applies the loop's policy — the ready date,
+   the person-assignee fold — and answers with every row and the reason it was
+   folded. It has already folded past everything under somebody else's live
+   claim, so what comes back clear is a shortlist.
+2. **Claim the first clear row.** A `409` is an answer and not a fault: somebody
+   took it between the scan and the take, and the pass moves on to the next clear
+   row. Up to **five** attempts, because a board whose first five are all being
+   worked is a board where waiting an interval is the honest thing to do — and an
+   unbounded walk would take and release leases down a thousand-card column.
+   Five refusals is a **busy** board, reported in its own sentence, naming the
+   keys and who holds them. That is deliberately not the sentence an empty board
+   gets: one means wait a minute, and the other means the night is over.
+3. **Read the dispatch, by name.** `work/{key}?heldToken=…` and never
+   `work/next`, which would answer with the first clear row *as it stands now* —
+   a different ticket from the one just claimed, once another runner's lease has
+   folded the row. The token is what stops the runner's own lease folding its own
+   dispatch. A dispatch that comes back blocked is a ticket that changed under
+   us: the lease goes straight back, and the walk goes on.
+4. **Reset the workspace**, then spawn. In that order, and after the claim: a
+   ticket held is a ticket nothing else will start, and a reset before the claim
+   would be a fetch spent on an increment that never happens.
+5. **Heartbeat**, carrying the last line the runner printed — and only when it
+   has changed, so the time a card draws is when the line was printed rather than
+   when a heartbeat happened to fire. A `--quiet` increment renders nothing and
+   so carries nothing, which is what `--quiet` is.
+6. **Release**, however the increment ended.
+
+**A refused heartbeat ends the increment.** The lease expired underneath the run,
+was taken over, or was cleared by the operator; the session is stopped rather
+than left spending money on a ticket this runner no longer holds, the bill is
+still posted — money was spent on that ticket, and a meter reading is not a claim
+to have done the work — and nothing else is written. In particular no
+[stall](#when-an-increment-does-nothing) is flagged: that would mark another
+runner's increment as ours, and the ticket did not move because we stopped, which
+the loop already knows. **A lost lease is not one of the three failures that end
+a night**, for the same reason: it is the loop working correctly on a busy board.
+
+Every other way a heartbeat can fail — a timeout, a `500`, an origin that did not
+answer — changes nothing. The next tick tries again.
 
 ### The workspace, between increments
 
@@ -1422,23 +1495,76 @@ usually raised by the session's own way out.
 
 On the server. `work/queue` is the same walk `work/next` takes, reported rather
 than acted on, and `GetNextWork` is the first clear row of that scan rather
-than a second walk that happens to agree with it — so the shell asks two
+than a second walk that happens to agree with it — so a runner asks two
 questions and cannot get two different boards. Everything
 above is decided in one place, in one order, in
 [`WorkController.cs`](../src/Aerie.Api/Modules/Hatch/WorkController.cs).
 
-The alternative was **the shell**, and it is the cheaper thing to write: `queue`
-already parses the board, and folding the not-yet-ready and the wrong-typed out
-of it is a few lines of `jq`. It was rejected because it puts the rules where
-the *caller* is, and there is more than one caller — a terminal, a loop, and the
-issue page — so the first renamed column would leave two of them disagreeing
-about what is workable, silently, with nobody watching. The shell's whole job is
-to spend increments and say what happened; it decides nothing about which.
+The alternative was **the client**, and it is the cheaper thing to write:
+`queue` already parses the board, and folding the not-yet-ready and the
+wrong-typed out of it is a few lines. It was rejected because it puts the rules
+where the *caller* is, and there is more than one caller — a terminal, a loop,
+and the issue page — so the first renamed column would leave two of them
+disagreeing about what is workable, silently, with nobody watching. A runner's
+whole job is to spend increments and say what happened; it decides nothing about
+which.
+
+The second of those two reads is `work/{key}`, named, carrying the runner's own
+claim token — never `work/next`. The claim between them is what closes the
+window the old pair had: a row read as clear and taken by somebody else in the
+meantime comes back from the named read carrying their sentence, and the pass
+walks on instead of spawning into it.
 
 That is also why the loop passes no `--model` or `--effort` of its own, though
 `work` accepts both. An override typed for one increment is one operator's
 opinion about one ticket, and a loop that carried it across a night would be
 applying it to tickets nobody looked at.
+
+### Where the loop lives
+
+`work` and `go-to-work` are a program — [`src/Aerie.Hatch`](../src/Aerie.Hatch)
+— and everything else an operator types is still
+[`scripts/hatch.sh`](../scripts/hatch.sh), which hands those two to it. Nothing
+an operator or a playbook types changed when they moved.
+
+They moved because of what they do rather than what they say. Every other
+command in that script is one request and a sentence about the answer. These two
+are a lease with a clock on it, a heartbeat on a background thread, a session
+that has to be killed the moment the lease goes, and three signals — and none of
+it could be tested, because nothing in this repository tested a shell script and
+a race is precisely the thing a hand check cannot catch twice. The question was
+asked as "how is the claim verified", and the honest answer was that in a shell
+it could not be: the alternative on the table was a stub harness of some six
+hundred lines driving `hatch.sh` through a fake `curl` and a fake `claude` on
+`PATH`, which is a second program to maintain and one that can only assert what
+a recorded request log happens to show.
+
+So: a console program in the solution, compiled against
+`src/Aerie.Hatch.Contracts` — the same records the API serves, so a fixture that
+goes stale does not quietly deserialise into a dispatch with empty fields, it
+stops compiling — and asserted in
+[`src/Aerie.Hatch.Tests`](../src/Aerie.Hatch.Tests), which `make test` and CI
+already run because the solution already builds and tests everything in it. Two
+loops racing one ticket, a lease refused mid-session, an interrupt between a
+claim and its release, two spellings of one checkout: each of those is a test
+that runs in milliseconds against a stub wire and a stub session, with no server,
+no key and no agent.
+
+Being cross-platform came along with it, and is worth naming because the shell
+was never going to be: `hatch.sh` is Bash 3.2 on purpose, for macOS, and a
+Windows operator had no runner at all.
+
+Two things in the shell version existed only because it was a shell, and are
+gone rather than translated. The session id and the bill used to travel back
+through the render pipeline wearing a control character, because every stage of
+a pipeline is a subshell and nothing set in one survives; they are now an object
+the renderer writes to. And the line a claim carries used to go through a file
+under `TMPDIR` for the same reason, which forced the heartbeat to defend against
+reading one mid-write; it is now a field.
+
+`hatch.sh` prefers a built runner and falls back to `dotnet run`, so a checkout
+with the SDK needs no build step — `make build-hatch` is the optimisation, and
+`HATCH_RUNNER_BIN` names a binary for a machine with no SDK at all.
 
 ### What it stops for
 
@@ -1463,6 +1589,19 @@ except the last one:
   next ticket is a different question. Three in a row is something else:
   whatever is broken is broken for every ticket, and the loop is now spending
   money to prove it.
+- **A workspace that cannot be made current** — the other one nobody asks for,
+  and the only condition that ends a night without an increment having failed. A
+  tree that will not reset is a tree every ticket would be built wrong on, and
+  the loop has no way to make it right. A fetch that merely did not answer is
+  not this: that is a wait, and the next pass tries again.
+
+Three things that look like reasons to stop are not. **A lost lease** is the
+loop working correctly on a busy board — the ticket went to a runner already
+further into it — and does not count toward the three. **A board that did not
+answer** is a minute of bad network, and a loop that ended on one is a loop
+somebody has to sit with. And **a busy board** is a wait, not an ending: every
+candidate being worked elsewhere is a report, and it is deliberately not the
+sentence an empty board gets.
 
 `--under AER-1` points a night at one project: the same rule, asked of one
 epic's subtree. It and a bare key cannot be given together, and a bare key is
@@ -1548,7 +1687,9 @@ from.
 [`scripts/hatch.sh`](../scripts/hatch.sh) wraps the calls a working session
 actually makes — `board`, `next`, `queue`, `show`, `start`, `move`, `comment`,
 `pr`, `depends`, `ask`, `questions`, `answer`, `work`, `go-to-work`, and `api`
-for everything else. It
+for everything else. The last two of those are
+[the runner](#where-the-loop-lives) and the rest are the script itself; every
+one of them is typed the same way either way. It
 finds a column by name rather than by id — on the letters and digits alone, so
 `todo` at a terminal reaches the column the board calls `To Do` — and folds off
 cards whose ready date has not arrived, exactly as the board does.

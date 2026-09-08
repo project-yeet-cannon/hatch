@@ -60,6 +60,10 @@ jobs:
       - name: Build
         run: dotnet build src/Aerie.slnx --no-restore --configuration Release
 
+      # The solution, so this one step covers both suites: Aerie.Api.Tests
+      # against the Postgres above, and Aerie.Hatch.Tests - the runner behind
+      # `hatch.sh work` and `hatch.sh go-to-work` - which needs neither a
+      # database nor a network, since its wire and its sessions are stubs.
       - name: Test
         run: dotnet test src/Aerie.slnx --no-build --configuration Release
 

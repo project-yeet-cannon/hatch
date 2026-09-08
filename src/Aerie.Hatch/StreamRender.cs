@@ -206,6 +206,25 @@ public sealed partial class StreamRender(string root, RunFacts facts)
     }
 
     /// <summary>
+    /// The prose a run ended with, out of the one object a quiet run answers
+    /// with. Printed as it is, because on a run nobody watched it is the only
+    /// account of what happened there is.
+    /// </summary>
+    internal static string? Closing(string json)
+    {
+        try
+        {
+            return JsonDocument.Parse(json).RootElement is { ValueKind: JsonValueKind.Object } e
+                ? Text(e, "result")
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// What the session said it did, out of the fenced block it was asked to
     /// end with - see <see cref="Prompt"/>, which is where that instruction is
     /// written.

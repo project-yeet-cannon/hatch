@@ -16,6 +16,17 @@ public enum Reset
 }
 
 /// <summary>
+/// Making the tree current, behind an interface - so that the order a pass does
+/// things in can be asserted without a repository, a remote and a network. That
+/// order is the point: the ticket is claimed before the fetch, and the lease is
+/// given back even when the fetch is what went wrong.
+/// </summary>
+public interface IWorkspace
+{
+    Reset Prepare();
+}
+
+/// <summary>
 /// The slate every increment starts on: the trunk, as the remote has it now.
 /// </summary>
 /// <remarks>
@@ -40,6 +51,7 @@ public enum Reset
 /// themselves.</para>
 /// </remarks>
 public sealed class Workspace(string root, string? configuredBase, Action<string> say, Action<string> complain)
+    : IWorkspace
 {
     /// <summary>
     /// What a branch is cut from, and the one thing about it that cannot be

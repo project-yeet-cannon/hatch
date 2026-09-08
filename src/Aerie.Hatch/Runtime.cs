@@ -29,4 +29,18 @@ public sealed record Runtime(
     public Idle Idle() => new(Board, Say);
 
     public Increment Increment() => new(Board, Sessions, Settings, Say);
+
+    /// <summary>
+    /// How the tree is made current between increments. Replaceable so a test
+    /// can assert the order a pass does things in - the claim, then the reset,
+    /// then the spawn - without a remote to fetch from.
+    /// </summary>
+    public Func<IWorkspace> Workspace { get; init; } = () =>
+        throw new InvalidOperationException("no workspace was configured");
+
+    /// <summary>The real one, over this checkout.</summary>
+    public Runtime WithGit() => this with
+    {
+        Workspace = () => new Workspace(Root, Settings.BaseBranch, Say.Line, Say.Complain),
+    };
 }

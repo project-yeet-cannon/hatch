@@ -198,8 +198,15 @@ public sealed class Increment(Board board, ISessionRunner sessions, Settings set
 
             if (output.StartsWith('{'))
             {
-                var one = output.ReplaceLineEndings(" ");
-                foreach (var line in render.Read(one)) say.Line(line);
+                // What the session said on its way out, and then the same object
+                // read as the event a stream ends with - so the closing lines and
+                // the facts come from one place rather than being written twice.
+                //
+                // Handed over whole rather than flattened onto a line: the shell
+                // needed a line because its renderer read a pipe, and the text a
+                // session ends with is made of newlines that matter.
+                if (StreamRender.Closing(output) is { Length: > 0 } closing) say.Line(closing);
+                foreach (var line in render.Read(output)) say.Line(line);
             }
             else if (output.Length > 0)
             {

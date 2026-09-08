@@ -316,6 +316,14 @@ public sealed class GoToWorkCommand(Runtime runtime)
         {
             await LoopAsync(under, quiet, once, interval, tally, ct);
         }
+        catch (OperationCanceledException)
+        {
+            // A signal caught while an increment was in flight. The claim has
+            // already gone back through the pass's own way out; what is left is
+            // to say why the night ended, which is the whole reason the tally is
+            // printed from here and not from the loop.
+            tally.StopWhy ??= "interrupted";
+        }
         finally
         {
             tally.Print(runtime.Say);
@@ -341,7 +349,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
         {
             if (tally.ShouldStop()) return;
 
-            var pass = await PassAsync(under, quiet, bin, tally, idle, busy, interval, ct);
+            var pass = await PassAsync(under, quiet, bin, tally, idle, busy, interval, once, ct);
             if (pass == Pass.Fatal) return;
 
             // `--once` is the loop's own dry run against a board that is not a
@@ -380,7 +388,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
     /// </remarks>
     private async Task<Pass> PassAsync(
         string? under, bool quiet, string bin, Tally tally,
-        SaidOnce idle, SaidOnce busy, int interval, CancellationToken ct)
+        SaidOnce idle, SaidOnce busy, int interval, bool once, CancellationToken ct)
     {
         var picked = await runtime.Picker().PickAsync(under, runtime.OffsetMinutes, ct, runtime.Heartbeat);
         var now = runtime.Clock.GetUtcNow();
@@ -389,7 +397,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
         {
             case Pick.Idle:
                 busy.Clear();
-                await SayQuietlyAsync(idle, now, interval, once: false,
+                await SayQuietlyAsync(idle, now, interval, once,
                     digest: string.Join('\n', Digest.Of(picked.Queue)),
                     still: "hatch: still nothing an agent may move",
                     inFull: () => runtime.Idle().ReportAsync(under, picked.Queue, runtime.OffsetMinutes, ct));
@@ -397,7 +405,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
 
             case Pick.Busy:
                 idle.Clear();
-                await SayQuietlyAsync(busy, now, interval, once: false,
+                await SayQuietlyAsync(busy, now, interval, once,
                     digest: string.Join('\n', picked.Busy),
                     still: "hatch: every issue an agent could take is still being worked elsewhere",
                     inFull: () =>
@@ -437,10 +445,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
             // has nothing to say to a loop with nothing to run. The guarantee is
             // the same either way, because it is about the spawn and not about
             // the pass.
-            var workspace = new Workspace(
-                runtime.Root, runtime.Settings.BaseBranch, runtime.Say.Line, runtime.Say.Complain);
-
-            switch (workspace.Prepare())
+            switch (runtime.Workspace().Prepare())
             {
                 case Reset.Never:
                     // The one condition that ends a night without an increment
