@@ -88,17 +88,16 @@ const FIELDS: FieldDef[] = [
     type: 'number',
     help: 'The kiosk says nothing below this. Defaults to 101, the bottom of "Unhealthy for Sensitive Groups".',
   },
+  // The Anthropic API key, and not the Claude subscription token beside it in
+  // the settings table: that one is Hatch's, and it is set on Hatch's own
+  // Settings page so an installation with no admin app can still set it. The
+  // key stays here because what it pays for - the family Game app - is here.
+  // Both are still ordinary site settings; only the page moved.
   {
     key: 'AnthropicApiKey',
     label: 'Anthropic API key',
     type: 'password',
     help: 'Lets the family Game app write games from what a child types. Billed to this key, so it is yours to supply. Stored obfuscated; leave blank to keep the current value.',
-  },
-  {
-    key: 'ClaudeSubscriptionToken',
-    label: 'Claude subscription token',
-    type: 'password',
-    help: 'An OAuth token for your own Claude subscription. Lets Hatch show how much headroom the account has left. Entirely optional - without one Hatch simply has no battery in its nav. Stored obfuscated; leave blank to keep the current value.',
   },
   {
     key: 'HazardMaxSeverityAgeHours',

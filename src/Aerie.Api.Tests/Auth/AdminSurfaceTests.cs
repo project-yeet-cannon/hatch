@@ -251,11 +251,24 @@ public class AdminSurfaceTests
         "AssigneeController.GetAssignees",
         "AssigneeController.PutIssueAssignee",
 
-        // The whole controller, reads included. See SettingsController.
+        // The whole controller, reads included. See
+        // Aerie.Api.Controllers.SettingsController.
         "SettingsController.GetAll",
         "SettingsController.Get",
         "SettingsController.Upsert",
         "SettingsController.Delete",
+
+        // Hatch's own two settings - the Claude subscription token and what to
+        // call whoever is sitting at this machine. Cut tighter than the module
+        // around it: plain [RequireAdmin], no Hatch scope, so a key is refused
+        // the read as well as the write. A key that could write here could set
+        // the name every event in the house is signed with, or swap the
+        // credential the account's headroom is read through. See
+        // Aerie.Api.Modules.Hatch.SettingsController - a different class that
+        // shares the four names above it, which is why its actions are named
+        // for what they answer rather than Get and Put.
+        "SettingsController.GetHatchSettings",
+        "SettingsController.PutHatchSettings",
     ];
 
     /// <summary>
