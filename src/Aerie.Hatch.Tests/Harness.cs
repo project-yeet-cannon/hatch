@@ -169,7 +169,7 @@ public sealed class Harness : IDisposable
         Directory.CreateDirectory(Path.Combine(Root, ".git"));
 
         var settings = new Settings { Base = "https://hatch.example", Key = "aerie_ak_test", HeartbeatSeconds = 0 };
-        _client = new HatchClient(settings, Wire);
+        _client = new HatchClient(settings, "test:/checkout", Wire);
 
         Runtime = new Runtime(
             Settings: settings,

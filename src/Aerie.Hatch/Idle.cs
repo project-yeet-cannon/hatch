@@ -49,7 +49,7 @@ public sealed class Idle(Board board, Terminal say)
             {
                 say.Line($"hatch:   {queue.Count} issue(s) were on the dispatcher's path, and every one was folded:");
                 say.Lines(digest);
-                say.Line("hatch:   ./scripts/hatch.sh queue names them one by one");
+                say.Line("hatch:   hatch queue names them one by one");
             }
         }
 
@@ -72,6 +72,6 @@ public sealed class Idle(Board board, Terminal say)
 
         if (waiting > 0)
             say.Line($"hatch: {waiting} question(s){(under is { Length: > 0 } ? $" under {under}" : "")} "
-                     + "are waiting on you - ./scripts/hatch.sh answer");
+                     + "are waiting on you - hatch answer");
     }
 }

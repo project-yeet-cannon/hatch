@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Aerie.Hatch.Tests;
 
@@ -13,6 +14,23 @@ namespace Aerie.Hatch.Tests;
 /// </remarks>
 public static class Fixtures
 {
+    /// <summary>
+    /// How the stub wire writes what it answers with.
+    /// </summary>
+    /// <remarks>
+    /// Reflective, and deliberately not <see cref="HatchClient.Json"/>. That one
+    /// resolves through a source-generated table because the shipped binary is
+    /// trimmed and reflection is switched off in it (<c>HatchJson</c>) - a
+    /// constraint on the client. <see cref="Wire"/> is standing in for the
+    /// server, which serialises reflectively, and holding the fixtures to the
+    /// client's table would mean registering an array shape in production code
+    /// because a test happened to write one.
+    /// </remarks>
+    public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
     public static StatusDto Status(int id, string name, bool terminal = false) =>
         new(id, name, id, terminal, "#888888");
 
@@ -69,7 +87,7 @@ public static class Fixtures
 
     public static string Taken(Guid token, int ttlSeconds = 300) =>
         JsonSerializer.Serialize(
-            new ClaimTakenDto(token, "aerie-hatch", DateTimeOffset.UnixEpoch, ttlSeconds), HatchClient.Json);
+            new ClaimTakenDto(token, "aerie-hatch", DateTimeOffset.UnixEpoch, ttlSeconds), Json);
 
     // ---- The events a session emits ----
 

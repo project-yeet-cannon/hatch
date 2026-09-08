@@ -12,7 +12,7 @@ public sealed record Call(string Method, string Path, string Query, string Body)
     public override string ToString() => $"{Route}{Query} {Body}";
 
     /// <summary>The body, read as the record it was sent as.</summary>
-    public T Read<T>() => JsonSerializer.Deserialize<T>(Body, HatchClient.Json)!;
+    public T Read<T>() => JsonSerializer.Deserialize<T>(Body, Fixtures.Json)!;
 }
 
 /// <summary>
@@ -56,7 +56,7 @@ public sealed class Wire : HttpMessageHandler
 
     /// <summary>Answer this route with a record, serialised the way the server would.</summary>
     public Wire Json(string method, string path, object body) =>
-        Reply(method, path, HttpStatusCode.OK, JsonSerializer.Serialize(body, HatchClient.Json));
+        Reply(method, path, HttpStatusCode.OK, JsonSerializer.Serialize(body, Fixtures.Json));
 
     /// <summary>Answer this route this way once, then fall through to whatever is behind it.</summary>
     public Wire Once(string method, string path, HttpStatusCode code, string body = "")

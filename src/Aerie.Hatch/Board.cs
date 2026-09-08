@@ -85,6 +85,48 @@ public sealed class Board(HatchClient client)
 
     public Task<WorkLogEntryDto?> WorkLogAsync(string key, WorkLogEntryRequest entry, CancellationToken ct) =>
         Client.PostAsync<WorkLogEntryDto>($"/api/hatch/issues/{key}/work-log", entry, ct);
+
+    // ---- The conversational half, which used to be jq over curl ----
+
+    /// <summary>The columns and every card on them, in the board's own order.</summary>
+    public Task<BoardDto?> BoardAsync(CancellationToken ct) =>
+        Client.GetAsync<BoardDto>("/api/hatch/board", ct);
+
+    /// <summary>The columns alone, which is what <c>show</c> needs to name one.</summary>
+    public async Task<IReadOnlyList<StatusDto>> StatusesAsync(CancellationToken ct) =>
+        await Client.GetAsync<List<StatusDto>>("/api/hatch/statuses", ct) ?? [];
+
+    /// <summary>One issue, whole: the brief, its edges and where it is.</summary>
+    public Task<IssueDto?> IssueAsync(string key, CancellationToken ct) =>
+        Client.GetAsync<IssueDto>($"/api/hatch/issues/{key}", ct);
+
+    public async Task<IReadOnlyList<CommentDto>> CommentsAsync(string key, CancellationToken ct) =>
+        await Client.GetAsync<List<CommentDto>>($"/api/hatch/issues/{key}/comments", ct) ?? [];
+
+    /// <summary>Into a column. The board decides the rank; nothing here has an opinion about it.</summary>
+    public Task<IssueDto?> MoveAsync(string key, int statusId, CancellationToken ct) =>
+        Client.PostAsync<IssueDto>($"/api/hatch/issues/{key}/move", new IssueMoveRequest(statusId, null, null), ct);
+
+    /// <summary>One field at a time, which is all the CLI ever edits.</summary>
+    public Task<IssueDto?> PatchAsync(string key, IssuePatchRequest patch, CancellationToken ct) =>
+        Client.WriteAsync<IssueDto>(HttpMethod.Patch, $"/api/hatch/issues/{key}", patch, ct);
+
+    /// <summary><paramref name="key"/> waits on <paramref name="dependsOnKey"/>.</summary>
+    public Task<IssueDto?> DependAsync(string key, string dependsOnKey, CancellationToken ct) =>
+        Client.PostAsync<IssueDto>(
+            $"/api/hatch/issues/{key}/dependencies", new IssueDependencyRequest(dependsOnKey), ct);
+
+    /// <summary>...no longer.</summary>
+    public Task<IssueDto?> UndependAsync(string key, string dependsOnKey, CancellationToken ct) =>
+        Client.WriteAsync<IssueDto>(
+            HttpMethod.Delete, $"/api/hatch/issues/{key}/dependencies/{dependsOnKey}", null, ct);
+
+    /// <summary>An answer to a question, which is a comment that names the one it answers.</summary>
+    public Task<CommentDto?> AnswerAsync(string key, long questionId, string body, CancellationToken ct) =>
+        Client.PostAsync<CommentDto>(
+            $"/api/hatch/issues/{key}/comments",
+            new CommentCreateRequest(body, Kind: "answer", AnswersId: questionId),
+            ct);
 }
 
 /// <summary>The reasons a pass folded past what it folded past, counted rather than listed.</summary>

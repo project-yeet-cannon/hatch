@@ -288,7 +288,7 @@ namespace Aerie.Api.Modules.Hatch.Migrations
               instead.
             - Comment the summary a reviewer needs: the branch, the sha, what changed, what
               to look at first, what did not land, and anything you are unsure about. If you
-              opened a pull request, record it on the issue with ./scripts/hatch.sh pr.
+              opened a pull request, record it on the issue with hatch pr.
             - Move the child tasks you worked along with the issue. A task left standing in
               the column it started in reads as work nobody did.$prompt$, 'sonnet', 'high', now(), now()
             FROM hatch."Statuses" f, hatch."Statuses" t

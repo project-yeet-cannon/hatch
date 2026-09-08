@@ -23,6 +23,19 @@ public static class Format
             ? "$" + Math.Round(usd, 2).ToString("0.##", CultureInfo.InvariantCulture)
             : "$" + Math.Round(usd, 4).ToString("0.####", CultureInfo.InvariantCulture);
 
+    /// <summary>
+    /// A timestamp as the server wrote it: ISO 8601, and no trailing zeros on
+    /// the fraction.
+    /// </summary>
+    /// <remarks>
+    /// <c>"O"</c> pads the fraction to seven digits, so a comment the API served
+    /// as <c>…:07.38376+00:00</c> would print as <c>…:07.3837600+00:00</c> - the
+    /// same instant, spelled differently from everywhere else that quotes it.
+    /// <c>F</c> is the digit-if-nonzero form, which round-trips what was sent.
+    /// </remarks>
+    public static string Stamp(DateTimeOffset when) =>
+        when.ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFFzzz", CultureInfo.InvariantCulture);
+
     /// <summary>A token count at the resolution a headline wants.</summary>
     public static string Compact(long count) => count switch
     {

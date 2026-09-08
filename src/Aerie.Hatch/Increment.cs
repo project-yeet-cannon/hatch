@@ -160,7 +160,7 @@ public sealed class Increment(Board board, ISessionRunner sessions, Settings set
                 say.Line($"--- {report.Key} asked {asked.Count} question(s) ---");
                 say.Line("");
                 foreach (var line in Questions.Draw(asked)) say.Line(line);
-                say.Line($"  ./scripts/hatch.sh answer {report.Key}");
+                say.Line($"  hatch answer {report.Key}");
                 say.Line($"  {board.Client.Origin}/issues/{report.Key}");
             }
         }

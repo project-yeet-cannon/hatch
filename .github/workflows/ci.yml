@@ -71,6 +71,60 @@ jobs:
       - name: Test
         run: dotnet test src/Aerie.slnx --no-build --configuration Release
 
+  # The shippable `hatch`, for every platform this house runs on.
+  #
+  # A cross-compiled, trimmed, self-contained publish is the one build that can
+  # break without any test noticing: trimming decides what to keep by static
+  # analysis, and a reflection path it could not see fails at runtime on the
+  # operator's machine and nowhere before it. So all four are built on every PR,
+  # in a matrix that names which RID broke rather than surfacing as a puzzling
+  # failure in whichever happened to run first.
+  #
+  # Every RID cross-compiles from ubuntu: `dotnet publish --runtime` needs only
+  # the target's runtime pack, not the target's operating system. Running the
+  # result is a different question, and one the tests above already answer on
+  # this platform.
+  hatch-cli:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, osx-arm64, osx-x64, linux-x64]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      # The same command `make publish-hatch` runs for one RID. Named here
+      # rather than shelling out to make, so the matrix leg is the unit that
+      # fails and the log says which platform it was.
+      - name: Publish
+        run: |
+          dotnet publish src/Aerie.Hatch/Aerie.Hatch.csproj \
+            --runtime ${{ matrix.rid }} \
+            --configuration Release \
+            --output artifacts/hatch/${{ matrix.rid }} \
+            -p:PublishSingleFile=true \
+            -p:SelfContained=true \
+            -p:PublishTrimmed=true
+
+      # A publish that produced no binary, or produced one under the old
+      # `hatch-runner` name, is a green step and a broken artifact otherwise.
+      - name: Check the binary is there, and is called hatch
+        run: |
+          set -euo pipefail
+          case "${{ matrix.rid }}" in
+            win-*) binary="artifacts/hatch/${{ matrix.rid }}/hatch.exe" ;;
+            *)     binary="artifacts/hatch/${{ matrix.rid }}/hatch" ;;
+          esac
+          test -f "$binary" || { echo "no $binary was published"; ls -R artifacts/hatch; exit 1; }
+          ls -lh "$binary"
+
   web:
     timeout-minutes: 10
     runs-on: ubuntu-latest

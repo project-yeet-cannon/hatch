@@ -172,6 +172,10 @@ public sealed class ClaudeSessionRunner(string? configured = null) : ISessionRun
             UseShellExecute = false,
         };
 
+        // The prompt this session is about to be handed names `hatch` commands,
+        // so the word has to resolve inside it. See Reach.
+        Reach.OnPath(start.Environment, Reach.OwnDirectory(Environment.ProcessPath));
+
         start.ArgumentList.Add("--model");
         start.ArgumentList.Add(request.Model);
         start.ArgumentList.Add("--effort");

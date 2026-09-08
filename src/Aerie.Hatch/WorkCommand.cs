@@ -226,7 +226,7 @@ public sealed class WorkCommand(Runtime runtime)
         {
             runtime.Say.Complain("");
             foreach (var line in Questions.Draw(open)) runtime.Say.Complain(line);
-            runtime.Say.Complain($"  ./scripts/hatch.sh answer {work.Issue.Key}");
+            runtime.Say.Complain($"  hatch answer {work.Issue.Key}");
             runtime.Say.Complain($"  {runtime.Board.Client.Origin}/issues/{work.Issue.Key}");
         }
 

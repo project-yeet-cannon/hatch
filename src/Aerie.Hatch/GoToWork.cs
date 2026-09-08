@@ -355,7 +355,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
         {
             runtime.Say.Complain(
                 "hatch: go-to-work does not take a ticket - it asks the board what is next, until there is nothing.");
-            runtime.Say.Complain($"hatch: one increment on {key} is  ./scripts/hatch.sh work {key}");
+            runtime.Say.Complain($"hatch: one increment on {key} is  hatch work {key}");
             return 1;
         }
 
