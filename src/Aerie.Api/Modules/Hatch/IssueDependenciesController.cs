@@ -29,7 +29,7 @@ namespace Aerie.Api.Modules.Hatch;
 [Route("api/hatch/issues/{key}/dependencies")]
 [RequireAdmin(AcceptScope = ApiKeyScopes.Hatch)]
 public class IssueDependenciesController(
-    HatchContext db, IssueClaims claims, ICallerIdentity caller, TimeProvider time) : ControllerBase
+    HatchContext db, IActorDirectory actors, IssueClaims claims, ICallerIdentity caller, TimeProvider time) : ControllerBase
 {
     /// <summary>
     /// Makes this issue wait on another. Adding an edge that is already there
@@ -102,7 +102,7 @@ public class IssueDependenciesController(
             await db.SaveChangesAsync(ct);
         }
 
-        return await IssueProjection.ToDtoAsync(db, issue, claims, time.GetUtcNow(), ct);
+        return await IssueProjection.ToDtoAsync(db, actors, issue, claims, time.GetUtcNow(), ct);
     }
 
     /// <summary>
@@ -143,7 +143,7 @@ public class IssueDependenciesController(
             }
         }
 
-        return await IssueProjection.ToDtoAsync(db, issue, claims, time.GetUtcNow(), ct);
+        return await IssueProjection.ToDtoAsync(db, actors, issue, claims, time.GetUtcNow(), ct);
     }
 
     /// <summary>

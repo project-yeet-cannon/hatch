@@ -14,6 +14,7 @@ const child = (key: string, waiting: number): ChildRollup => ({
     readyAt: null,
     dueAt: null,
     openQuestions: waiting,
+    assignee: null,
     claim: null,
   },
   isLeaf: true,

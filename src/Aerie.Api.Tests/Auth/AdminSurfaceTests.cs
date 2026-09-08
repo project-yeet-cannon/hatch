@@ -188,11 +188,12 @@ public class AdminSurfaceTests
         "IssueWorkLogController.GetWorkLog",
         "IssueWorkLogController.PostEntry",
 
-        // The same log read across issues, for the leaderboard's graph.
-        // Hatch-scoped like the module's other reads and, deliberately unlike
-        // the write above it, open to a person: reading what the nights cost is
-        // the whole point of the page.
+        // The same log read across issues, for the leaderboard. Hatch-scoped
+        // like the module's other reads and, deliberately unlike the write above
+        // it, open to a person: reading what the nights cost is the whole point
+        // of the page.
         "WorkLogController.GetHistory",
+        "WorkLogController.GetSessions",
 
         // Playbooks are guarded twice over. Reading one is Hatch-scoped like
         // the rest; writing one names no scope at all, so an API key is
@@ -233,6 +234,15 @@ public class AdminSurfaceTests
         // Hatch-scoped - and only the write is here. See
         // IssuePlaybookController.
         "IssuePlaybookController.PatchIssuePlaybook",
+
+        // A related edge, cut the same way and for a different reason: under
+        // the loop's "people only" rule an assignee is a dispatch gate, so a
+        // key that could write one could clear a person's name off a ticket and
+        // hand itself work that was reserved. The directory read beside it is
+        // Hatch-scoped - it is a list of names, and an agent has to be able to
+        // say whose ticket it is declining to take. See AssigneeController.
+        "AssigneeController.GetAssignees",
+        "AssigneeController.PutIssueAssignee",
 
         // The whole controller, reads included. See SettingsController.
         "SettingsController.GetAll",

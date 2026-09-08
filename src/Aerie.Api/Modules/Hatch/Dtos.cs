@@ -48,6 +48,25 @@ public record StatusPatchRequest(string? Name, int? SortOrder, bool? IsTerminal,
 // ---- Issues ----
 
 /// <summary>
+/// Who an issue belongs to: a person, or an API key, or - said as
+/// <c>null</c> wherever this appears - nobody at all.
+/// </summary>
+/// <remarks>
+/// <para>Hatch's own wire shape built from
+/// <see cref="Aerie.Api.Services.Auth.Actor"/>, so the module's payload stays
+/// the module's and the platform record can grow a field without changing what
+/// a board read looks like.</para>
+///
+/// <para>Null is the only way "nobody" is said: there is no empty-object form,
+/// so a client's test is <c>assignee &amp;&amp; …</c> and never a comparison
+/// against a sentinel id. An assignee whose person has been deleted or whose
+/// key has been revoked reads as null too, at every reader at once - see
+/// <see cref="Aerie.Api.Services.Auth.IActorDirectory"/>.</para>
+/// </remarks>
+/// <param name="Kind"><c>person</c> or <c>key</c> - see <see cref="Aerie.Api.Services.Auth.ActorKind"/>.</param>
+public record AssigneeDto(string Kind, Guid Id, string Name);
+
+/// <summary>
 /// A card. What the board draws, and nothing more - descriptions and comments
 /// are a detail-page request, because the board holds every issue in the house
 /// and shipping every description with it would make the first paint the
@@ -65,6 +84,14 @@ public record StatusPatchRequest(string? Name, int? SortOrder, bool? IsTerminal,
 /// an issue's children, a search result - are not places anybody answers a
 /// question from, and counting for them would be a query nobody reads.
 /// </param>
+/// <param name="Assignee">
+/// Who owns this card, or null for nobody - which is most of the board, and
+/// which is why the card draws no element at all rather than an empty chip.
+/// Trailing and defaulted for the reason <paramref name="OpenQuestions"/> is,
+/// though every list that draws a card fills it: an assignee that read one way
+/// through the board and another through the plan is the divergence this record
+/// exists to prevent.
+/// </param>
 public record IssueCardDto(
     string Key,
     string ProjectKey,
@@ -76,6 +103,7 @@ public record IssueCardDto(
     string? ReadyAt,
     string? DueAt,
     int OpenQuestions = 0,
+    AssigneeDto? Assignee = null,
     IssueClaimDto? Claim = null);
 
 /// <summary>
@@ -130,6 +158,14 @@ public record IssueClaimDto(
 /// <see cref="IssuePlaybookController"/>.
 /// </param>
 /// <param name="EffortOverride">The same, for the thinking budget, and independent of it.</param>
+/// <param name="Assignee">
+/// Who owns it, or null for nobody. Beside <paramref name="CreatedBy"/> because
+/// the two are the same kind of fact - who filed it, and whose it is now -
+/// though only one of them can change. Readable by a key, and writable only by
+/// a person through <see cref="AssigneeController"/>: under the loop's
+/// <c>people only</c> rule an assignee is a dispatch gate, and a key that could
+/// write one could hand itself work somebody had reserved.
+/// </param>
 public record IssueDto(
     string Key,
     int ProjectId,
@@ -148,6 +184,7 @@ public record IssueDto(
     string? PullRequestUrl,
     string? ModelOverride,
     string? EffortOverride,
+    AssigneeDto? Assignee,
     string CreatedBy,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
@@ -484,6 +521,37 @@ public record PlaybookPatchRequest(
 public record IssuePlaybookRequest(string? Model, string? Effort);
 
 /// <summary>
+/// Who an issue is to belong to. Both fields null is the unassign; exactly one
+/// of them is refused with a sentence, because a kind with no id is a request
+/// that meant something and did not say what.
+/// </summary>
+/// <remarks>
+/// What you read is what you write: this is <see cref="AssigneeDto"/> minus the
+/// name, so no client has to learn two shapes for one fact. The name is the
+/// directory's to say and not a caller's to assert - a request naming a person
+/// "Nathan" who is really somebody else would be a second source of truth about
+/// a row this process owns.
+/// </remarks>
+public record AssigneeRequest(string? Kind, Guid? Id);
+
+/// <summary>
+/// The picker's rows and the answer to "who am I", in one read.
+/// </summary>
+/// <remarks>
+/// One request rather than two because <em>Assign to me</em> needs both and a
+/// browser that inferred the second from a cookie would be a second
+/// implementation of who the caller is. <paramref name="Me"/> is null where
+/// nobody is signed in, which is the ordinary state of local development with
+/// <c>Auth:Enabled</c> false - and the press is simply absent there.
+/// </remarks>
+/// <param name="Assignees">
+/// Every person and every live key, people first and each A→Z. A revoked key is
+/// not in it, which is the same predicate that makes an issue already pointing
+/// at one read as unassigned.
+/// </param>
+public record AssigneeDirectoryDto(AssigneeDto? Me, IReadOnlyList<AssigneeDto> Assignees);
+
+/// <summary>
 /// One edge: this issue waits on <paramref name="DependsOnKey"/>.
 /// </summary>
 /// <remarks>
@@ -793,3 +861,67 @@ public record WorkLogHistoryDto(
     DateTimeOffset? FirstSessionAt,
     DateTimeOffset? LastSessionAt,
     IReadOnlyList<WorkLogBucketDto> Buckets);
+
+/// <summary>
+/// One agent session as the leaderboard reads it: what it was run against, what
+/// it said about itself, and what it cost.
+/// </summary>
+/// <remarks>
+/// Deliberately narrower than <see cref="WorkLogEntryDto"/> in two places, and
+/// both absences are the point. <c>Summary</c> is up to 2000 characters and this
+/// answers a hundred rows - the issue page is where a session is read at length.
+/// <c>Models</c> is a list per row and nothing on the leaderboard draws a
+/// per-model breakdown.
+/// </remarks>
+/// <param name="Title">What the session said it did, or null when it never said - see <paramref name="Described"/>.</param>
+/// <param name="TotalTokens">The four counts added up - one definition of the headline, as everywhere else in the module.</param>
+public record WorkLogSessionDto(
+    long Id,
+    string SessionId,
+    string IssueKey,
+    string IssueTitle,
+    DateTimeOffset StartedAt,
+    DateTimeOffset EndedAt,
+    long DurationMs,
+    string? Title,
+    bool Described,
+    bool IsError,
+    int Turns,
+    decimal CostUsd,
+    long InputTokens,
+    long OutputTokens,
+    long CacheCreationTokens,
+    long CacheReadTokens,
+    long TotalTokens);
+
+/// <summary>
+/// The sessions in a range, ranked - and what that whole range cost, whether or
+/// not every row of it came back.
+/// </summary>
+/// <remarks>
+/// <paramref name="Totals"/> covers <b>the whole filter and not the returned
+/// page</b>, which is what lets a capped table add up honestly; a caller tells
+/// the two apart by comparing <c>Totals.Sessions</c> with the length of
+/// <paramref name="Sessions"/> and says so on screen.
+///
+/// <paramref name="From"/> and <paramref name="To"/> are the range as given.
+/// Nothing is snapped here, deliberately unlike <see cref="WorkLogHistoryDto"/>:
+/// there is no bucket grid on this read to align to.
+/// </remarks>
+/// <param name="Sort">The sort as resolved - <c>tokens</c>, <c>cost</c> or <c>ended</c>.</param>
+/// <param name="FirstSessionAt">
+/// The earliest session in the population <c>ancestorKey</c> names,
+/// <em>ignoring the range</em>, or null when that population is empty. Read
+/// exactly as <see cref="WorkLogHistoryDto.FirstSessionAt"/> is, and here so a
+/// page can tell "nothing has ever been logged" from "nothing ran in the range
+/// you asked for" without fetching the graph's data to say it.
+/// </param>
+/// <param name="LastSessionAt">The latest, read the same way.</param>
+public record WorkLogSessionsDto(
+    DateTimeOffset From,
+    DateTimeOffset To,
+    string Sort,
+    WorkLogTotalsDto Totals,
+    DateTimeOffset? FirstSessionAt,
+    DateTimeOffset? LastSessionAt,
+    IReadOnlyList<WorkLogSessionDto> Sessions);

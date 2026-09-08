@@ -1,3 +1,4 @@
+using Aerie.Api.Services.Auth;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aerie.Api.Modules.Hatch;
@@ -20,8 +21,9 @@ public static class IssueProjection
     /// disagree about what an issue looks like.
     /// </summary>
     public static async Task<IssueDto> ToDtoAsync(
-        HatchContext db, EfHatchIssue issue, IssueClaims claims, DateTimeOffset now, CancellationToken ct) =>
-        (await ToDtosAsync(db, [issue], claims, now, ct))[issue.Id];
+        HatchContext db, IActorDirectory actors, EfHatchIssue issue, IssueClaims claims, DateTimeOffset now,
+        CancellationToken ct) =>
+        (await ToDtosAsync(db, actors, [issue], claims, now, ct))[issue.Id];
 
     /// <summary>
     /// A batch of issues, in a fixed number of queries rather than a fixed
@@ -45,8 +47,8 @@ public static class IssueProjection
     /// card and not its neighbour because the clock moved between them.
     /// </param>
     public static async Task<Dictionary<long, IssueDto>> ToDtosAsync(
-        HatchContext db, IReadOnlyList<EfHatchIssue> issues, IssueClaims claims, DateTimeOffset now,
-        CancellationToken ct)
+        HatchContext db, IActorDirectory actors, IReadOnlyList<EfHatchIssue> issues, IssueClaims claims,
+        DateTimeOffset now, CancellationToken ct)
     {
         if (issues.Count == 0) return [];
 
@@ -102,6 +104,16 @@ public static class IssueProjection
             .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g
                 .Select(r => IssueKey.Format(r.ProjectKey, r.Number)).ToList());
 
+        // The directory rather than a join, because the identity is not in this
+        // schema and could not be joined to (Modules/README.md). Memoized for
+        // the life of the request, so a hundred issues cost the same two queries
+        // as one - and an id naming somebody deleted or a key since revoked
+        // resolves to null here, which is how "unassigned" arrives without a
+        // sweeper ever having run.
+        var assignees = new Dictionary<long, AssigneeDto?>();
+        foreach (var issue in issues)
+            assignees[issue.Id] = await ToAssigneeAsync(actors, issue.AssigneePersonId, issue.AssigneeApiKeyId, ct);
+
         return issues.ToDictionary(issue => issue.Id, issue =>
         {
             var projectKey = issue.Project?.Key ?? projectKeys[issue.ProjectId];
@@ -124,11 +136,36 @@ public static class IssueProjection
                 issue.PullRequestUrl,
                 issue.ModelOverride,
                 issue.EffortOverride,
+                assignees[issue.Id],
                 issue.CreatedBy,
                 issue.CreatedAt,
                 issue.UpdatedAt,
                 claims.Project(ClaimSnapshot.Of(issue), now));
         });
+    }
+
+    /// <summary>
+    /// The pair of columns an issue carries, rendered as the one thing a client
+    /// sees - or null, for nobody and for an identity that is no longer live.
+    /// </summary>
+    /// <remarks>
+    /// Here rather than at each of the six sites that draws a card or an issue,
+    /// because the whole point of the liveness rule is that every reader applies
+    /// it the same way at the same instant. The person is asked first, arbitrarily
+    /// but consistently: the columns are mutually exclusive by a check
+    /// constraint and by the only route that writes them, so the order can only
+    /// matter for a row somebody wrote by hand.
+    /// </remarks>
+    public static async Task<AssigneeDto?> ToAssigneeAsync(
+        IActorDirectory actors, Guid? personId, Guid? apiKeyId, CancellationToken ct)
+    {
+        var actor = personId is not null
+            ? await actors.ResolveAsync(ActorKind.Person, personId, ct)
+            : apiKeyId is not null
+                ? await actors.ResolveAsync(ActorKind.Key, apiKeyId, ct)
+                : null;
+
+        return actor is null ? null : new AssigneeDto(actor.Kind, actor.Id, actor.Name);
     }
 
     /// <summary>The display key of an issue named by id, or null if it has gone.</summary>

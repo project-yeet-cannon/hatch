@@ -9,9 +9,9 @@ using Microsoft.Extensions.Time.Testing;
 namespace Aerie.Api.Tests.Hatch;
 
 /// <summary>
-/// The work log read across issues: what a caller may ask for, what the server
-/// decides when they ask for nothing, and the six things it refuses in a
-/// sentence.
+/// The work log read across issues - the graph's buckets and the leaderboard's
+/// ranked sessions: what a caller may ask for, what the server decides when they
+/// ask for nothing, and everything it refuses in a sentence.
 /// </summary>
 public class WorkLogControllerTests
 {
@@ -246,6 +246,268 @@ public class WorkLogControllerTests
             await h.RefusalAsync(offsetMinutes: 9999));
     }
 
+    // ---- The sessions, ranked ----
+
+    [Fact]
+    public async Task TheSessionsRange_IsTheFourteenDaysEndingNowAndIsNotSnapped()
+    {
+        var h = await NewAsync();
+
+        var sessions = await h.SessionsAsync();
+
+        // Echoed exactly as resolved, unlike `history`, which snaps both bounds
+        // outward onto the bucket grid it draws on. There is no grid here.
+        Assert.Equal(Now.AddDays(-14), sessions.From);
+        Assert.Equal(Now, sessions.To);
+        Assert.Equal("tokens", sessions.Sort);
+    }
+
+    [Fact]
+    public async Task OneSessionsBoundOnItsOwn_GetsTheOthersDefault()
+    {
+        var h = await NewAsync();
+
+        var since = await h.SessionsAsync(from: "2026-09-06T03:00:00Z");
+        var until = await h.SessionsAsync(to: "2026-09-06T03:00:00Z");
+
+        Assert.Equal(Now, since.To);
+        Assert.Equal(new DateTimeOffset(2026, 8, 23, 3, 0, 0, TimeSpan.Zero), until.From);
+    }
+
+    [Fact]
+    public async Task TheDefaultSort_IsTokensDescending()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync();
+
+        await h.SpendAsync(issue, 1_000, Now.AddHours(-3));
+        await h.SpendAsync(issue, 300_000, Now.AddHours(-2));
+        await h.SpendAsync(issue, 20_000, Now.AddHours(-1));
+
+        var sessions = await h.SessionsAsync();
+
+        Assert.Equal([300_000, 20_000, 1_000], sessions.Sessions.Select(s => s.TotalTokens));
+    }
+
+    [Fact]
+    public async Task CostRanksOnTheDollars_AndEndedIsNewestFirst()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync();
+
+        await h.SpendAsync(issue, 300_000, Now.AddHours(-3), usd: 0.10m);
+        await h.SpendAsync(issue, 1_000, Now.AddHours(-2), usd: 30.00m);
+        await h.SpendAsync(issue, 20_000, Now.AddHours(-1), usd: 2.00m);
+
+        var byCost = await h.SessionsAsync(sort: "cost");
+        var byEnded = await h.SessionsAsync(sort: "ended");
+
+        Assert.Equal("cost", byCost.Sort);
+        Assert.Equal([30.00m, 2.00m, 0.10m], byCost.Sessions.Select(s => s.CostUsd));
+        Assert.Equal("ended", byEnded.Sort);
+        Assert.Equal(
+            byEnded.Sessions.Select(s => s.EndedAt).OrderByDescending(e => e),
+            byEnded.Sessions.Select(s => s.EndedAt));
+    }
+
+    [Fact]
+    public async Task TiedSessions_BreakOnWhenTheyEndedAndThenOnId()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync();
+
+        var older = await h.SpendAsync(issue, 5_000, Now.AddHours(-2));
+        var first = await h.SpendAsync(issue, 5_000, Now.AddHours(-1));
+        var second = await h.SpendAsync(issue, 5_000, Now.AddHours(-1));
+
+        var sessions = await h.SessionsAsync();
+
+        // Two reads of one filter come back in one order, which is what makes a
+        // capped list stable across a refresh.
+        Assert.Equal([second, first, older], sessions.Sessions.Select(s => s.Id));
+    }
+
+    [Fact]
+    public async Task ASort_IsTakenInEitherCaseAndWithSpaceAroundIt()
+    {
+        var h = await NewAsync();
+
+        Assert.Equal("cost", (await h.SessionsAsync(sort: "COST")).Sort);
+        Assert.Equal("ended", (await h.SessionsAsync(sort: " Ended ")).Sort);
+        Assert.Equal("tokens", (await h.SessionsAsync(sort: "  ")).Sort);
+    }
+
+    [Fact]
+    public async Task TheCap_LimitsTheRowsAndNeverTheTotals()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync();
+
+        for (var i = 0; i < 120; i++) await h.SpendAsync(issue, 1_000, Now.AddMinutes(-i - 1));
+
+        var sessions = await h.SessionsAsync();
+
+        // A hundred rows under a total of 120 is a cap, and the page says so -
+        // the number itself is never a sample.
+        Assert.Equal(100, sessions.Sessions.Count);
+        Assert.Equal(120, sessions.Totals.Sessions);
+        Assert.Equal(120_000, sessions.Totals.TotalTokens);
+    }
+
+    [Fact]
+    public async Task AnExplicitLimit_IsHonouredAtEitherEnd()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync();
+
+        for (var i = 0; i < 3; i++) await h.SpendAsync(issue, 1_000, Now.AddMinutes(-i - 1));
+
+        Assert.Single((await h.SessionsAsync(limit: 1)).Sessions);
+        Assert.Equal(3, (await h.SessionsAsync(limit: 500)).Sessions.Count);
+    }
+
+    [Fact]
+    public async Task AnAncestorKeyOnTheSessions_CoversTheIssueItselfAndEveryDepthBeneathIt()
+    {
+        var h = await NewAsync();
+        var epic = await h.FileAsync("epic", "the effort");
+        var story = await h.FileAsync("story", "under it", parentKey: epic.Key);
+        var task = await h.FileAsync("task", "under that", parentKey: story.Key);
+        var elsewhere = await h.FileAsync("epic", "another effort");
+
+        await h.SpendAsync(epic, 1_000, Now.AddHours(-3));
+        await h.SpendAsync(story, 20_000, Now.AddHours(-2));
+        await h.SpendAsync(task, 300_000, Now.AddHours(-1));
+        await h.SpendAsync(elsewhere, 7_000_000, Now.AddHours(-1));
+
+        var scoped = await h.SessionsAsync(ancestorKey: epic.Key);
+
+        // The named issue's own sessions are in it: a planning session run
+        // against the epic is money no child holds.
+        Assert.Equal(3, scoped.Totals.Sessions);
+        Assert.Equal(321_000, scoped.Totals.TotalTokens);
+        Assert.DoesNotContain(elsewhere.Key, scoped.Sessions.Select(s => s.IssueKey));
+    }
+
+    [Fact]
+    public async Task AnErroredSession_IsCountedAndItsSpendCounts()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync();
+
+        await h.SpendAsync(issue, 1_000, Now.AddHours(-2), usd: 0.10m);
+        await h.SpendAsync(issue, 300_000, Now.AddHours(-1), usd: 30.00m, isError: true);
+
+        var sessions = await h.SessionsAsync();
+
+        // It ran, and it was billed for running.
+        Assert.Equal(2, sessions.Totals.Sessions);
+        Assert.Equal(1, sessions.Totals.Errors);
+        Assert.Equal(30.10m, sessions.Totals.CostUsd);
+        Assert.True(sessions.Sessions[0].IsError);
+    }
+
+    [Fact]
+    public async Task EachRow_NamesTheIssueItWasRunAgainstAndWhatItSaidOfItself()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync("story", "the leaderboard");
+
+        await h.SpendAsync(issue, 20_000, Now.AddHours(-2), title: "Broke the ranking out of the rollup", turns: 41);
+        await h.SpendAsync(issue, 1_000, Now.AddHours(-1));
+
+        var sessions = await h.SessionsAsync();
+
+        var described = sessions.Sessions[0];
+        Assert.Equal(issue.Key, described.IssueKey);
+        Assert.Equal("the leaderboard", described.IssueTitle);
+        Assert.Equal("Broke the ranking out of the rollup", described.Title);
+        Assert.True(described.Described);
+        Assert.Equal(41, described.Turns);
+        Assert.Equal(1_000, described.DurationMs);
+
+        // A session that never said what it did is marked, not blanked.
+        Assert.False(sessions.Sessions[1].Described);
+        Assert.Null(sessions.Sessions[1].Title);
+    }
+
+    [Fact]
+    public async Task ARangeWithNothingInIt_IsAnEmptyListAndZeroedTotals()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync();
+        await h.SpendAsync(issue, 1_000, Now.AddHours(-1));
+
+        var sessions = await h.SessionsAsync(from: "2026-01-01T00:00:00Z", to: "2026-01-03T00:00:00Z");
+
+        Assert.Empty(sessions.Sessions);
+        Assert.Equal(0, sessions.Totals.Sessions);
+        Assert.Equal(0m, sessions.Totals.CostUsd);
+    }
+
+    [Fact]
+    public async Task TheTwoBounds_IgnoreTheRangeAndRespectTheAncestor()
+    {
+        var h = await NewAsync();
+        var epic = await h.FileAsync("epic", "the effort");
+        var elsewhere = await h.FileAsync("epic", "another effort");
+
+        var first = Now.AddDays(-40);
+        var last = Now.AddHours(-1);
+        await h.SpendAsync(epic, 1_000, first);
+        await h.SpendAsync(epic, 1_000, last);
+        await h.SpendAsync(elsewhere, 1_000, Now.AddDays(-90));
+
+        var scoped = await h.SessionsAsync(ancestorKey: epic.Key);
+        var empty = await h.SessionsAsync(ancestorKey: (await h.FileAsync()).Key);
+
+        // Outside the fourteen-day default on both sides, and still reported:
+        // it is how a page tells "nothing has ever been logged" from "nothing
+        // ran in the range you asked for".
+        Assert.Equal(first, scoped.FirstSessionAt);
+        Assert.Equal(last, scoped.LastSessionAt);
+
+        // The range still applies to everything else: only the session inside
+        // the fourteen-day default is counted.
+        Assert.Equal(1, scoped.Totals.Sessions);
+        Assert.Null(empty.FirstSessionAt);
+        Assert.Null(empty.LastSessionAt);
+    }
+
+    // ---- What the sessions read refuses ----
+
+    [Fact]
+    public async Task TheSessionsRead_RefusesABadBoundAndAnInvertedRangeInTheSameWords()
+    {
+        var h = await NewAsync();
+
+        Assert.Equal(
+            "a range bound is an instant (2026-09-12T17:00:00Z) - not \"last tuesday\"",
+            await h.SessionRefusalAsync(from: "last tuesday"));
+        Assert.Equal(
+            "a range ends before it begins",
+            await h.SessionRefusalAsync(from: "2026-09-07T03:00:00Z", to: "2026-09-06T03:00:00Z"));
+        Assert.Equal("there is no AER-999", await h.SessionRefusalAsync(ancestorKey: "AER-999"));
+    }
+
+    [Fact]
+    public async Task AnUnknownSort_IsRefusedWithTheSentence()
+    {
+        var h = await NewAsync();
+
+        Assert.Equal("a sort is tokens, cost or ended - not \"turns\"", await h.SessionRefusalAsync(sort: "turns"));
+    }
+
+    [Fact]
+    public async Task ALimitOutsideTheCap_IsRefusedWithTheCapInIt()
+    {
+        var h = await NewAsync();
+
+        Assert.Equal("a limit is between 1 and 500 - not 0", await h.SessionRefusalAsync(limit: 0));
+        Assert.Equal("a limit is between 1 and 500 - not -1", await h.SessionRefusalAsync(limit: -1));
+        Assert.Equal("a limit is between 1 and 500 - not 501", await h.SessionRefusalAsync(limit: 501));
+    }
+
     // ---- Who may read it ----
 
     [Fact]
@@ -281,26 +543,41 @@ public class WorkLogControllerTests
         /// A row straight into the context rather than through the writer, so
         /// the test chooses when the session ended.
         /// </summary>
-        public async Task SpendAsync(
-            IssueDto issue, long tokens, DateTimeOffset endedAt, decimal usd = 0m, bool isError = false)
+        public async Task<long> SpendAsync(
+            IssueDto issue,
+            long tokens,
+            DateTimeOffset endedAt,
+            decimal usd = 0m,
+            bool isError = false,
+            string? title = null,
+            bool described = false,
+            long durationMs = 1_000,
+            int turns = 1)
         {
             IssueKey.TryParse(issue.Key, out var projectKey, out var number);
             var issueId = await Db.Issues.AsNoTracking().WithKey(projectKey, number).Select(i => i.Id).FirstAsync();
 
-            Db.WorkLog.Add(new EfHatchWorkLogEntry
+            var entry = new EfHatchWorkLogEntry
             {
                 IssueId = issueId,
                 SessionId = $"session-{Db.WorkLog.Local.Count}-{issueId}-{tokens}",
-                StartedAt = endedAt,
+                StartedAt = endedAt.AddMilliseconds(-durationMs),
                 EndedAt = endedAt,
-                DurationMs = 1_000,
+                DurationMs = durationMs,
+                Title = title,
+                // What the writer would have derived: a session that named
+                // itself described itself.
+                Described = described || title is not null,
                 IsError = isError,
-                Turns = 1,
+                Turns = turns,
                 CostUsd = usd,
                 InputTokens = tokens,
                 CreatedAt = Now,
-            });
+            };
+
+            Db.WorkLog.Add(entry);
             await Db.SaveChangesAsync();
+            return entry.Id;
         }
 
         public async Task<WorkLogHistoryDto> HistoryAsync(
@@ -310,6 +587,25 @@ public class WorkLogControllerTests
             int offsetMinutes = 0,
             string? ancestorKey = null) =>
             Value(await History.GetHistory(from, to, bucket, offsetMinutes, ancestorKey, default));
+
+        public async Task<WorkLogSessionsDto> SessionsAsync(
+            string? from = null,
+            string? to = null,
+            string? ancestorKey = null,
+            string? sort = null,
+            int limit = 100) =>
+            Value(await History.GetSessions(from, to, ancestorKey, sort, limit, default));
+
+        public async Task<string> SessionRefusalAsync(
+            string? from = null,
+            string? to = null,
+            string? ancestorKey = null,
+            string? sort = null,
+            int limit = 100)
+        {
+            var result = await History.GetSessions(from, to, ancestorKey, sort, limit, default);
+            return Assert.IsType<BadRequestObjectResult>(result.Result).Value?.ToString() ?? "";
+        }
 
         public async Task<string> RefusalAsync(
             string? from = null,
@@ -350,7 +646,7 @@ public class WorkLogControllerTests
         return new Harness
         {
             History = new WorkLogController(db, time),
-            Issues = new IssuesController(db, new RankService(db), TestClaims.With(), caller, time),
+            Issues = new IssuesController(db, new RankService(db), new StubActorDirectory(), TestClaims.With(), caller, time),
             Db = db,
             ProjectId = aerie.Id,
         };

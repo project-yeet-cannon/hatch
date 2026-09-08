@@ -15,6 +15,7 @@ const card = (key: string, parentKey: string | null, projectKey = 'AER'): IssueC
   readyAt: null,
   dueAt: null,
   openQuestions: 0,
+  assignee: null,
   claim: null,
 });
 

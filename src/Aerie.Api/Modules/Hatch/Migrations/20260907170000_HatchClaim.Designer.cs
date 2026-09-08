@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Aerie.Api.Modules.Hatch.Migrations
 {
     [DbContext(typeof(HatchContext))]
-    [Migration("20260907155344_HatchClaim")]
+    [Migration("20260907170000_HatchClaim")]
     partial class HatchClaim
     {
         /// <inheritdoc />
@@ -76,6 +76,12 @@ namespace Aerie.Api.Modules.Hatch.Migrations
                         .HasColumnType("bigint");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<Guid?>("AssigneeApiKeyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("AssigneePersonId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("ClaimChatter")
                         .HasMaxLength(512)
@@ -174,7 +180,10 @@ namespace Aerie.Api.Modules.Hatch.Migrations
 
                     b.HasIndex("StatusId", "Rank");
 
-                    b.ToTable("Issues", "hatch");
+                    b.ToTable("Issues", "hatch", t =>
+                        {
+                            t.HasCheckConstraint("CK_Issues_OneAssignee", "num_nonnulls(\"AssigneePersonId\", \"AssigneeApiKeyId\") <= 1");
+                        });
                 });
 
             modelBuilder.Entity("Aerie.Api.Modules.Hatch.EfHatchIssueDependency", b =>

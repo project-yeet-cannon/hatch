@@ -37,6 +37,38 @@ export interface Status {
   color: string;
 }
 
+/** Which kind of thing an assignee is. Mirrors ActorKind. */
+export type AssigneeKind = 'person' | 'key';
+
+/** Who owns an issue - a person, or an API key. Mirrors AssigneeDto.
+
+    Absent is written as `null` everywhere and never as an empty object, so the
+    test is always `assignee && …`. An assignee whose person has been deleted or
+    whose key has been revoked arrives as null too: the server resolves only a
+    live identity, and does it at every reader at once. */
+export interface Assignee {
+  kind: AssigneeKind;
+  id: string;
+  name: string;
+}
+
+/** The picker's rows and the answer to "who am I", in one read - see
+    AssigneeDirectoryDto. `me` is null where nobody is signed in, which is the
+    ordinary state of local development, and the **Assign to me** press is
+    simply absent there. */
+export interface AssigneeDirectory {
+  me: Assignee | null;
+  assignees: Assignee[];
+}
+
+/** Who an issue is to belong to. Both fields null is the unassign; exactly one
+    of them is refused by the server with a sentence. Mirrors AssigneeRequest -
+    what you read minus the name, so there is one shape to learn. */
+export interface AssigneeRequest {
+  kind: AssigneeKind | null;
+  id: string | null;
+}
+
 /** A card on the board. No description and no comments - see IssueCardDto. */
 export interface IssueCard {
   key: string;
@@ -53,6 +85,9 @@ export interface IssueCard {
   /** Questions on this issue nobody has answered. Non-zero means it is waiting
       on a person, and the board says so - see IssueCardDto.OpenQuestions. */
   openQuestions: number;
+  /** Who owns this card, or null for nobody - which is most of the board, and
+      why the card draws no element at all rather than an empty chip. */
+  assignee: Assignee | null;
   /** The lease a running dispatcher holds on this issue, or null. */
   claim: IssueClaim | null;
 }
@@ -109,6 +144,10 @@ export interface Issue {
       Independent of `modelOverride`: an issue may carry either, both or
       neither. One of PLAYBOOK_EFFORTS. */
   effortOverride: string | null;
+  /** Who owns it, or null for nobody. Readable by anybody a dispatch reaches
+      and writable only by a person, through its own route - see
+      AssigneeController. */
+  assignee: Assignee | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -642,4 +681,93 @@ export interface WorkLog {
   own: WorkLogTotals;
   /** This issue's own sessions, newest first. */
   entries: WorkLogEntry[];
+}
+
+/** How a read of the sessions is ranked. Every one of them is descending -
+    a leaderboard of the cheapest sessions is a page nobody asked for. Mirrors
+    WorkLogSort. */
+export type SessionSort = 'tokens' | 'cost' | 'ended';
+
+/** One agent session as the leaderboard reads it. Mirrors WorkLogSessionDto.
+
+    Deliberately narrower than `WorkLogEntry` in two places. There is no
+    `summary`, which is up to 2000 characters against a hundred rows - the issue
+    page is where a session is read at length - and no `models`, because nothing
+    here draws a per-model breakdown. */
+export interface WorkLogSession {
+  id: number;
+  /** What `claude --resume` takes. */
+  sessionId: string;
+  /** The issue it was run against, and the issue's own title - both on the wire
+      so a row links without a second read. */
+  issueKey: string;
+  issueTitle: string;
+  startedAt: string;
+  endedAt: string;
+  durationMs: number;
+  /** Null when the session never said what it did - see `described`. */
+  title: string | null;
+  described: boolean;
+  isError: boolean;
+  turns: number;
+  /** Notional API list price, not money that left an account. */
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  /** The four, added up on the server so the headline has one definition. */
+  totalTokens: number;
+}
+
+/** The sessions in a range, ranked. Mirrors WorkLogSessionsDto. */
+export interface WorkLogSessions {
+  /** The range as resolved - and as given, since nothing is snapped on this
+      read. Unlike `WorkLogHistory`, there is no bucket grid here. */
+  from: string;
+  to: string;
+  sort: SessionSort;
+  /** **The whole filter, not the returned page.** A capped table still adds up
+      honestly, and says so by comparing `totals.sessions` with the rows it drew. */
+  totals: WorkLogTotals;
+  /** The filtered population's own span, *ignoring the range* - null for both
+      when nothing has ever been logged under this filter. It is what tells
+      "nothing has ever run" apart from "nothing ran in the range you asked
+      for". */
+  firstSessionAt: string | null;
+  lastSessionAt: string | null;
+  sessions: WorkLogSession[];
+}
+
+/** One equal slice of the work log's time axis, and what ended inside it.
+    Mirrors WorkLogBucketDto.
+
+    A bucket with no sessions carries zeroed totals rather than being left out:
+    an hour in which nothing ran is an hour that cost nothing, which is a
+    measurement. A poll's history has gaps because a missing reading means
+    nobody looked; a work log has none. */
+export interface WorkLogBucket {
+  start: string;
+  end: string;
+  totals: WorkLogTotals;
+}
+
+/** What the log recorded over a range, in equal buckets. Mirrors
+    WorkLogHistoryDto. */
+export interface WorkLogHistory {
+  /** The requested range **snapped outward onto the bucket grid** - which is
+      the one way this read differs from `WorkLogSessions`. A page labels its
+      axis from here rather than from what it asked for. */
+  from: string;
+  to: string;
+  /** The size the server used, which may not be the one that was asked for. */
+  bucket: 'hour' | 'day';
+  /** The whole range, so nobody has to add the buckets up. */
+  totals: WorkLogTotals;
+  /** The filtered population's own span, ignoring the range - read exactly as
+      `WorkLogSessions` reads it. */
+  firstSessionAt: string | null;
+  lastSessionAt: string | null;
+  /** Oldest first, one per bucket, the empty ones included. */
+  buckets: WorkLogBucket[];
 }

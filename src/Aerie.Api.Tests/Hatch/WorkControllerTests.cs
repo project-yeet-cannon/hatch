@@ -82,6 +82,80 @@ public class WorkControllerTests
         Assert.IsType<NoContentResult>((await h.Work.GetNextWork(0, null, null, default)).Result);
     }
 
+    // ---- Whose work it is ----
+
+    [Fact]
+    public async Task NextWork_SkipsAnIssueAssignedToAPerson()
+    {
+        var h = await NewAsync();
+        var ada = h.Actors.AddPerson("Ada");
+        var hers = await h.FileAsync("story", "Ada is on this", h.Todo, rank: 1024);
+        var workable = await h.FileAsync("story", "nobody's", h.Todo, rank: 2048);
+        await h.AssignAsync(hers, personId: ada.Id);
+
+        // A name on a ticket takes it off the night shift. The folded card is
+        // above it and is passed over anyway, the same as a ready date.
+        Assert.Equal(Key(workable), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
+    }
+
+    [Fact]
+    public async Task NextWork_TakesAnIssueAssignedToAnApiKey()
+    {
+        var h = await NewAsync();
+        var claude = h.Actors.AddKey("Claude");
+        var its = await h.FileAsync("story", "assigned to the agent", h.Todo, rank: 1024);
+        await h.FileAsync("story", "nobody's", h.Todo, rank: 2048);
+        await h.AssignAsync(its, apiKeyId: claude.Id);
+
+        // "people only": assigning a ticket to Claude and having Claude stop
+        // picking it up would read backwards.
+        Assert.Equal(Key(its), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
+    }
+
+    [Fact]
+    public async Task NextWork_TakesAnIssueWhoseAssignedPersonHasBeenDeleted()
+    {
+        var h = await NewAsync();
+        var hers = await h.FileAsync("story", "was Ada's", h.Todo, rank: 1024);
+        await h.FileAsync("story", "nobody's", h.Todo, rank: 2048);
+
+        // The column holds an id the directory does not know, which is what a
+        // deleted person looks like from here. It is not assigned, so it is not
+        // folded - the liveness rule reaching the dispatcher without a sweeper.
+        await h.AssignAsync(hers, personId: Guid.NewGuid());
+
+        Assert.Equal(Key(hers), Value(await h.Work.GetNextWork(0, null, default)).Issue.Key);
+    }
+
+    [Fact]
+    public async Task Work_ForANamedKey_IsNotFoldedByAnAssignee()
+    {
+        var h = await NewAsync();
+        var ada = h.Actors.AddPerson("Ada");
+        var hers = await h.FileAsync("story", "Ada is on this", h.Todo, rank: 1024);
+        await h.FileAsync("story", "nobody's", h.Todo, rank: 2048);
+        await h.AssignAsync(hers, personId: ada.Id);
+
+        // Named by hand, nothing refuses it: this is the loop's policy about
+        // what it may *start*, not a fact about the work - the same line the
+        // ready date sits on.
+        Assert.Null(Value(await h.Work.GetWork(Key(hers), default)).Blocked);
+    }
+
+    [Fact]
+    public async Task Queue_SaysAnIssueIsAssigned()
+    {
+        var h = await NewAsync();
+        var ada = h.Actors.AddPerson("Ada");
+        var hers = await h.FileAsync("story", "Ada is on this", h.Todo, rank: 1024);
+        await h.AssignAsync(hers, personId: ada.Id);
+
+        // The sentence, not just the fold: hatch.sh prints .blocked verbatim,
+        // so this is the whole of what an operator reading a queue is told.
+        var folded = Value(await h.Work.GetQueue(0, null, default)).Single(e => e.Issue.Key == Key(hers));
+        Assert.Equal("assigned to Ada - an unattended pass leaves a person's work alone", folded.Blocked);
+    }
+
     // ---- One corner of the board ----
 
     [Fact]
@@ -810,7 +884,7 @@ public class WorkControllerTests
         await h.FileAsync("task", "todo, second", h.Todo, rank: 2048);
         await h.FileAsync("epic", "in progress, third", h.InProgress, rank: 4096);
 
-        var board = Value(await new BoardController(h.Db, TestClaims.With(), new FakeTimeProvider(Now)).GetBoard(default));
+        var board = Value(await new BoardController(h.Db, h.Actors, TestClaims.With(), h.Time).GetBoard(default));
         var queue = Value(await h.Work.GetQueue(0, null, default));
 
         // Per column, not flat: the board is ordered by status id and the
@@ -1022,6 +1096,9 @@ public class WorkControllerTests
     {
         public required HatchContext Db { get; init; }
         public required FakeTimeProvider Time { get; init; }
+
+        /// <summary>Who the house knows. Empty until a test says otherwise, which reads as "nobody is assigned to anything".</summary>
+        public required StubActorDirectory Actors { get; init; }
         public required WorkController Work { get; init; }
         public required PlaybooksController Playbooks { get; init; }
         public required int ProjectId { get; init; }
@@ -1062,6 +1139,21 @@ public class WorkControllerTests
             Db.Issues.Add(issue);
             await Db.SaveChangesAsync();
             return issue;
+        }
+
+        /// <summary>
+        /// An issue given to somebody, written straight to the columns - what
+        /// the route that writes them accepts and refuses is
+        /// <see cref="AssigneeControllerTests"/>'s business, and these tests are
+        /// about what the dispatcher does with an assignee once one is set. An
+        /// id the directory does not know is how a deleted person and a revoked
+        /// key are written here, which is what they are.
+        /// </summary>
+        public async Task AssignAsync(EfHatchIssue issue, Guid? personId = null, Guid? apiKeyId = null)
+        {
+            issue.AssigneePersonId = personId;
+            issue.AssigneeApiKeyId = apiKeyId;
+            await Db.SaveChangesAsync();
         }
 
         /// <summary>
@@ -1180,6 +1272,8 @@ public class WorkControllerTests
             Playbook(doing.Id, review.Id, "", "sonnet"));
         await db.SaveChangesAsync();
 
+        var actors = new StubActorDirectory();
+
         // One clock the tests can move, because the whole point of a lazily
         // expiring lease is that nothing has to run for it to end - advancing
         // this is the only way a claim dies.
@@ -1189,7 +1283,8 @@ public class WorkControllerTests
         {
             Db = db,
             Time = time,
-            Work = new WorkController(db, TestClaims.With(), time),
+            Actors = actors,
+            Work = new WorkController(db, actors, TestClaims.With(), time),
             Playbooks = new PlaybooksController(db, new FakeTimeProvider(Now)),
             ProjectId = project.Id,
             Inbox = inbox.Id,

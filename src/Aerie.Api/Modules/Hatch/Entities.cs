@@ -421,6 +421,44 @@ public class EfHatchIssue
     public DateTimeOffset? ClaimChatterAt { get; set; }
 
     /// <summary>
+    /// The person this issue belongs to, or null. At most one of this and
+    /// <see cref="AssigneeApiKeyId"/> is ever set - the controller clears the
+    /// other on every write, and a check constraint refuses a row wearing both.
+    /// </summary>
+    /// <remarks>
+    /// <para>A bare <see cref="Guid"/> and not a foreign key, for the reason
+    /// Quill's <c>QuillNote.PersonId</c> is one and
+    /// <see cref="CreatedBy"/> is a name: Hatch owns its own schema and its own
+    /// migration history, and a constraint from a module into
+    /// <c>public.People</c> is the compile-time coupling Modules/README.md
+    /// exists to prevent.</para>
+    ///
+    /// <para>What <c>ON DELETE SET NULL</c> would have bought is bought instead
+    /// by a predicate every reader applies: an id that does not resolve to a
+    /// live identity reads as unassigned, in the DTO, on the card, in the filter
+    /// and at the dispatcher, at the same instant and with nothing to sweep. See
+    /// <see cref="Services.Auth.IActorDirectory"/>, which owns that rule.</para>
+    ///
+    /// <para>Deliberately not a claim. A claim is a machine lease that comes and
+    /// goes with an increment; this is a durable statement about who owns the
+    /// ticket, written by a person and surviving every restart - which is why
+    /// writing it is closed to an API key
+    /// (<see cref="AssigneeController"/>).</para>
+    /// </remarks>
+    public Guid? AssigneePersonId { get; set; }
+
+    /// <summary>
+    /// The API key this issue belongs to, or null - the same column for the
+    /// other kind of actor, and mutually exclusive with
+    /// <see cref="AssigneePersonId"/>.
+    ///
+    /// A revoked key still has a row (<see cref="Ef.EfApiKey.RevokedAt"/>), so this
+    /// pointing at one is not an error and is not cleaned up: it reads as
+    /// unassigned, and the <c>assignee_changed</c> event still names who it was.
+    /// </summary>
+    public Guid? AssigneeApiKeyId { get; set; }
+
+    /// <summary>
     /// Who filed it, as a name rather than a foreign key. The audit trail wants
     /// to read the same after a person row is deleted, and Phase 6 puts API key
     /// names in this column beside human ones - neither of which a
@@ -584,6 +622,17 @@ public class EfHatchIssueEvent
     /// held - see <see cref="EfHatchIssue.PullRequestUrl"/>.
     /// </summary>
     public const string PullRequestChanged = "pull_request_changed";
+
+    /// <summary>
+    /// The issue was given to somebody, handed to somebody else, or taken off
+    /// everybody. The payload's <c>from</c> and <c>to</c> each carry a
+    /// <c>name</c> beside the kind and the id, and that is load-bearing: an
+    /// assignee resolves only while the identity is live, so an id alone would
+    /// stop reading the day a person is deleted or a key is revoked - which is
+    /// exactly when "whose was this in March" gets asked. The same argument
+    /// <see cref="EfHatchIssue.CreatedBy"/> makes for being a name.
+    /// </summary>
+    public const string AssigneeChanged = "assignee_changed";
 
     /// <summary>
     /// The issue was pinned to a model, moved to another, or handed back to

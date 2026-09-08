@@ -22,8 +22,12 @@ namespace Aerie.Api.Modules.Hatch;
 [Route("api/hatch/issues")]
 [RequireAdmin(AcceptScope = ApiKeyScopes.Hatch)]
 public class IssuesController(
-    HatchContext db, RankService ranks, IssueClaims claims, ICallerIdentity caller, TimeProvider time)
-    : ControllerBase
+    HatchContext db,
+    RankService ranks,
+    IActorDirectory actors,
+    IssueClaims claims,
+    ICallerIdentity caller,
+    TimeProvider time) : ControllerBase
 {
     /// <summary>
     /// How many times a create will re-read the project and try again. Five is
@@ -152,6 +156,8 @@ public class IssuesController(
                 i.ReadyAtHasTime,
                 i.DueAt,
                 i.DueAtHasTime,
+                i.AssigneePersonId,
+                i.AssigneeApiKeyId,
                 Claim = new ClaimSnapshot(
                     i.ClaimToken, i.ClaimedBy, i.ClaimRunner,
                     i.ClaimedAt, i.ClaimHeartbeatAt, i.ClaimChatter, i.ClaimChatterAt),
@@ -160,17 +166,25 @@ public class IssuesController(
 
         var now = time.GetUtcNow();
 
-        return rows.Select(i => new IssueCardDto(
-            IssueKey.Format(i.ProjectKey, i.Number),
-            i.ProjectKey,
-            i.Type,
-            i.Title,
-            i.StatusId,
-            i.Rank,
-            i.ParentNumber is { } n ? IssueKey.Format(i.ParentProjectKey!, n) : null,
-            IssueMoment.Format(i.ReadyAt, i.ReadyAtHasTime),
-            IssueMoment.Format(i.DueAt, i.DueAtHasTime),
-            Claim: claims.Project(i.Claim, now))).ToList();
+        var cards = new List<IssueCardDto>(rows.Count);
+        foreach (var i in rows)
+            cards.Add(new IssueCardDto(
+                IssueKey.Format(i.ProjectKey, i.Number),
+                i.ProjectKey,
+                i.Type,
+                i.Title,
+                i.StatusId,
+                i.Rank,
+                i.ParentNumber is { } n ? IssueKey.Format(i.ParentProjectKey!, n) : null,
+                IssueMoment.Format(i.ReadyAt, i.ReadyAtHasTime),
+                IssueMoment.Format(i.DueAt, i.DueAtHasTime),
+                // A search result is a card, and a card that read one way here
+                // and another on the board is the divergence IssueCardDto's own
+                // docstring exists to prevent.
+                Assignee: await IssueProjection.ToAssigneeAsync(actors, i.AssigneePersonId, i.AssigneeApiKeyId, ct),
+                Claim: claims.Project(i.Claim, now)));
+
+        return cards;
     }
 
     // ---- Creating ----
@@ -638,7 +652,7 @@ public class IssuesController(
         IssueProjection.KeyOfAsync(db, issueId, ct);
 
     private Task<IssueDto> ToDtoAsync(EfHatchIssue issue, CancellationToken ct) =>
-        IssueProjection.ToDtoAsync(db, issue, claims, time.GetUtcNow(), ct);
+        IssueProjection.ToDtoAsync(db, actors, issue, claims, time.GetUtcNow(), ct);
 
     /// <summary>
     /// The bottom of each column, for a request that appends to one more than

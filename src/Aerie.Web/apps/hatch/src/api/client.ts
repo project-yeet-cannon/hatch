@@ -1,5 +1,7 @@
 import { handledUnauthorized } from '../lib/signIn';
 import type {
+  AssigneeDirectory,
+  AssigneeRequest,
   Board,
   Comment,
   CommentCreateRequest,
@@ -26,12 +28,15 @@ import type {
   Project,
   ProjectCreateRequest,
   ProjectPatchRequest,
+  SessionSort,
   Status,
   StatusCreateRequest,
   StatusPatchRequest,
   Utilization,
   Work,
   WorkLog,
+  WorkLogHistory,
+  WorkLogSessions,
 } from '../types';
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -154,6 +159,19 @@ export const patchIssue = (key: string, request: IssuePatchRequest) =>
   fetchJson<Issue>(`/api/hatch/issues/${seg(key)}`, { method: 'PATCH', ...asJson(request) });
 /** The two things an issue overrides its playbooks with. Its own route because
     setting one is closed to an API key - see IssuePlaybookController. */
+/** Everybody an issue could belong to, and who the caller is. One read, because
+    the picker needs the first and **Assign to me** needs the second. */
+export const getAssignees = () => fetchJson<AssigneeDirectory>('/api/hatch/assignees');
+
+/** Give an issue to somebody, or - with both fields null - to nobody. Its own
+    route rather than a field on the patch: writing one is closed to an API key,
+    and that refusal is a property of the route. */
+export const setAssignee = (key: string, request: AssigneeRequest) =>
+  fetchJson<Issue>(`/api/hatch/issues/${seg(key)}/assignee`, {
+    method: 'PUT',
+    body: JSON.stringify(request),
+  });
+
 export const patchIssuePlaybook = (key: string, request: IssuePlaybookRequest) =>
   fetchJson<Issue>(`/api/hatch/issues/${seg(key)}/playbook`, { method: 'PATCH', ...asJson(request) });
 /** What an issue waits on. Both verbs answer with the whole issue, so the page
@@ -264,3 +282,57 @@ export const getUtilization = (refresh = false) =>
  * one for symmetry.
  */
 export const getWorkLog = (key: string) => fetchJson<WorkLog>(`/api/hatch/issues/${seg(key)}/work-log`);
+
+/** What a range of the log holds, ranked - and what that whole range cost.
+
+    The leaderboard asks this twice over one range: once pinned to the top five
+    by tokens for the ranking, and once at the URL's own sort for the table. Two
+    reads rather than one re-sorted in the browser, because a browser re-ranking
+    a capped hundred rows would be ranking a sample and calling it a
+    leaderboard.
+
+    Anything null or undefined is left out rather than sent empty - the rule
+    `searchIssues` states, and it matters here for the same reason: an empty
+    `ancestorKey` is not the same question as no `ancestorKey`. */
+export const getWorkLogSessions = (query: WorkLogSessionQuery) => {
+  const params = new URLSearchParams();
+  for (const [name, value] of Object.entries(query)) {
+    if (value !== null && value !== undefined) params.set(name, String(value));
+  }
+  return fetchJson<WorkLogSessions>(`/api/hatch/work-log/sessions?${params.toString()}`);
+};
+
+/** The same rows, folded along a time axis - one bucket per bar.
+
+    **No bucket size is sent.** The server chooses it from the length of the
+    range and names it back, and the graph labels its axis from that rather than
+    from what it asked for. `offsetMinutes` is the same value the page's range
+    presets were computed on, so the daily grid the page aligned to and the
+    daily grid the server buckets on are one grid. */
+export const getWorkLogHistory = (query: WorkLogHistoryQuery) => {
+  const params = new URLSearchParams();
+  for (const [name, value] of Object.entries(query)) {
+    if (value !== null && value !== undefined) params.set(name, String(value));
+  }
+  return fetchJson<WorkLogHistory>(`/api/hatch/work-log/history?${params.toString()}`);
+};
+
+export interface WorkLogHistoryQuery {
+  from: string;
+  to: string;
+  ancestorKey?: string | null;
+  /** Minutes east of UTC. It puts a daily bucket on the reader's midnight; an
+      overnight run split across UTC midnight is two half-nights nobody
+      worked. */
+  offsetMinutes: number;
+}
+
+export interface WorkLogSessionQuery {
+  from: string;
+  to: string;
+  /** One issue and everything beneath it, that issue included. */
+  ancestorKey?: string | null;
+  sort?: SessionSort;
+  /** 1 to 500; the server refuses anything outside it. */
+  limit?: number;
+}

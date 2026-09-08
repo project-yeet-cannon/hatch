@@ -420,6 +420,35 @@
   overflow-wrap: anywhere;
 }
 
+/* Who owns the card, in the head beside the type badge - and drawn only when
+   somebody does. There is no empty state here on purpose: most of the board
+   belongs to nobody, and a placeholder on every card is noise the eye has to
+   skip past to find the three that are somebody's.
+
+   Truncated rather than wrapped, because the head is one line and a long name
+   must not push the question mark onto a second one. Both themes come from the
+   tokens; nothing here is a literal colour. */
+.hatch-card-assignee {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 var(--sp-1-5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  color: var(--muted);
+  font-size: var(--t-micro);
+  line-height: 1.6;
+}
+
+/* The question mark pushes itself to the end of the head with `margin-left:
+   auto`; with a name beside it, the name is what has to give way. */
+.hatch-card-assignee + .hatch-card-asking {
+  margin-left: var(--sp-1);
+}
+
 .hatch-card-parent {
   margin-top: var(--sp-1);
   font-size: var(--t-micro);
@@ -446,6 +475,14 @@
 .hatch-type-toggles {
   display: flex;
   gap: var(--sp-1);
+}
+
+/* Whose cards to draw. A native <select> and not IssuePicker: that component
+   exists for sixty issue keys sharing a prefix, and a household's worth of
+   names is neither long enough nor ambiguous enough to need it. */
+.hatch-assignee-filter {
+  flex: 0 0 auto;
+  max-width: 12rem;
 }
 
 /* A toggle rather than a checkbox: four of these sit in a row and read as one
@@ -1267,6 +1304,219 @@
   padding-left: var(--sp-3);
 }
 
+/* ---- The leaderboard ----
+
+   Cousins of the work log block above it, and drawn in the same vocabulary on
+   purpose: a session on the issue page and the same session here should read as
+   one kind of thing said twice. */
+
+/* The controls sit on one line and wrap onto two on a narrow screen rather
+   than shrinking - a range preset that has to be guessed at is worse than one
+   on its own row. */
+.hatch-leaderboard-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+}
+
+.hatch-leaderboard-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.hatch-leaderboard-preset {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  border-radius: var(--r-ctl);
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--t-label);
+  cursor: pointer;
+}
+
+.hatch-leaderboard-preset:hover {
+  border-color: var(--primary);
+}
+
+/* The one in force, marked by more than colour: aria-pressed says it to a
+   screen reader and the fill says it to everybody else. */
+.hatch-leaderboard-preset.active {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+  color: var(--primary-ink);
+  font-weight: 600;
+}
+
+.hatch-leaderboard-issue {
+  min-width: 14rem;
+}
+
+/* Pushed to the end of the row: it is a label on what the controls resolved
+   to, not another control. */
+.hatch-leaderboard-window {
+  margin-left: auto;
+  font-size: var(--t-label);
+}
+
+.hatch-leaderboard-totals {
+  margin: var(--sp-2) 0 0;
+}
+
+/* The podium. An <ol> because the order is the whole point, with the numbers
+   drawn rather than left to the browser's own marker - a marker sits outside
+   the row and this one belongs inside it. */
+.hatch-leaderboard-podium {
+  list-style: none;
+  counter-reset: rank;
+  margin: var(--sp-4) 0 0;
+  padding: 0;
+}
+
+.hatch-leaderboard-rank {
+  counter-increment: rank;
+  border-top: 1px solid var(--line);
+  padding: var(--sp-3) 0 var(--sp-1) var(--sp-5);
+  margin-top: var(--sp-3);
+  position: relative;
+}
+
+.hatch-leaderboard-rank:first-child {
+  margin-top: 0;
+}
+
+.hatch-leaderboard-rank::before {
+  content: counter(rank);
+  position: absolute;
+  left: 0;
+  top: var(--sp-3);
+  font-size: var(--t-label);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.hatch-leaderboard-rank-head {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.hatch-leaderboard-rank-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  align-items: baseline;
+  font-size: var(--t-label);
+  margin: var(--sp-2) 0;
+}
+
+.hatch-leaderboard-key {
+  font-family: var(--mono);
+}
+
+/* A column header that sorts. It has to look like the header it replaced, so
+   nothing but the pointer and the mark on the active one distinguishes it. */
+.hatch-leaderboard-sort {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+
+.hatch-leaderboard-sort:hover {
+  color: var(--primary);
+}
+
+.hatch-leaderboard-sort.active {
+  color: var(--primary-ink);
+  font-weight: 600;
+}
+
+/* ---- The spend graph, on the leaderboard ----
+
+   Hand-cut SVG in the house's own tokens; the app carries no charting
+   dependency. The geometry is in lib/spend.ts - what is stated here is size and
+   colour, which is the split UtilizationBattery already makes. */
+.hatch-spend {
+  margin-top: var(--sp-4);
+}
+
+.hatch-spend-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+}
+
+.hatch-spend-measures {
+  display: flex;
+  gap: var(--sp-1);
+}
+
+.hatch-spend-measure {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  border-radius: var(--r-ctl);
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--t-label);
+  cursor: pointer;
+}
+
+.hatch-spend-measure:hover {
+  border-color: var(--primary);
+}
+
+.hatch-spend-measure.active {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+  color: var(--primary-ink);
+  font-weight: 600;
+}
+
+/* The top of the scale, pushed to the far end of the row above the bars it
+   sizes. */
+.hatch-spend-peak {
+  margin-left: auto;
+  font-size: var(--t-label);
+}
+
+/* The baseline is on the container rather than in the SVG, so an all-zero
+   range is a flat line on an axis rather than a blank box. */
+.hatch-spend-plot {
+  display: block;
+  width: 100%;
+  height: 140px;
+  margin-top: var(--sp-2);
+  border-bottom: 1px solid var(--line);
+}
+
+/* Transparent, full height, and the only thing carrying a <title> - so an empty
+   bucket is still hoverable. "A zero is a measurement" has to be true under the
+   mouse as well as in the data. */
+.hatch-spend-slot {
+  fill: transparent;
+}
+
+.hatch-spend-slot:hover {
+  fill: var(--primary-bg);
+}
+
+.hatch-spend-bar {
+  fill: var(--primary);
+}
+
+.hatch-spend-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  font-size: var(--t-label);
+  margin-top: var(--sp-2);
+}
+
 /* Rendered markdown - descriptions and comments. Only the spacing is stated:
    base.css already dresses headings, lists, code and links. */
 .hatch-markdown > :first-child {
@@ -1939,4 +2189,45 @@ button.hatch-option.chosen {
   gap: var(--sp-3);
   padding-top: var(--sp-3);
   border-top: 1px solid var(--line);
+}
+
+/* ---- Who owns a ticket ----
+
+   The select and its two presses on one line, wrapping rather than shrinking:
+   both buttons can be shown at once - that is the honest state of a ticket
+   assigned to somebody else - and neither is worth truncating to keep them
+   there. */
+.hatch-assignee-field {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.hatch-assignee-field select {
+  /* So the field does not collapse in the flex row of .hatch-issue-controls -
+     the same reason the parent picker sets one. */
+  min-width: 11rem;
+}
+
+/* Quieter than a primary button and louder than a link: taking a ticket is a
+   thing somebody does often and never by accident. */
+.hatch-assignee-mine,
+.hatch-assignee-clear {
+  padding: var(--sp-1) var(--sp-2-5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: none;
+  color: var(--ink);
+  font-size: var(--t-small);
+  cursor: pointer;
+}
+
+.hatch-assignee-mine:hover,
+.hatch-assignee-clear:hover {
+  border-color: var(--line-strong);
+}
+
+.hatch-assignee-clear {
+  color: var(--muted);
 }

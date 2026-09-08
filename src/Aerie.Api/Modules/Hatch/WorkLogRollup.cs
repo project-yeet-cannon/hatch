@@ -17,11 +17,11 @@ namespace Aerie.Api.Modules.Hatch;
 /// quietly unified by a later refactor, so they sit in two files and each says
 /// why.
 ///
-/// The same rows fold a second way here - along a time axis instead of the
-/// hierarchy, for the leaderboard's graph - and the two folds share their row
-/// projection and their arithmetic on purpose: a bucket's headline figure and an
-/// epic's headline figure are one piece of code and cannot come to mean
-/// different things.
+/// The same rows fold two more ways here - along a time axis instead of the
+/// hierarchy, for the leaderboard's graph, and ranked rather than added, for its
+/// table - and all three share their row projection and their arithmetic on
+/// purpose: a bucket's headline figure, a ranked range's and an epic's are one
+/// piece of code and cannot come to mean different things.
 /// </summary>
 public static class WorkLogRollup
 {
@@ -107,6 +107,89 @@ public static class WorkLogRollup
     }
 
     /// <summary>
+    /// The sessions in a range, ranked - with the range's own totals, which
+    /// cover every row the filter holds rather than the ones that came back.
+    /// </summary>
+    /// <remarks>
+    /// The range is used as given. There is no grid to align to on this read,
+    /// which is the one way it differs from <see cref="SeriesAsync"/>; a session
+    /// is in it when <c>from &lt;= EndedAt &lt; to</c>, the same half-open rule,
+    /// so a session on a boundary lands the same way in the table and in the
+    /// graph.
+    ///
+    /// The fold runs over every row in the filter and <em>before</em> the cap.
+    /// That is what makes a capped table's total honest: a hundred rows drawn
+    /// under a total of five hundred sessions is a cap, and the page says so,
+    /// but the number itself is never a sample.
+    ///
+    /// Sorted and summed in memory for the reason this file already states at
+    /// <see cref="Fold"/>: EF's in-memory provider does not sum a decimal
+    /// projection the way Npgsql does, and the work log grows by one row per
+    /// increment.
+    /// </remarks>
+    public static async Task<WorkLogSessionsDto> SessionsAsync(
+        HatchContext db,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        long? ancestorId,
+        WorkLogSort sort,
+        int limit,
+        CancellationToken ct)
+    {
+        // One tree walk, shared with the two bound reads below - as SeriesAsync
+        // does it.
+        var scope = ancestorId is { } id ? await ScopeAsync(db, id, includeDescendants: true, ct) : null;
+
+        var rows = await Scoped(db, scope)
+            .AsNoTracking()
+            .Where(w => w.EndedAt >= from && w.EndedAt < to)
+            .Select(w => new SessionRow(
+                w.Id,
+                w.SessionId,
+                w.Issue!.Project!.Key,
+                w.Issue!.Number,
+                w.Issue!.Title,
+                w.StartedAt,
+                w.EndedAt,
+                w.DurationMs,
+                w.Title,
+                w.Described,
+                w.IsError,
+                w.Turns,
+                w.CostUsd,
+                w.InputTokens,
+                w.OutputTokens,
+                w.CacheCreationTokens,
+                w.CacheReadTokens))
+            .ToListAsync(ct);
+
+        var ranked = sort switch
+        {
+            WorkLogSort.Cost => rows.OrderByDescending(r => r.CostUsd),
+            WorkLogSort.Ended => rows.OrderByDescending(r => r.EndedAt),
+            _ => rows.OrderByDescending(Tokens),
+        };
+
+        var ordered = ranked
+            // Every sort is descending, and both tiebreaks are too - so two
+            // reads of one filter come back in one order.
+            .ThenByDescending(r => r.EndedAt)
+            .ThenByDescending(r => r.Id)
+            .Take(limit)
+            .Select(Dto)
+            .ToList();
+
+        return new WorkLogSessionsDto(
+            from,
+            to,
+            Name(sort),
+            Fold(rows.ConvertAll(Meter)),
+            await FirstEndedAsync(db, scope, ascending: true, ct),
+            await FirstEndedAsync(db, scope, ascending: false, ct),
+            ordered);
+    }
+
+    /// <summary>
     /// The requested range, floored onto the bucket grid and counted - without
     /// touching the work log, because the count is what decides whether the log
     /// is scanned at all.
@@ -148,6 +231,14 @@ public static class WorkLogRollup
     /// <summary>The wire form of a bucket size, which is its lowercase name.</summary>
     public static string Name(WorkLogBucketSize bucket) => bucket == WorkLogBucketSize.Day ? "day" : "hour";
 
+    /// <summary>The wire form of a sort, which is its lowercase name.</summary>
+    public static string Name(WorkLogSort sort) => sort switch
+    {
+        WorkLogSort.Cost => "cost",
+        WorkLogSort.Ended => "ended",
+        _ => "tokens",
+    };
+
     // ---- The pieces both folds are made of ----
 
     /// <summary>
@@ -177,6 +268,62 @@ public static class WorkLogRollup
 
     /// <summary>Shared, because an empty bucket is the common case and each one would otherwise allocate a list to say so.</summary>
     private static readonly List<Row> NoRows = [];
+
+    /// <summary>
+    /// One session as the leaderboard reads it: everything <see cref="Row"/>
+    /// carries, plus what a table draws and a fold has no use for.
+    /// </summary>
+    /// <remarks>
+    /// Two shapes rather than one because the arithmetic is shared and the
+    /// reading is not. <see cref="Meter"/> maps this down to <see cref="Row"/>
+    /// so the ranking's totals are folded by exactly the code an epic's meter
+    /// is, rather than by a second addition that agrees until it does not.
+    /// </remarks>
+    private readonly record struct SessionRow(
+        long Id,
+        string SessionId,
+        string ProjectKey,
+        int Number,
+        string IssueTitle,
+        DateTimeOffset StartedAt,
+        DateTimeOffset EndedAt,
+        long DurationMs,
+        string? Title,
+        bool Described,
+        bool IsError,
+        int Turns,
+        decimal CostUsd,
+        long InputTokens,
+        long OutputTokens,
+        long CacheCreationTokens,
+        long CacheReadTokens);
+
+    /// <summary>The headline, added the one way it is added - see <see cref="Fold"/>.</summary>
+    private static long Tokens(SessionRow r) =>
+        r.InputTokens + r.OutputTokens + r.CacheCreationTokens + r.CacheReadTokens;
+
+    /// <summary>What the fold needs of a session, and nothing else.</summary>
+    private static Row Meter(SessionRow r) => new(
+        r.EndedAt, r.IsError, r.InputTokens, r.OutputTokens, r.CacheCreationTokens, r.CacheReadTokens, r.CostUsd);
+
+    private static WorkLogSessionDto Dto(SessionRow r) => new(
+        r.Id,
+        r.SessionId,
+        IssueKey.Format(r.ProjectKey, r.Number),
+        r.IssueTitle,
+        r.StartedAt,
+        r.EndedAt,
+        r.DurationMs,
+        r.Title,
+        r.Described,
+        r.IsError,
+        r.Turns,
+        r.CostUsd,
+        r.InputTokens,
+        r.OutputTokens,
+        r.CacheCreationTokens,
+        r.CacheReadTokens,
+        Tokens(r));
 
     /// <summary>The log, narrowed to a set of issues - or the whole of it when there is none.</summary>
     private static IQueryable<EfHatchWorkLogEntry> Scoped(HatchContext db, List<long>? scope) =>
@@ -254,6 +401,26 @@ public static class WorkLogRollup
         var quotient = Math.DivRem(value, divisor, out var remainder);
         return remainder < 0 ? quotient - 1 : quotient;
     }
+}
+
+/// <summary>
+/// What "ranked" means on a read of the sessions.
+/// </summary>
+/// <remarks>
+/// Every one of them is descending. A leaderboard of the cheapest sessions is a
+/// page nobody asked for, and the oldest-first reading of a log is the issue
+/// page's job.
+/// </remarks>
+public enum WorkLogSort
+{
+    /// <summary>The four token counts added up - the headline figure.</summary>
+    Tokens,
+
+    /// <summary>Notional USD, which is the headline the day the account is billed per token.</summary>
+    Cost,
+
+    /// <summary>When the session ended: most recent first.</summary>
+    Ended,
 }
 
 /// <summary>How long one bucket of the work log's time axis is.</summary>

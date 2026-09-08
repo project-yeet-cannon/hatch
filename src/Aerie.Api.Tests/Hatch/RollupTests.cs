@@ -348,7 +348,7 @@ public class RollupTests
         return new Harness
         {
             Db = db,
-            Plan = new PlanController(db, TestClaims.With(), new FakeTimeProvider(Now)),
+            Plan = new PlanController(db, new StubActorDirectory(), TestClaims.With(), new FakeTimeProvider(Now)),
             ProjectId = project.Id,
             Todo = todo.Id,
             InProgress = doing.Id,

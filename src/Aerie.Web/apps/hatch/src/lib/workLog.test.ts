@@ -158,13 +158,13 @@ describe('showsWorkLog', () => {
 
 describe('the sentences the totals say', () => {
   it('reads the subtree, in tokens first and dollars second', () => {
-    expect(totalsPhrase(log({ totals: totals({ sessions: 3, totalTokens: 1_400_000, costUsd: 3.41 }) }))).toBe(
+    expect(totalsPhrase(totals({ sessions: 3, totalTokens: 1_400_000, costUsd: 3.41 }))).toBe(
       '3 sessions · 1.4M tokens · $3.41',
     );
   });
 
   it('says session, singular, at one', () => {
-    expect(totalsPhrase(log({ totals: totals({ sessions: 1 }) }))).toContain('1 session ·');
+    expect(totalsPhrase(totals({ sessions: 1 }))).toContain('1 session ·');
   });
 
   it('says when the subtree cost more than the issue itself did', () => {
@@ -186,8 +186,8 @@ describe('the sentences the totals say', () => {
   });
 
   it('counts the errors, or stays quiet', () => {
-    expect(errorPhrase(log())).toBeNull();
-    expect(errorPhrase(log({ totals: totals({ errors: 1 }) }))).toBe('1 session ended with an error');
-    expect(errorPhrase(log({ totals: totals({ errors: 2 }) }))).toBe('2 sessions ended with an error');
+    expect(errorPhrase(totals())).toBeNull();
+    expect(errorPhrase(totals({ errors: 1 }))).toBe('1 session ended with an error');
+    expect(errorPhrase(totals({ errors: 2 }))).toBe('2 sessions ended with an error');
   });
 });

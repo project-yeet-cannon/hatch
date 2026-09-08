@@ -201,7 +201,7 @@ through the gate that was supposed to stop it.
 `EfHatchIssue` — `ProjectId`, `Number`, `Type`, `Title`, `Description`,
 `StatusId`, `ParentId`, `Rank`, `ReadyAt`/`ReadyAtHasTime`,
 `DueAt`/`DueAtHasTime`, `PullRequestUrl`, `ModelOverride`, `EffortOverride`,
-`CreatedBy`, `CreatedAt`, `UpdatedAt`.
+`AssigneePersonId`/`AssigneeApiKeyId`, `CreatedBy`, `CreatedAt`, `UpdatedAt`.
 
 The display key `AER-12` is **computed** (`Project.Key + "-" + Number`) and
 never stored, so there is exactly one fact about a key anywhere and no chance of
@@ -250,6 +250,50 @@ job is to be clicked should not hold something that does not open. Nothing
 parses the host: a self-hosted forge on a private address is a pull request like
 any other, and a column that only accepted one company's would be a fact about
 exactly one installation.
+
+#### Assignee
+
+**Who owns a ticket, said on the ticket.** An issue is assigned to a person, or
+to an API key, or to nobody — two nullable columns, `AssigneePersonId` and
+`AssigneeApiKeyId`, of which at most one is ever set. The controller clears one
+when it writes the other, and a check constraint refuses a row wearing both, so
+the constraint is a backstop and never the error a caller sees.
+
+It is deliberately **not a claim**. A claim is a machine lease that comes and
+goes with an increment, and Hatch does not have one for the reasons [one loop at
+a time](#one-loop-at-a-time) gives. An assignee is a durable statement written
+by a person, changing rarely and surviving every restart — which is why it is a
+column here and a lease would not have been.
+
+Neither column is a foreign key, and neither could be: Hatch owns its own schema
+and its own migration history, and a constraint from a module into
+`public.People` is the coupling `Modules/README.md` exists to prevent — the same
+reason `CreatedBy` is a name. `ON DELETE SET NULL` would not have worked anyway,
+because [revoking a key](auth-architecture.md) sets a column and keeps the row
+on purpose.
+
+What does the work instead is **one predicate every reader applies**: an
+assignee resolves only to a *live* identity — a person row that still exists, or
+a key that exists and is not revoked — and an id that does not resolve reads as
+**unassigned**. In the issue payload, on the card, in the board filter and at
+the dispatcher, at the same instant. Nothing sweeps, nothing is cleaned up, and
+nothing can be half-migrated: a predicate cannot fail to run, which is the same
+argument [one loop at a time](#one-loop-at-a-time) makes for a lock whose owner
+is gone being cleared rather than honoured. The rule lives in one place,
+`Services/Auth/ActorDirectory.cs`, so that the day a second module wants an
+owner there is one thing to ask.
+
+The trade is stated rather than papered over: an issue assigned to a key that is
+later revoked reads as unassigned without announcing it. The `assignee_changed`
+event still names who it was — both sides carry a name beside the id, for the
+reason `CreatedBy` is a name — so the trail answers "whose was this in March".
+
+Setting one is closed to an API key: under the loop's `people only` rule an
+assignee is a dispatch gate, so a key that could write one could hand itself
+work somebody had reserved. See [The one edge that is deliberately
+cut](#the-one-edge-that-is-deliberately-cut), and [what makes an issue
+actionable](#what-makes-an-issue-actionable) for what a name on a ticket does to
+a pass.
 
 **`ModelOverride` and `EffortOverride` are what this ticket costs**, and null on
 every issue until somebody says otherwise. A playbook prices a *transition*,
@@ -543,8 +587,9 @@ except with its issue.
 
 Kinds: `created`, `retitled`, `redescribed`, `retyped`, `status_changed`,
 `parent_changed`, `ready_changed`, `due_changed`, `pull_request_changed`,
-`model_override_changed`, `effort_override_changed`, `dependency_added`,
-`dependency_removed`, `commented`, `asked`, `answered`, `imported`.
+`model_override_changed`, `effort_override_changed`, `assignee_changed`,
+`dependency_added`, `dependency_removed`, `commented`, `asked`, `answered`,
+`imported`.
 
 Nothing renders this, and it has been written since the first release anyway,
 because an event log is the one feature that cannot be added retroactively:
@@ -712,6 +757,17 @@ settle at. Cutting it costs nothing, and it is cut *in the route* rather than
 asked for in a prompt, because a rule an agent is merely told is a rule an agent
 can reason its way past.
 
+**And so is setting an assignee**, which is a *related* edge rather than the
+same one. A playbook widens what an agent may spend; an assignee widens what it
+may be **sent at** — because under the loop's `people only` rule, a name on a
+ticket is what holds it off the night shift. A key that could write one could
+clear a person's name off a ticket and hand itself work somebody had reserved.
+So `PUT /api/hatch/issues/{key}/assignee` lives on its own controller
+(`AssigneeController`) carrying no class-level scope, for the same reason and by
+the same means. Reading is open, and deliberately: an agent has to be able to
+say whose ticket it is leaving alone, so both `GET /api/hatch/assignees` and the
+`assignee` on `IssueDto` are Hatch-scoped like everything else.
+
 One related edge is **not** cut, and is stated rather than papered over:
 **nothing stops a key answering its own question.** A key is what
 `hatch.sh answer` types with and it is also what a spawned agent inherits; the
@@ -741,6 +797,8 @@ Everything under `/api/hatch`, every route `[RequireAdmin(AcceptScope =
 | `/issues/{key}/questions` | GET | `?open=false` for the answered ones too |
 | `/issues/{key}/events` | GET | Newest first |
 | `/issues/{key}/playbook` | PATCH | **Person only** — plain `[RequireAdmin]`. The issue's own model and effort; `""` hands either back to the playbook |
+| `/assignees` | GET | Every person and every live key, plus who the caller is — the picker's rows and *Assign to me* in one read |
+| `/issues/{key}/assignee` | PUT | **Person only** — plain `[RequireAdmin]`. `{ kind, id }`, or both null to unassign — see [Assignee](#assignee) |
 | `/issues/{key}/claim` | POST | Takes the [lease](#claim). `{ runner }`; answers with the token, the holder, when it was taken and the TTL. `409` naming the holder where something live already has it — including the same runner asking twice |
 | `/issues/{key}/claim/heartbeat` | POST | `{ token, chatter? }` — refreshes it, `204`. `409` on a token that is not the row's, and on a lease that is over. `chatter` absent leaves the carried line alone, `""` clears it, anything longer than the column is truncated rather than refused |
 | `/issues/{key}/claim?token=…` | DELETE | Releases it, `204`. A mismatched token is `409` and clears nothing; an issue holding no claim is `204` and writes nothing. **With no token at all it is person-only** — an agent that could clear another runner's claim could take a ticket off it mid-increment |
@@ -751,6 +809,9 @@ Everything under `/api/hatch`, every route `[RequireAdmin(AcceptScope =
 | `/playbooks` | GET | **Reads only.** POST/PATCH/DELETE are plain `[RequireAdmin]` |
 | `/import/preview`, `/import/preview-text`, `/import` | POST | See [the importer](#the-importer) |
 | `/utilization` | GET | The account's Claude headroom, read by the server. `204` when no token is configured; `?refresh=true` bypasses the cache — see [the battery](#the-battery) |
+| `/issues/{key}/work-log` | GET, POST | What each session on this issue cost. **POST is a key only** — a browser is refused outright, because the only honest writer of a meter reading is the dispatcher that read it. See [the leaderboard](#the-leaderboard) |
+| `/work-log/sessions` | GET | The sessions in a range, ranked, with the range's own totals — see [the leaderboard](#the-leaderboard) |
+| `/work-log/history` | GET | The same rows folded into equal buckets of time, for the graph |
 
 Two of the filters are worth knowing: `ancestorKey` returns everything below an
 issue at any depth — an epic's stories and their tasks in one request — and
@@ -861,6 +922,107 @@ Two floors bound how often somebody else's endpoint is asked:
 pressing a button once, which is not what the floors exist to bound.
 
 
+## The leaderboard
+
+The battery says how much Claude is left. The leaderboard says **what the nights
+cost, and on what** — which is a question account-wide utilization cannot answer
+at all, because it is honest and anonymous and no arithmetic over it can say
+which epic ate the evening.
+
+Every number on the page comes from one table: `hatch.work_log_entries`, the row
+the dispatcher writes at the end of every unattended increment. It carries the
+session id, the issue, both instants, the duration, the turns, the four token
+counts, the notional USD, whether the run errored, and what the session said it
+did in its `work-log` block. **No Claude credential is anywhere in this path.**
+A leaderboard on an installation with no subscription token is the whole
+leaderboard rather than a reduced one.
+
+The page is at `/leaderboard` in the Hatch app, beside Plan in the primary nav —
+the two pages that read across the whole board rather than about one ticket. It
+holds three things over one window and one optional issue filter:
+
+- a **ranking** of the top-billing sessions, captioned in the house's own voice.
+  A leaderboard of most expensive agent runs is funnier than it is useful, and
+  being funny is how it gets read; it should still be exactly right.
+- a **table** of the sessions in the window, filterable to one issue and
+  everything beneath it, sortable by tokens, by notional USD or by when it ran.
+- a **graph** of spend over time, one bar per bucket.
+
+Tokens are the headline everywhere and notional USD is beside them, sortable —
+so the day an account is billed per token, the money becomes the headline and
+nothing has to be rebuilt.
+
+### The two reads behind it
+
+```
+GET /api/hatch/work-log/sessions?from=&to=&ancestorKey=&sort=&limit=
+GET /api/hatch/work-log/history?from=&to=&ancestorKey=&bucket=&offsetMinutes=
+```
+
+They take the same range and the same `ancestorKey`, and **`ancestorKey` means
+the same thing on both**: the issue itself *and* everything beneath it at any
+depth, from `Rollup.DescendantIdsAsync`. That is deliberately not how the same
+word reads on `GET /api/hatch/issues`, and the reason is that a planning session
+run against an epic is money no child holds. It is also what keeps the ranking,
+the table and the graph from ever describing different populations.
+
+Four rules worth knowing before reading either:
+
+- **A session is in the range when `from ≤ EndedAt < to`**, half-open on both
+  reads, so a session on a boundary lands the same way in the table and in the
+  graph. `EndedAt` is the instant the spend was known.
+- **The totals cover the whole filter, not the page that came back.** `sessions`
+  answers at most `limit` rows (100 by default, 500 at the most) and folds every
+  row in the filter for its totals, so a capped table adds up honestly — and a
+  caller tells the two apart by comparing `totals.sessions` with the rows it
+  got. The page says so on screen rather than leaving a larger total to read as
+  a bug.
+- **`firstSessionAt` and `lastSessionAt` ignore the range** and respect the
+  filter. They are what tell *nothing has ever been logged here* apart from
+  *nothing ran in the window you asked for* — two different sentences, and the
+  page says whichever is true once rather than in each empty section.
+- **`sessions` uses the range as given; `history` snaps it outward onto the
+  bucket grid** and names the bucket size it chose. The page's range presets are
+  computed on that same grid, so for every range it offers the two reads
+  describe one window and their totals are equal. A `from`/`to` typed into the
+  URL by hand may be off-grid, and then the graph covers a little more than the
+  table — so the page labels its window from what came back rather than from
+  what it asked for.
+
+An errored session's spend counts in all of it. It ran, and it was billed for
+running; `totals.errors` says how many, and the table marks them.
+
+### The graph
+
+`history` folds the same rows along a time axis instead of the hierarchy, and
+the page draws one bar per bucket, oldest at the left.
+
+- **The page asks for no bucket size.** The server chooses one from the length
+  of the range — hourly up to two days, daily past it — and names it back, and
+  the graph labels its axis from the answer. A caller that asked in days and got
+  hours has to say hours.
+- **A bucket in which nothing ran is drawn as a zero, not as a gap**, and its
+  slot stays hoverable. A poll's history has gaps because a missing reading
+  means nobody looked; a work log has none, and drawing an empty hour as a break
+  would assert an absence where there is a measurement.
+- **Tokens or notional USD, one at a time, never on a shared axis.** They differ
+  by six orders of magnitude and a second y-axis would draw two lies crossing,
+  so the control rescales the whole graph. The choice is in the URL as `measure`
+  with the rest of the page's state.
+- `offsetMinutes` puts a daily bucket on the reader's midnight. An overnight run
+  split across UTC midnight is two half-nights nobody worked.
+
+It is hand-cut SVG in the house's own tokens — the Hatch app carries no charting
+dependency, and the geometry lives in a tested function rather than in the
+component.
+
+**Nothing on this page writes**, and the absence is the guarantee rather than a
+convention: there is no control that could, and the browser API client has no
+function that could. A work log row is written by the dispatcher with an API
+key, and `POST /api/hatch/issues/{key}/work-log` refuses a person outright — see
+`IssueWorkLogController.NotAKey`.
+
+
 ## The dispatcher
 
 `GET /api/hatch/work/next` answers "what should an agent do next, and how?" in
@@ -934,10 +1096,10 @@ named a ticket is owed the sentence saying why it cannot move.
 
 ### One more, on `next` alone
 
-The refusals above are facts about an issue. One further rule is the *loop's
-policy* — what an unattended run may **start**, as opposed to what may
-move — so it is asked on `work/next` and not on `work/{key}`. A person who names
-a ticket is giving an instruction, and housekeeping does not overrule it.
+The refusals above are facts about an issue. Two further rules are the *loop's
+policy* — what an unattended run may **start**, as opposed to what may move — so
+they are asked on `work/next` and not on `work/{key}`. A person who names a
+ticket is giving an instruction, and housekeeping does not overrule it.
 
 The issue's **type** is not among them, and was never the loop's to decide:
 which types a move applies to is [the playbook row's](#playbooks) to state, and
@@ -950,6 +1112,19 @@ Playbooks page because that is where the fix is.
    not one an unattended pass should be spending an increment on — but somebody
    who names a ticket ahead of its date has said the date is not the point
    today, and is given the dispatch rather than a lecture about it.
+2. **Nobody's name is on it** — nobody's meaning no *person's*. An issue
+   [assigned](#assignee) to somebody is theirs to do, and a pass that took it
+   anyway would be taking work off a person who had said they wanted it.
+   Assigning something to yourself is therefore how you take it off the night
+   shift, which is a gesture you already had a reason to make.
+
+   **People only**, and the asymmetry is the point: an issue assigned to an API
+   key is picked up exactly as it always was, because assigning a ticket to
+   Claude and having Claude stop working on it would read backwards. An
+   assignee whose person has been deleted, or whose key has been revoked, is
+   nobody at all — the [liveness rule](#assignee) reaches the dispatcher the
+   same as every other reader, so there is no such thing as a ticket held off
+   the board by a name that no longer resolves.
 
 An [unmet dependency](#dependency) is deliberately **not** here. It looks like
 housekeeping and is not: a ready date is a decision about scheduling, while an
@@ -1088,7 +1263,7 @@ line naming the two values says which of them the issue chose.
 
 ### What makes an issue actionable
 
-Six conditions. An issue is the loop's to pick up when it meets every one, and
+Seven conditions. An issue is the loop's to pick up when it meets every one, and
 the sentence saying which one it failed is what `work/queue` reports:
 
 1. **There is a column to its right, and that column is not terminal.** The end
@@ -1102,13 +1277,16 @@ the sentence saying which one it failed is what `work/queue` reports:
    re-reading the dispatch for a ticket one already holds is not a conflict.
 3. **Its ready date has arrived**, read against the caller's calendar day. A
    card folded off the board is not one to spend an increment on tonight.
-4. **It holds no unanswered question.** It is waiting on a person, and another
+4. **Nobody's name is on it.** An issue [assigned](#assignee) to a person is
+   somebody's to do, and an unattended pass leaves it alone. An issue assigned
+   to an API key, or to nobody, is picked up exactly as it always was.
+5. **It holds no unanswered question.** It is waiting on a person, and another
    agent sent at it would ask the same thing again or guess at the answer.
-5. **Nothing it depends on is unfinished** — and only when the move is into the
+6. **Nothing it depends on is unfinished** — and only when the move is into the
    column where the code gets written. Everything left of that still moves; an
    edge is satisfied only once the issue it names is in a terminal column. See
    [Dependency](#dependency).
-6. **A playbook covers that transition for that type.** Without one there is
+7. **A playbook covers that transition for that type.** Without one there is
    nothing to say to the session — and a column no playbook leads out of is
    exactly [how a column becomes the operator's](#status), which is why the
    absence is a fold rather than an error. **This is also where the issue's
@@ -1116,9 +1294,9 @@ the sentence saying which one it failed is what `work/queue` reports:
    pick up is a type no row names for that move, said in the words that name
    the fix.
 
-Five of them — 1, 2, 4, 5 and 6 — are facts about the issue, and `work/{key}`
-asks them too. The other is the loop's policy and is asked only when the pass is
-asking; see [one more, on `next` alone](#one-more-on-next-alone).
+Five of them — 1, 2, 5, 6 and 7 — are facts about the issue, and `work/{key}`
+asks them too. The other two are the loop's policy and are asked only when the
+pass is asking; see [one more, on `next` alone](#one-more-on-next-alone).
 
 **The board is worked right to left**, for the reason the dispatcher gives, and
 overnight it is the difference between a shape and a mess: a loop working left

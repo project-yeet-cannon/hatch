@@ -3,6 +3,7 @@ using System;
 using Aerie.Api.Modules.Hatch;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Aerie.Api.Modules.Hatch.Migrations
 {
     [DbContext(typeof(HatchContext))]
-    partial class HatchContextModelSnapshot : ModelSnapshot
+    [Migration("20260907164320_IssueAssignee")]
+    partial class IssueAssignee
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -79,30 +82,6 @@ namespace Aerie.Api.Modules.Hatch.Migrations
 
                     b.Property<Guid?>("AssigneePersonId")
                         .HasColumnType("uuid");
-
-                    b.Property<string>("ClaimChatter")
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)");
-
-                    b.Property<DateTimeOffset?>("ClaimChatterAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset?>("ClaimHeartbeatAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ClaimRunner")
-                        .HasMaxLength(240)
-                        .HasColumnType("character varying(240)");
-
-                    b.Property<Guid?>("ClaimToken")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset?>("ClaimedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ClaimedBy")
-                        .HasMaxLength(240)
-                        .HasColumnType("character varying(240)");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");

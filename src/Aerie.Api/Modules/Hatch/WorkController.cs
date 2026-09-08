@@ -1,5 +1,6 @@
 using Aerie.Api.Common;
 using Aerie.Api.Ef;
+using Aerie.Api.Services.Auth;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,7 +20,8 @@ namespace Aerie.Api.Modules.Hatch;
 [ApiController]
 [Route("api/hatch/work")]
 [RequireAdmin(AcceptScope = ApiKeyScopes.Hatch)]
-public class WorkController(HatchContext db, IssueClaims claims, TimeProvider time) : ControllerBase
+public class WorkController(
+    HatchContext db, IActorDirectory actors, IssueClaims claims, TimeProvider time) : ControllerBase
 {
     /// <summary>
     /// The issue an unattended run should pick up: the top of the rightmost
@@ -123,7 +125,7 @@ public class WorkController(HatchContext db, IssueClaims claims, TimeProvider ti
         // queries a row, which is what makes a scan of a board a thing nobody
         // runs twice.
         var issues = await IssueProjection.ToDtosAsync(
-            db, scan.Rows.Select(r => r.Issue).ToList(), claims, scan.Claims.Now, ct);
+            db, actors, scan.Rows.Select(r => r.Issue).ToList(), claims, scan.Claims.Now, ct);
 
         return scan.Rows.Select(r => new QueueEntryDto(
             issues[r.Issue.Id],
@@ -201,6 +203,14 @@ public class WorkController(HatchContext db, IssueClaims claims, TimeProvider ti
 
         var byColumn = candidates.GroupBy(i => i.StatusId).ToDictionary(g => g.Key, g => g.ToList());
 
+        // Blocked is static and has no db, so the assignees are resolved here
+        // and handed in, the way `open` and `gate` already are. One memoized
+        // read for the whole pass, whatever the board holds.
+        var assignees = new Dictionary<long, AssigneeDto?>();
+        foreach (var issue in candidates)
+            assignees[issue.Id] = await IssueProjection.ToAssigneeAsync(
+                actors, issue.AssigneePersonId, issue.AssigneeApiKeyId, ct);
+
         var implementation = Implementation(statuses);
 
         var rows = new List<ScanRow>();
@@ -215,7 +225,9 @@ public class WorkController(HatchContext db, IssueClaims claims, TimeProvider ti
                 open.TryGetValue(issue.Id, out var waiting);
                 rows.Add(new ScanRow(
                     issue, status, to,
-                    Blocked(issue, status, to, playbook, waiting, loop, gate, claimed, implementation)));
+                    Blocked(
+                        issue, status, to, playbook, waiting, loop, gate, claimed, implementation,
+                        assignees[issue.Id])));
             }
         }
 
@@ -509,23 +521,27 @@ public class WorkController(HatchContext db, IssueClaims claims, TimeProvider ti
                 ProjectKey = i.Project!.Key,
                 i.Number, i.Type, i.Title, i.StatusId, i.Rank,
                 i.ReadyAt, i.ReadyAtHasTime, i.DueAt, i.DueAtHasTime,
+                i.AssigneePersonId, i.AssigneeApiKeyId,
                 Claim = new ClaimSnapshot(
                     i.ClaimToken, i.ClaimedBy, i.ClaimRunner,
                     i.ClaimedAt, i.ClaimHeartbeatAt, i.ClaimChatter, i.ClaimChatterAt),
             })
             .ToListAsync(ct);
 
-        var childCards = children.Select(c => new IssueCardDto(
-            IssueKey.Format(c.ProjectKey, c.Number),
-            c.ProjectKey,
-            c.Type,
-            c.Title,
-            c.StatusId,
-            c.Rank,
-            IssueKey.Format(issue.Project!.Key, issue.Number),
-            IssueMoment.Format(c.ReadyAt, c.ReadyAtHasTime),
-            IssueMoment.Format(c.DueAt, c.DueAtHasTime),
-            Claim: claims.Project(c.Claim, claimed.Now))).ToList();
+        var childCards = new List<IssueCardDto>(children.Count);
+        foreach (var c in children)
+            childCards.Add(new IssueCardDto(
+                IssueKey.Format(c.ProjectKey, c.Number),
+                c.ProjectKey,
+                c.Type,
+                c.Title,
+                c.StatusId,
+                c.Rank,
+                IssueKey.Format(issue.Project!.Key, issue.Number),
+                IssueMoment.Format(c.ReadyAt, c.ReadyAtHasTime),
+                IssueMoment.Format(c.DueAt, c.DueAtHasTime),
+                Assignee: await IssueProjection.ToAssigneeAsync(actors, c.AssigneePersonId, c.AssigneeApiKeyId, ct),
+                Claim: claims.Project(c.Claim, claimed.Now)));
 
         var playbook = to is null ? null : await MatchAsync(from.Id, to.Id, issue.Type, ct);
 
@@ -536,7 +552,7 @@ public class WorkController(HatchContext db, IssueClaims claims, TimeProvider ti
         var waiting = questions.Count(q => q.Answers.Count == 0);
 
         return new WorkDto(
-            await IssueProjection.ToDtoAsync(db, issue, claims, claimed.Now, ct),
+            await IssueProjection.ToDtoAsync(db, actors, issue, claims, claimed.Now, ct),
             ToStatusDto(from),
             to is null ? null : ToStatusDto(to),
             // The values the increment will actually run on, in place rather
@@ -555,7 +571,9 @@ public class WorkController(HatchContext db, IssueClaims claims, TimeProvider ti
             },
             childCards,
             questions,
-            Blocked(issue, from, to, playbook, waiting, loop, gate, claimed, Implementation(statuses)));
+            Blocked(
+                issue, from, to, playbook, waiting, loop, gate, claimed, Implementation(statuses),
+                await IssueProjection.ToAssigneeAsync(actors, issue.AssigneePersonId, issue.AssigneeApiKeyId, ct)));
     }
 
     /// <summary>
@@ -566,7 +584,7 @@ public class WorkController(HatchContext db, IssueClaims claims, TimeProvider ti
     /// <remarks>
     /// <para>The order is what it costs to change the answer, most fundamental
     /// first: a terminal column, no column after this one, a terminal next
-    /// column, a live claim, a ready date, an unanswered question, an unmet
+    /// column, a live claim, a ready date, an assignee, an unanswered question, an unmet
     /// dependency, and last a missing playbook. A column with nowhere an agent may go is a fact
     /// about the board and no argument alters it; a ready date needs time; a
     /// question needs a person; a dependency needs other work to land; and a
@@ -631,7 +649,8 @@ public class WorkController(HatchContext db, IssueClaims claims, TimeProvider ti
         LoopScope? loop,
         DependencyGate gate,
         ClaimGate claimed,
-        EfHatchStatus? implementation)
+        EfHatchStatus? implementation,
+        AssigneeDto? assignee)
     {
         if (from.IsTerminal)
             return $"\"{from.Name}\" is where work ends - there is nothing after it";
@@ -649,6 +668,14 @@ public class WorkController(HatchContext db, IssueClaims claims, TimeProvider ti
         {
             if (IsWaiting(issue, loop.Today, loop.OffsetMinutes))
                 return $"not workable until {IssueMoment.Format(issue.ReadyAt, issue.ReadyAtHasTime)}";
+
+            // A person's name on a ticket takes it off the night shift, and
+            // only a person's: an issue assigned to a key is exactly the thing
+            // an agent should pick up, and one whose assignee no longer
+            // resolves is not assigned at all - the liveness rule reaching the
+            // dispatcher without a line of its own.
+            if (assignee?.Kind == ActorKind.Person)
+                return $"assigned to {assignee.Name} - an unattended pass leaves a person's work alone";
         }
 
         if (waiting > 0)
