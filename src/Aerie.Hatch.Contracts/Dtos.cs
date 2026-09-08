@@ -126,7 +126,22 @@ public record IssueClaimDto(
     DateTimeOffset ClaimedAt,
     DateTimeOffset HeartbeatAt,
     string? Chatter,
-    DateTimeOffset? ChatterAt);
+    DateTimeOffset? ChatterAt,
+    /// <summary>
+    /// The lease this claim is judged against, in seconds - the same value
+    /// <see cref="ClaimTakenDto"/> carries, on the read as well as on the take.
+    /// Here rather than beside the claim so that a claim is self-describing
+    /// wherever one is drawn: a card on the board, a child row on the plan, a
+    /// section on the issue page. A client that had to fetch the TTL from
+    /// somewhere else could draw a claim before it knew what "recently" meant.
+    ///
+    /// It is not a second copy of the rule. <see cref="IssueClaims.IsLive"/>
+    /// still decides whether there is a claim at all, and this only says how
+    /// much of the lease there was to spend - which is what lets a client draw
+    /// a runner that has gone quiet without deciding for itself when one is
+    /// gone.
+    /// </summary>
+    int TtlSeconds);
 
 /// <summary>One issue, whole - the detail page's payload.</summary>
 /// <param name="ChildKeys">Its stories, or its tasks. Keys rather than nested issues: the page links to them and does not draw them.</param>

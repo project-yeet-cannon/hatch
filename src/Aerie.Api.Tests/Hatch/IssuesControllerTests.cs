@@ -2012,10 +2012,18 @@ public class IssuesControllerTests
         Assert.Equal("somewhere:/checkouts/one", read.Claim.Runner);
         Assert.Equal("running the tests", read.Claim.Chatter);
 
+        // The lease rides the read, not only the take. A client is handed the
+        // TTL because it is what "last heard from four minutes ago" has to be
+        // judged against: four minutes into a five-minute lease is a runner
+        // about to go, and four minutes into an hour is one that is fine.
+        Assert.Equal(TestClaims.Ttl, read.Claim.TtlSeconds);
+
         // The board and the search hand out cards rather than issues, and a
         // claim a client cannot see on the screen it lives on is a claim it
         // cannot draw.
-        Assert.NotNull(Value(await h.Board.GetBoard(default)).Issues.Single(c => c.Key == issue.Key).Claim);
+        var card = Value(await h.Board.GetBoard(default)).Issues.Single(c => c.Key == issue.Key);
+        Assert.NotNull(card.Claim);
+        Assert.Equal(TestClaims.Ttl, card.Claim.TtlSeconds);
 
         var found = Value(await h.Issues.SearchIssues(null, null, null, null, null, "somebody is on it", default));
         Assert.NotNull(Assert.Single(found).Claim);

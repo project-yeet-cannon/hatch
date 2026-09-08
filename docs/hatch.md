@@ -505,9 +505,11 @@ state anything writes: nothing has to run for a dead runner's ticket to become
 claimable again, and there is no job to tune, schedule or notice has stopped.
 The columns stay as they are until somebody takes the lease over, so the trail
 of who last held it outlives the lease. The TTL is `Hatch:ClaimTtlSeconds`, five
-minutes by default, and it is **returned to the client with the claim** rather
-than configured on both sides — the server is what honours it, so the server is
-what says what it is.
+minutes by default, and it is **returned to the client with the claim** — on
+every read a claim rides, not only on the take — rather than configured on both
+sides, because the server is what honours it and so is what says what it is. A
+client holding a heartbeat four minutes old cannot otherwise tell a runner about
+to go from one that is fine.
 
 **The token is a fencing token, and it is a capability.** Every heartbeat and
 every release presents it, and a write whose token is not the one on the row is
@@ -520,6 +522,27 @@ when it was taken, when it was last heard from and what it last said — and
 nothing at all where the claim has expired, because the arithmetic is the
 server's and a card drawing a holder that stopped existing four hours ago is
 worse than a card drawing nothing.
+
+**A claim is drawn where the work is looked at.** A claimed card carries a dot
+in its head row, green while the holder is being heard from and amber once it
+has gone quiet, with who holds it, from where and how long since a word on the
+hover. The issue page draws a **Claim** section saying the same things at
+length: the holder, the `host:/path/to/checkout` they hold it from, when it was
+taken, when it was last heard from, and the last line the runner printed with
+how long ago it printed it. *Quiet* is half the lease without a word — a
+fraction rather than a count of minutes, so changing `Hatch:ClaimTtlSeconds`
+moves the warning with it — and it is not expiry: a claim past its lease is
+drawn as no claim at all, on the card and on the page, because the server has
+already stopped sending one. Neither polls. Both go stale with the read they
+came from and come back current on the next one.
+
+**Clearing a claim does not stop the runner.** The operator's
+`DELETE .../claim` takes the lease off the row and nothing else: that session
+keeps running, keeps pushing, and may still move the ticket, because moves are
+not gated on a token. What clearing does is make the issue claimable again, so
+the next pass may spawn a second session at it and the two would then both be
+writing to it. It is the sentence the confirmation on the issue page leads with,
+and the reason to press it is a runner known to be gone or known to be wrong.
 
 **The guarantee lives in a predicate on the write.** Reading the row first is
 unavoidable — a refusal has to name who holds it, and that sentence can only be

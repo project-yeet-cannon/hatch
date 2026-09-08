@@ -67,7 +67,8 @@ public sealed class IssueClaims(IOptions<HatchOptions> options)
             ? new IssueClaimDto(
                 claim!.ClaimedBy ?? "", claim.Runner ?? "",
                 claim.ClaimedAt ?? claim.HeartbeatAt!.Value, claim.HeartbeatAt!.Value,
-                claim.Chatter, claim.ChatterAt)
+                claim.Chatter, claim.ChatterAt,
+                TtlSeconds)
             : null;
 
     /// <summary>

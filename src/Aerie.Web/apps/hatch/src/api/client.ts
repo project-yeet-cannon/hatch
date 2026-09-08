@@ -172,6 +172,16 @@ export const setAssignee = (key: string, request: AssigneeRequest) =>
     body: JSON.stringify(request),
   });
 
+/** Take a ticket back off a runner - the operator's clobber, with no token in
+    it, which is why the server refuses it from an API key: a key may release
+    only the lease it holds. Answers nothing (204), so the page re-reads rather
+    than repainting from a response.
+
+    There is deliberately no take and no heartbeat beside it. A person does not
+    hold a lease; the only claim verb a browser gets is this one. */
+export const clearClaim = (key: string) =>
+  fetchJson<void>(`/api/hatch/issues/${seg(key)}/claim`, { method: 'DELETE' });
+
 export const patchIssuePlaybook = (key: string, request: IssuePlaybookRequest) =>
   fetchJson<Issue>(`/api/hatch/issues/${seg(key)}/playbook`, { method: 'PATCH', ...asJson(request) });
 /** What an issue waits on. Both verbs answer with the whole issue, so the page

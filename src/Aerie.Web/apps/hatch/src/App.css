@@ -449,6 +449,40 @@
   margin-left: var(--sp-1);
 }
 
+/* Something is holding this card right now.
+
+   A dot rather than a word, and the smallest thing on the card that is still
+   visible: the board is read all day, a ticket is claimed for a few minutes,
+   and the marker has to cost nothing beside a nine-rem assignee name. The whole
+   sentence - who, from where, how long since a word - is on the hover.
+
+   Sized in ems so it tracks the head row's type rather than needing its own
+   number, and given a flex basis it cannot be squeezed out of: everything else
+   in that row may shrink, and this is the one thing that reads as nothing at
+   all if it half-disappears. */
+.hatch-card-claim {
+  flex: 0 0 auto;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+}
+
+/* Green is being heard from. A ring rather than a fill so the dot has an edge
+   against a coloured column header. */
+.hatch-card-claim-fresh {
+  background: var(--success);
+  box-shadow: 0 0 0 2px var(--success-bg);
+}
+
+/* Amber is a holder that has gone quiet on a lease it still holds - the same
+   vocabulary the due chip warms through, said on the same board. It is not
+   "expired": an expired claim is drawn as no claim at all, because the server
+   stopped sending one. */
+.hatch-card-claim-quiet {
+  background: var(--warn);
+  box-shadow: 0 0 0 2px var(--warn-bg);
+}
+
 .hatch-card-parent {
   margin-top: var(--sp-1);
   font-size: var(--t-micro);
@@ -1302,6 +1336,69 @@
 .hatch-worklog-error {
   border-left: 2px solid var(--danger);
   padding-left: var(--sp-3);
+}
+
+/* ---- The claim ----
+
+   Modelled on the work log block above it: the same facts row, the same weight
+   of heading. What is different is that this one is about right now rather than
+   about what has already happened, which is why it sits at the top of the page
+   beside Waiting and carries an edge of its own. */
+
+/* A band down the left edge, as .hatch-waiting has, and for the same reason: it
+   is one of the two cards on this page that is about something acting on the
+   ticket rather than about the ticket. Green while the holder is being heard
+   from - a claim is ordinarily good news, and a page that painted every live
+   runner amber would have nothing left to say when one stopped answering. */
+.hatch-claim {
+  border-left: 3px solid var(--success);
+}
+
+/* Gone quiet, still holding. The card turns rather than one word inside it, so
+   the block reads as wanting attention from across the page. */
+.hatch-claim-quiet {
+  border-left-color: var(--warn);
+}
+
+.hatch-claim-head {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.hatch-claim-holder {
+  margin: var(--sp-2) 0 0;
+  overflow-wrap: anywhere;
+}
+
+/* The two elapsed phrases, on one line and wrapping rather than truncating -
+   the same shape .hatch-worklog-facts is, because they are the same kind of
+   row. */
+.hatch-claim-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  align-items: baseline;
+  font-size: var(--t-label);
+  margin: var(--sp-2) 0;
+}
+
+/* The last line the runner printed, quoted. Set apart from the facts above it
+   because it is the runner talking rather than the board describing it, and
+   wrapping anywhere because a path or a command is what it usually is. */
+.hatch-claim-chatter {
+  margin: var(--sp-2) 0;
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+/* The dialog's stack, as .hatch-cascade is for the close offer. */
+.hatch-claim-clear {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
 }
 
 /* ---- The leaderboard ----
