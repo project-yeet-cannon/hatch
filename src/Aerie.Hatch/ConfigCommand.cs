@@ -163,7 +163,7 @@ public sealed record ConfigCommand(
                     : value;
 
             var where = from == Settings.Layer.Unset ? "" : $"  ({Where(from)})";
-            Say.Line($"{(name + ":").PadRight(18)}{shown}{where}");
+            Say.Line($"{(name + ":").PadRight(19)}{shown}{where}");
         }
 
         return 0;

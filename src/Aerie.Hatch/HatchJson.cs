@@ -45,14 +45,6 @@ namespace Aerie.Hatch;
 [JsonSerializable(typeof(IssueDependencyRequest))]
 [JsonSerializable(typeof(WorkLogEntryRequest))]
 [JsonSerializable(typeof(ClaimRequest))]
+[JsonSerializable(typeof(ClaimHeartbeatRequest))]
 [JsonSerializable(typeof(NightState))]
-
-// The shapes the test wire stubs answers with, which are the ones above read
-// the other way round. Listed because a fixture that cannot be serialised is a
-// suite that fails for a reason nothing to do with what it was testing.
-[JsonSerializable(typeof(StatusDto))]
-[JsonSerializable(typeof(IssueCardDto))]
-[JsonSerializable(typeof(QuestionDto))]
-[JsonSerializable(typeof(QueueEntryDto))]
-[JsonSerializable(typeof(PlaybookDto))]
 internal sealed partial class HatchJson : JsonSerializerContext;
