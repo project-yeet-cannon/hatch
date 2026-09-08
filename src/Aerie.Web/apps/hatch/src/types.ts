@@ -109,6 +109,15 @@ export interface IssueClaim {
   /** A line the holder is carrying: what it is doing right now, or null if it has not said. */
   chatter: string | null;
   chatterAt: string | null;
+  /** The lease the heartbeat is judged against, in seconds - the server's own
+      Hatch:ClaimTtlSeconds, on every read a claim rides.
+
+      It is not what decides whether there is a claim: the server already did
+      that, and an expired one arrives as null. It is what lets a client say
+      how much of the lease has gone unspoken, so `last heard from 4 minutes
+      ago` can be read as fine under an hour-long lease and as a runner going
+      quiet under a five-minute one. */
+  ttlSeconds: number;
 }
 
 export interface Issue {
