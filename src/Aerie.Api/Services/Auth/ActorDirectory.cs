@@ -62,6 +62,10 @@ public interface IActorDirectory
     /// Everybody who could be given something: every person, then every live
     /// key, each A→Z. The order is the directory's rather than the caller's so
     /// that a picker built from it is stable between reads.
+    ///
+    /// With the wall off the local person is first, ahead of the A→Z - you,
+    /// then everybody else. See the implementation for why that is a prepend
+    /// rather than a name-ordered merge.
     /// </summary>
     Task<IReadOnlyList<Actor>> LiveAsync(CancellationToken ct);
 
@@ -75,8 +79,9 @@ public interface IActorDirectory
 
     /// <summary>
     /// Who is making this request, as an actor - the person holding the device,
-    /// else the key it presented, else null. Null is the ordinary state of local
-    /// development, where <c>Auth:Enabled</c> is false and nobody is enrolled.
+    /// else the key it presented, else the local caller where the wall is off.
+    /// Null is what is left: a request with no wall to authenticate it and no
+    /// HTTP context behind it at all, which is background work.
     /// </summary>
     Task<Actor?> MeAsync(CancellationToken ct);
 }
@@ -107,8 +112,21 @@ public class ActorDirectory(AerieContext db, ICallerIdentity caller, TimeProvide
         var now = time.GetUtcNow();
         var keys = await db.ApiKeys.AsNoTracking().OrderBy(k => k.Name).ToListAsync(ct);
 
+        // Prepended rather than merged into the name order, for two reasons.
+        // The database's collation decided the order of the rows it returned,
+        // and inserting into that list in memory would be this app second-
+        // guessing it with a different comparison. And "you" is not one name
+        // among many on a picker: it is the one press that is always the same
+        // press, which is why "Assign to me" exists at all.
+        //
+        // Only a person, never a runner. A runner is transient and self-named,
+        // so nothing may be assigned to one - ResolveAsync answering null for
+        // its id is the correct reading of an id that means nothing tomorrow.
+        Actor[] me = await caller.LocalAsync(ct) is { Kind: ActorKind.Person } local ? [local] : [];
+
         return live =
         [
+            .. me,
             .. people,
             .. keys.Where(k => k.IsLive(now)).Select(k => new Actor(ActorKind.Key, k.Id, k.Name)),
         ];
@@ -122,9 +140,9 @@ public class ActorDirectory(AerieContext db, ICallerIdentity caller, TimeProvide
     }
 
     /// <summary>
-    /// The person first and the key second - the order
-    /// <see cref="CallerIdentity.ActorNameAsync"/> already takes, so "who am I"
-    /// reads one way however it is asked.
+    /// The person, the key, then the local caller - the same order
+    /// <see cref="CallerIdentity.ActorNameAsync"/> takes, so "who am I" reads
+    /// one way however it is asked.
     /// </summary>
     public async Task<Actor?> MeAsync(CancellationToken ct)
     {
@@ -134,6 +152,6 @@ public class ActorDirectory(AerieContext db, ICallerIdentity caller, TimeProvide
         if (await caller.ApiKeyAsync(ct) is { } key)
             return new Actor(ActorKind.Key, key.Id, key.Name);
 
-        return null;
+        return await caller.LocalAsync(ct);
     }
 }

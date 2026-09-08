@@ -166,9 +166,17 @@ public class IssueWorkLogController(HatchContext db, TimeProvider time, ICallerI
     /// <c>AdminGate</c> is dormant wherever <c>Auth:EnforceAdmin</c> is off,
     /// which is all of local development, and a guarantee that evaporates under
     /// a switch is not a guarantee.
+    ///
+    /// <para>"A key" is asked as
+    /// <see cref="ICallerIdentity.IsProgramAsync"/>, which is a key <em>or</em>
+    /// a keyless runner that named itself in local mode - the dispatcher on a
+    /// machine with no wall is still the dispatcher, and losing an evening's
+    /// spend because it had no credential to present would be the wrong trade.
+    /// The sentence below is unchanged and still true: a runner reading it is
+    /// reading which lane it is in.</para>
     /// </remarks>
     private async Task<ObjectResult?> NotAKey(CancellationToken ct) =>
-        await caller.ApiKeyAsync(ct) is null
+        !await caller.IsProgramAsync(ct)
             ? new ObjectResult("a work log entry is written by the dispatcher, with an API key")
             {
                 StatusCode = StatusCodes.Status403Forbidden,

@@ -471,8 +471,16 @@ public class AssigneeControllerTests
 
         public Task<EfApiKey?> ApiKeyAsync(CancellationToken ct) => Task.FromResult(Key);
 
+        /// <summary>Local mode's third lane: the person at the machine, or a runner that named itself. Null is every install with a wall.</summary>
+        public Actor? Local { get; set; }
+
+        public Task<Actor?> LocalAsync(CancellationToken ct) => Task.FromResult(Local);
+
+        public Task<bool> IsProgramAsync(CancellationToken ct) =>
+            Task.FromResult(Key is not null || Local is { Kind: ActorKind.Key });
+
         public Task<string> ActorNameAsync(CancellationToken ct) =>
-            Task.FromResult(Person?.Name ?? Key?.Name ?? CallerIdentity.Unattributed);
+            Task.FromResult(Person?.Name ?? Key?.Name ?? Local?.Name ?? CallerIdentity.Unattributed);
     }
 
     /// <summary>The two sides an assignee_changed event carries, each whole or null.</summary>

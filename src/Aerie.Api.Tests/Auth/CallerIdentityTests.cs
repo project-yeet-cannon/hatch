@@ -1,6 +1,7 @@
 using Aerie.Api.Common;
 using Aerie.Api.Ef;
 using Aerie.Api.Services.Auth;
+using Aerie.Api.Services.DeviceMapping;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using System.Net;
@@ -156,7 +157,8 @@ public class CallerIdentityTests
     [Fact]
     public async Task Grant_IsNullOutsideARequest()
     {
-        var identity = new CallerIdentity(new HttpContextAccessor(), new StubAuthService(NewGrant()), NewOptions());
+        var identity = new CallerIdentity(
+            new HttpContextAccessor(), new StubAuthService(NewGrant()), NewOptions(), new StubSiteSettings());
 
         Assert.Null(await identity.GrantAsync(default));
     }
@@ -179,8 +181,13 @@ public class CallerIdentityTests
         return context;
     }
 
-    private static CallerIdentity NewIdentity(HttpContext context, IAuthService auth) =>
-        new(new HttpContextAccessor { HttpContext = context }, auth, NewOptions());
+    private static CallerIdentity NewIdentity(
+        HttpContext context, IAuthService auth, AuthOptions? options = null, ISiteSettingsService? settings = null) =>
+        new(
+            new HttpContextAccessor { HttpContext = context },
+            auth,
+            Options.Create(options ?? NewOptions().Value),
+            settings ?? new StubSiteSettings());
 
     private static IOptions<AuthOptions> NewOptions() =>
         Options.Create(new AuthOptions { Enabled = false, CookieName = "aerie_grant" });

@@ -28,7 +28,8 @@ public record SiteSettingsSnapshot(
     string? AnthropicApiKey,
     string? ImmichBaseUrl,
     string? ImmichApiKey,
-    string? ClaudeSubscriptionToken);
+    string? ClaudeSubscriptionToken,
+    string? LocalPersonName);
 
 public interface ISiteSettingsService
 {
@@ -129,7 +130,11 @@ public class SiteSettingsService(IDbContextFactory<AerieContext> dbFactory, Time
                 // Deobfuscated for the same reason as the two above: the Photos
                 // module hands it to Immich as a header, not to a screen.
                 ImmichApiKey: Deobfuscated(values.GetValueOrDefault(SiteSettingKeys.ImmichApiKey)),
-                ClaudeSubscriptionToken: Deobfuscated(values.GetValueOrDefault(SiteSettingKeys.ClaudeSubscriptionToken)));
+                ClaudeSubscriptionToken: Deobfuscated(values.GetValueOrDefault(SiteSettingKeys.ClaudeSubscriptionToken)),
+                // No default: "nobody has said" is a distinct answer from any
+                // name, and it is what tells the nav strip to explain how to
+                // set one. LocalCaller decides what unset means.
+                LocalPersonName: NullIfEmpty(values.GetValueOrDefault(SiteSettingKeys.LocalPersonName)));
 
             cached = snapshot;
             expiresAt = time.GetUtcNow() + CacheTtl;

@@ -69,6 +69,13 @@ public class AuthOptions
     public bool EnforceAdmin { get; set; }
 
     /// <summary>
+    /// Who is sitting at the machine when there is no wall to ask - read only
+    /// when <see cref="Enabled"/> is false. See
+    /// <see cref="LocalCaller"/> and docs/auth-architecture.md, "Local mode".
+    /// </summary>
+    public LocalPersonOptions LocalPerson { get; set; } = new();
+
+    /// <summary>
     /// The cookie the grant token rides in. The <c>__Secure-</c> prefix is
     /// correct rather than <c>__Host-</c>: <c>__Host-</c> forbids a Domain
     /// attribute, and the Domain attribute is the entire single-sign-on story
@@ -141,4 +148,29 @@ public class AuthOptions
     public TimeSpan LastSeenThrottle => TimeSpan.FromSeconds(Math.Max(0, LastSeenThrottleSeconds));
 
     public TimeSpan RedeemWindow => TimeSpan.FromSeconds(Math.Max(1, RedeemWindowSeconds));
+}
+
+/// <summary>
+/// The name local mode answers "who am I" with (the "Auth:LocalPerson"
+/// subsection, so <c>Auth__LocalPerson__Name</c> is the environment spelling).
+///
+/// Its own class rather than a flat <c>Auth:LocalPersonName</c> because the
+/// next thing local mode needs to know about the person - an avatar, a
+/// timezone - belongs beside this one rather than in a fourth key with a
+/// prefix in its name.
+/// </summary>
+public class LocalPersonOptions
+{
+    /// <summary>
+    /// What to call whoever started the app. Empty is the ordinary state:
+    /// nothing supplied it, and <see cref="LocalCaller.DefaultName"/> is the
+    /// answer.
+    ///
+    /// Deliberately <em>not</em> defaulted to <c>Environment.UserName</c>.
+    /// Inside a container that is the container's user - <c>root</c>, or
+    /// <c>app</c> - which is a confident wrong answer where an honest fallback
+    /// belongs. The compose file passes the host's user in explicitly, which is
+    /// the one place that knows it.
+    /// </summary>
+    public string Name { get; set; } = "";
 }
