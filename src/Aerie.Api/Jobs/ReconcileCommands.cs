@@ -37,6 +37,9 @@ public class ReconcileCommands(
     /// <summary>Twice SampleChannels' interval - there's nothing to reconcile against until a fresh sample has landed, so running faster would just re-read the same rows.</summary>
     public TimeSpan Interval => TimeSpan.FromMinutes(2);
 
+    /// <summary>It reconciles commands sent to Home Assistant devices against what SampleChannels observed; with no connection there are neither.</summary>
+    public bool ServesTheHouse => true;
+
     public Task Execute(IJobExecutionContext context) => ReconcileAsync(context.CancellationToken);
 
     /// <summary>The job's actual work, separated from Quartz's IJobExecutionContext so it can be driven directly from tests.</summary>

@@ -92,7 +92,7 @@ public sealed class WorkCommand(Runtime runtime)
     private async Task<int> SpendAsync(
         string? key, string? under, string? model, string? effort, bool attach, bool quiet, CancellationToken ct)
     {
-        if (!ClaudeSessionRunner.TryFind(runtime.Settings.ClaudeBin, out var bin, out var missing))
+        if (!runtime.Sessions.CanSpawn(out var missing))
         {
             runtime.Say.Complain(missing);
             return 1;
@@ -169,13 +169,13 @@ public sealed class WorkCommand(Runtime runtime)
             model ??= work.Playbook?.Model ?? "";
             effort ??= work.Playbook?.Effort ?? "";
 
-            if (attach) return await AttachAsync(work, bin, model, effort, claim, ct);
+            if (attach) return await AttachAsync(work, model, effort, claim, ct);
 
             // Zero for an increment that happened, whatever the session exited
             // with: the report is where "it went badly" is said, and a shell
             // that treated a hard ticket as a broken command would be one more
             // thing an operator has to work around.
-            await runtime.Increment().RunAsync(work, bin, runtime.Root, model, effort, quiet, claim, ct);
+            await runtime.Increment().RunAsync(work, runtime.Root, model, effort, quiet, claim, ct);
             return 0;
         }
         finally
@@ -195,7 +195,7 @@ public sealed class WorkCommand(Runtime runtime)
     /// is not the heartbeat's call.
     /// </remarks>
     private async Task<int> AttachAsync(
-        WorkDto work, string bin, string model, string effort, Claim claim, CancellationToken ct)
+        WorkDto work, string model, string effort, Claim claim, CancellationToken ct)
     {
         runtime.Say.Line($"hatch: {work.Issue.Key} [{work.Issue.Type}] {work.Issue.Title}");
         runtime.Say.Line($"hatch: {model}, effort {effort}, {work.FromStatus.Name} -> {work.ToStatus?.Name}");
@@ -203,7 +203,7 @@ public sealed class WorkCommand(Runtime runtime)
         runtime.Say.Line("");
 
         return await runtime.Sessions.AttachAsync(
-            new SessionRequest(bin, runtime.Root, model, effort, Prompt.Compose(work), Quiet: false), ct);
+            new SessionRequest(runtime.Root, model, effort, Prompt.Compose(work), Quiet: false), ct);
     }
 
     /// <summary>

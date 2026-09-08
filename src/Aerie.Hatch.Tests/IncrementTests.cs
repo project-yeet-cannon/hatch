@@ -30,7 +30,7 @@ public sealed class IncrementTests
         h.Wire.Json("GET", "/api/hatch/issues/AER-1/questions", Array.Empty<QuestionDto>());
 
         var report = await h.Runtime.Increment().RunAsync(
-            Fixtures.Work("AER-1"), "claude", h.Root, "opus", "high", quiet: false, claim, default);
+            Fixtures.Work("AER-1"), h.Root, "opus", "high", quiet: false, claim, default);
 
         Assert.True(report.Moved);
         Assert.Equal("In Progress -> In Review", report.Outcome);
@@ -66,7 +66,7 @@ public sealed class IncrementTests
             new CommentDto(1, "aerie-hatch", "…", "comment", null, null, DateTimeOffset.UnixEpoch));
 
         var report = await h.Runtime.Increment().RunAsync(
-            Fixtures.Work("AER-1"), "claude", h.Root, "opus", "high", quiet: false, claim, default);
+            Fixtures.Work("AER-1"), h.Root, "opus", "high", quiet: false, claim, default);
 
         Assert.True(report.Stalled);
         Assert.Equal("flagged", report.Flag);
@@ -95,7 +95,7 @@ public sealed class IncrementTests
             new CommentDto(1, "aerie-hatch", "…", "comment", null, null, DateTimeOffset.UnixEpoch));
 
         var report = await h.Runtime.Increment().RunAsync(
-            Fixtures.Work("AER-1"), "claude", h.Root, "opus", "high", quiet: false, claim, default);
+            Fixtures.Work("AER-1"), h.Root, "opus", "high", quiet: false, claim, default);
 
         Assert.Equal("waiting on a question", report.Flag);
         Assert.Single(h.Wire.To("POST", "/api/hatch/issues/AER-1/comments"));
@@ -124,7 +124,7 @@ public sealed class IncrementTests
         h.Sessions.Behaviour = FakeSessions.UntilStopped();
 
         var report = await h.Runtime.Increment().RunAsync(
-            Fixtures.Work("AER-1"), "claude", h.Root, "opus", "high", quiet: false, claim, default);
+            Fixtures.Work("AER-1"), h.Root, "opus", "high", quiet: false, claim, default);
 
         Assert.True(report.LostLease);
         Assert.Contains("the claim was taken", report.Flag!, StringComparison.Ordinal);
@@ -176,7 +176,7 @@ public sealed class IncrementTests
         };
 
         var report = await h.Runtime.Increment().RunAsync(
-            Fixtures.Work("AER-1"), "claude", h.Root, "opus", "high", quiet: false, claim, default);
+            Fixtures.Work("AER-1"), h.Root, "opus", "high", quiet: false, claim, default);
 
         Assert.True(report.LostLease);
         Assert.Single(h.Wire.To("POST", "/api/hatch/issues/AER-1/work-log"));
@@ -222,7 +222,7 @@ public sealed class IncrementTests
         };
 
         await h.Runtime.Increment().RunAsync(
-            Fixtures.Work("AER-1"), "claude", h.Root, "opus", "high", quiet: false, claim, default);
+            Fixtures.Work("AER-1"), h.Root, "opus", "high", quiet: false, claim, default);
 
         var carried = h.Wire.To("POST", "/api/hatch/issues/AER-1/claim/heartbeat")
             .Select(c => c.Read<ClaimHeartbeatRequest>().Chatter)
@@ -251,7 +251,7 @@ public sealed class IncrementTests
         };
 
         await h.Runtime.Increment().RunAsync(
-            Fixtures.Work("AER-1"), "claude", h.Root, "opus", "high", quiet: false, claim, default);
+            Fixtures.Work("AER-1"), h.Root, "opus", "high", quiet: false, claim, default);
 
         Assert.Empty(h.Wire.To("POST", "/api/hatch/issues/AER-1/work-log"));
         Assert.Contains(h.Say.Complained, l => l.Contains("no work log entry", StringComparison.Ordinal));

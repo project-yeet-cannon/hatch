@@ -24,6 +24,9 @@ public class SampleChannels(TimeProvider t, HistoryClient haHistory, AerieContex
 
     public TimeSpan Interval => TimeSpan.FromMinutes(1);
 
+    /// <summary>It reads Home Assistant - the HistoryClient below is one of HADotNet's, and without a connection ClientFactory was never initialized, so the first call on it throws.</summary>
+    public bool ServesTheHouse => true;
+
     public async Task Execute(IJobExecutionContext context)
     {
         logger.LogInformation("SampleChannels job execution started");

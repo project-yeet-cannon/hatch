@@ -18,6 +18,27 @@ public sealed class FakeSessions : ISessionRunner
     /// <summary>Set once the session is under way, so a test can act while it runs.</summary>
     public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    /// <summary>Why there is nothing to spawn, when that is the path under test. Null is a CLI that is there.</summary>
+    public string? Missing { get; set; }
+
+    /// <summary>
+    /// Waits for a session to be under way, and fails saying so rather than
+    /// hanging when none ever is. A bare await on <see cref="Started"/> never
+    /// returns if the thing under test declines to spawn, and it takes the rest
+    /// of its class down with it.
+    /// </summary>
+    public async Task StartedWithin(int withinMs = 10_000)
+    {
+        try
+        {
+            await Started.Task.WaitAsync(TimeSpan.FromMilliseconds(withinMs));
+        }
+        catch (TimeoutException)
+        {
+            Assert.Fail($"waited {withinMs}ms for a session to start, and none did");
+        }
+    }
+
     /// <summary>What a session does. The default emits a few events and finishes well.</summary>
     public Func<SessionRequest, Action<string>?, CancellationToken, Task<SessionResult>> Behaviour { get; set; } =
         (_, onLine, _) =>
@@ -64,6 +85,12 @@ public sealed class FakeSessions : ISessionRunner
         Attached.Add(request);
         Started.TrySetResult();
         return Task.FromResult(0);
+    }
+
+    public bool CanSpawn(out string refusal)
+    {
+        refusal = Missing ?? "";
+        return Missing is null;
     }
 }
 

@@ -60,7 +60,7 @@ using var client = new HatchClient(settings);
 var runtime = new Runtime(
     Settings: settings,
     Board: new Board(client),
-    Sessions: new ClaudeSessionRunner(),
+    Sessions: new ClaudeSessionRunner(settings.ClaudeBin),
     Say: say,
     Root: root,
     RunnerName: Checkout.Runner(settings.Runner, Host(), root),

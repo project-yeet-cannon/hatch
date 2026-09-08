@@ -485,7 +485,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
         var idle = new SaidOnce();
         var busy = new SaidOnce();
 
-        if (!ClaudeSessionRunner.TryFind(runtime.Settings.ClaudeBin, out var bin, out var missing))
+        if (!runtime.Sessions.CanSpawn(out var missing))
         {
             runtime.Say.Complain(missing);
             tally.StopWhy = "there is no claude CLI to spawn";
@@ -512,7 +512,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
                 return true;
             }
 
-            var pass = await PassAsync(under, quiet, bin, tally, idle, busy, interval, once, restart, ct);
+            var pass = await PassAsync(under, quiet, tally, idle, busy, interval, once, restart, ct);
             if (pass == Pass.Fatal) return false;
             if (pass == Pass.Restarting) return true;
 
@@ -558,7 +558,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
     /// gives the ticket back.
     /// </remarks>
     private async Task<Pass> PassAsync(
-        string? under, bool quiet, string bin, Tally tally,
+        string? under, bool quiet, Tally tally,
         SaidOnce idle, SaidOnce busy, int interval, bool once, Restarts restart, CancellationToken ct)
     {
         var picked = await runtime.Picker().PickAsync(under, runtime.OffsetMinutes, ct, runtime.Heartbeat);
@@ -654,7 +654,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
             // which arrive folded into the playbook already.
             var work = picked.Work!;
             var report = await runtime.Increment().RunAsync(
-                work, bin, runtime.Root, work.Playbook?.Model ?? "", work.Playbook?.Effort ?? "",
+                work, runtime.Root, work.Playbook?.Model ?? "", work.Playbook?.Effort ?? "",
                 quiet, claim, ct);
 
             tally.Record(report);
