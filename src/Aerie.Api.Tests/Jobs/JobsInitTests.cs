@@ -16,6 +16,7 @@ namespace Aerie.Api.Tests.Jobs;
 /// state those calls leave behind - whether a trigger exists - which is what
 /// this asserts instead.</para>
 /// </summary>
+[Collection(QuartzSchedulerCollection.Name)]
 public class JobsInitTests
 {
     /// <summary>

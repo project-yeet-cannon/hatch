@@ -128,6 +128,25 @@ public sealed class GoToWorkTests
     }
 
     [Fact]
+    public async Task A_night_with_no_CLI_to_spawn_ends_before_it_reads_the_board()
+    {
+        using var h = new Harness();
+        OneTicket(h);
+        h.Sessions.Missing = "hatch: no claude CLI on PATH.";
+
+        Assert.Equal(0, await new GoToWorkCommand(h.Runtime).RunAsync(["--once"], default));
+
+        Assert.Contains(h.Say.Complained, l => l.Contains("no claude CLI on PATH", StringComparison.Ordinal));
+        Assert.Contains(h.Say.Said, l => l.Contains("there is no claude CLI to spawn", StringComparison.Ordinal));
+        Assert.Empty(h.Sessions.Spawned);
+
+        // Nothing was read and nothing was claimed: the question is asked before
+        // the board, because a night that cannot spend should not take a ticket
+        // off it to find that out.
+        Assert.Empty(h.Wire.Calls);
+    }
+
+    [Fact]
     public async Task An_interrupt_gives_the_ticket_back_and_still_prints_the_tally()
     {
         using var h = new Harness();
@@ -137,7 +156,7 @@ public sealed class GoToWorkTests
         h.Sessions.Behaviour = FakeSessions.UntilStopped();
 
         var running = new GoToWorkCommand(h.Runtime).RunAsync([], interrupting.Token);
-        await h.Sessions.Started.Task;
+        await h.Sessions.StartedWithin();
         await interrupting.CancelAsync();
         await running;
 

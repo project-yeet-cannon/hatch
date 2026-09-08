@@ -31,6 +31,7 @@ namespace Aerie.Api.Tests;
 /// skipped out loud on a laptop with no Postgres rather than reported as
 /// passed.</para>
 /// </summary>
+[Collection(Jobs.QuartzSchedulerCollection.Name)]
 public class MinimalStartupTests
 {
     /// <summary>Everything the four house jobs and BackfillChannelHistory are registered under - criterion 6 is that no trigger for it exists.</summary>
@@ -94,10 +95,19 @@ public class MinimalStartupTests
         // never notices; a test file with two of them gets the *first* host's
         // LoggerFactory, disposed with it, and the second host dies resolving
         // IScheduler. Clearing it lets this host's AddQuartz rebind to its own.
+        //
+        // Cleared on the way out as well, and that half is not symmetry for its
+        // own sake: the binding outlives the host it points at, so a host left
+        // in the static is a disposed LoggerFactory every later scheduler in
+        // this process resolves through. JobsInitTests is the one that pays -
+        // ObjectDisposedException out of StdSchedulerFactory.GetScheduler,
+        // which is why leaving here matters as much as arriving.
         QuartzLogProvider.SetCurrentLogProvider(null);
 
-        await using (var factory = new MinimalFactory(aerie, quartz, logs))
+        try
         {
+            await using var factory = new MinimalFactory(aerie, quartz, logs);
+
             // Creating the client is what builds and starts the host - before
             // this line nothing has run, and the exit 139 came out of exactly
             // here.
@@ -105,6 +115,10 @@ public class MinimalStartupTests
 
             var health = await client.GetAsync("/health/ready");
             Assert.Equal(HttpStatusCode.OK, health.StatusCode);
+        }
+        finally
+        {
+            QuartzLogProvider.SetCurrentLogProvider(null);
         }
 
         Assert.Empty(await MinimalDatabases.TriggerNamesAsync(quartz, JobGroup));

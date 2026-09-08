@@ -69,7 +69,7 @@ public sealed class IncrementReport
 public sealed class Increment(Board board, ISessionRunner sessions, Settings settings, Terminal say)
 {
     public async Task<IncrementReport> RunAsync(
-        WorkDto work, string bin, string root, string model, string effort, bool quiet,
+        WorkDto work, string root, string model, string effort, bool quiet,
         Claim claim, CancellationToken ct)
     {
         var report = new IncrementReport
@@ -99,7 +99,7 @@ public sealed class Increment(Board board, ISessionRunner sessions, Settings set
         using var stopping = CancellationTokenSource.CreateLinkedTokenSource(ct);
         claim.OnLost = _ => stopping.Cancel();
 
-        var result = await SpawnAsync(work, bin, root, model, effort, quiet, facts, claim, stopping.Token);
+        var result = await SpawnAsync(work, root, model, effort, quiet, facts, claim, stopping.Token);
         report.ExitCode = result.ExitCode;
         report.SessionId = facts.SessionId;
         report.Cost = facts.CostUsd;
@@ -181,10 +181,10 @@ public sealed class Increment(Board board, ISessionRunner sessions, Settings set
     // ---- The session ----
 
     private async Task<SessionResult> SpawnAsync(
-        WorkDto work, string bin, string root, string model, string effort, bool quiet,
+        WorkDto work, string root, string model, string effort, bool quiet,
         RunFacts facts, Claim claim, CancellationToken ct)
     {
-        var request = new SessionRequest(bin, root, model, effort, Prompt.Compose(work), quiet);
+        var request = new SessionRequest(root, model, effort, Prompt.Compose(work), quiet);
         var render = new StreamRender(root, facts);
 
         if (quiet)
