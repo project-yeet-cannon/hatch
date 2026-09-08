@@ -5,6 +5,8 @@ import type {
   Board,
   Comment,
   CommentCreateRequest,
+  HatchSettings,
+  HatchSettingsWriteRequest,
   ImportRequest,
   ImportResult,
   Issue,
@@ -290,6 +292,19 @@ export const getUtilization = (refresh = false) =>
  */
 export const getLocalPerson = () =>
   fetchJson<LocalPerson | undefined>('/api/hatch/local-person').then((person) => person ?? null);
+
+// ---- Settings ----
+//
+// Person only, both verbs: unlike every other route in this file, a Hatch-scoped
+// API key is refused here. One of these two settings is a credential and the
+// other is the name every event a browser writes is signed with. See
+// Aerie.Api.Modules.Hatch.SettingsController.
+
+export const getHatchSettings = () => fetchJson<HatchSettings>('/api/hatch/settings');
+
+/** Answers with the settings as they now read, so a save needs no reload. */
+export const putHatchSettings = (request: HatchSettingsWriteRequest) =>
+  fetchJson<HatchSettings>('/api/hatch/settings', { method: 'PUT', ...asJson(request) });
 
 // ---- The work log ----
 

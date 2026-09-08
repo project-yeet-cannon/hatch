@@ -268,13 +268,13 @@ and one paragraph at the end that matters more than the other two.
 whoever started the app: `Auth:LocalPerson:Name` (so
 `Auth__LocalPerson__Name` in an environment, which is what the compose file
 passes the host's user in as), overridden by a `LocalPersonName` site setting
-so the name can be changed without a restart, and falling back to `friend`
-when nobody has said. Their id is a fixed literal in `LocalCaller.PersonId`
-and is **not** derived from the name — an id computed from a name changes the
-day somebody fixes a typo in it, and every issue assigned to them would then
-resolve to nobody, which is the liveness rule reading correctly off a fact
-that quietly became false. The id is who you are; the name is only what is
-drawn.
+so the name can be changed without a restart — that setting is what Hatch's own
+**Settings** page writes — and falling back to `friend` when nobody has said.
+Their id is a fixed literal in `LocalCaller.PersonId` and is **not** derived
+from the name — an id computed from a name changes the day somebody fixes a
+typo in it, and every issue assigned to them would then resolve to nobody,
+which is the liveness rule reading correctly off a fact that quietly became
+false. The id is who you are; the name is only what is drawn.
 
 They are an *actor* and not a row in `People`. `ICallerIdentity.PersonAsync`
 and `PersonIdAsync` do not answer with them, deliberately: `AdminGate` reads

@@ -845,6 +845,8 @@ Everything under `/api/hatch`, every route `[RequireAdmin(AcceptScope =
 | `/playbooks` | GET | **Reads only.** POST/PATCH/DELETE are plain `[RequireAdmin]` |
 | `/import/preview`, `/import/preview-text`, `/import` | POST | See [the importer](#the-importer) |
 | `/utilization` | GET | The account's Claude headroom, read by the server. `204` when no token is configured; `?refresh=true` bypasses the cache — see [the battery](#the-battery) |
+| `/local-person` | GET | What to call whoever is sitting here, and whether anybody said so. `204` wherever the wall is up |
+| `/settings` | GET, PUT | **Person only** — plain `[RequireAdmin]`, so a key is refused the read as well as the write. The two settings a Hatch install of its own has — see [the credential](#the-credential). PUT follows the bulk rule: a field left out is left alone, `""` clears it |
 | `/issues/{key}/work-log` | GET, POST | What each session on this issue cost. **POST is a key only** — a browser is refused outright, because the only honest writer of a meter reading is the dispatcher that read it. See [the leaderboard](#the-leaderboard) |
 | `/work-log/sessions` | GET | The sessions in a range, ranked, with the range's own totals — see [the leaderboard](#the-leaderboard) |
 | `/work-log/history` | GET | The same rows folded into equal buckets of time, for the graph |
@@ -876,9 +878,15 @@ endpoint answers with is what says so.
 ### The credential
 
 The token is a **secret-valued site setting**, `ClaudeSubscriptionToken`, set on
-the admin app's **Settings** page and stored the way the Immich key and the
+Hatch's own **Settings** page and stored the way the Immich key and the
 Anthropic key already are: obfuscated at rest, redacted on read, never leaving
-the API. It is an OAuth token for the operator's own Claude subscription, and
+the API. That page holds two settings and no others: this token, and
+`LocalPersonName` — what Hatch calls whoever is sitting at the machine
+([auth-architecture.md](auth-architecture.md), "Local mode"), shown only where
+there is no wall, because with one the name comes from the grant. It lives in
+Hatch rather than on the admin app's Settings page so that an installation with
+no admin app — which is every installation that is only somebody's tracker —
+can still set both. It is an OAuth token for the operator's own Claude subscription, and
 like every other credential in Aerie it is the operator's to supply
 ([`docs/ethos.md`](ethos.md)) — nothing about one household's account may be
 true of the artifact.

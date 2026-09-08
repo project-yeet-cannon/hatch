@@ -12,6 +12,7 @@ import { StatusesPage } from './pages/StatusesPage';
 import { PlaybooksPage } from './pages/PlaybooksPage';
 import { BulkPage } from './pages/BulkPage';
 import { ImportPage } from './pages/ImportPage';
+import { SettingsPage } from './pages/SettingsPage';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) => `hatch-nav-link${isActive ? ' active' : ''}`;
 
@@ -39,6 +40,10 @@ export function App() {
           <NavLink to="/statuses" className={navLinkClass}>Statuses</NavLink>
           <NavLink to="/playbooks" className={navLinkClass}>Playbooks</NavLink>
           <NavLink to="/import" className={navLinkClass}>Import</NavLink>
+          {/* A page like any other rather than a strip element: what it holds
+              is this installation's own configuration, and it is the only place
+              a Hatch with no admin app beside it can be configured at all. */}
+          <NavLink to="/settings" className={navLinkClass}>Settings</NavLink>
 
           {/* The right-hand group: what the strip says about this session
               rather than about the board. One box because two elements each
@@ -65,6 +70,7 @@ export function App() {
           <Route path="/playbooks" element={<PlaybooksPage />} />
           <Route path="/issues/:key" element={<IssuePage />} />
           <Route path="/import" element={<ImportPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           {/* An unknown deep link lands on the board rather than on nothing -
               the board is the app, and there is no page worth writing that
               says "that URL was wrong". */}

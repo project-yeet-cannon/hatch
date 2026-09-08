@@ -635,6 +635,26 @@ export interface LocalPerson {
   configured: boolean;
 }
 
+// ---- Settings ----
+
+/** The two settings a Hatch install of its own has. Mirrors HatchSettingsDto. */
+export interface HatchSettings {
+  /** Dots when a token is set, empty when none is - never the token itself. */
+  claudeSubscriptionToken: string;
+  /** Whether there is a name here to set at all: false wherever the wall is up,
+      because there the name comes from the grant and the field would be a lie. */
+  localPersonNameApplies: boolean;
+  /** The name as stored, or empty. Not a secret, so it comes back to be edited. */
+  localPersonName: string;
+}
+
+/** An edit to either setting, or both. A field left out is left alone; `''`
+    clears one - the same rule the issues bulk endpoint states. */
+export interface HatchSettingsWriteRequest {
+  claudeSubscriptionToken?: string;
+  localPersonName?: string;
+}
+
 // ---- The work log ----
 
 /** What one model cost inside one session. Mirrors WorkLogModelUseDto. */

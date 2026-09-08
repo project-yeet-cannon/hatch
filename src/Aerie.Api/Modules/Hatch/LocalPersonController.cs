@@ -19,10 +19,10 @@ namespace Aerie.Api.Modules.Hatch;
 /// something used to be.
 /// </summary>
 /// <remarks>
-/// A read of an identity and not a way to set one. Writing the name is
-/// AERIE-936's Settings page; this story is what makes that a page and a route
-/// rather than a page, a route and a lane, because the setting it will write is
-/// already the first thing <see cref="LocalCaller.PersonNameOf"/> consults.
+/// A read of an identity and not a way to set one. Writing it is
+/// <see cref="SettingsController"/>, which writes the same setting this reads -
+/// already the first thing <see cref="LocalCaller.PersonNameOf"/> consults, so
+/// the two need nothing between them.
 /// </remarks>
 [ApiController]
 [Route("api/hatch/local-person")]
