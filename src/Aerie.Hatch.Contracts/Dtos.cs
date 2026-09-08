@@ -961,6 +961,49 @@ public record WorkLogSessionsDto(
 // ---- Runners ----
 
 /// <summary>
+/// What a runner is: a loop that will ask again, or a single increment that
+/// will not.
+/// </summary>
+/// <remarks>
+/// Spelled on the contract rather than on either side of the wire, because both
+/// sides act on it: the runner says which it is, and the board decides from it
+/// whether to draw a control surface at all.
+/// </remarks>
+public static class RunnerKinds
+{
+    /// <summary><c>go-to-work</c>: it heartbeats every pass and obeys what comes back.</summary>
+    public const string Loop = "loop";
+
+    /// <summary><c>work</c>, and <c>go-to-work --once</c>: one heartbeat, and no second pass to apply an instruction to.</summary>
+    public const string Once = "once";
+}
+
+/// <summary>
+/// What the board would like a runner to do: carry on, hold, or finish and
+/// stop.
+/// </summary>
+/// <remarks>
+/// Three and no more, and none of them is "kill it". Nothing on the server
+/// reaches into a process; every one of these is picked up by the loop itself,
+/// between increments, which is what makes them work for a runner behind a
+/// router nothing can reach.
+/// </remarks>
+public static class RunnerStates
+{
+    /// <summary>Take the next ticket, as ever.</summary>
+    public const string Running = "running";
+
+    /// <summary>Keep saying you are here; take nothing.</summary>
+    public const string Paused = "paused";
+
+    /// <summary>Finish whatever is in flight and exit without picking another.</summary>
+    public const string Stopping = "stopping";
+
+    /// <summary>The three, in the order a control surface should offer them.</summary>
+    public static readonly string[] All = [Running, Paused, Stopping];
+}
+
+/// <summary>
 /// One runner as the board draws it: who it is, what it is doing, when it was
 /// last heard from, and what it has been asked to do next.
 /// </summary>

@@ -1074,23 +1074,18 @@ public class EfHatchRunner
     /// <summary>Room for an issue key, which is what <c>--under</c> takes.</summary>
     public const int MaxUnderLength = 32;
 
-    /// <summary>A loop, asking for its instructions between increments.</summary>
-    public const string LoopKind = "loop";
-
-    /// <summary>One increment and out - <c>work</c>, or <c>go-to-work --once</c>. It heartbeats once and reads nothing back.</summary>
-    public const string OnceKind = "once";
-
-    /// <summary>Carry on.</summary>
-    public const string Running = "running";
-
-    /// <summary>Keep heartbeating, take no new ticket.</summary>
-    public const string Paused = "paused";
-
-    /// <summary>Finish what is in flight and exit.</summary>
-    public const string Stopping = "stopping";
+    // The five words both sides of the wire act on, read off the contract
+    // rather than written down again here - the runner sends one of the kinds
+    // and obeys one of the states, and the copy that would be wrong is always
+    // the one nobody was looking at.
+    public const string LoopKind = RunnerKinds.Loop;
+    public const string OnceKind = RunnerKinds.Once;
+    public const string Running = RunnerStates.Running;
+    public const string Paused = RunnerStates.Paused;
+    public const string Stopping = RunnerStates.Stopping;
 
     /// <summary>The three a <c>PATCH</c> accepts, in the order a control surface should offer them.</summary>
-    public static readonly string[] States = [Running, Paused, Stopping];
+    public static readonly string[] States = RunnerStates.All;
 
     /// <summary>
     /// What the runner calls itself - <c>host:/path/to/checkout</c>, or

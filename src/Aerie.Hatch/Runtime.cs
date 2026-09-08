@@ -39,6 +39,14 @@ public sealed record Runtime(
     public Increment Increment() => new(Board, Sessions, Settings, Say);
 
     /// <summary>
+    /// This process, on the board: where it says it is alive and reads back
+    /// what it has been asked to do. Named by <see cref="RunnerName"/>, which
+    /// is the same string its claims carry - a runner has one identity, and the
+    /// row is keyed on it.
+    /// </summary>
+    public Runners Runners() => new(Board.Client, RunnerName);
+
+    /// <summary>
     /// How the tree is made current between increments. Replaceable so a test
     /// can assert the order a pass does things in - the claim, then the reset,
     /// then the spawn - without a remote to fetch from.
