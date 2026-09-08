@@ -1,5 +1,6 @@
 using Aerie.Api.Common;
 using Aerie.Api.Ef;
+using Aerie.Api.Jobs;
 using Aerie.Api.Models.DeviceMapping;
 using Aerie.Api.Services.DeviceMapping;
 using Microsoft.AspNetCore.Mvc;
@@ -25,8 +26,23 @@ namespace Aerie.Api.Controllers;
 public class SettingsController(
     AerieContext db,
     IHomeAssistantConnectionManager haConnection,
-    ISiteSettingsService siteSettings) : ControllerBase
+    ISiteSettingsService siteSettings,
+    JobsInit jobs) : ControllerBase
 {
+    /// <summary>
+    /// The three keys that are, between them, the Home Assistant connection -
+    /// and therefore whether this installation has a house at all. Saving or
+    /// clearing any of them re-applies the connection and re-decides the house
+    /// jobs' schedule (see JobsInit.WireUpJobs), so an operator who connects a
+    /// house gets its jobs without a restart and one who disconnects it stops
+    /// them the same way. They are saved one key at a time, so a full
+    /// connection only resolves after the third write and WireUpJobs runs three
+    /// times; it is idempotent, which is what makes that fine.
+    /// </summary>
+    private static bool IsHomeAssistantConnection(string key) =>
+        key is SiteSettingKeys.HomeAssistantHost or SiteSettingKeys.HomeAssistantPort
+            or SiteSettingKeys.HomeAssistantToken;
+
     [HttpGet]
     public async Task<IReadOnlyList<SiteSettingDto>> GetAll(CancellationToken ct)
     {
@@ -67,8 +83,16 @@ public class SettingsController(
         // answer for the length of the cache TTL.
         siteSettings.Invalidate();
 
-        if (key is SiteSettingKeys.HomeAssistantHost or SiteSettingKeys.HomeAssistantPort or SiteSettingKeys.HomeAssistantToken)
+        if (IsHomeAssistantConnection(key))
+        {
             await haConnection.ApplyAsync(ct);
+
+            // Better than the ApplyAsync above it, and for a reason worth
+            // knowing: the Quartz store is shared, so this write reaches every
+            // replica's schedule, where ClientFactory.Initialize reaches only
+            // the one that took the request.
+            await jobs.WireUpJobs();
+        }
 
         return new SiteSettingDto(setting.Key, Redact(setting.Key, setting.Value));
     }
@@ -81,6 +105,13 @@ public class SettingsController(
         db.SiteSettings.Remove(setting);
         await db.SaveChangesAsync(ct);
         siteSettings.Invalidate();
+
+        // The other side of Upsert's branch. Without it, clearing a connection
+        // would leave the house jobs scheduled against a house that is no
+        // longer there.
+        if (IsHomeAssistantConnection(key))
+            await jobs.WireUpJobs();
+
         return NoContent();
     }
 

@@ -24,6 +24,9 @@ public class SyncOutdoorHazards(IHazardSyncService sync, ILogger<SyncOutdoorHaza
 
     public TimeSpan Interval => TimeSpan.FromMinutes(15);
 
+    /// <summary>Same as SyncCalendarEvents: the hazard panel is drawn on the kiosk wall, and there is no wall without a house.</summary>
+    public bool ServesTheHouse => true;
+
     public async Task Execute(IJobExecutionContext context)
     {
         // SyncAsync is fail-soft by contract, so there is nothing to catch
