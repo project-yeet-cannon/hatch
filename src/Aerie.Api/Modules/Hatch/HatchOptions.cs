@@ -30,4 +30,25 @@ public class HatchOptions
     /// what it is.
     /// </remarks>
     public int ClaimTtlSeconds { get; set; } = 300;
+
+    /// <summary>
+    /// How long a runner may go without a heartbeat before its row reads
+    /// <em>gone</em> - see <see cref="EfHatchRunner.LastSeenAt"/>. Shorter than
+    /// a claim's TTL on purpose: a claim is a lease that must outlast a slow
+    /// build, and this is a control surface, where a runner that stopped
+    /// answering a minute ago is worth saying so about.
+    /// </summary>
+    /// <remarks>
+    /// <para>Read through <see cref="Runners.GoneAfterSeconds"/> and nowhere
+    /// else, guarded there the way the TTL above is.</para>
+    ///
+    /// <para>The second horizon - the one past which a row is not returned at
+    /// all - is deliberately not a setting. It is a fixed multiple of this
+    /// (<see cref="Runners.DropMultiple"/>), because the two are not
+    /// independent judgements: one says "this runner is not answering" and the
+    /// other says "this runner is not coming back", and an installation that
+    /// could set them apart could set the second shorter than the first and
+    /// have rows vanish before they were ever gone.</para>
+    /// </remarks>
+    public int RunnerGoneAfterSeconds { get; set; } = 90;
 }

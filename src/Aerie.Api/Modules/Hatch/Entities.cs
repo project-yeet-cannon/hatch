@@ -1029,3 +1029,141 @@ public class EfHatchWorkLogEntry
     /// <summary>When the row landed, which is not when the session ended.</summary>
     public required DateTimeOffset CreatedAt { get; set; }
 }
+
+/// <summary>
+/// A runner: one <c>go-to-work</c> or <c>work</c> process, and what the board
+/// would like it to do next.
+///
+/// The row is written from two directions and they never overlap. The process
+/// writes <see cref="Kind"/>, <see cref="LastSeenAt"/> and <see cref="Line"/>
+/// on every heartbeat - "I am here, and this is what I am doing". The operator
+/// writes <see cref="State"/> and the four bounds - "keep going", "finish and
+/// stop", "stay under this epic" - and a heartbeat never overwrites one of
+/// those once the row exists. What the loop reads back off its own heartbeat is
+/// the second half, which is the whole round trip: nothing on the server starts
+/// or stops a process, it says what it would like and the runner obeys between
+/// increments.
+/// </summary>
+/// <remarks>
+/// <para>There is no claim key here, deliberately, and it is the one thing
+/// somebody adding a column to this table is most likely to want. What a runner
+/// is working is <see cref="EfHatchIssue.ClaimRunner"/> read back the other way
+/// - <c>Issues WHERE ClaimRunner = Name</c>, judged live - the same way an open
+/// question is computed rather than stored. A column here would be a copy that
+/// drifts the moment an operator clears a claim out from under the runner
+/// holding it.</para>
+///
+/// <para>Nothing sweeps this table. A row ages through idle, then gone, then
+/// out of the read entirely - all three by arithmetic against
+/// <see cref="LastSeenAt"/> at the moment somebody asks, which is the same lazy
+/// expiry the claim uses and for the same reason: there is no timeout to tune
+/// and no sweeper to notice has stopped.</para>
+/// </remarks>
+[Table("Runners")]
+public class EfHatchRunner
+{
+    /// <summary>Room for <c>host:/path/to/checkout</c> - the same name a claim carries, because it is the same name.</summary>
+    public const int MaxNameLength = ClaimRequest.MaxRunnerLength;
+
+    /// <summary>Room for a line the runner printed, on the terms a claim's chatter has.</summary>
+    public const int MaxLineLength = ClaimRequest.MaxChatterLength;
+
+    public const int MaxKindLength = 16;
+    public const int MaxStateLength = 16;
+
+    /// <summary>Room for an issue key, which is what <c>--under</c> takes.</summary>
+    public const int MaxUnderLength = 32;
+
+    /// <summary>A loop, asking for its instructions between increments.</summary>
+    public const string LoopKind = "loop";
+
+    /// <summary>One increment and out - <c>work</c>, or <c>go-to-work --once</c>. It heartbeats once and reads nothing back.</summary>
+    public const string OnceKind = "once";
+
+    /// <summary>Carry on.</summary>
+    public const string Running = "running";
+
+    /// <summary>Keep heartbeating, take no new ticket.</summary>
+    public const string Paused = "paused";
+
+    /// <summary>Finish what is in flight and exit.</summary>
+    public const string Stopping = "stopping";
+
+    /// <summary>The three a <c>PATCH</c> accepts, in the order a control surface should offer them.</summary>
+    public static readonly string[] States = [Running, Paused, Stopping];
+
+    /// <summary>
+    /// What the runner calls itself - <c>host:/path/to/checkout</c>, or
+    /// <c>HATCH_RUNNER</c>'s override. The key, because a runner already has
+    /// exactly one identity and it is this one; a surrogate id would be a
+    /// second name to keep in step with the claim's.
+    /// </summary>
+    [Key]
+    [MaxLength(MaxNameLength)]
+    public required string Name { get; set; }
+
+    /// <summary>
+    /// <see cref="LoopKind"/> or <see cref="OnceKind"/> - whether anything will
+    /// ever read an instruction back. Written by every heartbeat rather than
+    /// only on insert: the same checkout runs both commands, and a row that
+    /// still said <c>loop</c> would offer a control surface for a process that
+    /// exited an hour ago.
+    /// </summary>
+    [MaxLength(MaxKindLength)]
+    public required string Kind { get; set; }
+
+    /// <summary>The first time this name was ever seen, and never moved afterwards.</summary>
+    public required DateTimeOffset FirstSeenAt { get; set; }
+
+    /// <summary>
+    /// The last heartbeat. Every judgement about this row - idle, gone, dropped
+    /// - is arithmetic against this and nothing else.
+    /// </summary>
+    public required DateTimeOffset LastSeenAt { get; set; }
+
+    /// <summary>
+    /// The last line the runner printed while holding no claim: what it is
+    /// waiting for, why it is idle, why it stopped. In-increment chatter rides
+    /// the claim instead and is read from there, so this is only ever drawn for
+    /// a runner between tickets.
+    /// </summary>
+    [MaxLength(MaxLineLength)]
+    public string? Line { get; set; }
+
+    /// <summary>When that line arrived, so a stale one reads as stale.</summary>
+    public DateTimeOffset? LineAt { get; set; }
+
+    /// <summary>
+    /// What the board would like this runner to do: <see cref="Running"/>,
+    /// <see cref="Paused"/> or <see cref="Stopping"/>. Written by a person and
+    /// never by a heartbeat - an agent that could set its own state could
+    /// un-stop itself.
+    /// </summary>
+    [MaxLength(MaxStateLength)]
+    public required string State { get; set; }
+
+    /// <summary>
+    /// The epic to stay inside, or null for the whole board -
+    /// <c>go-to-work --under</c>, moved to the board.
+    /// </summary>
+    [MaxLength(MaxUnderLength)]
+    public string? Under { get; set; }
+
+    /// <summary>
+    /// The cap on increments, compared against a count the runner keeps itself.
+    /// Lowering it below what a night has already spent stops that loop at its
+    /// next pass, which is the honest reading of a cap.
+    /// </summary>
+    public int? MaxRuns { get; set; }
+
+    /// <summary>The cap on dollars, on the same terms.</summary>
+    public decimal? MaxSpend { get; set; }
+
+    /// <summary>
+    /// When to stop, always as an instant. The command line takes a wall clock
+    /// (<c>--until 06:00</c>) because somebody is typing it at a terminal in a
+    /// timezone; a row on a page is read by a browser that knows its own, so
+    /// the stored form is the unambiguous one.
+    /// </summary>
+    public DateTimeOffset? UntilAt { get; set; }
+}

@@ -957,3 +957,114 @@ public record WorkLogSessionsDto(
     DateTimeOffset? FirstSessionAt,
     DateTimeOffset? LastSessionAt,
     IReadOnlyList<WorkLogSessionDto> Sessions);
+
+// ---- Runners ----
+
+/// <summary>
+/// One runner as the board draws it: who it is, what it is doing, when it was
+/// last heard from, and what it has been asked to do next.
+/// </summary>
+/// <remarks>
+/// Nothing here is a second copy of the claim. <paramref name="ClaimKey"/> and
+/// the line beside it are read live off whichever issue this runner holds at
+/// the moment the request is served, so an operator who clears a claim sees the
+/// runner go idle on the next poll rather than seeing a column that remembers
+/// the ticket.
+/// </remarks>
+/// <param name="Name">What the runner calls itself - <c>host:/path/to/checkout</c>, the same string its claims carry.</param>
+/// <param name="Kind">
+/// <c>loop</c> for <c>go-to-work</c>, which asks for instructions between
+/// increments, or <c>once</c> for a single increment that will never read one.
+/// A control surface is worth drawing only for the first.
+/// </param>
+/// <param name="ClaimKey">The issue it holds right now, or null between increments.</param>
+/// <param name="Line">
+/// The last thing it said: the claim's chatter while it holds one, and its own
+/// last line when it does not. One field because it is one question - what is
+/// this runner doing - and which row answered it is not the reader's problem.
+/// </param>
+/// <param name="GoneAfterSeconds">
+/// How long a runner may go unheard from before it is gone, the way a claim
+/// carries its own TTL: the server honours it, so the server says what it is,
+/// and a client can draw "quiet" without deciding for itself what quiet means.
+/// </param>
+public record RunnerDto(
+    string Name,
+    string Kind,
+    DateTimeOffset FirstSeenAt,
+    DateTimeOffset LastSeenAt,
+    string? ClaimKey,
+    string? Line,
+    DateTimeOffset? LineAt,
+    string State,
+    string? Under,
+    int? MaxRuns,
+    decimal? MaxSpend,
+    DateTimeOffset? UntilAt,
+    int GoneAfterSeconds);
+
+/// <summary>
+/// Still here, and what should I do next - the one call a runner makes about
+/// itself.
+/// </summary>
+/// <remarks>
+/// The four bounds are <em>reported</em>, not requested: they are what this
+/// process started with, and they are written only when the row is being
+/// created. A restart of the same loop sends them again and the server ignores
+/// them, which is what stops a restart from undoing an operator's edit.
+/// </remarks>
+/// <param name="Kind">
+/// <see cref="RunnerDto.Kind"/>, and the runner is what knows it: a loop asks
+/// again, a single increment does not.
+/// </param>
+/// <param name="Line">
+/// What it is doing right now, on the terms
+/// <see cref="ClaimHeartbeatRequest.Chatter"/> has: absent leaves the last one
+/// alone, <c>""</c> clears it, and anything longer than
+/// <see cref="ClaimRequest.MaxChatterLength"/> is truncated rather than
+/// refused.
+/// </param>
+public record RunnerHeartbeatRequest(
+    string? Kind = null,
+    string? Line = null,
+    string? Under = null,
+    int? MaxRuns = null,
+    decimal? MaxSpend = null,
+    DateTimeOffset? UntilAt = null);
+
+/// <summary>
+/// What the board would like this runner to do, answered to its own heartbeat
+/// and read by nobody else.
+/// </summary>
+/// <remarks>
+/// The loop folds all five into its bounds before its next pick, so a person
+/// editing a row changes what that loop does from the next ticket onward -
+/// never in the middle of one. That is not a check anywhere: the heartbeat
+/// happens at the top of a pass, which is the one moment no claim is held.
+/// </remarks>
+public record RunnerInstructionDto(
+    string State,
+    string? Under,
+    int? MaxRuns,
+    decimal? MaxSpend,
+    DateTimeOffset? UntilAt);
+
+/// <summary>
+/// The operator's half: keep going, pause, stop after this one - and the bounds
+/// that were flags on the command line.
+/// </summary>
+/// <remarks>
+/// Every field is a string on the wire, and absent / <c>""</c> / a value are
+/// leave alone / clear / set, which is the convention the two dates on
+/// <see cref="IssuePatchRequest"/> already established. The numbers wear the
+/// same clothes rather than inventing a second tri-state for themselves - a
+/// nullable number can say "leave it" or "set it" but not "take the cap off".
+/// </remarks>
+/// <param name="State">One of <c>running</c>, <c>paused</c>, <c>stopping</c>. Not clearable - a runner is always in one of the three.</param>
+/// <param name="UntilAt">An instant (<c>2026-09-12T17:00:00Z</c>), read by <c>IssueMoment</c> the way a ready date is.</param>
+public record RunnerPatchRequest(
+    string? State = null,
+    string? Under = null,
+    string? MaxRuns = null,
+    string? MaxSpend = null,
+    string? UntilAt = null);

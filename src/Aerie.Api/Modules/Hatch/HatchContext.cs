@@ -4,7 +4,7 @@ namespace Aerie.Api.Modules.Hatch;
 
 /// <summary>
 /// Hatch's slice of the Aerie database: the <c>hatch</c> schema, its own
-/// migration history, eight tables.
+/// migration history, nine tables.
 /// </summary>
 public class HatchContext(DbContextOptions<HatchContext> options) : DbContext(options), IModuleContext
 {
@@ -18,6 +18,14 @@ public class HatchContext(DbContextOptions<HatchContext> options) : DbContext(op
     public DbSet<EfHatchPlaybook> Playbooks => Set<EfHatchPlaybook>();
     public DbSet<EfHatchIssueDependency> Dependencies => Set<EfHatchIssueDependency>();
     public DbSet<EfHatchWorkLogEntry> WorkLog => Set<EfHatchWorkLogEntry>();
+
+    /// <summary>
+    /// The processes that have spoken to this Hatch lately, and what the board
+    /// would like each to do next. Keyed on the name a runner already calls
+    /// itself by, and related to nothing: a runner is an identity a checkout
+    /// computes, not a row that belongs to an issue.
+    /// </summary>
+    public DbSet<EfHatchRunner> Runners => Set<EfHatchRunner>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -135,6 +143,10 @@ public class HatchContext(DbContextOptions<HatchContext> options) : DbContext(op
                 .HasForeignKey(d => d.DependsOnId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
+
+        // Two places, because a spend cap is dollars and cents and the default
+        // scale would refuse the number an operator types into the box.
+        modelBuilder.Entity<EfHatchRunner>().Property(r => r.MaxSpend).HasPrecision(18, 2);
 
         // Cascade with the issue, the way comments and events do and for the
         // same reason: a meter reading for a ticket nobody kept is a row about

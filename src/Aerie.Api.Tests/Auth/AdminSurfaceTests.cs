@@ -242,6 +242,17 @@ public class AdminSurfaceTests
         // IssuePlaybookController.
         "IssuePlaybookController.PatchIssuePlaybook",
 
+        // The runners, and the same split drawn a third time. The heartbeat and
+        // the read are a dispatcher's - a loop that could not say it was alive
+        // would leave a control surface that could only ever be empty - and the
+        // PATCH beside them is the operator's, because every field it writes is
+        // a bound on how much a runner may spend and how long it may run. An
+        // agent that could raise its own --max-spend could raise its own
+        // budget. See RunnersController.
+        "RunnersController.GetRunners",
+        "RunnersController.Heartbeat",
+        "RunnersController.PatchRunner",
+
         // A related edge, cut the same way and for a different reason: under
         // the loop's "people only" rule an assignee is a dispatch gate, so a
         // key that could write one could clear a person's name off a ticket and
