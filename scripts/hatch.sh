@@ -10,11 +10,20 @@
 # and which card is at the top of it (rank order, minus the ones whose ready
 # date has not arrived - the board folds those away and so does this).
 #
-# Two settings, both required, neither in this repo:
+# Two settings, neither in this repo:
 #
-#   AERIE_BASE       https://hatch.<your domain>   - or a local dev origin
+#   AERIE_BASE       https://hatch.<your domain>   - or a local dev origin.
+#                                                    Required.
 #   AERIE_HATCH_KEY  aerie_ak_...                  - minted on the admin app's
-#                                                    API keys page, shown once
+#                                                    API keys page, shown once.
+#                                                    Required against a Hatch
+#                                                    with its wall up, which is
+#                                                    every cluster install;
+#                                                    optional against one
+#                                                    started with Auth:Enabled
+#                                                    false, where calls name
+#                                                    themselves with the runner
+#                                                    header instead
 #
 # And a few optional ones, all of them for the two commands that spawn a
 # session - which are the runner's rather than this file's, and read them
@@ -149,8 +158,13 @@ load_env() {
 
 # Called by every command that talks to Hatch, and by none of the ones that do
 # not - `config` has to be able to run before there is anything to require.
+# The origin alone. The key is not required, because a Hatch started with its
+# wall off has no credential to present and names its callers by the runner
+# header instead - see docs/auth-architecture.md, "Local mode". A key against
+# that Hatch still works and still wins; a missing one against a Hatch with a
+# wall is a 401, and `api` says which of the two happened.
 require_env() {
-  if [ -z "${AERIE_BASE:-}" ] || [ -z "${AERIE_HATCH_KEY:-}" ]; then
+  if [ -z "${AERIE_BASE:-}" ]; then
     cat >&2 <<MISSING
 hatch: not configured.
 
@@ -158,11 +172,34 @@ hatch: not configured.
 
   asks for the Hatch origin and an aerie_ak_ key and writes them to
   $(env_file), which git ignores. Exporting AERIE_BASE and
-  AERIE_HATCH_KEY yourself works too, and wins over the file.
+  AERIE_HATCH_KEY yourself works too, and wins over the file. The key
+  may be left empty for a Hatch running with its wall off.
 MISSING
     exit 1
   fi
   base="${AERIE_BASE%/}"
+}
+
+# What a keyless call calls itself: the same host:/path sentence
+# Checkout.Runner builds, so one runner reads one way whichever half of the
+# tooling is speaking. Capped from the head like that one does, because the end
+# of a path is the part that names a checkout.
+RUNNER_MAX=240
+
+runner_name() {
+  local name root
+  if [ -n "${HATCH_RUNNER:-}" ]; then
+    name="$HATCH_RUNNER"
+  else
+    root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+    name="$(hostname -s 2>/dev/null || hostname):${root}"
+  fi
+
+  if [ "${#name}" -gt "$RUNNER_MAX" ]; then
+    printf '...%s' "${name: -$((RUNNER_MAX - 3))}"
+  else
+    printf '%s' "$name"
+  fi
 }
 
 # Enough of a key to recognise which one it is, and not enough to use.
@@ -178,7 +215,7 @@ cmd_config() {
   if [ "${1:-}" = "--show" ]; then
     echo "file:             ${file}$([ -f "$file" ] || echo ' (does not exist yet)')"
     echo "AERIE_BASE:       ${AERIE_BASE:-<unset>}"
-    echo "AERIE_HATCH_KEY:  $([ -n "${AERIE_HATCH_KEY:-}" ] && mask_key "$AERIE_HATCH_KEY" || echo '<unset>')"
+    echo "AERIE_HATCH_KEY:  $([ -n "${AERIE_HATCH_KEY:-}" ] && mask_key "$AERIE_HATCH_KEY" || echo "<unset - calls go out as \"$(runner_name)\", which only a wall-off Hatch reads>")"
     echo "HATCH_CLAUDE_BIN: ${HATCH_CLAUDE_BIN:-<unset, using PATH>}"
     return
   fi
@@ -210,8 +247,8 @@ cmd_config() {
   IFS= read -rs ans || ans=""
   echo
   if [ -n "$ans" ]; then cur_key="$ans"; fi
-  [ -n "$cur_key" ] || { echo "hatch: a key is required - mint one on the admin app's API keys page" >&2; exit 1; }
   case "$cur_key" in
+    '') echo "hatch: no key - calls will name themselves \"$(runner_name)\", which only a Hatch with its wall off reads." >&2 ;;
     aerie_ak_*) ;;
     *) echo "hatch: warning - that does not start with aerie_ak_. Carrying on; the call below will say." >&2 ;;
   esac
@@ -234,6 +271,8 @@ cmd_config() {
     echo "# recognisable on sight. Re-run \`config\` to change any of this."
     echo
     printf 'AERIE_BASE=%s\n' "$cur_base"
+    # Written even when empty, so the file records that the omission was
+    # deliberate rather than looking like a half-finished config.
     printf 'AERIE_HATCH_KEY=%s\n' "$cur_key"
     if [ -n "$cur_bin" ]; then printf 'HATCH_CLAUDE_BIN=%s\n' "$cur_bin"; fi
   } >> "$tmp"
@@ -266,7 +305,15 @@ api() {
   local method="$1" path="$2" body="${3:-}"
   local response code
   local -a args
-  args=(-sS -X "$method" -H "Authorization: Bearer ${AERIE_HATCH_KEY}" -w '\n%{http_code}')
+  args=(-sS -X "$method" -w '\n%{http_code}')
+
+  # One or the other, never both. A key is a credential and outranks a name;
+  # the header is only a name, and only a Hatch with its wall off reads one.
+  if [ -n "${AERIE_HATCH_KEY:-}" ]; then
+    args+=(-H "Authorization: Bearer ${AERIE_HATCH_KEY}")
+  else
+    args+=(-H "X-Hatch-Runner: $(runner_name)")
+  fi
   [ -n "$body" ] && args+=(-H 'Content-Type: application/json' -d "$body")
 
   if ! response=$(curl "${args[@]}" "${base}/${path#/}" 2>&1); then
@@ -281,7 +328,16 @@ api() {
 
   case "$code" in
     2*) [ -n "$response" ] && printf '%s\n' "$response"; return 0 ;;
-    401) echo "hatch: 401 - the key was not accepted. Minted, not revoked, copied whole?" >&2 ;;
+    401)
+      if [ -n "${AERIE_HATCH_KEY:-}" ]; then
+        echo "hatch: 401 - the key was not accepted. Minted, not revoked, copied whole?" >&2
+      else
+        # No credential was sent, so nothing was rejected: this Hatch has its
+        # wall up and wants one. Said plainly, because "the key was not
+        # accepted" would send somebody looking at a key they never set.
+        echo "hatch: 401 - no key was sent and this Hatch has its wall on. Run \`./scripts/hatch.sh config\`." >&2
+      fi
+      ;;
     403) echo "hatch: 403 - the key is good and this route is not one it may take (CLAUDE.md)." >&2 ;;
     404) echo "hatch: 404 - no such issue or route: ${path}" >&2 ;;
     *)   echo "hatch: ${code} - ${response}" >&2 ;;
