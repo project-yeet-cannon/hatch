@@ -11,22 +11,38 @@ Notes for Claude. Read [`README.md`](README.md) for what Aerie is,
 where work is described, and it is reachable programmatically — so a link to a
 ticket is a complete instruction, and the ticket is where the answer goes back.
 
-[`scripts/hatch.sh`](scripts/hatch.sh) wraps the calls a working session
-actually makes — `board`, `next`, `queue`, `show`, `start`, `move`, `comment`,
-`pr`, `depends`, `ask`, `questions`, `answer`, `work`, `go-to-work`, and `api`
-for everything else. It finds a column by name rather than by id, on the letters
-and digits alone, so `todo` reaches the column the board calls `To Do`. Prefer
-it to raw `curl`; the raw calls below are what it is doing.
+`hatch` is the calls a working session actually makes — `board`, `next`,
+`queue`, `show`, `start`, `move`, `comment`, `pr`, `depends`, `ask`,
+`questions`, `answer`, `config`, `work`, `go-to-work`, and `api` for everything
+else. It finds a column by name rather than by id, on the letters and digits
+alone, so `todo` reaches the column the board calls `To Do`. Prefer it to raw
+`curl`; the raw calls below are what it is doing. `hatch --help` lists the
+surface, and every subcommand takes `-h` for its own.
 
-Access is an API key — `Authorization: Bearer aerie_ak_…` — read from
-`scripts/.env` (written by `hatch.sh config`, ignored by git) or from an
-exported `AERIE_BASE`/`AERIE_HATCH_KEY`, which win over the file. **The key
-lives outside the artifact**: never a tracked file, never a value in a commit,
-never pasted into a plan or an issue. Aerie is headed for release to other
-operators, and a credential in the artifact is one operator's credential
-inherited by everyone who clones it. The key carries the `hatch` scope and
-reaches `/api/hatch/*` and nothing else, so a `403` means the key is working and
-the route is not one a key may take — ask the operator.
+It is one program — [`src/Aerie.Hatch`](src/Aerie.Hatch), published as a single
+binary for macOS, Windows and Linux — because an operator who clones Aerie has
+no copy of this repository's scripts on their `PATH`. Only `work` and
+`go-to-work` need to be run inside a git checkout.
+
+**In this checkout, [`scripts/hatch.sh`](scripts/hatch.sh) reaches every one of
+those commands**, finding or building the binary and handing over. Use it where
+`hatch` is not installed; the two are the same commands and the same arguments,
+and this file writes `./scripts/hatch.sh` below for exactly that reason.
+
+Access is an API key — `Authorization: Bearer aerie_ak_…` — read from three
+layers, highest first: an exported `AERIE_BASE`/`AERIE_HATCH_KEY`, then
+`scripts/.env` in this checkout (ignored by git), then the per-user file
+`hatch config` writes. **The key lives outside the artifact**: never a tracked
+file, never a value in a commit, never pasted into a plan or an issue. Aerie is
+headed for release to other operators, and a credential in the artifact is one
+operator's credential inherited by everyone who clones it. The key carries the
+`hatch` scope and reaches `/api/hatch/*` and nothing else, so a `403` means the
+key is working and the route is not one a key may take — ask the operator.
+
+The key is optional against a Hatch running with its wall off, where calls name
+themselves with a runner header instead. So a `401` says which of two things
+happened: a key that was sent and refused, or no key against a Hatch that wants
+one.
 
 ### If the loop spawned you
 
@@ -75,7 +91,7 @@ writable only by a person — as is a model or effort pinned on a single ticket.
 a playbook is wrong, say so on the ticket. The API refuses to let you route
 around it, and it refuses on purpose.
 
-Work on the loop itself — `scripts/hatch.sh`, `src/Aerie.Hatch`,
+Work on the loop itself — `src/Aerie.Hatch`, `scripts/hatch.sh`,
 `src/Aerie.Hatch.Contracts` — reaches the next increment rather than the next
 night: when its own source changes on the trunk, the loop rebuilds and comes
 back as the new version.
@@ -164,7 +180,7 @@ here, because getting them wrong is not recoverable by reading further:
   ```
   ~~~
 
-  `hatch.sh` lifts that out of the last thing the session says and posts it,
+  `hatch` lifts that out of the last thing the session says and posts it,
   with what the increment cost, as one row of the **work log** on the ticket —
   the only record anywhere that knows *which* ticket the money went on. Write it
   last, and write it once: whichever block comes last wins.

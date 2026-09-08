@@ -806,7 +806,7 @@ say whose ticket it is leaving alone, so both `GET /api/hatch/assignees` and the
 
 One related edge is **not** cut, and is stated rather than papered over:
 **nothing stops a key answering its own question.** A key is what
-`hatch.sh answer` types with and it is also what a spawned agent inherits; the
+`hatch answer` types with and it is also what a spawned agent inherits; the
 server cannot tell them apart, and a check that looked like it could would be
 worse than none. What holds the loop shut is one step further out — the dispatch
 is refused while a question is open, and the dispatch is a command the operator
@@ -1216,7 +1216,7 @@ projected in one batch.
 jammed board from a finished one was computed and served here long before
 anything printed it, and for a while nothing did unless somebody thought to run
 `queue` by hand — so ten minutes of an idle loop saying "nothing on the board is
-an agent's to move" read as a broken loop. `hatch.sh` now groups the scan's
+an agent's to move" read as a broken loop. `hatch` now groups the scan's
 sentences and prints them with a count each whenever a pass finds nothing, and
 a board with nothing on the dispatcher's path at all says *that* instead. Two
 different boards, two different sentences, no second command.
@@ -1276,7 +1276,7 @@ it back.
 
 ## The unattended loop
 
-`hatch.sh go-to-work` is [the dispatcher](#the-dispatcher) run in a circle: read
+`hatch go-to-work` is [the dispatcher](#the-dispatcher) run in a circle: read
 the board, take the one issue an agent may advance, spend one increment on it,
 and ask again. Given nothing else it runs until the board has nothing on it that
 an agent may move, and then waits — asking again every interval, saying so once
@@ -1292,7 +1292,7 @@ ticket itself names — or, where it names neither, the ones its
 [playbook](#playbooks) does — rather than whatever the session started as, and
 costs less for the privilege.
 
-A `--model` or `--effort` typed at `hatch.sh work` still beats both, and is
+A `--model` or `--effort` typed at `hatch work` still beats both, and is
 still not carried across a night: a flag is one operator's opinion about one
 increment, while an override is a fact recorded on a ticket somebody read. The
 line naming the two values says which of them the issue chose.
@@ -1502,7 +1502,7 @@ merely counting — and, if nothing is already open there, **a question**.
 A question rather than a **flag field**, which was the obvious alternative and
 would have had to be taught three things a question already does: it blocks the
 issue from being dispatched again, it badges the card on the board, and it is
-the list `hatch.sh answer` walks. Answering it clears the flag, which is the
+the list `hatch answer` walks. Answering it clears the flag, which is the
 right gesture, because the flag means "nobody has looked at this" and answering
 is somebody having looked. A field would have been a fourth thing on the issue
 row that only the loop writes and only the loop reads, and a second flag the
@@ -1545,22 +1545,39 @@ applying it to tickets nobody looked at.
 
 ### Where the loop lives
 
-`work` and `go-to-work` are a program — [`src/Aerie.Hatch`](../src/Aerie.Hatch)
-— and everything else an operator types is still
-[`scripts/hatch.sh`](../scripts/hatch.sh), which hands those two to it. Nothing
-an operator or a playbook types changed when they moved.
+The CLI is one program — [`src/Aerie.Hatch`](../src/Aerie.Hatch), published as a
+single binary called `hatch`. Every command is a command of it: `board`, `next`,
+`queue`, `show`, `start`, `move`, `comment`, `pr`, `depends`, `ask`,
+`questions`, `answer`, `api`, `config`, `work` and `go-to-work`.
 
-They moved because of what they do rather than what they say. Every other
-command in that script is one request and a sentence about the answer. These two
-are a lease with a clock on it, a heartbeat on a background thread, a session
-that has to be killed the moment the lease goes, and three signals — and none of
-it could be tested, because nothing in this repository tested a shell script and
-a race is precisely the thing a hand check cannot catch twice. The question was
-asked as "how is the claim verified", and the honest answer was that in a shell
-it could not be: the alternative on the table was a stub harness of some six
-hundred lines driving `hatch.sh` through a fake `curl` and a fake `claude` on
-`PATH`, which is a second program to maintain and one that can only assert what
-a recorded request log happens to show.
+It got there in two steps, for two different reasons.
+
+`work` and `go-to-work` moved first, because of what they do rather than what
+they say. Every other command is one request and a sentence about the answer.
+These two are a lease with a clock on it, a heartbeat on a background thread, a
+session that has to be killed the moment the lease goes, and three signals — and
+none of it could be tested, because nothing in this repository tested a shell
+script and a race is precisely the thing a hand check cannot catch twice. The
+question was asked as "how is the claim verified", and the honest answer was
+that in a shell it could not be: the alternative on the table was a stub harness
+of some six hundred lines driving `hatch.sh` through a fake `curl` and a fake
+`claude` on `PATH`, which is a second program to maintain and one that can only
+assert what a recorded request log happens to show.
+
+The other fourteen followed, and not because shell was the wrong language for
+`curl | jq` — it was a perfectly good one, and the ported code says the same
+things. They followed because an operator who clones Aerie into their own house
+has no copy of `scripts/hatch.sh` on their `PATH`, and a tracker reachable from
+one checkout is a tracker for one person. `hatch` installs once, runs from
+wherever somebody is standing, and keeps its settings with the person rather
+than in one repository's `scripts/` directory. The seeded playbooks name that
+command, so an agent working a friend's repository is told how to reach the
+board in words that are true there.
+
+[`scripts/hatch.sh`](../scripts/hatch.sh) is still here, and every command still
+works through it — it finds or builds the binary and hands over. What is left in
+it is the two things that are genuinely its own: that door, and the restart
+supervisor below, which a process cannot be for itself.
 
 So: a console program in the solution, compiled against
 `src/Aerie.Hatch.Contracts` — the same records the API serves, so a fixture that
@@ -1585,9 +1602,21 @@ the renderer writes to. And the line a claim carries used to go through a file
 under `TMPDIR` for the same reason, which forced the heartbeat to defend against
 reading one mid-write; it is now a field.
 
-`hatch.sh` prefers a built runner and falls back to `dotnet run`, so a checkout
+`hatch.sh` prefers a built binary and falls back to `dotnet run`, so a checkout
 with the SDK needs no build step — `make build-hatch` is the optimisation, and
-`HATCH_RUNNER_BIN` names a binary for a machine with no SDK at all.
+`HATCH_RUNNER_BIN` names a binary for a machine with no SDK at all. That target
+is deliberately a single fast Release build of this machine's own platform,
+because the restart path below calls it between increments; `make publish-hatch`
+is the other thing, and makes the self-contained single-file binary an operator
+downloads — `win-x64`, `osx-arm64`, `osx-x64` and `linux-x64`, all four built on
+every pull request.
+
+One consequence of publishing trimmed is worth naming, because it fails nowhere
+before the operator's machine: a trimmed .NET application has reflection-based
+JSON switched off outright, so every wire record is registered in a
+source-generated context (`HatchJson`). A record nobody registered refuses by
+name at the call that needed it, rather than deserialising into a dispatch with
+empty fields.
 
 One difference between the two commands is worth naming, because it is the whole
 of how a loop restarts itself. `work` is `exec`'d: one increment has nothing to
@@ -1767,25 +1796,43 @@ the plan reads — and is read on demand.
 
 ### Reaching Hatch
 
-[`scripts/hatch.sh`](../scripts/hatch.sh) wraps the calls a working session
-actually makes — `board`, `next`, `queue`, `show`, `start`, `move`, `comment`,
-`pr`, `depends`, `ask`, `questions`, `answer`, `work`, `go-to-work`, and `api`
-for everything else. The last two of those are
-[the runner](#where-the-loop-lives) and the rest are the script itself; every
-one of them is typed the same way either way. It
-finds a column by name rather than by id — on the letters and digits alone, so
-`todo` at a terminal reaches the column the board calls `To Do` — and folds off
-cards whose ready date has not arrived, exactly as the board does.
+`hatch` is the calls a working session actually makes — `board`, `next`,
+`queue`, `show`, `start`, `move`, `comment`, `pr`, `depends`, `ask`,
+`questions`, `answer`, `config`, `work`, `go-to-work`, and `api` for everything
+else. It finds a column by name rather than by id — on the letters and digits
+alone, so `todo` at a terminal reaches the column the board calls `To Do` — and
+folds off cards whose ready date has not arrived, exactly as the board does.
+`hatch --help` lists the surface and every subcommand takes `-h` for its own.
 
-Its settings come from `scripts/.env` (mode 600, git-ignored, written by
-`hatch.sh config`), and an exported `AERIE_BASE` or `AERIE_HATCH_KEY` wins over
-the file. **The key lives outside the artifact** — never a tracked file, never a
-value in a commit, never pasted into an issue. That is not ordinary secret
-hygiene: Aerie ships to other operators, and a credential in the artifact is one
-operator's credential inherited by everyone who clones it
-([`ethos.md`](ethos.md)).
+Only `work` and `go-to-work` need to be run inside a git checkout, because only
+those two are about a codebase. The other fourteen are one request and a
+sentence about the answer, and `hatch board` from a directory that has never
+been a repository is the ordinary case.
 
-`hatch.sh work` reads `work/next`, then spawns a headless session with the
+Its settings are read in three layers, highest first: an exported `AERIE_BASE`
+or `AERIE_HATCH_KEY`, then `scripts/.env` in the checkout you happen to be
+standing in, then the per-user file `hatch config` writes — mode 600, under the
+platform's application-data directory, outside every repository. An operator
+configures once and every checkout on that machine is reached; a repository that
+wants to pin its own origin still can. **The key lives outside the artifact** —
+never a tracked file, never a value in a commit, never pasted into an issue.
+That is not ordinary secret hygiene: Aerie ships to other operators, and a
+credential in the artifact is one operator's credential inherited by everyone
+who clones it ([`ethos.md`](ethos.md)).
+
+The key is optional. Against a Hatch started with its wall off
+([`auth-architecture.md`](auth-architecture.md), "Local mode") there is no
+credential to present, and every call names itself with an `X-Hatch-Runner`
+header instead — which is a name and not a proof, and only that Hatch reads one.
+So a `401` is two different sentences, and says which happened: a key that was
+sent and refused is a key to go and look at, and no key at all is a Hatch with
+its wall on and nothing to look at yet.
+
+In this repository, [`scripts/hatch.sh`](../scripts/hatch.sh) still answers to
+every one of these commands and hands them to the program, so nothing anybody
+has typed here stops working.
+
+`hatch work` reads `work/next`, then spawns a headless session with the
 playbook's prompt, model and effort. It prints the session id first and last
 with the `claude --resume` command beside it, and streams what the run is doing
 as it happens — every tool call, a thinking-token pulse, and a heartbeat naming
@@ -1794,14 +1841,14 @@ output prints nothing until the run ends, so a four-minute increment was four
 minutes of blank terminal indistinguishable from a hang, and the fix for "is it
 working" is showing the work, not a spinner.
 
-`hatch.sh go-to-work` is `work` in a circle, and is
+`hatch go-to-work` is `work` in a circle, and is
 [its own section](#the-unattended-loop) — what it may pick up, what it does
 about a ticket that did not move, and what it stops for.
 
-`hatch.sh queue` reads the scan and prints it, one issue a line — key, type,
+`hatch queue` reads the scan and prints it, one issue a line — key, type,
 column, and either the reason the pass would fold past it or the transition it
 is clear for, in the dispatcher's order: rightmost column first, and within a
-column the order the board itself draws that column in. `hatch.sh queue AER-1`
+column the order the board itself draws that column in. `hatch queue AER-1`
 scopes it to one epic's subtree. It spawns nothing and writes nothing, and an
 empty board prints a sentence saying so rather than a blank line: "there is
 nothing" and "something went wrong and printed nothing" look identical
@@ -1827,7 +1874,7 @@ ten minutes; `queue` is where the counts turn back into tickets.
 - **Comment the commit sha and the branch, and record the pull request.** The
   ticket is where somebody looks in six months, and a comment naming a commit is
   what makes that search short. The pull request is a field rather than a
-  sentence — `hatch.sh pr AER-12 <url>` puts it there, and the issue page draws
+  sentence — `hatch pr AER-12 <url>` puts it there, and the issue page draws
   it as something to click.
 - **Plan on the ticket, not in a chat log.** A planning session `PATCH`es
   acceptance criteria into the description and `POST`s the stories or tasks the
@@ -1858,7 +1905,7 @@ side. The rule is: do not guess, and do not quietly take whichever branch is
 cheapest to build. Ask on the ticket, **name the choices**, and stop.
 
 ```
-./scripts/hatch.sh ask AER-12 "How should drain retries be scoped?" \
+hatch ask AER-12 "How should drain retries be scoped?" \
     --recommend "Per-node: one budget each, so a slow node cannot starve the rest" \
     --option   "Global: one budget for the drain, simpler to reason about"
 ```
@@ -1875,7 +1922,7 @@ Then **stop**. An open question blocks the ticket from being dispatched at all,
 so nothing further is spawned at it until somebody answers, and anything built
 past the question is built on a guess.
 
-The operator answers at a terminal (`hatch.sh answer` walks the open ones one at
+The operator answers at a terminal (`hatch answer` walks the open ones one at
 a time, serially — a list of six printed at once gets answered in aggregate,
 which is how a wrong assumption gets in) or on the issue page. The answer is a
 comment bound to its question, so `work` carries the decisions already made into
