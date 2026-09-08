@@ -315,6 +315,63 @@ public class IssueWorkLogControllerTests
         Assert.Empty(h.Db.WorkLog);
     }
 
+    /// <summary>
+    /// A dispatcher on a machine with no wall is still the dispatcher. Losing
+    /// an evening's spend because it had no credential to present would be the
+    /// wrong trade, so the narrowing asks "is this a program", and a keyless
+    /// runner that named itself is one.
+    /// </summary>
+    [Fact]
+    public async Task AKeylessRunnerInLocalMode_MayStillWriteItsRow()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync();
+
+        h.Caller.Key = null;
+        h.Caller.Local = new Actor(ActorKind.Key, LocalCaller.RunnerIdFor("host:/src"), "host:/src");
+
+        var entry = await h.PostAsync(issue.Key, Reported());
+
+        Assert.Equal(Session, entry.SessionId);
+        Assert.Single(h.Db.WorkLog);
+    }
+
+    /// <summary>Idempotent by (issue, session) for a runner exactly as for a key - the caller is a shell script that can be re-run either way.</summary>
+    [Fact]
+    public async Task ARunnersSecondPostForTheSameSession_UpdatesTheRowItAlreadyWrote()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync();
+
+        h.Caller.Key = null;
+        h.Caller.Local = new Actor(ActorKind.Key, LocalCaller.RunnerIdFor("host:/src"), "host:/src");
+
+        await h.PostAsync(issue.Key, Reported());
+        var again = await h.PostAsync(issue.Key, Reported());
+
+        Assert.Single(h.Db.WorkLog);
+        Assert.Equal(Session, again.SessionId);
+    }
+
+    /// <summary>
+    /// The local person is not a program, so the narrowing still refuses them -
+    /// there is no control for writing an entry anywhere in the browser and
+    /// there is not meant to be one.
+    /// </summary>
+    [Fact]
+    public async Task TheLocalPerson_StillCannotWriteAnEntry()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync();
+
+        h.Caller.Key = null;
+        h.Caller.Local = new Actor(ActorKind.Person, LocalCaller.PersonId, "Ada");
+
+        var refused = Assert.IsType<ObjectResult>((await h.WorkLog.PostEntry(issue.Key, Reported(), default)).Result);
+        Assert.Equal(StatusCodes.Status403Forbidden, refused.StatusCode);
+        Assert.Empty(h.Db.WorkLog);
+    }
+
     [Fact]
     public async Task ARowWithoutASession_IsRefused()
     {

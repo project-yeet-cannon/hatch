@@ -316,8 +316,8 @@ public class AssigneeControllerTests
         var h = await NewAsync();
         h.Actors.AddPerson("Ada");
 
-        // The ordinary state of local development, where Auth:Enabled is false
-        // and nobody is enrolled - the page simply does not offer the press.
+        // A browser with nothing behind it and no local caller either - the
+        // page simply does not offer the press.
         var directory = Value(await h.Assignee.GetAssignees(default));
 
         Assert.Null(directory.Me);
@@ -332,6 +332,58 @@ public class AssigneeControllerTests
         // Signed in as somebody the directory has stopped listing: a press that
         // would only be refused is not offered.
         h.Actors.Me = new Actor(ActorKind.Person, Guid.NewGuid(), "Ada");
+
+        Assert.Null(Value(await h.Assignee.GetAssignees(default)).Me);
+    }
+
+    // ---- Local mode ----
+
+    /// <summary>
+    /// With the wall off the local person leads the directory and is the press
+    /// "Assign to me" draws. How they get into the list is
+    /// ActorDirectoryTests; this is that the controller holds no separate
+    /// opinion about somebody who is not a row in People.
+    /// </summary>
+    [Fact]
+    public async Task TheDirectory_OffersTheLocalPersonAsMe()
+    {
+        var h = await NewAsync();
+        h.Actors.Me = h.Actors.AddPerson("Ada", LocalCaller.PersonId);
+
+        var directory = Value(await h.Assignee.GetAssignees(default));
+
+        Assert.Equal(LocalCaller.PersonId, directory.Me!.Id);
+        Assert.Contains(directory.Assignees, a => a.Id == LocalCaller.PersonId);
+    }
+
+    [Fact]
+    public async Task AnIssue_IsAssignedToTheLocalPerson()
+    {
+        var h = await NewAsync();
+        var issue = await h.FileAsync();
+        h.Actors.AddPerson("Ada", LocalCaller.PersonId);
+
+        var assigned = await h.AssignAsync(issue.Key, ActorKind.Person, LocalCaller.PersonId);
+
+        Assert.Equal(LocalCaller.PersonId, assigned.Assignee!.Id);
+        Assert.Equal("Ada", assigned.Assignee.Name);
+
+        // The id alone goes in the column and the name is drawn on the way out,
+        // which is what makes renaming yourself cost nothing.
+        Assert.Equal(LocalCaller.PersonId, (await h.RowAsync(issue.Key)).AssigneePersonId);
+    }
+
+    /// <summary>
+    /// A runner is who is calling and is still not in the directory, so the
+    /// lookup inside finds nothing - the correct offer to make to something
+    /// nothing may be assigned to.
+    /// </summary>
+    [Fact]
+    public async Task ARunner_IsOfferedNoPress()
+    {
+        var h = await NewAsync();
+        h.Actors.AddPerson("Ada", LocalCaller.PersonId);
+        h.Actors.Me = new Actor(ActorKind.Key, LocalCaller.RunnerIdFor("host:/src"), "host:/src");
 
         Assert.Null(Value(await h.Assignee.GetAssignees(default)).Me);
     }
