@@ -355,6 +355,46 @@ public class IssueClaimTests
         Assert.IsType<NoContentResult>(await h.Claims.ReleaseClaim(issue, token, default));
     }
 
+    /// <summary>
+    /// The same narrowing where the wall is off. An agent without a credential
+    /// can take a ticket off another agent just as well as one with, so the
+    /// question is "is this a program" rather than "does it hold a key" - and
+    /// the sentence is the one a key is refused with, because it is the truth
+    /// about which lane the caller is in.
+    /// </summary>
+    [SkippableFact]
+    public async Task ATokenlessRelease_IsRefusedToAKeylessRunnerToo()
+    {
+        await using var h = await NewAsync();
+        var issue = await h.FileAsync();
+        await h.TakeAsync(issue);
+
+        h.Caller.Local = new Actor(ActorKind.Key, LocalCaller.RunnerIdFor("host:/src"), "host:/src");
+
+        var refused = Assert.IsType<ObjectResult>(await h.Claims.ReleaseClaim(issue, null, default));
+        Assert.Equal(StatusCodes.Status403Forbidden, refused.StatusCode);
+        Assert.Equal("clearing another runner's claim is the operator's, not an agent's", refused.Value);
+
+        // And the local person may - which is the operator's press on the
+        // issue page working exactly as it does under a wall.
+        h.Caller.Local = new Actor(ActorKind.Person, LocalCaller.PersonId, "Ada");
+        Assert.IsType<NoContentResult>(await h.Claims.ReleaseClaim(issue, null, default));
+        Assert.Null((await h.RowAsync(issue)).ClaimToken);
+    }
+
+    /// <summary>The narrowing is the tokenless lane and only it, for a runner as for a key.</summary>
+    [SkippableFact]
+    public async Task AKeylessRunnerMayStillReleaseItsOwnClaim()
+    {
+        await using var h = await NewAsync();
+        var issue = await h.FileAsync();
+        var token = await h.TakeAsync(issue);
+
+        h.Caller.Local = new Actor(ActorKind.Key, LocalCaller.RunnerIdFor("host:/src"), "host:/src");
+
+        Assert.IsType<NoContentResult>(await h.Claims.ReleaseClaim(issue, token, default));
+    }
+
     [SkippableFact]
     public async Task ReleasingAnUnclaimedIssue_WritesNothing()
     {
@@ -395,6 +435,27 @@ public class IssueClaimTests
         Assert.Equal((null, "Nathan on somewhere:/checkouts/one"), Payload(events[0]));
         Assert.Equal(("Nathan on somewhere:/checkouts/one", null), Payload(events[1]));
         Assert.Equal(("Nathan on elsewhere:/checkouts/two", null), Payload(events[3]));
+    }
+
+    /// <summary>
+    /// The trail names the runner rather than "operator" on both ends of a
+    /// lease taken with no key - criterion 4's "its events name the runner",
+    /// which is the whole reason the lane has a name at all.
+    /// </summary>
+    [SkippableFact]
+    public async Task AKeylessRunnersTakeAndRelease_AreNamedAfterIt()
+    {
+        await using var h = await NewAsync();
+        var issue = await h.FileAsync();
+
+        h.Caller.Person = null;
+        h.Caller.Local = new Actor(ActorKind.Key, LocalCaller.RunnerIdFor("host:/src"), "host:/src");
+
+        var token = await h.TakeAsync(issue, "host:/src");
+        await h.Claims.ReleaseClaim(issue, token, default);
+
+        var events = await h.EventsAsync(issue);
+        Assert.All(events, e => Assert.Equal("host:/src", e.Actor));
     }
 
     // ---- The harness ----
@@ -529,8 +590,16 @@ public class IssueClaimTests
 
         public Task<EfApiKey?> ApiKeyAsync(CancellationToken ct) => Task.FromResult(Key);
 
+        /// <summary>Local mode's third lane: the person at the machine, or a runner that named itself. Null is every install with a wall.</summary>
+        public Actor? Local { get; set; }
+
+        public Task<Actor?> LocalAsync(CancellationToken ct) => Task.FromResult(Local);
+
+        public Task<bool> IsProgramAsync(CancellationToken ct) =>
+            Task.FromResult(Key is not null || Local is { Kind: ActorKind.Key });
+
         public Task<string> ActorNameAsync(CancellationToken ct) =>
-            Task.FromResult(Person?.Name ?? Key?.Name ?? CallerIdentity.Unattributed);
+            Task.FromResult(Person?.Name ?? Key?.Name ?? Local?.Name ?? CallerIdentity.Unattributed);
     }
 
     /// <summary>A key wearing a caller's clothes - what a dispatcher's requests arrive as.</summary>

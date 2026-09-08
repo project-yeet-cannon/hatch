@@ -166,6 +166,11 @@ public class AdminGateTests
         /// <summary>Uncounted: <see cref="Asked"/> is about grant lookups, which are the expensive ones - they write LastSeenAt.</summary>
         public Task<EfApiKey?> ApiKeyAsync(CancellationToken ct) => Task.FromResult(key);
 
+        /// <summary>Always nobody: AdminGate is only awake where the wall is up, and the local lane is only alive where it is down.</summary>
+        public Task<Actor?> LocalAsync(CancellationToken ct) => Task.FromResult<Actor?>(null);
+
+        public Task<bool> IsProgramAsync(CancellationToken ct) => Task.FromResult(key is not null);
+
         public Task<string> ActorNameAsync(CancellationToken ct) =>
             Task.FromResult(grant?.Person?.Name ?? key?.Name ?? CallerIdentity.Unattributed);
     }

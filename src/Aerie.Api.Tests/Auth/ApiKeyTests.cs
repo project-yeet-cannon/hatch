@@ -266,8 +266,12 @@ public class ApiKeyTests
     }
 
     /// <summary>
-    /// Local development, an unlinked device, and every request while the wall
-    /// is off - all the same honest answer rather than an empty column.
+    /// An unlinked device and a request carrying nothing at all - the same
+    /// honest answer rather than an empty column.
+    ///
+    /// Under a wall, which is the only place it is still the answer: with the
+    /// wall off, whoever is at the machine has a name (see
+    /// <see cref="LocalCaller"/>) and this column reads that instead.
     /// </summary>
     [Fact]
     public async Task WithNobodyHoldingThePhone_TheActorIsTheOperator()
@@ -287,7 +291,7 @@ public class ApiKeyTests
         var context = new DefaultHttpContext();
         context.Request.Headers.Authorization = "Bearer aerie_ak_secret";
 
-        var caller = new CallerIdentity(Accessor(context), auth, Options.Create(new AuthOptions()));
+        var caller = new CallerIdentity(Accessor(context), auth, Options.Create(new AuthOptions()), new StubSiteSettings());
 
         Assert.Equal("Claude", (await caller.ApiKeyAsync(default))?.Name);
         Assert.Equal("aerie_ak_secret", Assert.Single(auth.KeysVerified));
@@ -426,7 +430,16 @@ public class ApiKeyTests
         if (key is not null) context.SetApiKey(key);
         if (grant is not null) context.SetAuthGrant(grant);
 
-        return new CallerIdentity(Accessor(context), new StubAuthService(null), Options.Create(new AuthOptions()));
+        // Enabled, because that is what the summary above says this helper is:
+        // a request under a wall. It was left at the default while nothing
+        // branched on it; local mode's third lane is the first thing that does,
+        // and an unauthenticated caller there is the local person rather than
+        // nobody.
+        return new CallerIdentity(
+            Accessor(context),
+            new StubAuthService(null),
+            Options.Create(new AuthOptions { Enabled = true }),
+            new StubSiteSettings());
     }
 
     /// <summary>A controller with a response to write headers onto - the mint sets no-store on one.</summary>

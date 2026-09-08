@@ -223,6 +223,14 @@ public static class SiteSettingKeys
     /// </summary>
     public const string AnthropicApiKey = "AnthropicApiKey";
 
+    /// <summary>
+    /// What Hatch calls whoever is sitting at this machine, when the wall is
+    /// off and there is nobody to authenticate - see LocalCaller. Unset means
+    /// the value the app was started with, else a built-in default; the setting
+    /// exists so the name can be changed without a restart.
+    /// </summary>
+    public const string LocalPersonName = "LocalPersonName";
+
     /// <summary>Which IWeatherAlertProvider supplies watches and warnings, by its Name - "nws" (default) or "none" to disable. The seam that keeps NWS's US-only reach from being a decision baked into the schema; see HazardProviders.</summary>
     public const string WeatherAlertProvider = "WeatherAlertProvider";
 

@@ -190,9 +190,15 @@ public class IssueClaimController(
     /// dormant wherever <c>Auth:EnforceAdmin</c> is off, which is all of local
     /// development, and a guarantee that evaporates under a switch is not a
     /// guarantee.
+    ///
+    /// <para>"A key" is asked as
+    /// <see cref="ICallerIdentity.IsProgramAsync"/>, so a keyless runner in
+    /// local mode is refused here too - the failure this narrowing exists to
+    /// prevent is an agent taking a ticket off another agent, and an agent
+    /// without a credential can do that just as well as one with.</para>
     /// </remarks>
     private async Task<ObjectResult?> NotAPerson(CancellationToken ct) =>
-        await caller.ApiKeyAsync(ct) is not null
+        await caller.IsProgramAsync(ct)
             ? new ObjectResult("clearing another runner's claim is the operator's, not an agent's")
             {
                 StatusCode = StatusCodes.Status403Forbidden,

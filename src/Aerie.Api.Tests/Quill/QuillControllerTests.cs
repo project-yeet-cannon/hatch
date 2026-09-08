@@ -314,6 +314,11 @@ public class QuillControllerTests
         /// <summary>Nor for a key: Quill's notes belong to a person, and a program is not one.</summary>
         public Task<EfApiKey?> ApiKeyAsync(CancellationToken ct) => Task.FromResult<EfApiKey?>(null);
 
+        /// <summary>Nor for the local lane: Quill scopes by PersonId, and local mode's person is deliberately not a row in People.</summary>
+        public Task<Actor?> LocalAsync(CancellationToken ct) => Task.FromResult<Actor?>(null);
+
+        public Task<bool> IsProgramAsync(CancellationToken ct) => Task.FromResult(false);
+
         public Task<string> ActorNameAsync(CancellationToken ct) => Task.FromResult(CallerIdentity.Unattributed);
     }
 }

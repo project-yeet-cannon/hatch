@@ -39,6 +39,17 @@ public class AuthMiddleware(RequestDelegate next, IOptions<AuthOptions> options,
         context.Request.Headers.Remove(AuthChallenge.GrantHeader);
         context.Request.Headers.Remove(AuthChallenge.LabelHeader);
 
+        // The runner header, on the other hand, is only stripped where the wall
+        // is up - it is local mode's whole way of naming itself, and removing it
+        // above would delete it in exactly the mode it exists for. Under
+        // gate.Enabled alone rather than the pair below, so the canary
+        // (EnforceInProcess=false, wall up) strips it too.
+        //
+        // Belt and braces: CallerIdentity.LocalAsync also refuses to read this
+        // unless Auth:Enabled is false, so neither the strip nor the check is
+        // load-bearing on its own.
+        if (gate.Enabled) context.Request.Headers.Remove(LocalCaller.RunnerHeader);
+
         // Two conditions, one no-op. Off is the rollback; on-but-not-enforcing
         // is the canary, where Traefik is deliberately the only
         // enforcer so that the wall stands in front of exactly the routes

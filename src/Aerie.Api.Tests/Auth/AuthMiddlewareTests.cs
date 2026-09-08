@@ -164,6 +164,59 @@ public class AuthMiddlewareTests
         Assert.False(context.Request.Headers.ContainsKey(AuthChallenge.LabelHeader));
     }
 
+    /// <summary>
+    /// The runner header is stripped under a wall, for the reason the grant
+    /// header is: nothing downstream can tell a name a client sent from one it
+    /// earned, and where there is a wall a name has to be earned.
+    /// </summary>
+    [Fact]
+    public async Task AnInboundRunnerHeaderIsStrippedWhereTheWallIsUp()
+    {
+        var request = Request("/api/zones");
+        request.Headers.Cookie = "aerie_grant=a-token";
+        request.Headers[LocalCaller.RunnerHeader] = "host:/src";
+
+        var (context, served) = await Run(request, auth: new StubAuthService(Grant()));
+
+        Assert.True(served);
+        Assert.False(context.Request.Headers.ContainsKey(LocalCaller.RunnerHeader));
+    }
+
+    /// <summary>
+    /// And kept where it is down - which is the whole reason it is not stripped
+    /// beside the grant header at the top of the middleware. That Remove runs
+    /// before the wall-off return, so it would delete the header in exactly the
+    /// mode it exists for.
+    /// </summary>
+    [Fact]
+    public async Task TheRunnerHeaderSurvivesWhereTheWallIsOff()
+    {
+        var request = Request("/api/zones");
+        request.Headers[LocalCaller.RunnerHeader] = "host:/src";
+
+        var (context, served) = await Run(request, enabled: false);
+
+        Assert.True(served);
+        Assert.Equal("host:/src", context.Request.Headers[LocalCaller.RunnerHeader]);
+    }
+
+    /// <summary>
+    /// The canary has the wall up and enforces nothing in-process, so it strips
+    /// it too - which is why the check is under gate.Enabled alone rather than
+    /// below the pair.
+    /// </summary>
+    [Fact]
+    public async Task TheCanaryStripsTheRunnerHeaderAsWell()
+    {
+        var request = Request("/api/zones");
+        request.Headers[LocalCaller.RunnerHeader] = "host:/src";
+
+        var (context, served) = await Run(request, enforceInProcess: false);
+
+        Assert.True(served);
+        Assert.False(context.Request.Headers.ContainsKey(LocalCaller.RunnerHeader));
+    }
+
     [Fact]
     public async Task AStaleCookieIsReIssuedWithTheSameTokenSoAnInUseDeviceNeverLapses()
     {

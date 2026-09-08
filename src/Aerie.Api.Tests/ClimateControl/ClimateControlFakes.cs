@@ -80,7 +80,8 @@ internal sealed class FakeSiteSettingsService(string? mediaBaseUrl = null, int o
         AnthropicApiKey: null,
         ImmichBaseUrl: null,
         ImmichApiKey: null,
-        ClaudeSubscriptionToken: null));
+        ClaudeSubscriptionToken: null,
+        LocalPersonName: null));
 
     /// <summary>Counted rather than ignored: SettingsController is supposed to call it on every write.</summary>
     public int Invalidations { get; private set; }

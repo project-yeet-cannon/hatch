@@ -77,9 +77,49 @@ public static class PersonName
             return false;
         }
 
-        // NFC first, so the length is measured on the same string that will be
-        // stored - a decomposed name can compose down to fewer graphemes, and
-        // measuring before normalizing would refuse names that fit.
+        var result = Sanitize(raw);
+
+        // Reachable with input that was not blank: a string of nothing but
+        // control characters normalizes to nothing at all.
+        if (result.Length == 0)
+        {
+            error = EmptyError;
+            return false;
+        }
+
+        if (CountGraphemes(result) > MaxGraphemes || result.Length > MaxChars)
+        {
+            error = TooLongError;
+            return false;
+        }
+
+        name = result;
+        return true;
+    }
+
+    /// <summary>
+    /// The half of <see cref="TryNormalize"/> that cleans rather than judges:
+    /// NFC, control and format characters out (the zero-width joiner excepted),
+    /// whitespace collapsed and trimmed. Never fails - an input made entirely
+    /// of the characters it strips comes back as the empty string.
+    /// </summary>
+    /// <remarks>
+    /// Public because a person's name is not the only text in the house that
+    /// becomes a displayed name, and the Trojan Source strip is wanted wherever
+    /// that is true. The 60-grapheme rule is deliberately not part of it: a
+    /// runner calls itself <c>host:/a/deep/path/to/a/checkout</c>, which is a
+    /// legitimate name for a program and not one for a person. Callers that
+    /// want the person rule ask <see cref="TryNormalize"/>, which is this plus
+    /// the two refusals.
+    /// </remarks>
+    public static string Sanitize(string? raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return string.Empty;
+
+        // NFC first, so anything measured afterwards is measured on the same
+        // string that will be stored - a decomposed name can compose down to
+        // fewer graphemes, and measuring before normalizing would refuse names
+        // that fit.
         var normalized = raw.Normalize(NormalizationForm.FormC);
 
         var builder = new StringBuilder(normalized.Length);
@@ -117,24 +157,7 @@ public static class PersonName
         }
 
         // A trailing pendingSpace is simply never written - that is the trim.
-        var result = builder.ToString();
-
-        // Reachable with input that was not blank: a string of nothing but
-        // control characters normalizes to nothing at all.
-        if (result.Length == 0)
-        {
-            error = EmptyError;
-            return false;
-        }
-
-        if (CountGraphemes(result) > MaxGraphemes || result.Length > MaxChars)
-        {
-            error = TooLongError;
-            return false;
-        }
-
-        name = result;
-        return true;
+        return builder.ToString();
     }
 
     /// <summary>
