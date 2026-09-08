@@ -5,6 +5,7 @@ using Aerie.Api.Modules.Photos;
 using Aerie.Api.Modules.Quill;
 using Aerie.Api.Modules.Storage;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace Aerie.Api.Modules;
@@ -46,8 +47,15 @@ public static class ModuleRegistration
         this IServiceCollection services, IConfiguration configuration, string schema)
         where TContext : DbContext, IModuleContext
     {
+        // Same reasoning as Program.cs's AerieContext registration: in migrate
+        // mode the first command against an empty database is a probe of a
+        // history table that does not exist yet, and one Error line per module
+        // context reads as a broken install. Everywhere else a failed command
+        // stays news.
+        var quietCommandErrors = configuration["AERIE_MIGRATE"] == "1";
+
         services.AddDbContext<TContext>(o =>
-            ConfigureModule(o, configuration.GetConnectionString("Aerie"), schema));
+            ConfigureModule(o, configuration.GetConnectionString("Aerie"), schema, quietCommandErrors));
 
         // Registered a second time under the marker interface: this is what lets the
         // startup migration loop find every module context without knowing its type.
@@ -61,7 +69,18 @@ public static class ModuleRegistration
     /// above and <see cref="ModuleDesignTimeFactory{TContext}"/>, so a scaffolded
     /// migration lands in the same history table the running app reads.
     /// </summary>
-    public static void ConfigureModule(DbContextOptionsBuilder options, string? connectionString, string schema) =>
+    /// <param name="quietCommandErrors">
+    /// Downgrades EF's Error-level CommandError to Debug. Optional and off by
+    /// default so <see cref="ModuleDesignTimeFactory{TContext}"/>, which has no
+    /// configuration to read the flag from, keeps its one call site untouched.
+    /// </param>
+    public static void ConfigureModule(
+        DbContextOptionsBuilder options, string? connectionString, string schema, bool quietCommandErrors = false)
+    {
         options.UseNpgsql(connectionString, npgsql =>
             npgsql.MigrationsHistoryTable(HistoryRepository.DefaultTableName, schema));
+
+        if (quietCommandErrors)
+            options.ConfigureWarnings(w => w.Log((RelationalEventId.CommandError, LogLevel.Debug)));
+    }
 }

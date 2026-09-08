@@ -65,6 +65,14 @@ spec:
             # and exits before app.Run(), instead of serving traffic.
             - name: AERIE_MIGRATE
               value: "1"
+            # The value the bootstrap-invite mint in that branch is gated on.
+            # Rendered from the same token comparison api-deployment.yaml uses,
+            # so the Job and the pods it precedes cannot disagree about whether
+            # this install has a wall - and without it the Job reads `false`
+            # out of appsettings.json and shouts a sign-in code on every deploy
+            # of an install that has no wall.
+            - name: Auth__Enabled
+              value: {{ ne .Values.auth.mode "none" | quote }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp

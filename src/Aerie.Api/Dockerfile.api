@@ -75,6 +75,17 @@ RUN dotnet publish src/Aerie.Api/Aerie.Api.csproj -c Release -o out -p:SkipDashb
 # Build runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /App
+
+# Npgsql probes for a Kerberos library on every connect, to see whether GSSAPI
+# authentication is on the table. The aspnet runtime image carries none, so the
+# probe fails and the loader writes two lines to stderr beginning with `Error:`
+# - before anything the app itself logs, on both a serving start and a migrate
+# run. They are the first thing a new operator sees and they say nothing is
+# wrong. About a megabyte to make them go away.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libgssapi-krb5-2 \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY --from=build-env /App/out .
 # Markdown source for DocsController/DocsService (Docs:Path in appsettings.Docker.json),
 # not part of the published .NET output above.
