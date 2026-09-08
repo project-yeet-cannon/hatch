@@ -1,4 +1,7 @@
 <Solution>
   <Project Path="Aerie.Api.Tests/Aerie.Api.Tests.csproj" />
   <Project Path="Aerie.Api/Aerie.Api.csproj" />
+  <Project Path="Aerie.Hatch.Contracts/Aerie.Hatch.Contracts.csproj" />
+  <Project Path="Aerie.Hatch/Aerie.Hatch.csproj" />
+  <Project Path="Aerie.Hatch.Tests/Aerie.Hatch.Tests.csproj" />
 </Solution>
