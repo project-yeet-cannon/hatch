@@ -816,3 +816,61 @@ export interface WorkLogHistory {
   /** Oldest first, one per bucket, the empty ones included. */
   buckets: WorkLogBucket[];
 }
+
+// ---- Runners ----
+
+/** What a runner is: a loop that will ask again between increments, or a single
+    increment that never will. Only the first is worth drawing controls for -
+    nothing would ever read them off the second. Mirrors RunnerKinds. */
+export type RunnerKind = 'loop' | 'once';
+
+/** What the board has asked a runner to do. Mirrors RunnerStates. */
+export type RunnerState = 'running' | 'paused' | 'stopping';
+
+/** One runner: a `go-to-work` or `work` process that has spoken to this Hatch
+    lately. Mirrors RunnerDto.
+
+    Nothing here is a copy of a claim. `claimKey` and `line` are read off
+    whichever issue the runner holds at the moment of the request, so clearing a
+    claim leaves the row idle on the next poll rather than remembering a ticket
+    nobody is working. */
+export interface Runner {
+  /** What it calls itself - `host:/path/to/checkout`, the same string its
+      claims carry. Its identity, and the last segment of every URL that reaches
+      it. */
+  name: string;
+  kind: RunnerKind;
+  firstSeenAt: string;
+  /** The last heartbeat. Whether a runner is here, gone, or no longer drawn at
+      all is arithmetic against this and `goneAfterSeconds`. */
+  lastSeenAt: string;
+  /** The issue it holds right now, or null between increments. */
+  claimKey: string | null;
+  /** The last thing it said: the claim's chatter while it holds one, its own
+      last line when it does not. */
+  line: string | null;
+  lineAt: string | null;
+  state: RunnerState;
+  /** The epic it has been asked to stay inside, or null for the whole board. */
+  under: string | null;
+  maxRuns: number | null;
+  maxSpend: number | null;
+  untilAt: string | null;
+  /** How long a runner may go unheard from before it is gone - the server's own
+      Hatch:RunnerGoneAfterSeconds, carried the way a claim carries its TTL, so
+      nothing here has to decide for itself what quiet means. */
+  goneAfterSeconds: number;
+}
+
+/** What a person asks a runner to do next. Every field is a string, and absent
+    / `''` / a value are leave alone / clear / set - the convention the two dates
+    on an issue already established. Mirrors RunnerPatchRequest. */
+export interface RunnerPatchRequest {
+  state?: RunnerState;
+  under?: string;
+  maxRuns?: string;
+  maxSpend?: string;
+  /** An instant (`2026-09-12T17:00:00Z`). Never a bare date: "stop by the 12th"
+      would be a midnight in a timezone nobody named. */
+  untilAt?: string;
+}

@@ -10,6 +10,7 @@ import { IssuePage } from './pages/IssuePage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { StatusesPage } from './pages/StatusesPage';
 import { PlaybooksPage } from './pages/PlaybooksPage';
+import { RunnersPage } from './pages/RunnersPage';
 import { BulkPage } from './pages/BulkPage';
 import { ImportPage } from './pages/ImportPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -39,6 +40,10 @@ export function App() {
           <NavLink to="/projects" className={navLinkClass}>Projects</NavLink>
           <NavLink to="/statuses" className={navLinkClass}>Statuses</NavLink>
           <NavLink to="/playbooks" className={navLinkClass}>Playbooks</NavLink>
+          {/* Beside Playbooks: the two pages that are about the loop rather
+              than about the board. One says what an agent is told, the other
+              says which agents are running and what they may spend. */}
+          <NavLink to="/runners" className={navLinkClass}>Runners</NavLink>
           <NavLink to="/import" className={navLinkClass}>Import</NavLink>
           {/* A page like any other rather than a strip element: what it holds
               is this installation's own configuration, and it is the only place
@@ -68,6 +73,7 @@ export function App() {
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/statuses" element={<StatusesPage />} />
           <Route path="/playbooks" element={<PlaybooksPage />} />
+          <Route path="/runners" element={<RunnersPage />} />
           <Route path="/issues/:key" element={<IssuePage />} />
           <Route path="/import" element={<ImportPage />} />
           <Route path="/settings" element={<SettingsPage />} />

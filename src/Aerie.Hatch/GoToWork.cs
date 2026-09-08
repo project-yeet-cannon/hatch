@@ -525,7 +525,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
             // Before the stop conditions are asked, so a cap lowered from a
             // page is a cap this pass is judged against rather than the next
             // one.
-            if (told is not null) under = Fold(told, tally);
+            if (told is not null) under = Fold(told, tally, under);
 
             if (tally.ShouldStop()) return false;
 
@@ -563,7 +563,6 @@ public sealed class GoToWorkCommand(Runtime runtime)
                         return Task.CompletedTask;
                     });
 
-                if (once) return false;
                 if (!await NapAsync(interval, tally, ct)) return false;
                 continue;
             }
@@ -658,8 +657,23 @@ public sealed class GoToWorkCommand(Runtime runtime)
     /// somebody cleared. Reading an absence as "leave the flag alone" would
     /// make a cap impossible to take off from the page that set it.
     /// </remarks>
-    private static string? Fold(RunnerInstructionDto told, Tally tally)
+    private string? Fold(RunnerInstructionDto told, Tally tally, string? under)
     {
+        var scope = told.Under is { Length: > 0 } named ? named : null;
+
+        // Said out loud, because the sentence that ends a night names a flag -
+        // "--max-runs 3 reached" - and a terminal that had never seen anybody
+        // type one would be a run that stopped for no reason it could show.
+        // Nothing is said on the ordinary beat, where what comes back is what
+        // this process started with.
+        var moved = new List<string>();
+        if (scope != under) moved.Add($"--under {scope ?? "off"}");
+        if (told.MaxRuns != tally.MaxRuns) moved.Add($"--max-runs {told.MaxRuns?.ToString(CultureInfo.InvariantCulture) ?? "off"}");
+        if (told.MaxSpend != tally.MaxSpend) moved.Add($"--max-spend {told.MaxSpend?.ToString(CultureInfo.InvariantCulture) ?? "off"}");
+        if (told.UntilAt != tally.UntilAt) moved.Add($"--until {told.UntilAt?.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture) ?? "off"}");
+
+        if (moved.Count > 0) runtime.Say.Line($"hatch: the board set {string.Join(", ", moved)}");
+
         tally.MaxRuns = told.MaxRuns;
         tally.MaxSpend = told.MaxSpend;
         tally.UntilAt = told.UntilAt;
@@ -669,7 +683,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
         // sentence has always named.
         tally.Until = told.UntilAt?.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
 
-        return told.Under is { Length: > 0 } scope ? scope : null;
+        return scope;
     }
 
     private async Task<Pass> PassAsync(

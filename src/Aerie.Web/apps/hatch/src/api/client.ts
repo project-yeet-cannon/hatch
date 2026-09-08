@@ -31,6 +31,8 @@ import type {
   Project,
   ProjectCreateRequest,
   ProjectPatchRequest,
+  Runner,
+  RunnerPatchRequest,
   SessionSort,
   Status,
   StatusCreateRequest,
@@ -138,6 +140,21 @@ export const patchPlaybook = (id: number, request: PlaybookPatchRequest) =>
   fetchJson<Playbook>(`/api/hatch/playbooks/${id}`, { method: 'PATCH', body: JSON.stringify(request) });
 export const deletePlaybook = (id: number) =>
   fetchJson<void>(`/api/hatch/playbooks/${id}`, { method: 'DELETE' });
+
+// ---- Runners ----
+//
+// Reading is open to a Hatch-scoped key, like the claim - a dispatcher that
+// could not say it was alive would leave a page that could only ever be empty.
+// The write is refused to one, for the reason the playbook writes are: an agent
+// that could raise its own --max-spend could raise its own budget. See
+// RunnersController.
+//
+// There is no heartbeat here. A browser is not a runner, and the only caller
+// that could ever post one is the loop itself.
+
+export const getRunners = () => fetchJson<Runner[]>('/api/hatch/runners');
+export const patchRunner = (name: string, request: RunnerPatchRequest) =>
+  fetchJson<Runner>(`/api/hatch/runners/${seg(name)}`, { method: 'PATCH', ...asJson(request) });
 
 export const getIssue = (key: string) => fetchJson<Issue>(`/api/hatch/issues/${seg(key)}`);
 
