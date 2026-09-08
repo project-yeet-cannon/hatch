@@ -884,7 +884,7 @@ function Next({ answer, rollup }: { answer: NextAnswer | null; rollup: IssueRoll
           {found.key}
         </Link>
         <span className="hatch-next-title">— {found.title}</span>
-        <Command command={`./scripts/hatch.sh work ${found.key}`} />
+        <Command command={`hatch work ${found.key}`} />
       </p>
     );
   }

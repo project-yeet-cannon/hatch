@@ -1619,6 +1619,27 @@ is the other thing, and makes the self-contained single-file binary an operator
 downloads — `win-x64`, `osx-arm64`, `osx-x64` and `linux-x64`, all four built on
 every pull request.
 
+**A fresh install does not run that target; it opens the Runner page.** The API
+image publishes the same four binaries from the same build as itself
+(`Dockerfile.api`) and Hatch's **Runner** page hands out the one matching the
+browser's platform, beside the revision all of them were built from, the three
+things to have installed first, and the two commands to type:
+
+```
+hatch config --origin https://hatch.<your domain>
+hatch go-to-work
+```
+
+`config --origin` is the non-interactive third mode of `hatch config`: it writes
+the origin alone and leaves the key and the claude path exactly as they were, so
+it is safe to paste on a machine that is already configured. The page fills in
+this Hatch's own origin, because the address bar is the one thing about an
+install nobody can get wrong.
+
+So `make publish-hatch` is how *this repository* builds the artifact, and the
+Runner page is how *a person* gets it. A friend with the stack running needs the
+image and nothing else — no SDK, no clone, no copy of this Makefile.
+
 One consequence of publishing trimmed is worth naming, because it fails nowhere
 before the operator's machine: a trimmed .NET application has reflection-based
 JSON switched off outright, so every wire record is registered in a

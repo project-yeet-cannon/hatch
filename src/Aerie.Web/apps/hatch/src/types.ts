@@ -655,6 +655,29 @@ export interface HatchSettingsWriteRequest {
   localPersonName?: string;
 }
 
+// ---- The runner ----
+
+/** One platform's `hatch` binary, as this image publishes it. Mirrors RunnerDownloadDto. */
+export interface RunnerDownload {
+  /** The .NET runtime identifier, which is also what `detectPlatform` answers. */
+  rid: string;
+  /** What to call it to a person - "macOS (Apple Silicon)", not "osx-arm64". */
+  platform: string;
+  /** What it lands on disk as: `hatch.exe` on Windows, `hatch` everywhere else. */
+  fileName: string;
+  /** Where to get it. Named by the server, so the page never builds a path of its own. */
+  url: string;
+}
+
+/** What the Runner page draws. Mirrors RunnerDto. */
+export interface Runner {
+  /** The commit this image - and therefore every binary below - was built from. */
+  revision: string;
+  /** In platform order, and only the ones this build actually published. Empty is a
+      possible answer: a `dotnet run` from a checkout has published none. */
+  downloads: RunnerDownload[];
+}
+
 // ---- The work log ----
 
 /** What one model cost inside one session. Mirrors WorkLogModelUseDto. */
