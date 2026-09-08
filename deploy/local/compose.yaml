@@ -1,0 +1,91 @@
+# Hatch on one laptop, from published images and nothing else.
+#
+# This file is published to the registry as an OCI artifact beside the two
+# images it names (.github/workflows/publish.yml), so the line that brings the
+# stack up needs no checkout of this repository:
+#
+#   docker compose -f oci://ghcr.io/eouw0o83hf/hatch-local up -d
+#
+# The root compose.yaml is the developer's file - it builds from source and
+# publishes Postgres on 5432 so tests can reach it. This one is the friend's:
+# no `build:` anywhere (which is what makes it publishable at all), no port on
+# the database, and the images are the ones every push to the default branch
+# already pushes. See deploy/local/README.md.
+
+# Named explicitly so the stack is the same stack however this file was
+# reached. Compose otherwise takes the project name from wherever the file came
+# from - the directory for a checkout, the artifact for an `oci://` reference -
+# and the project name is what prefixes the volume, so two spellings of the
+# same command would be two databases.
+name: hatch-local
+
+services:
+  db:
+    image: ghcr.io/eouw0o83hf/aerie-db:latest
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    # `unless-stopped`, not the root file's `always`: stopping the stack from
+    # Docker Desktop's own UI should keep it stopped rather than fight the
+    # person who stopped it. This is a shipped end-user stack.
+    restart: unless-stopped
+
+  # The same image as `api`, run in its migrate mode (Program.cs reads
+  # AERIE_MIGRATE) and then exited. It carries no `restart:` on purpose: the
+  # default of `no` is what leaves it in the "completed successfully" state
+  # `api` waits on, on every start rather than only the first.
+  migrate:
+    image: ghcr.io/eouw0o83hf/aerie-api:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DOTNET_ENVIRONMENT: Docker
+      Auth__Enabled: "false"
+      AERIE_MIGRATE: "1"
+
+  api:
+    image: ghcr.io/eouw0o83hf/aerie-api:latest
+    # Not `depends_on: db` - the API does not retry a schema that is not there
+    # yet, it exits (AERIE-931). Waiting for the migration to *finish* is the
+    # difference between a stack that comes up and one that races.
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DOTNET_ENVIRONMENT: Docker
+      Auth__Enabled: "false"
+      # Whoever ran the command, by whichever name their OS uses: USERNAME on
+      # Windows, USER on macOS and Linux. Read from the invoking shell's own
+      # environment - no .env file, nothing to export first.
+      #
+      # Empty when neither is set, rather than the literal `friend`, and that
+      # is the load-bearing part: the API answers an unnamed person with
+      # `friend` *and* knows nobody said so, which is what puts the "set
+      # Auth__LocalPerson__Name" hint in the nav strip. Passing `friend` in
+      # from here would read as a person who chose that name
+      # (LocalCaller.IsNamed) and the hint would never appear - and
+      # LocalPersonOptions.Name says empty is the ordinary state for exactly
+      # this reason.
+      Auth__LocalPerson__Name: "${USERNAME:-${USER:-}}"
+    # The long form, not the "${HATCH_PORT:-8080}:8080" shorthand: `docker
+    # compose publish` rejects a shorthand port string that still holds an
+    # unresolved variable ("expected a map or struct, got string"), even though
+    # `config` and `up` resolve the same line without complaint.
+    ports:
+      - target: 8080
+        published: "${HATCH_PORT:-8080}"
+        protocol: tcp
+    restart: unless-stopped
+
+# The one named volume, and the reason `down` keeps your data while `down -v`
+# throws it away. Everything Hatch knows lives here.
+volumes:
+  pgdata:

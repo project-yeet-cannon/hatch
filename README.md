@@ -14,6 +14,11 @@ See [docs/delivery-architecture.md](docs/delivery-architecture.md) for what
 happens when you push, what a push *doesn't* change, and how to watch a cluster
 change land.
 
+There is a third, and it deploys nowhere: **Hatch on one laptop**, from the
+published images and a compose file published beside them, for somebody with no
+checkout of this repository and no account on any installation of it. See
+[deploy/local/README.md](deploy/local/README.md).
+
 ## Aerie.API
 
 `make run` to run it.
