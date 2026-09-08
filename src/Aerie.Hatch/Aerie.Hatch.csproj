@@ -38,6 +38,15 @@
     <SelfContained>true</SelfContained>
     <PublishTrimmed>true</PublishTrimmed>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!--
+      No .pdb beside the binary. A published RID is something somebody
+      downloads - from `make publish-hatch`, from the image's own build, or
+      from CI's hatch-cli job - and a symbol file is 156KB of nothing they
+      asked for sitting next to it, which the Runner page would then have to
+      know not to serve. Set here rather than in the three callers so there is
+      one place it is true.
+    -->
+    <DebugType>none</DebugType>
   </PropertyGroup>
 
   <ItemGroup>

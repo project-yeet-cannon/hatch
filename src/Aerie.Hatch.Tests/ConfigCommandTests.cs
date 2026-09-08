@@ -196,6 +196,117 @@ public sealed class ConfigCommandTests : IDisposable
         Assert.False(File.Exists(ConfigPath));
     }
 
+    // ---- --origin ----
+
+    /// <summary>
+    /// The point of the mode: what Hatch's own Runner page prints, pasted on a
+    /// machine that has just downloaded the binary.
+    /// </summary>
+    [Fact]
+    public async Task Origin_writes_the_origin_without_asking_anything()
+    {
+        var input = new Replies();
+
+        Assert.Equal(0, await Command(input).RunAsync(["--origin", "https://hatch.example"], default));
+
+        Assert.Contains("AERIE_BASE=https://hatch.example", File.ReadAllLines(ConfigPath));
+        Assert.Empty(input.Asked);
+        Assert.Contains("reached https://hatch.example - columns: To Do, In Progress, Done", Said);
+    }
+
+    /// <summary>
+    /// The sharp one. A command that silently blanked a credential would be a
+    /// worse way to lose one than forgetting it.
+    /// </summary>
+    [Fact]
+    public async Task Origin_leaves_the_key_and_the_cli_exactly_as_they_were()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
+        File.WriteAllLines(ConfigPath, [
+            "AERIE_BASE=https://old",
+            "AERIE_HATCH_KEY=aerie_ak_alreadykept",
+            "HATCH_CLAUDE_BIN=/opt/claude",
+        ]);
+
+        Assert.Equal(0, await Command(new Replies()).RunAsync(["--origin", "https://new"], default));
+
+        var written = File.ReadAllLines(ConfigPath);
+        Assert.Contains("AERIE_BASE=https://new", written);
+        Assert.Contains("AERIE_HATCH_KEY=aerie_ak_alreadykept", written);
+        Assert.Contains("HATCH_CLAUDE_BIN=/opt/claude", written);
+    }
+
+    /// <summary>Never on the screen, even in the mode that never asks for it.</summary>
+    [Fact]
+    public async Task Origin_never_prints_the_key_it_carried_forward()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
+        File.WriteAllLines(ConfigPath, ["AERIE_HATCH_KEY=aerie_ak_abcdefghijklmnop"]);
+
+        await Command(new Replies()).RunAsync(["--origin", "https://hatch.example"], default);
+
+        Assert.DoesNotContain("aerie_ak_abcdefghijklmnop", $"{Said}\n{Complained}");
+    }
+
+    /// <summary>
+    /// The same sentence the interactive path says, because it is the same
+    /// helper - a friend who paired the page's command with a wall-off Hatch
+    /// should be told what their calls will name themselves.
+    /// </summary>
+    [Fact]
+    public async Task Origin_with_no_key_anywhere_says_what_calls_will_name_themselves()
+    {
+        Assert.Equal(0, await Command(new Replies()).RunAsync(["--origin", "https://hatch.example"], default));
+
+        Assert.Contains("AERIE_HATCH_KEY=", File.ReadAllLines(ConfigPath));
+        Assert.Contains("no key - calls will name themselves \"test:/checkout\"", Complained);
+    }
+
+    [Fact]
+    public async Task Origin_with_no_scheme_is_refused_with_the_same_sentence_and_nothing_is_written()
+    {
+        Assert.Equal(1, await Command(new Replies()).RunAsync(["--origin", "hatch.example"], default));
+
+        Assert.Contains("has no scheme - every call will fail", Complained);
+        Assert.False(File.Exists(ConfigPath));
+    }
+
+    [Fact]
+    public async Task An_empty_origin_is_refused_and_nothing_is_written()
+    {
+        Assert.Equal(1, await Command(new Replies()).RunAsync(["--origin", "   "], default));
+
+        Assert.Contains("an origin is required", Complained);
+        Assert.False(File.Exists(ConfigPath));
+    }
+
+    /// <summary>Written before it is proven, exactly as the interactive path writes it.</summary>
+    [Fact]
+    public async Task Origin_that_cannot_be_reached_still_leaves_the_file_behind()
+    {
+        var code = await Command(
+                new Replies(),
+                probe: (_, _, _) => throw new HatchException("hatch: 401 - the key was not accepted."))
+            .RunAsync(["--origin", "https://hatch.example"], default);
+
+        Assert.Equal(1, code);
+        Assert.Contains("AERIE_BASE=https://hatch.example", File.ReadAllLines(ConfigPath));
+        Assert.Contains("the file is written but that call did not go through", Complained);
+    }
+
+    /// <summary>
+    /// It needs no terminal - which is the difference from `config` and the
+    /// reason a setup script may use it.
+    /// </summary>
+    [Fact]
+    public async Task Origin_works_where_there_is_no_terminal_at_all()
+    {
+        var input = new Replies { AtATerminal = false };
+
+        Assert.Equal(0, await Command(input).RunAsync(["--origin", "https://hatch.example"], default));
+        Assert.Contains("AERIE_BASE=https://hatch.example", File.ReadAllLines(ConfigPath));
+    }
+
     // ---- --show ----
 
     [Fact]
@@ -265,11 +376,23 @@ public sealed class ConfigCommandTests : IDisposable
     // ---- usage ----
 
     [Fact]
-    public async Task Anything_other_than_show_is_the_mistake_and_then_the_usage_block()
+    public async Task Anything_other_than_the_three_modes_is_the_mistake_and_then_the_usage_block()
     {
         Assert.Equal(1, await Command(new Replies()).RunAsync(["--everything"], default));
-        Assert.Contains("config takes nothing, or --show", Complained);
+        Assert.Contains("config takes nothing, --show, or --origin <origin>", Complained);
         Assert.Contains("usage: hatch config", Complained);
+    }
+
+    /// <summary>An origin is one argument, and a bare `--origin` is a mistake rather than a prompt.</summary>
+    [Fact]
+    public async Task Origin_with_nothing_after_it_is_the_usage_block_and_not_a_question()
+    {
+        var input = new Replies();
+
+        Assert.Equal(1, await Command(input).RunAsync(["--origin"], default));
+        Assert.Contains("config takes nothing, --show, or --origin <origin>", Complained);
+        Assert.Empty(input.Asked);
+        Assert.False(File.Exists(ConfigPath));
     }
 
     [Fact]

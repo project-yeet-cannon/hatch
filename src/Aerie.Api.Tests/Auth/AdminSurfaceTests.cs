@@ -269,6 +269,15 @@ public class AdminSurfaceTests
         // for what they answer rather than Get and Put.
         "SettingsController.GetHatchSettings",
         "SettingsController.PutHatchSettings",
+
+        // The runner the image hands out, cut the same way as the settings
+        // above it: plain [RequireAdmin], no Hatch scope. Not because a binary
+        // is a credential - it is the same program anybody may build from this
+        // repository - but because the audience is a person at a browser
+        // setting a machine up, and nobody's dispatcher has a reason to
+        // download the program it is already running as. See RunnerController.
+        "RunnerController.Get",
+        "RunnerController.Download",
     ];
 
     /// <summary>
