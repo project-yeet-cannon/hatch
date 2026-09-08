@@ -4,6 +4,7 @@ import { Badge, Button, Card, Field, PageHeader } from '@aerie/ui';
 import {
   addComment,
   addDependency,
+  clearClaim,
   createIssue,
   deleteIssue,
   getAssignees,
@@ -20,6 +21,8 @@ import {
   setAssignee,
 } from '../api/client';
 import { AssigneeField } from '../components/AssigneeField';
+import { ClaimPanel } from '../components/ClaimPanel';
+import { ClearClaimDialog } from '../components/ClearClaimDialog';
 import { Choice } from '../components/Choice';
 import { CloseSubtreeDialog } from '../components/CloseSubtreeDialog';
 import { Command } from '../components/Command';
@@ -76,6 +79,11 @@ export function IssuePage() {
   const [next, setNext] = useState<NextAnswer | null>(null);
   const [workLog, setWorkLog] = useState<WorkLogData | null>(null);
   const [workLogError, setWorkLogError] = useState<string | null>(null);
+  /* The speed bump in front of taking a ticket off a runner, and whether the
+     clear is in flight. Two flags rather than one, because the dialog stays up
+     while the request runs and says so on its own button. */
+  const [clearingClaim, setClearingClaim] = useState(false);
+  const [claimClearing, setClaimClearing] = useState(false);
 
   const load = useCallback(async () => {
     /* The fifth read, sent with the other four and awaited apart from them.
@@ -206,6 +214,28 @@ export function IssuePage() {
     [key, load],
   );
 
+  /* Taking the ticket back off a runner. Its own call for the reason
+     `saveAssignee` is - its own endpoint, closed to an API key - and otherwise
+     exactly `save`: it re-reads, so the section, the card and the trail below
+     all redraw together, and a refusal lands in `error` above in the server's
+     own words.
+
+     The dialog is shut either way, including on a refusal - the page's error
+     line is behind the scrim, and an explanation nobody can read until they
+     dismiss the thing covering it is not an explanation. */
+  const clearTheClaim = useCallback(async () => {
+    setClaimClearing(true);
+    try {
+      await clearClaim(key);
+      await load();
+    } catch (err) {
+      setError(message(err));
+    } finally {
+      setClaimClearing(false);
+      setClearingClaim(false);
+    }
+  }, [key, load]);
+
   /* An edge added or taken off. Its own call rather than a field on the patch
      for the reason `savePlaybook` is - it is its own endpoint - and otherwise
      exactly `save`: it re-reads, and a refusal lands in `error` above in the
@@ -298,6 +328,19 @@ export function IssuePage() {
           unanswered question is not dispatched at all - see WorkController - so
           until this card is empty the ticket does not move. */}
       <Waiting issueKey={key} comments={comments} onAnswered={() => void load()} onError={setError} />
+
+      {/* Beside Waiting and for the same reason: something else is acting on
+          this ticket right now, and that is worth knowing before pressing
+          anything below. Draws nothing on the overwhelming majority of pages. */}
+      <ClaimPanel issueKey={key} claim={issue.claim} onClear={() => setClearingClaim(true)} />
+
+      <ClearClaimDialog
+        issueKey={key}
+        claim={clearingClaim ? issue.claim : null}
+        busy={claimClearing}
+        onConfirm={() => void clearTheClaim()}
+        onClose={() => setClearingClaim(false)}
+      />
 
       <StatusBar
         statuses={board.statuses}

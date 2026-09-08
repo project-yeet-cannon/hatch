@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { ClaimBadge } from './ClaimBadge';
 import { TypeBadge } from './TypeBadge';
 import { MomentChip } from './MomentChip';
 import { isPlainClick } from '../lib/pointer';
@@ -90,6 +91,11 @@ function CardFace({ card, waiting, terminal }: Required<Omit<CardProps, 'card'>>
       <div className="hatch-card-head">
         <span className="hatch-card-key">{card.key}</span>
         <TypeBadge type={card.type} />
+        {/* Something is holding this one right now. On the face rather than on
+            the page, so the drag preview carries it too - a card being moved is
+            exactly the card where knowing a runner is mid-increment on it
+            matters. */}
+        <ClaimBadge claim={card.claim} />
         {/* Drawn on the card and not only on the issue page, because a question
             nobody can see is a question nobody answers - and this card is the
             reason the column below it has stopped moving. */}
