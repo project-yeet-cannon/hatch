@@ -7,18 +7,45 @@ namespace Aerie.Hatch;
 /// - because an interrupted run has to be able to print it too, and an
 /// interrupted run is exactly the one with nothing left to reconstruct from.
 /// </summary>
-public sealed class Tally(TimeProvider clock)
+public sealed class Tally
 {
-    private readonly List<string> _moved = [];
-    private readonly List<string> _stalled = [];
+    private readonly TimeProvider _clock;
+    private readonly List<string> _moved;
+    private readonly List<string> _stalled;
     private readonly List<string> _failed = [];
-    private readonly DateTimeOffset _started = clock.GetUtcNow();
+    private readonly DateTimeOffset _started;
+
+    /// <summary>
+    /// A fresh night, or one already part-spent - <paramref name="carried"/>
+    /// being what the incarnation before a restart handed forward. Everything a
+    /// bound is measured against is seeded from it, which is what stops a
+    /// restart from being a way to start the budget over.
+    /// </summary>
+    public Tally(TimeProvider clock, NightState? carried = null)
+    {
+        _clock = clock;
+        _moved = [.. carried?.Moved ?? []];
+        _stalled = [.. carried?.Stalled ?? []];
+
+        // The night's start and not this process's, so the elapsed time in the
+        // morning covers the whole of it. A state file with no start in it is
+        // taken as starting now rather than in the year zero.
+        _started = carried is { Started.Year: > 1 } ? carried.Started : clock.GetUtcNow();
+
+        Runs = carried?.Runs ?? 0;
+        Spent = carried?.Spent ?? 0m;
+        Fails = carried?.Fails ?? 0;
+        Restarts = carried?.Restarts ?? 0;
+    }
 
     public int Runs { get; private set; }
     public decimal Spent { get; private set; }
 
     /// <summary>Increments that exited non-zero, in a row.</summary>
     public int Fails { get; private set; }
+
+    /// <summary>How many times the loop has come back as a newer version of itself.</summary>
+    public int Restarts { get; }
 
     /// <summary>The sentence naming what ended the run.</summary>
     public string? StopWhy { get; set; }
@@ -71,7 +98,7 @@ public sealed class Tally(TimeProvider clock)
             return true;
         }
 
-        if (UntilAt is { } hour && clock.GetUtcNow() >= hour)
+        if (UntilAt is { } hour && _clock.GetUtcNow() >= hour)
         {
             StopWhy = $"--until {Until} has come";
             return true;
@@ -117,6 +144,26 @@ public sealed class Tally(TimeProvider clock)
     }
 
     /// <summary>
+    /// The night so far, for the incarnation that is about to take it over -
+    /// counting the restart that is being asked for, since this is only ever
+    /// called on the way out to one.
+    /// </summary>
+    public NightState ToState() => new()
+    {
+        Runs = Runs,
+        Spent = Spent,
+        Started = _started,
+        Fails = Fails,
+        Restarts = Restarts + 1,
+        UntilAt = UntilAt,
+        Moved = _moved,
+        Stalled = _stalled,
+    };
+
+    /// <summary>What the night has come to so far, in one line, on the way to a restart.</summary>
+    public string SoFar() => $"{Runs} increment(s), ${Format.Money(Spent)} so far, carried forward";
+
+    /// <summary>
     /// What the run came to. Printed on the way out and nowhere else, because
     /// the reasons a loop ends include the ones nobody wrote code for - an
     /// interrupt, a failure, a terminal closing - and those are precisely the
@@ -124,11 +171,17 @@ public sealed class Tally(TimeProvider clock)
     /// </summary>
     public void Print(Terminal say)
     {
-        var elapsed = (long)(clock.GetUtcNow() - _started).TotalSeconds;
+        var elapsed = (long)(_clock.GetUtcNow() - _started).TotalSeconds;
+
+        // Every incarnation's, because the night is the thing somebody wanted
+        // counted and a restart is an implementation detail of it. The restarts
+        // are named only when there were some, so a night without one reads
+        // exactly as it always did.
+        var restarts = Restarts > 0 ? $", {Restarts} restart(s)" : "";
 
         say.Line("");
         if (StopWhy is { Length: > 0 } why) say.Line($"hatch: {why}");
-        say.Line($"hatch: {Runs} increment(s) in {Format.Duration(elapsed)}, ${Format.Money(Spent)}");
+        say.Line($"hatch: {Runs} increment(s) in {Format.Duration(elapsed)}, ${Format.Money(Spent)}{restarts}");
         say.Lines(_moved);
         say.Lines(_stalled);
     }
@@ -200,12 +253,32 @@ public sealed class GoToWorkCommand(Runtime runtime)
     /// <summary>How long to wait between reminders that nothing has changed.</summary>
     private static readonly TimeSpan StillNothing = TimeSpan.FromMinutes(10);
 
+    /// <summary>
+    /// What the runner exits with to ask the supervisor in <c>hatch.sh</c> to
+    /// build the new source and run it again.
+    /// </summary>
+    /// <remarks>
+    /// 75 is <c>EX_TEMPFAIL</c> - "try again" - and collides with nothing else
+    /// the runner answers with: 0 for a night that ended, 1 for a refusal, 130
+    /// for an interrupt. A process cannot exec itself into a newer build, so
+    /// asking to be replaced is the only move available from in here.
+    /// </remarks>
+    public const int RestartExitCode = 75;
+
+    /// <summary>How long a loop runs before the backstop restarts it anyway.</summary>
+    private const int RestartAfterMinutes = 30;
+
+    /// <summary>Changed paths named on a restart before the rest are counted instead.</summary>
+    private const int NamedPaths = 5;
+
     public async Task<int> RunAsync(string[] args, CancellationToken ct)
     {
         string? key = null, under = null, until = null, stopFile = null;
         var interval = 60;
         var once = false;
         var quiet = false;
+        var restartAfter = RestartAfterMinutes;
+        var noRestart = false;
         int? maxRuns = null;
         decimal? maxSpend = null;
 
@@ -247,6 +320,19 @@ public sealed class GoToWorkCommand(Runtime runtime)
                     break;
                 case "--until" when i + 1 < args.Length: until = args[++i]; break;
                 case "--stop-file" when i + 1 < args.Length: stopFile = args[++i]; break;
+                case "--restart-after" when i + 1 < args.Length:
+                    if (!int.TryParse(args[++i], out restartAfter) || restartAfter < 0)
+                    {
+                        // Refused rather than clamped, like --interval: a
+                        // negative age is a loop that is always too old, which
+                        // is a loop that does nothing but restart.
+                        runtime.Say.Complain(
+                            "hatch: --restart-after takes a number of minutes, at least one - or 0 to turn it off");
+                        return 1;
+                    }
+
+                    break;
+                case "--no-restart": noRestart = true; break;
                 case var flag when flag.StartsWith('-'):
                     runtime.Say.Complain($"hatch: go-to-work does not take {flag}");
                     return 1;
@@ -303,18 +389,39 @@ public sealed class GoToWorkCommand(Runtime runtime)
             return 1;
         }
 
-        var tally = new Tally(runtime.Clock)
+        // What the incarnation before a restart handed over, if this is one.
+        var carried = NightState.Read(runtime.NightStatePath);
+
+        var tally = new Tally(runtime.Clock, carried)
         {
             MaxRuns = maxRuns,
             MaxSpend = maxSpend,
             Until = until,
-            UntilAt = untilAt,
+            // Carried rather than recomputed, and it is the one bound that would
+            // otherwise be wrong: `--until 23:59` typed at 23:58 and restarted at
+            // 00:01 re-reads as 23:59 tomorrow, and adds a day to the night.
+            UntilAt = carried?.UntilAt ?? untilAt,
             StopFile = stopFile,
         };
 
+        var restart = Restarts.Armed(runtime, noRestart, once, restartAfter);
+        var restarting = false;
+
         try
         {
-            await LoopAsync(under, quiet, once, interval, tally, ct);
+            restarting = await LoopAsync(under, quiet, once, interval, tally, restart, ct);
+
+            // A restart that could not hand the night's totals over would be a
+            // fresh night: the budget back to nothing, the streak cleared, the
+            // hour re-read. Better the version that is running carries on to its
+            // own end than a new one starts with no bounds on it.
+            if (restarting && !tally.ToState().Write(runtime.NightStatePath))
+            {
+                runtime.Say.Complain(
+                    $"hatch: could not write the night's totals to {runtime.NightStatePath} - not restarting, since the next one would start the budget over");
+                tally.StopWhy = "the night's totals could not be handed forward";
+                restarting = false;
+            }
         }
         catch (OperationCanceledException)
         {
@@ -326,14 +433,54 @@ public sealed class GoToWorkCommand(Runtime runtime)
         }
         finally
         {
-            tally.Print(runtime.Say);
+            // A restart is the middle of a night and not the end of one: the
+            // tally goes into the state file for whoever comes back, and is
+            // printed once, by whichever incarnation is the last.
+            if (!restarting)
+            {
+                NightState.Forget(runtime.NightStatePath);
+                tally.Print(runtime.Say);
+            }
         }
 
-        return 0;
+        return restarting ? RestartExitCode : 0;
     }
 
-    private async Task LoopAsync(
-        string? under, bool quiet, bool once, int interval, Tally tally, CancellationToken ct)
+    /// <summary>
+    /// Whether this loop may come back as a newer version of itself, when it
+    /// should give up waiting for a reason to, and what its own source looked
+    /// like when it started.
+    /// </summary>
+    /// <remarks>
+    /// The baseline is taken once, at startup, and deliberately not carried
+    /// across a restart. That is what makes a failed rebuild safe: an
+    /// incarnation running the old code with the new source already on disk has
+    /// the new source as <em>its</em> baseline, and will not ask again for the
+    /// same change.
+    /// </remarks>
+    private sealed record Restarts(bool On, TimeSpan? After, SelfPrint Baseline, DateTimeOffset Born)
+    {
+        public static Restarts Armed(Runtime runtime, bool noRestart, bool once, int afterMinutes)
+        {
+            // Three ways of being off, and the third is not a flag: no state
+            // path means nobody is supervising this process, so exiting 75 would
+            // simply end the night. A runner started by hand is today's loop.
+            var on = !noRestart && !once && runtime.NightStatePath is { Length: > 0 };
+
+            return new Restarts(
+                On: on,
+                After: afterMinutes > 0 ? TimeSpan.FromMinutes(afterMinutes) : null,
+                Baseline: on ? runtime.Self().Take() : SelfPrint.Nothing,
+                Born: runtime.Clock.GetUtcNow());
+        }
+
+        /// <summary>Whether this incarnation - not the night - has been up long enough.</summary>
+        public bool TooOld(DateTimeOffset now) => On && After is { } age && now - Born >= age;
+    }
+
+    /// <summary>Answers whether the loop is asking to come back as a newer version of itself.</summary>
+    private async Task<bool> LoopAsync(
+        string? under, bool quiet, bool once, int interval, Tally tally, Restarts restart, CancellationToken ct)
     {
         var idle = new SaidOnce();
         var busy = new SaidOnce();
@@ -342,31 +489,49 @@ public sealed class GoToWorkCommand(Runtime runtime)
         {
             runtime.Say.Complain(missing);
             tally.StopWhy = "there is no claude CLI to spawn";
-            return;
+            return false;
         }
 
         while (!ct.IsCancellationRequested)
         {
-            if (tally.ShouldStop()) return;
+            if (tally.ShouldStop()) return false;
 
-            var pass = await PassAsync(under, quiet, bin, tally, idle, busy, interval, once, ct);
-            if (pass == Pass.Fatal) return;
+            // The backstop, read here because here is where no claim is held. An
+            // idle loop never resets - by design, since a fetch every interval
+            // all night against a remote with nothing to say is a fetch for
+            // nothing - so it never sees a change, and age is what covers it.
+            // The fresh process re-reads scripts/.env, re-resolves the runner,
+            // and the first pass with work in it resets and sees the rest.
+            var now = runtime.Clock.GetUtcNow();
+            if (restart.TooOld(now))
+            {
+                runtime.Say.Line("");
+                runtime.Say.Line(
+                    $"hatch: this loop has been running {Format.Duration((long)(now - restart.Born).TotalSeconds)} - restarting to pick up anything that landed");
+                runtime.Say.Line($"hatch:   {tally.SoFar()}");
+                return true;
+            }
+
+            var pass = await PassAsync(under, quiet, bin, tally, idle, busy, interval, once, restart, ct);
+            if (pass == Pass.Fatal) return false;
+            if (pass == Pass.Restarting) return true;
 
             // `--once` is the loop's own dry run against a board that is not a
             // fixture: one pass, whatever it found, and out.
             if (once)
             {
                 tally.StopWhy = "--once, and the pass is done";
-                return;
+                return false;
             }
 
             // An increment that ran is followed by the next one immediately. The
             // interval is what to do when there was nothing to do.
             if (pass == Pass.Worked) continue;
-            if (!await NapAsync(interval, tally, ct)) return;
+            if (!await NapAsync(interval, tally, ct)) return false;
         }
 
         if (ct.IsCancellationRequested) tally.StopWhy ??= "interrupted";
+        return false;
     }
 
     private enum Pass
@@ -374,6 +539,12 @@ public sealed class GoToWorkCommand(Runtime runtime)
         Worked,
         Waited,
         Fatal,
+
+        /// <summary>
+        /// The loop's own source changed under it. Nothing was spawned, and the
+        /// claim goes back on the way out - a restart holds no ticket.
+        /// </summary>
+        Restarting,
     }
 
     /// <summary>
@@ -388,7 +559,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
     /// </remarks>
     private async Task<Pass> PassAsync(
         string? under, bool quiet, string bin, Tally tally,
-        SaidOnce idle, SaidOnce busy, int interval, bool once, CancellationToken ct)
+        SaidOnce idle, SaidOnce busy, int interval, bool once, Restarts restart, CancellationToken ct)
     {
         var picked = await runtime.Picker().PickAsync(under, runtime.OffsetMinutes, ct, runtime.Heartbeat);
         var now = runtime.Clock.GetUtcNow();
@@ -462,6 +633,18 @@ public sealed class GoToWorkCommand(Runtime runtime)
                     return Pass.Waited;
             }
 
+            // The one place the change trigger can fire, because the new source
+            // only exists on disk once the reset has pulled it. Inside the `try`
+            // on purpose: the `finally` that gives the ticket back on every
+            // other way out of a pass gives it back on this one too, so a
+            // restart holds no claim and the next incarnation finds the ticket
+            // free.
+            if (Changed(restart) is { Count: > 0 } changed)
+            {
+                SayChanged(changed, tally);
+                return Pass.Restarting;
+            }
+
             runtime.Say.Line("");
 
             // The playbook's, and no flag reaches this: `work --model` is one
@@ -489,6 +672,30 @@ public sealed class GoToWorkCommand(Runtime runtime)
             // path out of a pass goes through.
             await claim.ReleaseAsync();
         }
+    }
+
+    /// <summary>
+    /// What of the loop's own source is not what it was when this incarnation
+    /// started. Empty when nothing changed, and when restarts are off - the
+    /// print is not even read then.
+    /// </summary>
+    private IReadOnlyList<string> Changed(Restarts restart) =>
+        restart.On ? runtime.Self().Take().ChangedFrom(restart.Baseline) : [];
+
+    /// <summary>
+    /// Which trigger fired and what it saw - because a terminal at three in the
+    /// morning that goes quiet and comes back reads as a crash unless something
+    /// says otherwise.
+    /// </summary>
+    private void SayChanged(IReadOnlyList<string> changed, Tally tally)
+    {
+        var named = string.Join(", ", changed.Take(NamedPaths));
+        if (changed.Count > NamedPaths) named += $", and {changed.Count - NamedPaths} more";
+
+        runtime.Say.Line("");
+        runtime.Say.Line("hatch: the loop's own source changed on the trunk - restarting as the new version");
+        runtime.Say.Line($"hatch:   {named}");
+        runtime.Say.Line($"hatch:   {tally.SoFar()}");
     }
 
     private async Task SayQuietlyAsync(

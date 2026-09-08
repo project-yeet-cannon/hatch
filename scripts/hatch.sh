@@ -77,6 +77,8 @@
 #   ./hatch.sh go-to-work --quiet --interval 300
 #   ./hatch.sh go-to-work --max-runs 5 --max-spend 20 --until 08:00
 #   ./hatch.sh go-to-work --stop-file /tmp/stop   # touch it to end the loop
+#   ./hatch.sh go-to-work --restart-after 60      # ...coming back as a newer build that often
+#   ./hatch.sh go-to-work --no-restart            # ...never coming back as a newer one
 #   ./hatch.sh api GET /api/hatch/issues?statusId=2
 #   ./hatch.sh api PATCH /api/hatch/issues/AER-12 '{"dueAt":"2026-10-01"}'
 #
@@ -892,25 +894,123 @@ MISSING
   echo "dotnet|run|--project|${root}/src/Aerie.Hatch/Aerie.Hatch.csproj|--"
 }
 
-# Both commands, through one door. HATCH_ROOT is the checkout: this script knows
-# where it lives and the runner would otherwise have to guess, and "which
-# checkout" is the question the whole of AERIE-794 is about.
-run_runner() {
-  local cmd root parts
+# The runner and how to launch it, in RUNNER_ARGV - a global because bash 3.2
+# cannot return an array and this file is bash 3.2 on purpose. Resolved again
+# before every launch, since a rebuild between two of them can put a binary
+# where there was only the SDK.
+runner_argv() {
+  local cmd
   cmd=$(runner_cmd)
+
+  case "$cmd" in
+    *"|"*) IFS='|' read -r -a RUNNER_ARGV <<<"$cmd" ;;
+    *)     RUNNER_ARGV=("$cmd") ;;
+  esac
+}
+
+# `work`, through one door. HATCH_ROOT is the checkout: this script knows where
+# it lives and the runner would otherwise have to guess, and "which checkout" is
+# the question the whole of AERIE-794 is about.
+#
+# One increment has nothing to carry forward and nothing to come back as, so it
+# replaces this process rather than being watched by it.
+exec_runner() {
+  runner_argv
+  HATCH_ROOT="$(repo_root)" exec "${RUNNER_ARGV[@]}" "$@"
+}
+
+# ---- The supervisor ----
+
+# `go-to-work` is run rather than exec'd, and this is the whole reason why: a
+# loop that spends the night improving this repository is running the version it
+# started with, and would be until somebody came and stopped it. Work that lands
+# at one in the morning does not reach the run that wrote it.
+#
+# A process cannot exec itself into a newer build - relaunching the same binary
+# relaunches the same code, and the new source has to be compiled by something
+# that outlives the process being replaced. That something is this file, which
+# was already sitting here as the parent. So the runner asks to come back by
+# exiting 75, and everything interesting - deciding to restart, letting go of
+# the claim, carrying the night's totals - stays in the runner, where
+# `make test-hatch` can assert them.
+#
+# The totals travel in a file this names once per night: a restart that started
+# the budget over would be a way of outspending `--max-spend` by restarting.
+night_state=""
+
+forget_night_state() {
+  [ -n "$night_state" ] && rm -f "$night_state"
+  return 0
+}
+
+supervise_go_to_work() {
+  local status root
   root=$(repo_root)
 
-  # A pipe-separated command line rather than an array, because bash 3.2 cannot
-  # return one and this file is bash 3.2 on purpose.
+  night_state=$(mktemp "${TMPDIR:-/tmp}/hatch-night.XXXXXX")
+
+  # Nothing is ever backgrounded here, so there is nothing to orphan: a signal
+  # reaches the runner directly, and bash runs the trap once the runner has
+  # finished giving its ticket back.
+  trap forget_night_state EXIT
+  trap "forget_night_state; exit 130" INT
+  trap "forget_night_state; exit 143" TERM
+
+  while :; do
+    runner_argv
+
+    # Captured rather than read after the fact, because `set -e` would otherwise
+    # end the night on the exit code that is asking for it to continue.
+    status=0
+    HATCH_ROOT="$root" HATCH_NIGHT_STATE="$night_state" \
+      "${RUNNER_ARGV[@]}" go-to-work "$@" || status=$?
+
+    [ "$status" -eq 75 ] || exit "$status"
+
+    rebuild_runner
+    echo "hatch: restarting" >&2
+  done
+}
+
+# The new source, compiled - the one place in this file that builds anything.
+#
+# A build that fails is not the end of a night: the loop comes back on the
+# binary that is there, and having taken its baseline at startup it will not ask
+# again for the same change. So this says what went wrong and returns, always.
+rebuild_runner() {
+  local root cmd
+  root=$(repo_root)
+
+  if [ -n "${HATCH_RUNNER_BIN:-}" ]; then
+    # A machine with no SDK on it. Restart anyway: hatch.sh itself may be what
+    # changed, and this file is read fresh on the way back in.
+    echo "hatch: HATCH_RUNNER_BIN names the runner, so there is nothing here to rebuild" >&2
+    return 0
+  fi
+
+  cmd=$(runner_cmd)
   case "$cmd" in
     *"|"*)
-      IFS='|' read -r -a parts <<<"$cmd"
-      HATCH_ROOT="$root" exec "${parts[@]}" "$@"
-      ;;
-    *)
-      HATCH_ROOT="$root" exec "$cmd" "$@"
+      # The `dotnet run` fallback, which builds on its own. Building here would
+      # leave a Release binary that the next launch prefers - a change nobody
+      # asked for.
+      return 0
       ;;
   esac
+
+  echo "hatch: rebuilding the runner" >&2
+
+  if command -v make >/dev/null; then
+    make -C "$root" build-hatch >&2 \
+      || echo "hatch: the rebuild failed - carrying on with the runner that is there" >&2
+  elif command -v dotnet >/dev/null; then
+    dotnet build "${root}/src/Aerie.Hatch/Aerie.Hatch.csproj" --configuration Release >&2 \
+      || echo "hatch: the rebuild failed - carrying on with the runner that is there" >&2
+  else
+    echo "hatch: neither make nor dotnet is here - carrying on with the runner that is there" >&2
+  fi
+
+  return 0
 }
 
 usage() {
@@ -942,8 +1042,8 @@ case "${1:-}" in
   ask)       shift; cmd_ask "$@" ;;
   questions) shift; cmd_questions "$@" ;;
   answer)    shift; cmd_answer "$@" ;;
-  work)    shift; run_runner work "$@" ;;
-  go-to-work) shift; run_runner go-to-work "$@" ;;
+  work)    shift; exec_runner work "$@" ;;
+  go-to-work) shift; supervise_go_to_work "$@" ;;
   api)     shift; api "${1:?method}" "/${2#/}" "${3:-}" ;;
   ''|-h|--help|help) usage 0 ;;
   *) echo "hatch: no such command \"$1\"" >&2; usage 1 ;;

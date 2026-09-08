@@ -90,6 +90,33 @@ public sealed class FakeWorkspace : IWorkspace
     }
 }
 
+/// <summary>
+/// The loop's own source, without a tree to change: a test sets what the next
+/// read answers, at the moment a reset would have pulled it.
+/// </summary>
+public sealed class FakeSelf : ISelf
+{
+    /// <summary>What the loop is made of, until a test says it is made of something else.</summary>
+    public SelfPrint Print { get; set; } = Of(("src/Aerie.Hatch/GoToWork.cs", "before"));
+
+    /// <summary>How many times the loop read itself.</summary>
+    public int Taken { get; private set; }
+
+    /// <summary>A print over the named files and the hashes they are standing in for.</summary>
+    public static SelfPrint Of(params (string Path, string Hash)[] files)
+    {
+        var map = files.ToDictionary(f => f.Path, f => f.Hash, StringComparer.Ordinal);
+        var ordered = map.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f => $"{f.Key}={f.Value}");
+        return new SelfPrint(map, string.Join('\n', ordered));
+    }
+
+    public SelfPrint Take()
+    {
+        Taken++;
+        return Print;
+    }
+}
+
 /// <summary>One test's runner: a stub wire, a stub session, a temporary tree.</summary>
 public sealed class Harness : IDisposable
 {
@@ -128,8 +155,22 @@ public sealed class Harness : IDisposable
             Heartbeat: heartbeat ?? Beat)
         {
             Workspace = () => Workspace,
+            Self = () => Self,
         };
     }
+
+    /// <summary>
+    /// Where a night's totals would be handed on. Named but not written: the
+    /// supervisor makes the path and the runner writes to it only when it is
+    /// asking to come back.
+    /// </summary>
+    public string NightState => Path.Combine(Temp, "night.json");
+
+    /// <summary>A loop that is being watched by a supervisor, and so may ask to restart.</summary>
+    public Runtime Supervised => Runtime with { NightStatePath = NightState };
+
+    /// <summary>The loop's own source, as the loop finds it.</summary>
+    public FakeSelf Self { get; } = new();
 
     /// <summary>The tree, as the pass finds it. Ready unless a test says otherwise.</summary>
     public FakeWorkspace Workspace { get; } = new();
