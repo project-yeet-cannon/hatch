@@ -467,6 +467,77 @@ is no `GET`: both lists ride `IssueDto`, where the board, the page and the shell
 need them anyway. Both directions land in the issue's history, on the issue that
 waits and on it alone.
 
+### Claim
+
+Seven nullable columns on the issue row — `ClaimToken`, `ClaimedBy`,
+`ClaimRunner`, `ClaimedAt`, `ClaimHeartbeatAt`, `ClaimChatter`, `ClaimChatterAt`
+— and a lease is all of them set or all of them null.
+
+**A claim is a lease held by a running dispatcher**: taken before an increment,
+refreshed while it runs, released after it, and expiring on its own when the
+runner dies. It is what makes two checkouts against one Hatch safe, which is the
+whole of why it exists. Columns rather than a table because a claim is a fact
+about the issue with at most one of it at a time, and because taking one is then
+a single conditional `UPDATE` against a row the dispatcher is already reading.
+
+**A claim and an assignee are different nouns.** An assignee is a person's
+intent, answered in days and written by a person. A claim is a process's grip,
+answered in minutes and written by a machine, and it is gone the moment the
+machine is. Putting them in one field would mean a crashed runner erasing
+somebody's plan for the week.
+
+**Expiry is lazy, and there is no sweeper.** A claim is dead when its heartbeat
+is older than the TTL, which is a predicate every reader evaluates rather than a
+state anything writes: nothing has to run for a dead runner's ticket to become
+claimable again, and there is no job to tune, schedule or notice has stopped.
+The columns stay as they are until somebody takes the lease over, so the trail
+of who last held it outlives the lease. The TTL is `Hatch:ClaimTtlSeconds`, five
+minutes by default, and it is **returned to the client with the claim** rather
+than configured on both sides — the server is what honours it, so the server is
+what says what it is.
+
+**The token is a fencing token, and it is a capability.** Every heartbeat and
+every release presents it, and a write whose token is not the one on the row is
+refused — which is what stops a runner whose lease expired mid-increment from
+clearing the lease that replaced it. It is handed out exactly once, in the
+response to the claim that minted it, and **it is on no read anywhere**: a board
+read that carried it would let anybody holding a board read steal or refresh
+somebody else's lease. What a client gets instead is who holds it, from where,
+when it was taken, when it was last heard from and what it last said — and
+nothing at all where the claim has expired, because the arithmetic is the
+server's and a card drawing a holder that stopped existing four hours ago is
+worse than a card drawing nothing.
+
+**The guarantee lives in a predicate on the write.** Reading the row first is
+unavoidable — a refusal has to name who holds it, and that sentence can only be
+written from the row — but nothing is decided by the read. Each write is one
+conditional `UPDATE`: a take matches only a row nothing live holds, a refresh
+and a release only a row still carrying the caller's own token. Two runners that
+both looked at the same unclaimed row resolve to one claim, and the loser wrote
+nothing rather than overwriting a lease it lost.
+
+**What the claim fences is the claim, not the writes.** Two runners are never
+*dispatched* at one ticket, which is the failure it exists to prevent. A runner
+whose lease expired mid-increment can still push its branch and still move the
+ticket, because moves are not gated on a token — and gating them would break
+every move a person makes, which is not a trade worth taking for a window that
+opens only when a runner stops answering for five minutes and then comes back.
+It is named here rather than papered over.
+
+Taking, releasing and clearing each write an event naming the actor, so the
+trail says who took a ticket and who let it go. A heartbeat writes none: it is a
+meter reading rather than a decision, and the trail would otherwise be a row a
+minute for every running increment.
+
+**Its tests need a real Postgres**, and `make test-api-db` is how they get one —
+`make test-api` runs the same suite and skips them, saying so. That is not
+fastidiousness: the guarantee here is a `WHERE` clause, EF's in-memory provider
+refuses a conditional `UPDATE` outright, and the SQLite provider cannot
+translate the `DateTimeOffset` comparison the expiry rule is. Either substitute
+would be green while the SQL was wrong, which is the one failure mode the lane
+exists to prevent — the same argument the trading silo's queue makes about its
+own. CI runs it on every pull request.
+
 ### Comment, question and answer
 
 `EfHatchComment` — `IssueId`, `Author`, `Body` (markdown), `Kind`, `AnswersId`,
@@ -728,9 +799,12 @@ Everything under `/api/hatch`, every route `[RequireAdmin(AcceptScope =
 | `/issues/{key}/playbook` | PATCH | **Person only** — plain `[RequireAdmin]`. The issue's own model and effort; `""` hands either back to the playbook |
 | `/assignees` | GET | Every person and every live key, plus who the caller is — the picker's rows and *Assign to me* in one read |
 | `/issues/{key}/assignee` | PUT | **Person only** — plain `[RequireAdmin]`. `{ kind, id }`, or both null to unassign — see [Assignee](#assignee) |
+| `/issues/{key}/claim` | POST | Takes the [lease](#claim). `{ runner }`; answers with the token, the holder, when it was taken and the TTL. `409` naming the holder where something live already has it — including the same runner asking twice |
+| `/issues/{key}/claim/heartbeat` | POST | `{ token, chatter? }` — refreshes it, `204`. `409` on a token that is not the row's, and on a lease that is over. `chatter` absent leaves the carried line alone, `""` clears it, anything longer than the column is truncated rather than refused |
+| `/issues/{key}/claim?token=…` | DELETE | Releases it, `204`. A mismatched token is `409` and clears nothing; an issue holding no claim is `204` and writes nothing. **With no token at all it is person-only** — an agent that could clear another runner's claim could take a ticket off it mid-increment |
 | `/questions` | GET | Every open question in the house |
 | `/plan`, `/plan/{key}` | GET | See [the level above the board](#the-level-above-the-board) |
-| `/work/next`, `/work/{key}` | GET | See [the dispatcher](#the-dispatcher) |
+| `/work/next`, `/work/{key}` | GET | See [the dispatcher](#the-dispatcher). `?heldToken=` names a [claim](#claim) of one's own, so it is not folded past as somebody else's |
 | `/work/queue` | GET | The same walk `next` takes, reported rather than acted on — see [what a pass skipped](#what-a-pass-skipped) |
 | `/playbooks` | GET | **Reads only.** POST/PATCH/DELETE are plain `[RequireAdmin]` |
 | `/import/preview`, `/import/preview-text`, `/import` | POST | See [the importer](#the-importer) |
@@ -986,24 +1060,34 @@ An override changes what a dispatch costs and never whether one happens.
 Nothing in the refusals below consults one: an issue with no playbook for its
 next move is refused in the same sentence whether it names a model or not.
 
-**Four refusals**, and two of them are rules of the whole loop rather than
+**Six refusals**, and two of them are rules of the whole loop rather than
 missing configuration:
 
 1. The issue is already in a terminal column — there is nothing after it.
 2. There is no column to its right.
 3. The next column **is** terminal — *only the operator decides that something
    shipped*.
-4. The issue holds an unanswered question — *it is waiting on a person, not on
+4. Something else holds a live [claim](#claim) on it — *somebody is working this
+   right now*, named with the runner it is being worked from and when it was
+   last heard from.
+5. The issue holds an unanswered question — *it is waiting on a person, not on
    an agent*.
+6. Something it [depends on](#dependency) is unfinished, and the move is into
+   the column where the code gets written.
 
 …and then, if none of those, the ordinary one: no playbook covers this
 transition for this type.
 
-The fourth is checked before the playbook, because "nobody has answered you" is
-a more useful sentence than "no playbook covers this" when both are true. It is
-also what keeps a question from being asked twice: without it, the loop's only
-reaction to an open question would be to spawn another session that asks it
-again.
+The claim is fourth rather than last because it is the only one of these that
+says work is happening *now*; everything under it is about whether the issue
+could be worked at all, and "no playbook covers this" is a true sentence about
+the wrong thing when another runner is three minutes in.
+
+The question is checked before the playbook, because "nobody has answered you"
+is a more useful sentence than "no playbook covers this" when both are true. It
+is also what keeps a question from being asked twice: without it, the loop's
+only reaction to an open question would be to spawn another session that asks
+it again.
 
 `work/next` folds past everything blocked in silence — "nothing to do" is the
 useful answer and a list of reasons is not — while `work/{key}`, which somebody
@@ -1179,24 +1263,30 @@ line naming the two values says which of them the issue chose.
 
 ### What makes an issue actionable
 
-Six conditions. An issue is the loop's to pick up when it meets every one, and
+Seven conditions. An issue is the loop's to pick up when it meets every one, and
 the sentence saying which one it failed is what `work/queue` reports:
 
 1. **There is a column to its right, and that column is not terminal.** The end
    of the board is not a transition, and the step into a terminal column is the
    operator's: *only the operator decides that something shipped*.
-2. **Its ready date has arrived**, read against the caller's calendar day. A
+2. **No live [claim](#claim) is held by somebody else.** It is the only fold
+   that says *this is being worked right now*; everything below it is about
+   whether the issue could be worked at all, which is why nothing else is said
+   about a ticket another runner is three minutes into. A caller naming a claim
+   token of its own with `?heldToken=` is not folded by its own lease:
+   re-reading the dispatch for a ticket one already holds is not a conflict.
+3. **Its ready date has arrived**, read against the caller's calendar day. A
    card folded off the board is not one to spend an increment on tonight.
-3. **Nobody's name is on it.** An issue [assigned](#assignee) to a person is
+4. **Nobody's name is on it.** An issue [assigned](#assignee) to a person is
    somebody's to do, and an unattended pass leaves it alone. An issue assigned
    to an API key, or to nobody, is picked up exactly as it always was.
-4. **It holds no unanswered question.** It is waiting on a person, and another
+5. **It holds no unanswered question.** It is waiting on a person, and another
    agent sent at it would ask the same thing again or guess at the answer.
-5. **Nothing it depends on is unfinished** — and only when the move is into the
+6. **Nothing it depends on is unfinished** — and only when the move is into the
    column where the code gets written. Everything left of that still moves; an
    edge is satisfied only once the issue it names is in a terminal column. See
    [Dependency](#dependency).
-6. **A playbook covers that transition for that type.** Without one there is
+7. **A playbook covers that transition for that type.** Without one there is
    nothing to say to the session — and a column no playbook leads out of is
    exactly [how a column becomes the operator's](#status), which is why the
    absence is a fold rather than an error. **This is also where the issue's
@@ -1204,9 +1294,9 @@ the sentence saying which one it failed is what `work/queue` reports:
    pick up is a type no row names for that move, said in the words that name
    the fix.
 
-Four of them — 1, 4, 5 and 6 — are facts about the issue, and `work/{key}` asks
-them too. The other two are the loop's policy and are asked only when the pass
-is asking; see [one more, on `next` alone](#one-more-on-next-alone).
+Five of them — 1, 2, 5, 6 and 7 — are facts about the issue, and `work/{key}`
+asks them too. The other two are the loop's policy and are asked only when the
+pass is asking; see [one more, on `next` alone](#one-more-on-next-alone).
 
 **The board is worked right to left**, for the reason the dispatcher gives, and
 overnight it is the difference between a shape and a mess: a loop working left
@@ -1226,16 +1316,23 @@ machine that rebooted out from under it — is cleared rather than honoured, whi
 is the difference between a loop that survives a crash and one somebody has to
 let back in.
 
-The alternative was a **claim on the issue row** — a "who is working this, and
-since when" pair the dispatcher would fold past. It was rejected because a claim
-is a lease: a lease needs an expiry, an expiry needs a heartbeat, and the first
-run that dies mid-increment leaves a row nothing may touch until a timeout
-nobody has ever tuned. It would also put the loop's scheduling state in the
-tracker's schema, where the board would then have to draw it, to say something
-about a process on one machine. The premise is one loop at a time, and a
-directory says exactly that and nothing else. Two loops against one Hatch is
-[parallelism](#deferred-on-purpose), and it is deferred rather than
-half-answered here.
+The lock says one loop per machine. What says one loop per *ticket* is the
+[claim](#claim), and it now exists — so the two questions the `TMPDIR` directory
+used to answer together are answered separately, each by the thing that can.
+
+The claim was once deferred, and each reason it was deferred has an answer.
+A lease needs an expiry, and the expiry is lazy: a claim is dead when its
+heartbeat is older than the TTL, evaluated by whoever reads the row, so there is
+no timeout to tune and no sweeper to notice has stopped. An expiry needs a
+heartbeat, and the heartbeat is the runner's own — it is sent by the process
+holding the lease, not by anything the board has to run. And a run that dies
+mid-increment leaves a row nothing may touch for exactly one TTL, after which
+the next pass takes it with no operator action.
+
+What remains machine-local is the `TMPDIR` lock, and it is now the smaller
+claim: *this checkout is already looping*. Making it one lock per checkout
+rather than one per machine — so two checkouts on one box may both run — is
+AERIE-794's, and the claim is what makes it safe.
 
 ### The workspace, between increments
 
@@ -1566,15 +1663,12 @@ code already settles is a round trip through a person for nothing.
 
 ## Deferred on purpose
 
-- **Parallelism.** One loop at a time, on one machine, enforced by a directory
-  in `TMPDIR` and by nothing else. Two loops against one Hatch would need a
-  claim the dispatcher honours — with an expiry, and a heartbeat behind the
-  expiry — and the lock exists precisely so that none of that has to be right
-  before the first unattended night can run. It is also not obviously wanted:
-  what makes an epic serial is now a [chain somebody filed](#dependency) rather
-  than a rule about siblings, so two loops would produce exactly the parallelism
-  the chain was written to prevent wherever nobody filed one — and the operator
-  reading the pull requests is the one thing that does not parallelise.
+- **The loop lifted onto the Aerie platform, headless.** Two checkouts on one
+  box and several boxes in the house are what the [claim](#claim) makes
+  possible; a loop that is a service rather than a terminal somebody left open
+  is the run after that, and it is not this one. What is deferred is the
+  scheduling, the credentials and the place the output goes — not the mutex,
+  which is built.
 - **A second scope for agents**, which would stop a key answering its own
   question. Worth a column when somebody wants it; see
   [the one edge](#the-one-edge-that-is-deliberately-cut).

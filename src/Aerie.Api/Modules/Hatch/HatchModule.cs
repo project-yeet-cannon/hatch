@@ -20,6 +20,16 @@ public static class HatchModule
         // nor the clock.
         services.AddSingleton<PlanImportParser>();
 
+        // The claim's TTL, and the one class that judges a lease against it.
+        // Bound here rather than in Program.cs because a module owns its own
+        // registrations (Modules/README.md).
+        //
+        // Singleton for the reason above it: IssueClaims reads an options value
+        // and holds nothing else, and every judgement it makes takes the
+        // instant it is judging against rather than reading a clock.
+        services.Configure<HatchOptions>(configuration.GetSection(HatchOptions.SectionName));
+        services.AddSingleton<IssueClaims>();
+
         // The battery in the nav, in three registrations. All singletons, and
         // the chain has to be: UtilizationCache holds the last good reading for
         // the whole process - which is what lets an unreachable account still

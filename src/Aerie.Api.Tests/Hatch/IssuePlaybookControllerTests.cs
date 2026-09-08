@@ -302,8 +302,8 @@ public class IssuePlaybookControllerTests
 
         return new Harness
         {
-            Playbook = new IssuePlaybookController(db, new StubActorDirectory(), caller, time),
-            Issues = new IssuesController(db, new RankService(db), new StubActorDirectory(), caller, time),
+            Playbook = new IssuePlaybookController(db, new StubActorDirectory(), TestClaims.With(), caller, time),
+            Issues = new IssuesController(db, new RankService(db), new StubActorDirectory(), TestClaims.With(), caller, time),
             Thread = new IssueThreadController(db, caller, time),
             Time = time,
             ProjectId = aerie.Id,

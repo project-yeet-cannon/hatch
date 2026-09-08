@@ -184,6 +184,20 @@ public class EfHatchIssue
     /// </summary>
     public const int MaxPullRequestUrlLength = 500;
 
+    /// <summary>
+    /// Room for <c>host:/path/to/checkout</c>, which is how a runner names
+    /// itself. The same 240 a person's name takes, because it is the same kind
+    /// of thing: a label somebody reads in a refusal.
+    /// </summary>
+    public const int MaxClaimRunnerLength = 240;
+
+    /// <summary>
+    /// Room for a line of chatter. A sentence, not a log - what is stored is
+    /// what a card draws under "working on it", and anything longer is
+    /// truncated to this.
+    /// </summary>
+    public const int MaxClaimChatterLength = 512;
+
     /// <summary>The four types, in the order a picker should offer them.</summary>
     public static readonly string[] Types = ["epic", "story", "task", "bug"];
 
@@ -335,6 +349,76 @@ public class EfHatchIssue
     /// </summary>
     [MaxLength(EfHatchPlaybook.MaxEffortLength)]
     public string? EffortOverride { get; set; }
+
+    // ---- The claim ----
+    //
+    // A lease on this issue held by a running dispatcher: taken before an
+    // increment, refreshed while it runs, released after it, and expiring on
+    // its own when the runner dies. Seven columns on the issue row rather than
+    // a table of their own, because a claim is a fact about the issue with at
+    // most one of it at a time - and because taking one is then a single
+    // conditional UPDATE against a row the dispatcher is already reading.
+    //
+    // Expiry is lazy and there is no sweeper. A claim is dead when
+    // <see cref="ClaimHeartbeatAt"/> is older than the TTL, which is a
+    // predicate every reader evaluates (see IssueClaims.IsLive); nothing has to
+    // run for a dead runner's ticket to become claimable again. The columns are
+    // left as they are until somebody takes the lease over, so the trail of who
+    // last held it survives the lease itself.
+    //
+    // There is deliberately no index on ClaimHeartbeatAt, and nobody should add
+    // one on a hunch. The predicate is only ever evaluated against rows already
+    // selected by the board's own (StatusId, Rank) index or by primary key, and
+    // this table holds hundreds of rows.
+
+    /// <summary>
+    /// The fencing token, or null where nothing holds this issue. A heartbeat
+    /// or a release presenting a token that is not this one is refused, which
+    /// is what keeps a runner whose lease expired mid-increment from clearing
+    /// the lease that replaced it.
+    /// </summary>
+    /// <remarks>
+    /// Never leaves the server on a board read - see <see cref="IssueClaimDto"/>.
+    /// It is a capability, not a fact about the issue, and a card carrying it
+    /// would let anyone holding a board read steal or refresh a lease.
+    /// </remarks>
+    public Guid? ClaimToken { get; set; }
+
+    /// <summary>
+    /// Who holds it, as a name rather than a foreign key - the same column
+    /// shape <see cref="CreatedBy"/> and <see cref="EfHatchIssueEvent.Actor"/>
+    /// take, and for the same reason: the trail has to keep reading after the
+    /// person or the key it named is gone.
+    /// </summary>
+    [MaxLength(Common.PersonName.MaxChars)]
+    public string? ClaimedBy { get; set; }
+
+    /// <summary>
+    /// Which checkout is holding it - <c>host:/path/to/checkout</c>, as the
+    /// runner names itself. A claim answers "who" and "from where" separately
+    /// because two checkouts on one box under one key are the case the whole
+    /// feature exists for.
+    /// </summary>
+    [MaxLength(MaxClaimRunnerLength)]
+    public string? ClaimRunner { get; set; }
+
+    /// <summary>When the lease was taken. Not moved by a heartbeat - "how long has this been running" is a question about this column.</summary>
+    public DateTimeOffset? ClaimedAt { get; set; }
+
+    /// <summary>When the holder was last heard from. The lease is over when this is older than the TTL.</summary>
+    public DateTimeOffset? ClaimHeartbeatAt { get; set; }
+
+    /// <summary>
+    /// A line the holder is carrying: what it is doing right now, replaced
+    /// whole by each heartbeat that names one. Cosmetic, and truncated rather
+    /// than refused - killing a live lease because a terminal printed something
+    /// wide would be the wrong trade.
+    /// </summary>
+    [MaxLength(MaxClaimChatterLength)]
+    public string? ClaimChatter { get; set; }
+
+    /// <summary>When that line arrived, so a stale one reads as stale.</summary>
+    public DateTimeOffset? ClaimChatterAt { get; set; }
 
     /// <summary>
     /// The person this issue belongs to, or null. At most one of this and
@@ -570,6 +654,25 @@ public class EfHatchIssueEvent
 
     /// <summary>The reverse - see <see cref="DependencyAdded"/>.</summary>
     public const string DependencyRemoved = "dependency_removed";
+
+    /// <summary>
+    /// A runner took the lease on this issue - see
+    /// <see cref="EfHatchIssue.ClaimToken"/>. Written because the trail's
+    /// question is "who took this ticket", and on a board worked by several
+    /// checkouts that is a question with a wrong answer.
+    /// </summary>
+    public const string ClaimTaken = "claim_taken";
+
+    /// <summary>The holder let go of it, presenting the token it was given.</summary>
+    public const string ClaimReleased = "claim_released";
+
+    /// <summary>
+    /// The operator took it off somebody - the same column cleared, and a
+    /// different fact. A runner letting go and a person prising a ticket loose
+    /// are told apart by the kind and not by the payload, which is the same
+    /// <c>{ from, to }</c> shape either way.
+    /// </summary>
+    public const string ClaimCleared = "claim_cleared";
 
     public const string Commented = "commented";
 

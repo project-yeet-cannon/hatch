@@ -36,7 +36,8 @@ namespace Aerie.Api.Modules.Hatch;
 [ApiController]
 [Route("api/hatch")]
 public class AssigneeController(
-    HatchContext db, IActorDirectory actors, ICallerIdentity caller, TimeProvider time) : ControllerBase
+    HatchContext db, IActorDirectory actors, IssueClaims claims, ICallerIdentity caller,
+    TimeProvider time) : ControllerBase
 {
     /// <summary>
     /// Everybody an issue could belong to, and who the caller is - in one read,
@@ -143,7 +144,7 @@ public class AssigneeController(
             await db.SaveChangesAsync(ct);
         }
 
-        return await IssueProjection.ToDtoAsync(db, actors, issue, ct);
+        return await IssueProjection.ToDtoAsync(db, actors, issue, claims, time.GetUtcNow(), ct);
     }
 
     /// <summary>The module's wire shape for a platform actor - see <see cref="AssigneeDto"/>.</summary>

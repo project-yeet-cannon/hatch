@@ -21,7 +21,8 @@ namespace Aerie.Api.Modules.Hatch;
 [ApiController]
 [Route("api/hatch/plan")]
 [RequireAdmin(AcceptScope = ApiKeyScopes.Hatch)]
-public class PlanController(HatchContext db, IActorDirectory actors) : ControllerBase
+public class PlanController(
+    HatchContext db, IActorDirectory actors, IssueClaims claims, TimeProvider time) : ControllerBase
 {
     /// <summary>The type the Plan page is a list of. Everything else is what an epic is a total over.</summary>
     private const string Epic = "epic";
@@ -62,9 +63,13 @@ public class PlanController(HatchContext db, IActorDirectory actors) : Controlle
                 i.DueAtHasTime,
                 i.AssigneePersonId,
                 i.AssigneeApiKeyId,
+                Claim = new ClaimSnapshot(
+                    i.ClaimToken, i.ClaimedBy, i.ClaimRunner,
+                    i.ClaimedAt, i.ClaimHeartbeatAt, i.ClaimChatter, i.ClaimChatterAt),
             })
             .ToListAsync(ct);
 
+        var now = time.GetUtcNow();
         var parentKey = IssueKey.Format(issue.ProjectKey, issue.Number);
 
         var rows = new List<ChildRollupDto>(children.Count);
@@ -80,7 +85,8 @@ public class PlanController(HatchContext db, IActorDirectory actors) : Controlle
                     parentKey,
                     IssueMoment.Format(c.ReadyAt, c.ReadyAtHasTime),
                     IssueMoment.Format(c.DueAt, c.DueAtHasTime),
-                    Assignee: await IssueProjection.ToAssigneeAsync(actors, c.AssigneePersonId, c.AssigneeApiKeyId, ct)),
+                    Assignee: await IssueProjection.ToAssigneeAsync(actors, c.AssigneePersonId, c.AssigneeApiKeyId, ct),
+                    Claim: claims.Project(c.Claim, now)),
                 tree.IsLeaf(c.Id),
                 tree.Of(c.Id)));
 
@@ -126,6 +132,9 @@ public class PlanController(HatchContext db, IActorDirectory actors) : Controlle
                 i.DueAtHasTime,
                 i.AssigneePersonId,
                 i.AssigneeApiKeyId,
+                Claim = new ClaimSnapshot(
+                    i.ClaimToken, i.ClaimedBy, i.ClaimRunner,
+                    i.ClaimedAt, i.ClaimHeartbeatAt, i.ClaimChatter, i.ClaimChatterAt),
             })
             .ToListAsync(ct);
 
@@ -137,6 +146,7 @@ public class PlanController(HatchContext db, IActorDirectory actors) : Controlle
             .Select(i => i.Id)
             .ToListAsync(ct);
 
+        var now = time.GetUtcNow();
         var byId = epics.ToDictionary(e => e.Id);
         var keys = epics.ToDictionary(e => e.Id, e => IssueKey.Format(e.ProjectKey, e.Number));
 
@@ -198,7 +208,8 @@ public class PlanController(HatchContext db, IActorDirectory actors) : Controlle
                         row.ParentId is { } parent ? keys.GetValueOrDefault(parent) : null,
                         IssueMoment.Format(row.ReadyAt, row.ReadyAtHasTime),
                         IssueMoment.Format(row.DueAt, row.DueAtHasTime),
-                        Assignee: assignees[id]),
+                        Assignee: assignees[id],
+                        Claim: claims.Project(row.Claim, now)),
                     tree.IsLeaf(id),
                     // The whole subtree, not the epics below it: an epic's
                     // meter is its stories and their tasks, and the nested

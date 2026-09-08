@@ -33,7 +33,7 @@ namespace Aerie.Api.Modules.Hatch;
 [ApiController]
 [Route("api/hatch/issues")]
 public class IssuePlaybookController(
-    HatchContext db, IActorDirectory actors, ICallerIdentity caller, TimeProvider time) : ControllerBase
+    HatchContext db, IActorDirectory actors, IssueClaims claims, ICallerIdentity caller, TimeProvider time) : ControllerBase
 {
     /// <summary>
     /// Set, change or clear either override. Null leaves a field alone and
@@ -106,7 +106,7 @@ public class IssuePlaybookController(
             await db.SaveChangesAsync(ct);
         }
 
-        return await IssueProjection.ToDtoAsync(db, actors, issue, ct);
+        return await IssueProjection.ToDtoAsync(db, actors, issue, claims, time.GetUtcNow(), ct);
     }
 
     /// <summary>An emptied value read as the null the column holds for "no override".</summary>

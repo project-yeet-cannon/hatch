@@ -14,6 +14,13 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!--
+      Dynamic skipping, which xUnit v2's own Assert does not have. One feature's
+      tests need a real Postgres (see HatchDatabase) and have to say so out loud
+      on a machine without one: reporting them as passed would be a lie, and
+      failing would make `dotnet test` red on every laptop.
+    -->
+    <PackageReference Include="Xunit.SkippableFact" Version="1.5.85" />
   </ItemGroup>
 
   <ItemGroup>

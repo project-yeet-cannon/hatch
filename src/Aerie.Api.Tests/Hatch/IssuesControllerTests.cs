@@ -1997,9 +1997,66 @@ public class IssuesControllerTests
 
     private static readonly DateTimeOffset Now = new(2026, 9, 2, 12, 0, 0, TimeSpan.Zero);
 
+    // ---- The claim, on every read a client draws from ----
+
+    [Fact]
+    public async Task ALiveClaim_RidesTheIssueAndTheCardAndTheSearch()
+    {
+        var h = await NewAsync();
+        var issue = await h.CreateAsync("story", "somebody is on it");
+        await h.ClaimAsync(issue.Key, "aerie-hatch", "somewhere:/checkouts/one", "running the tests");
+
+        var read = Value(await h.Issues.GetIssue(issue.Key, default));
+        Assert.NotNull(read.Claim);
+        Assert.Equal("aerie-hatch", read.Claim.ClaimedBy);
+        Assert.Equal("somewhere:/checkouts/one", read.Claim.Runner);
+        Assert.Equal("running the tests", read.Claim.Chatter);
+
+        // The board and the search hand out cards rather than issues, and a
+        // claim a client cannot see on the screen it lives on is a claim it
+        // cannot draw.
+        Assert.NotNull(Value(await h.Board.GetBoard(default)).Issues.Single(c => c.Key == issue.Key).Claim);
+
+        var found = Value(await h.Issues.SearchIssues(null, null, null, null, null, "somebody is on it", default));
+        Assert.NotNull(Assert.Single(found).Claim);
+    }
+
+    [Fact]
+    public async Task AClaim_NeverCarriesItsToken()
+    {
+        var h = await NewAsync();
+        var issue = await h.CreateAsync("story", "held");
+        var token = await h.ClaimAsync(issue.Key);
+
+        // The token is a capability, not a fact about the issue. A read that
+        // carried it would let anybody holding a board read steal or refresh
+        // somebody else's lease - so it is on no read anywhere, and the way to
+        // test that is to look at what the whole payload serializes to.
+        var payload = System.Text.Json.JsonSerializer.Serialize(Value(await h.Issues.GetIssue(issue.Key, default)));
+
+        Assert.DoesNotContain(token.ToString(), payload);
+        Assert.Contains("aerie-hatch", payload);
+    }
+
+    [Fact]
+    public async Task AnExpiredClaim_RidesNothing()
+    {
+        var h = await NewAsync();
+        var issue = await h.CreateAsync("story", "its runner died");
+        await h.ClaimAsync(issue.Key);
+
+        h.Time.Advance(TimeSpan.FromSeconds(TestClaims.Ttl + 1));
+
+        // Null rather than a claim with an old heartbeat: the arithmetic is the
+        // server's, and no client should have to redo it.
+        Assert.Null(Value(await h.Issues.GetIssue(issue.Key, default)).Claim);
+        Assert.Null(Value(await h.Board.GetBoard(default)).Issues.Single(c => c.Key == issue.Key).Claim);
+    }
+
     private sealed class Harness
     {
         public required HatchContext Db { get; init; }
+        public required FakeTimeProvider Time { get; init; }
 
         /// <summary>Who the house knows. Empty until a test says otherwise, which reads as "nobody is assigned to anything".</summary>
         public required StubActorDirectory Actors { get; init; }
@@ -2014,6 +2071,32 @@ public class IssuesControllerTests
         public required int Inbox { get; init; }
         public required int Todo { get; init; }
         public required int Done { get; init; }
+
+        /// <summary>
+        /// A lease, written straight onto the row - what the claim endpoints
+        /// accept and refuse is IssueClaimTests' business, and these tests are
+        /// about what a read hands out once one is there.
+        /// </summary>
+        public async Task<Guid> ClaimAsync(
+            string key, string by = "aerie-hatch", string runner = "somewhere:/checkouts/one",
+            string? chatter = null)
+        {
+            var token = Guid.NewGuid();
+            var now = Time.GetUtcNow();
+            var issue = await Db.Issues.Include(i => i.Project)
+                .FirstAsync(i => i.Project!.Key + "-" + i.Number == key);
+
+            issue.ClaimToken = token;
+            issue.ClaimedBy = by;
+            issue.ClaimRunner = runner;
+            issue.ClaimedAt = now;
+            issue.ClaimHeartbeatAt = now;
+            issue.ClaimChatter = chatter;
+            issue.ClaimChatterAt = chatter is null ? null : now;
+            await Db.SaveChangesAsync();
+
+            return token;
+        }
 
         public async Task<IssueDto> CreateAsync(
             string type,
@@ -2090,11 +2173,12 @@ public class IssuesControllerTests
         return new Harness
         {
             Db = db,
+            Time = time,
             Actors = actors,
-            Issues = new IssuesController(db, ranks, actors, caller, time),
+            Issues = new IssuesController(db, ranks, actors, TestClaims.With(), caller, time),
             Thread = new IssueThreadController(db, caller, time),
             Questions = new QuestionsController(db),
-            Board = new BoardController(db, actors),
+            Board = new BoardController(db, actors, TestClaims.With(), time),
             Projects = new ProjectsController(db, time),
             Statuses = new StatusesController(db),
             ProjectId = aerie.Id,

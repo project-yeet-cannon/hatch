@@ -25,6 +25,7 @@ public class IssuesController(
     HatchContext db,
     RankService ranks,
     IActorDirectory actors,
+    IssueClaims claims,
     ICallerIdentity caller,
     TimeProvider time) : ControllerBase
 {
@@ -157,8 +158,13 @@ public class IssuesController(
                 i.DueAtHasTime,
                 i.AssigneePersonId,
                 i.AssigneeApiKeyId,
+                Claim = new ClaimSnapshot(
+                    i.ClaimToken, i.ClaimedBy, i.ClaimRunner,
+                    i.ClaimedAt, i.ClaimHeartbeatAt, i.ClaimChatter, i.ClaimChatterAt),
             })
             .ToListAsync(ct);
+
+        var now = time.GetUtcNow();
 
         var cards = new List<IssueCardDto>(rows.Count);
         foreach (var i in rows)
@@ -175,7 +181,8 @@ public class IssuesController(
                 // A search result is a card, and a card that read one way here
                 // and another on the board is the divergence IssueCardDto's own
                 // docstring exists to prevent.
-                Assignee: await IssueProjection.ToAssigneeAsync(actors, i.AssigneePersonId, i.AssigneeApiKeyId, ct)));
+                Assignee: await IssueProjection.ToAssigneeAsync(actors, i.AssigneePersonId, i.AssigneeApiKeyId, ct),
+                Claim: claims.Project(i.Claim, now)));
 
         return cards;
     }
@@ -645,7 +652,7 @@ public class IssuesController(
         IssueProjection.KeyOfAsync(db, issueId, ct);
 
     private Task<IssueDto> ToDtoAsync(EfHatchIssue issue, CancellationToken ct) =>
-        IssueProjection.ToDtoAsync(db, actors, issue, ct);
+        IssueProjection.ToDtoAsync(db, actors, issue, claims, time.GetUtcNow(), ct);
 
     /// <summary>
     /// The bottom of each column, for a request that appends to one more than

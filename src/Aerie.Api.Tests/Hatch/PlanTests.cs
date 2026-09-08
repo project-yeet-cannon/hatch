@@ -1,5 +1,6 @@
 using Aerie.Api.Modules.Hatch;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Aerie.Api.Tests.Hatch;
 
@@ -315,7 +316,7 @@ public class PlanTests
         return new Harness
         {
             Db = db,
-            Plan = new PlanController(db, new StubActorDirectory()),
+            Plan = new PlanController(db, new StubActorDirectory(), TestClaims.With(), new FakeTimeProvider(Now)),
             ProjectId = project.Id,
             Other = other.Id,
             Todo = todo.Id,

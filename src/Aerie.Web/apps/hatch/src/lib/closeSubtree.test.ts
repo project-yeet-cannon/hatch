@@ -26,6 +26,7 @@ const card = (key: string, statusId: number, parentKey: string | null, rank = 10
   dueAt: null,
   openQuestions: 0,
   assignee: null,
+  claim: null,
 });
 
 const keys = (cards: IssueCard[]) => cards.map((c) => c.key);

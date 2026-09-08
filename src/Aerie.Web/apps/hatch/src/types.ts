@@ -88,6 +88,27 @@ export interface IssueCard {
   /** Who owns this card, or null for nobody - which is most of the board, and
       why the card draws no element at all rather than an empty chip. */
   assignee: Assignee | null;
+  /** The lease a running dispatcher holds on this issue, or null. */
+  claim: IssueClaim | null;
+}
+
+/** The lease a running dispatcher holds on an issue - see IssueClaimDto.
+    Null on the issue where nothing holds it, and null where the claim has
+    expired: the server does that arithmetic, so nothing here has to.
+
+    There is no token, and there is not meant to be one. The token is the
+    capability a heartbeat and a release present, and a board read that carried
+    it would let anybody holding a board read steal a lease. */
+export interface IssueClaim {
+  claimedBy: string;
+  /** The checkout holding it - `host:/path/to/checkout`, as the runner names itself. */
+  runner: string;
+  claimedAt: string;
+  /** When the holder was last heard from. The lease is over when this is older than the TTL. */
+  heartbeatAt: string;
+  /** A line the holder is carrying: what it is doing right now, or null if it has not said. */
+  chatter: string | null;
+  chatterAt: string | null;
 }
 
 export interface Issue {
@@ -130,6 +151,9 @@ export interface Issue {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  /** The lease a running dispatcher holds on this issue, or null - the same
+      shape the card carries, and null once it has expired. */
+  claim: IssueClaim | null;
 }
 
 /** An ordinary note, a question that needs deciding, or the answer to one.
@@ -185,6 +209,9 @@ export type IssueEventKind =
   | 'effort_override_changed'
   | 'dependency_added'
   | 'dependency_removed'
+  | 'claim_taken'
+  | 'claim_released'
+  | 'claim_cleared'
   | 'commented'
   | 'asked'
   | 'answered'

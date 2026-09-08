@@ -447,9 +447,9 @@ public class AssigneeControllerTests
         {
             Db = db,
             Actors = actors,
-            Assignee = new AssigneeController(db, actors, caller, time),
-            Issues = new IssuesController(db, new RankService(db), actors, caller, time),
-            Board = new BoardController(db, actors),
+            Assignee = new AssigneeController(db, actors, TestClaims.With(), caller, time),
+            Issues = new IssuesController(db, new RankService(db), actors, TestClaims.With(), caller, time),
+            Board = new BoardController(db, actors, TestClaims.With(), time),
             Thread = new IssueThreadController(db, caller, time),
             Time = time,
             ProjectId = aerie.Id,

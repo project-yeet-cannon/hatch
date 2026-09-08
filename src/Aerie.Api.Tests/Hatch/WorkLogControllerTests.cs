@@ -646,7 +646,7 @@ public class WorkLogControllerTests
         return new Harness
         {
             History = new WorkLogController(db, time),
-            Issues = new IssuesController(db, new RankService(db), new StubActorDirectory(), caller, time),
+            Issues = new IssuesController(db, new RankService(db), new StubActorDirectory(), TestClaims.With(), caller, time),
             Db = db,
             ProjectId = aerie.Id,
         };
