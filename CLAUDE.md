@@ -112,6 +112,8 @@ Two things about it are worth knowing before working on this repo:
 ./scripts/hatch.sh go-to-work --interval 300  # ...asking this often when there is nothing
 ./scripts/hatch.sh go-to-work --max-runs 5 --max-spend 20 --until 08:00
 ./scripts/hatch.sh go-to-work --stop-file /tmp/stop   # touch it to end the loop
+./scripts/hatch.sh go-to-work --restart-after 60      # ...coming back as a newer build that often
+./scripts/hatch.sh go-to-work --no-restart            # ...never coming back as a newer one
 ```
 
 `go-to-work` is `work` in a circle: the next actionable issue, one increment,
@@ -160,6 +162,14 @@ and they are why this section is in a file an agent reads:
   is still analysed. A planning session that has just filed five stories that
   must land one after another chains them here, in four calls, and the loop then
   walks the chain.
+- **The loop restarts into what you land.** A `go-to-work` whose own source
+  changed on the trunk — `scripts/hatch.sh`, `src/Aerie.Hatch`,
+  `src/Aerie.Hatch.Contracts` — comes back as the new version between
+  increments, rebuilding first, and does the same every thirty minutes as a
+  backstop (`--restart-after`, `0` to turn it off; `--no-restart` for neither).
+  So work on the loop itself reaches the next increment rather than the next
+  night. The night's bounds and everything spent so far are carried across, and
+  the restart holds no claim.
 - **Read the board before assuming it is empty.** `./scripts/hatch.sh queue`
   prints every issue a pass would look at, in the order it looks, each with the
   reason it would be folded past — or the transition it is clear for.
