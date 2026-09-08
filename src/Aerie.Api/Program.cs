@@ -34,6 +34,12 @@ using System.Threading.RateLimiting;
 /// DI
 var builder = WebApplication.CreateBuilder(args);
 
+// Read once, up here, because the registrations below need it as well as the
+// branch at the bottom that acts on it: migrate mode wants EF to keep quiet
+// about the commands that are *supposed* to fail on an empty database, and
+// that has to be decided while the contexts are being configured.
+var migrateMode = builder.Configuration["AERIE_MIGRATE"] == "1";
+
 // Structured JSON console output outside local dev, so the fluent-bit ->
 // OpenSearch pipeline (which tails raw container stdout, see
 // deploy/cluster/observability/controllers/fluent-bit.yaml) can parse fields like State.Service
@@ -71,7 +77,19 @@ builder.Services.AddPooledDbContextFactory<AerieContext>(o =>
     // (duplicate measurements/state changes) doesn't stop it from flooding
     // the logs. Downgrade it to Debug; genuine failures still throw and are
     // logged by the caller.
-    o.ConfigureWarnings(w => w.Log((CoreEventId.SaveChangesFailed, LogLevel.Debug)));
+    o.ConfigureWarnings(w =>
+    {
+        w.Log((CoreEventId.SaveChangesFailed, LogLevel.Debug));
+
+        // In migrate mode only. The first command EF issues against an empty
+        // database is a SELECT from __EFMigrationsHistory, which does not
+        // exist yet - one Error-level line per context, before a single
+        // migration has run, indistinguishable from a broken install to the
+        // person reading it. In a serving process a failed command is news and
+        // stays at Error; in the migrate process the *exception* is what
+        // reports a failure, and this probe is expected to fail.
+        if (migrateMode) w.Log((RelationalEventId.CommandError, LogLevel.Debug));
+    });
 });
 builder.Services.AddScoped<AerieContext>(sp =>
     sp.GetRequiredService<IDbContextFactory<AerieContext>>().CreateDbContext());
@@ -343,7 +361,7 @@ var app = builder.Build();
 /// migration provably runs the same code as the pods it precedes rather than
 /// a second image that can drift from it. Runs once per deploy, ahead of any
 /// replica; the serving pods below never take this branch.
-if (builder.Configuration["AERIE_MIGRATE"] == "1")
+if (migrateMode)
 {
     using var scope = app.Services.CreateScope();
 
@@ -362,7 +380,17 @@ if (builder.Configuration["AERIE_MIGRATE"] == "1")
     var seeder = scope.ServiceProvider.GetRequiredService<IDeviceMappingSeeder>();
     await seeder.SeedAsync();
 
+    // Resolved before it is applied only so the run can say which of the two
+    // things it did. ApplyAsync returns without a word when nothing is
+    // configured, and a step that leaves no trace either way is a step nobody
+    // can tell ran. HomeAssistantConnection.ToString is redacted for exactly
+    // this kind of line.
     var haConnection = scope.ServiceProvider.GetRequiredService<IHomeAssistantConnectionManager>();
+    if (await haConnection.ResolveAsync(CancellationToken.None) is { } resolved)
+        app.Logger.LogInformation("Applying the Home Assistant connection at {Connection}.", resolved);
+    else
+        app.Logger.LogInformation("No Home Assistant connection is configured; none applied.");
+
     await haConnection.ApplyAsync(CancellationToken.None);
 
     // The chicken-and-egg: the thing that generates an invite lives behind the
@@ -376,15 +404,25 @@ if (builder.Configuration["AERIE_MIGRATE"] == "1")
     // the log from that isn't already reachable. On an install that has grants,
     // nothing below runs and nothing is printed.
     //
-    // Deliberately not gated on Auth:Enabled, even though a wall that is off
-    // needs no way through it. Gating it would put the one recovery path
-    // behind a second piece of config reaching this Job correctly, and the
-    // failure mode of getting that wrong - the wall goes up on an install that
-    // minted nothing - is the unrecoverable one this exists to prevent. The
-    // cost of being wrong the other way is one expiring row and one log line
-    // per deploy on an install that has no wall.
+    // Gated on Auth:Enabled. The objection this used to carry was that gating
+    // it would put the one recovery path behind a second piece of config
+    // reaching this Job correctly - and it was right, because nothing was
+    // passing that config: charts/aerie/templates/migrate-job.yaml handed the
+    // Job DOTNET_ENVIRONMENT, the postgres env and AERIE_MIGRATE, so it read
+    // `false` out of appsettings.json even on a cluster whose wall is up. That
+    // is answered rather than ignored - the Job is now given Auth__Enabled from
+    // the same `ne .Values.auth.mode "none"` the api Deployment renders, so the
+    // two cannot disagree. And turning the wall on is a chart change, which is
+    // an upgrade, which re-runs this Job with Auth__Enabled=true and mints
+    // then. On an install with no wall, a sign-in code in the log is a code
+    // nothing will ever accept, printed on every deploy.
+    var authEnabled = scope.ServiceProvider.GetRequiredService<IOptions<AuthOptions>>().Value.Enabled;
     var authService = scope.ServiceProvider.GetRequiredService<IAuthService>();
-    if (!await authService.HasAnyAccessAsync(CancellationToken.None))
+    if (!authEnabled)
+    {
+        app.Logger.LogInformation("Auth is disabled, so there is no wall to get through and no bootstrap invite is needed.");
+    }
+    else if (!await authService.HasAnyAccessAsync(CancellationToken.None))
     {
         var bootstrap = await authService.CreateInviteAsync("Bootstrap", personId: null, isBootstrap: true, CancellationToken.None);
         app.Logger.LogWarning(
@@ -446,7 +484,21 @@ forwardedHeadersOptions.KnownIPNetworks.Clear();
 forwardedHeadersOptions.KnownProxies.Clear();
 app.UseForwardedHeaders(forwardedHeadersOptions);
 
-app.UseHttpsRedirection();
+// Registered only where it can do anything. It is inert in both deployments
+// today - neither the pod nor the container binds an HTTPS port, TLS is
+// terminated at the proxy above - so unconditionally it logs one "Failed to
+// determine the https port for redirect" warning on the first request and
+// passes every request through thereafter. That warning is on the clean-boot
+// log of an install that has nothing wrong with it. The `https` launch profile
+// in Properties/launchSettings.json sets an https:// application URL, so
+// `dotnet run` under it still redirects.
+var httpsConfigured =
+    !string.IsNullOrEmpty(builder.Configuration["HTTPS_PORT"])
+    || !string.IsNullOrEmpty(builder.Configuration["ASPNETCORE_HTTPS_PORTS"])
+    || (builder.Configuration["ASPNETCORE_URLS"] ?? "")
+           .Contains("https://", StringComparison.OrdinalIgnoreCase);
+
+if (httpsConfigured) app.UseHttpsRedirection();
 
 // Ahead of the wall, so a refusal carries the header too - "which replica
 // refused me, and on what build" is unanswerable exactly when the wall is the
@@ -643,3 +695,8 @@ app.UseSwaggerUI(c =>
 app.MapSwagger();
 
 await app.RunAsync();
+
+// Named so WebApplicationFactory<Program> can find this assembly's entry point:
+// top-level statements compile to an internal Program, which the test host cannot
+// see. One line, and it changes nothing about how the app runs.
+public partial class Program;

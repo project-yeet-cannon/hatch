@@ -14,9 +14,11 @@ namespace Aerie.Api.Services.DeviceMapping;
 /// behind ApplyAsync; everyone after that sees ClientFactory.IsInitialized
 /// and returns immediately.
 /// </summary>
-public class HomeAssistantClientFactoryGate
+public class HomeAssistantClientFactoryGate(ILogger<HomeAssistantClientFactoryGate> logger)
 {
     private static readonly SemaphoreSlim Gate = new(1, 1);
+
+    private bool loggedUnreadable;
 
     public void EnsureInitialized(IServiceProvider services)
     {
@@ -29,6 +31,30 @@ public class HomeAssistantClientFactoryGate
             services.GetRequiredService<IHomeAssistantConnectionManager>()
                 .ApplyAsync(CancellationToken.None)
                 .GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            // This runs inside DI resolution, on the startup path, for every
+            // HA client anything asks for - so an exception here is an
+            // exception out of Main, and a database nobody has migrated yet
+            // (SiteSettings does not exist) is enough to cause one. Failing to
+            // *read* the settings is not the same as having no Home Assistant,
+            // but it has the same answer: leave ClientFactory uninitialized
+            // and carry on. The health check still reports the database
+            // honestly, and SettingsController still surfaces a failure to the
+            // person who caused it.
+            //
+            // Deliberately narrow: it covers this one call, and it says what
+            // it decided. Logged once per process, the way
+            // HomeAssistantEventListener.loggedUnconfigured does, because
+            // otherwise every client resolution would repeat it.
+            if (!loggedUnreadable)
+            {
+                logger.LogInformation(
+                    ex,
+                    "Could not read the site settings; treating Home Assistant as unconfigured for the life of this process.");
+                loggedUnreadable = true;
+            }
         }
         finally
         {

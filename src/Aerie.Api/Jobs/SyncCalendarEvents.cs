@@ -22,6 +22,9 @@ public class SyncCalendarEvents(ICalendarSyncService sync, ILogger<SyncCalendarE
 
     public TimeSpan Interval => TimeSpan.FromMinutes(5);
 
+    /// <summary>The only surface the cached agenda feeds is the kiosk wall, and the wall is part of the house.</summary>
+    public bool ServesTheHouse => true;
+
     public async Task Execute(IJobExecutionContext context)
     {
         // SyncAsync is fail-soft by contract, so there is nothing to catch
