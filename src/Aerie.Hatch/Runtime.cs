@@ -22,6 +22,14 @@ public sealed record Runtime(
     /// <summary>The clock, so a test can put the loop at a particular hour.</summary>
     public TimeProvider Clock { get; init; } = TimeProvider.System;
 
+    /// <summary>
+    /// Where the night's running totals are handed from one incarnation of the
+    /// loop to the next. Set by the supervisor in <c>hatch.sh</c> and by nobody
+    /// else, so its absence is how the runner knows there is no supervisor
+    /// standing over it and therefore nothing to restart it.
+    /// </summary>
+    public string? NightStatePath { get; init; }
+
     public int OffsetMinutes => Board.OffsetMinutes(Clock.GetLocalNow());
 
     public Picker Picker() => new(Board, RunnerName, Say);
@@ -38,9 +46,18 @@ public sealed record Runtime(
     public Func<IWorkspace> Workspace { get; init; } = () =>
         throw new InvalidOperationException("no workspace was configured");
 
-    /// <summary>The real one, over this checkout.</summary>
+    /// <summary>
+    /// How the loop reads its own source. Replaceable for the same reason
+    /// <see cref="Workspace"/> is: a test says the loop changed underneath
+    /// itself without having to change the files it is running from.
+    /// </summary>
+    public Func<ISelf> Self { get; init; } = () =>
+        throw new InvalidOperationException("no source reader was configured");
+
+    /// <summary>The real ones, over this checkout.</summary>
     public Runtime WithGit() => this with
     {
         Workspace = () => new Workspace(Root, Settings.BaseBranch, Say.Line, Say.Complain),
+        Self = () => new LoopSource(Root),
     };
 }

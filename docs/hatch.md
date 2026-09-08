@@ -1589,6 +1589,14 @@ reading one mid-write; it is now a field.
 with the SDK needs no build step — `make build-hatch` is the optimisation, and
 `HATCH_RUNNER_BIN` names a binary for a machine with no SDK at all.
 
+One difference between the two commands is worth naming, because it is the whole
+of how a loop restarts itself. `work` is `exec`'d: one increment has nothing to
+carry forward and nothing to come back as, so it replaces the shell rather than
+being watched by it. `go-to-work` is *run*, in a loop, because a process cannot
+exec itself into a newer build — relaunching the same binary relaunches the same
+code, and the new source has to be compiled by something that outlives the
+process being replaced. `hatch.sh` was already that something.
+
 ### What it stops for
 
 Nothing, by default, and that is the point: a run that stopped for a reason
@@ -1617,6 +1625,52 @@ except the last one:
   tree that will not reset is a tree every ticket would be built wrong on, and
   the loop has no way to make it right. A fetch that merely did not answer is
   not this: that is a wait, and the next pass tries again.
+
+One thing that looks like a stop is not: **a restart**. A loop that spends the
+night improving this repository is running the version it started with, and
+would be until somebody came and stopped it — work that lands at one in the
+morning never reaching the run that wrote it. So the loop watches its own source
+and comes back as the new version, and the terminal says which trigger fired
+rather than going quiet and back in a way that reads as a crash.
+
+The runner asks for it by exiting **75** (`EX_TEMPFAIL`, "try again", which
+collides with nothing else it answers with), and `hatch.sh` rebuilds it and runs
+it again. Two triggers, because the answer to which one on the ticket was both:
+
+- **Its own source changed on the trunk.** The set is `scripts/hatch.sh` and
+  everything under `src/Aerie.Hatch` and `src/Aerie.Hatch.Contracts` — the loop,
+  the wire records it is compiled against, and the script that resolves and
+  launches it — hashed on disk rather than read out of git, since the files that
+  are there are the files that run. The baseline is taken once at startup, and
+  the check happens after the reset, which is the only moment new source can
+  have arrived. The changed paths are named on the way out.
+- **Age**, `--restart-after MINUTES`, thirty by default and `0` to turn it off.
+  It is the backstop for the loop this would otherwise miss entirely: an idle
+  loop never resets — a fetch every interval all night against a remote with
+  nothing to say is a fetch for nothing — so it never sees a change, and would
+  sit there on the old code until morning. Read where no claim is held, so a
+  restart is never something a ticket is waiting behind.
+
+What survives the restart is what was typed and what has been spent.
+`--max-runs`, `--max-spend`, `--until`, `--under`, `--interval`, `--quiet` and
+`--stop-file` are all still in argv, which the supervisor re-runs verbatim; the
+increments, the spend, the failure streak, the night's start and the two lists
+the tally prints travel in a state file the supervisor names once per night. So
+a restart cannot outspend `--max-spend` or outrun `--max-runs` by starting over,
+and the tally at the end covers the whole night and says how many times the loop
+came back. `--until` is carried as the instant it resolved to rather than
+re-read, which is the one bound that would otherwise be wrong: `--until 23:59`
+typed at 23:58 and re-read at 00:01 means tomorrow, and adds a day to the night.
+
+Three things it will not do. It will not restart holding a claim — the ticket
+the deciding pass claimed goes back before the process exits, and nothing is
+spawned on that pass. It will not restart-loop on a build that failed: the
+supervisor says so and runs the version that is there, and that incarnation took
+its baseline from the source already on disk, so it does not ask again for the
+same change. And it will not restart at all under `--once`, under
+`--no-restart`, or when started by hand rather than through `hatch.sh` — the
+state path is what tells the runner somebody is standing over it, and a runner
+with nobody to rebuild it is the loop it started as.
 
 Three things that look like reasons to stop are not. **A lost lease** is the
 loop working correctly on a busy board — the ticket went to a runner already

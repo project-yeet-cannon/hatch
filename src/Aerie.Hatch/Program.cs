@@ -64,7 +64,14 @@ var runtime = new Runtime(
     Say: say,
     Root: root,
     RunnerName: Checkout.Runner(settings.Runner, Host(), root),
-    TempDirectory: Path.GetTempPath()).WithGit();
+    TempDirectory: Path.GetTempPath())
+{
+    // Set by the supervisor in scripts/hatch.sh and by nobody else, which is
+    // how a runner started by hand knows there is nothing standing over it to
+    // build the new source and run it again. See docs/hatch.md, "What it stops
+    // for".
+    NightStatePath = Environment.GetEnvironmentVariable("HATCH_NIGHT_STATE"),
+}.WithGit();
 
 // Every way out through one door. A signal that is not handled kills the
 // process outright, and the increment that ends in an interrupt is exactly the
@@ -144,6 +151,9 @@ internal partial class Program
         "  hatch-runner go-to-work --under AER-1 --interval 300",
         "  hatch-runner go-to-work --max-runs 5 --max-spend 20 --until 08:00",
         "  hatch-runner go-to-work --stop-file /tmp/stop",
+        "  hatch-runner go-to-work --restart-after 60   ...coming back as a newer build that often",
+        "  hatch-runner go-to-work --restart-after 0    ...only when its own source changed",
+        "  hatch-runner go-to-work --no-restart         ...never coming back as a newer one",
         "",
         "Settings, from scripts/.env or the environment:",
         "",
@@ -154,6 +164,11 @@ internal partial class Program
         "  HATCH_RUNNER       what the board calls this runner (default host:/path)",
         "  HATCH_ROOT         the checkout to work in (default: upwards from here)",
         "  HATCH_HEARTBEAT    seconds of silence before the renderer says what it is waiting on",
+        "  HATCH_NIGHT_STATE  where a night's totals are handed to the loop that restarts into",
+        "",
+        "A go-to-work whose own source changes under it asks to be restarted as the new",
+        "build, and hatch.sh is what rebuilds it and runs it again. A runner started by",
+        "hand has nobody to do that, so it does not ask: it is the loop it started as.",
         "",
         "Reach it through ./scripts/hatch.sh work and ./scripts/hatch.sh go-to-work,",
         "which is where the rest of the CLI lives.",
