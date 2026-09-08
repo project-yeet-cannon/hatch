@@ -116,6 +116,39 @@ public sealed class WorkCommandTests
     }
 
     [Fact]
+    public async Task With_no_CLI_to_spawn_it_refuses_before_it_reads_the_board()
+    {
+        using var h = new Harness();
+        h.Wire.Json("GET", "/api/hatch/work/AER-1", Fixtures.Work("AER-1"));
+        h.Sessions.Missing = "hatch: no claude CLI on PATH.";
+
+        Assert.Equal(1, await new WorkCommand(h.Runtime).RunAsync(["AER-1"], default));
+
+        Assert.Contains(h.Say.Complained, l => l.Contains("no claude CLI on PATH", StringComparison.Ordinal));
+        Assert.Empty(h.Sessions.Spawned);
+
+        // Nothing was read and nothing was claimed - an increment that cannot
+        // start should not take a ticket off the board to find that out.
+        Assert.Empty(h.Wire.Calls);
+    }
+
+    [Fact]
+    public async Task A_dry_run_prints_its_prompt_with_no_CLI_installed()
+    {
+        using var h = new Harness();
+        h.Wire.Json("GET", "/api/hatch/work/next", Fixtures.Work("AER-1"));
+        h.Sessions.Missing = "hatch: no claude CLI on PATH.";
+
+        // It spawns nothing, so it never asks. A machine with no CLI on it can
+        // still read what one would have been told.
+        Assert.Equal(0, await new WorkCommand(h.Runtime).RunAsync(["--dry-run"], default));
+
+        Assert.Contains(h.Say.Said, l => l.Contains("## The ticket", StringComparison.Ordinal));
+        Assert.Empty(h.Say.Complained);
+        Assert.Empty(h.Sessions.Spawned);
+    }
+
+    [Fact]
     public async Task An_interrupt_lets_go_of_the_ticket_before_it_exits()
     {
         using var h = new Harness();
@@ -129,7 +162,7 @@ public sealed class WorkCommandTests
         h.Sessions.Behaviour = FakeSessions.UntilStopped();
 
         var running = new WorkCommand(h.Runtime).RunAsync(["AER-1"], interrupting.Token);
-        await h.Sessions.Started.Task;
+        await h.Sessions.StartedWithin();
 
         // Ctrl-C. The token is cancelled, the session is killed, and the release
         // happens on the way out of the block the claim was taken in.

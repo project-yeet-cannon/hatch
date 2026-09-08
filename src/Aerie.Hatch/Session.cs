@@ -10,7 +10,7 @@ namespace Aerie.Hatch;
 /// the session said.
 /// </param>
 public sealed record SessionRequest(
-    string Bin, string Root, string Model, string Effort, string Prompt, bool Quiet);
+    string Root, string Model, string Effort, string Prompt, bool Quiet);
 
 /// <param name="Output">Everything the CLI wrote, on a quiet run. Empty on a streamed one, which was rendered as it arrived.</param>
 public sealed record SessionResult(int ExitCode, string Output);
@@ -33,11 +33,35 @@ public interface ISessionRunner
     /// somebody is sitting in front of - stdio is the terminal's.
     /// </summary>
     Task<int> AttachAsync(SessionRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Whether there is anything to spawn, and the sentence saying why not.
+    /// Asked before a claim is taken: an increment that cannot start should not
+    /// take a ticket off the board to find that out.
+    /// </summary>
+    bool CanSpawn(out string refusal);
 }
 
 /// <summary>The claude CLI, actually spawned.</summary>
-public sealed class ClaudeSessionRunner : ISessionRunner
+public sealed class ClaudeSessionRunner(string? configured = null) : ISessionRunner
 {
+    /// <summary>The binary <see cref="CanSpawn"/> found, and null until it has.</summary>
+    private string? _bin;
+
+    public bool CanSpawn(out string refusal)
+    {
+        if (_bin is not null)
+        {
+            refusal = "";
+            return true;
+        }
+
+        if (!TryFind(configured, out var found, out refusal)) return false;
+
+        _bin = found;
+        return true;
+    }
+
     public async Task<SessionResult> RunAsync(SessionRequest request, Action<string>? onLine, CancellationToken ct)
     {
         // bypassPermissions because in print mode nothing can answer a prompt:
@@ -131,11 +155,19 @@ public sealed class ClaudeSessionRunner : ISessionRunner
         return process.ExitCode;
     }
 
-    private static ProcessStartInfo Base(SessionRequest request)
+    /// <summary>
+    /// The binary to spawn, which is only known once <see cref="CanSpawn"/> has
+    /// said there is one. A caller that skipped the question is a bug, and
+    /// spawning whatever <c>PATH</c> happens to offer would hide it.
+    /// </summary>
+    private string Bin => _bin
+        ?? throw new InvalidOperationException("CanSpawn was never asked, so there is no claude CLI to spawn");
+
+    private ProcessStartInfo Base(SessionRequest request)
     {
         var start = new ProcessStartInfo
         {
-            FileName = request.Bin,
+            FileName = Bin,
             WorkingDirectory = request.Root,
             UseShellExecute = false,
         };
@@ -176,7 +208,7 @@ public sealed class ClaudeSessionRunner : ISessionRunner
     /// weekly, and a loop built on that path breaks on somebody else's release
     /// schedule. Install the CLI, or name it once in <c>HATCH_CLAUDE_BIN</c>.
     /// </remarks>
-    public static bool TryFind(string? configured, out string bin, out string refusal)
+    private static bool TryFind(string? configured, out string bin, out string refusal)
     {
         refusal = "";
 

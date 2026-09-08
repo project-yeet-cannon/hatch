@@ -7,6 +7,10 @@ on:
 
 jobs:
   api:
+    # A job that has stopped making progress should cost a coffee break, not
+    # an afternoon: GitHub's default is six hours, and these are several times
+    # what each of these takes on a green run.
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     env:
       # Hatch's claim (docs/hatch.md, "Claim") is built out of conditional
@@ -68,6 +72,7 @@ jobs:
         run: dotnet test src/Aerie.slnx --no-build --configuration Release
 
   web:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -109,6 +114,7 @@ jobs:
   # gets a check that names it rather than surfacing as a puzzling failure in
   # whichever app's job happened to run first.
   web-packages:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -140,6 +146,7 @@ jobs:
   # steps for the same reason the web matrix exists: a PR check should say
   # which of format, lint, types or tests broke without anyone opening a log.
   trading:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     env:
       # pyright is a Node program in a Python wrapper and by default runs
@@ -262,6 +269,7 @@ jobs:
   #     both exist on the runner and not on a macOS developer's machine, and a
   #     guard that can only be run in CI is one nobody runs before pushing.
   trading-boundary:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -382,6 +390,7 @@ jobs:
           echo "Dockerfile.trading copies only from within the silo."
 
   deploy-manifests:
+    timeout-minutes: 10
     # From the cluster plan Phase 3b.3 onward, everything under deploy/ reaches the
     # cluster by being committed - there is no apply step to fail in front of a
     # human. A kustomization that does not build is otherwise discovered as a
@@ -525,6 +534,7 @@ jobs:
           echo "$(echo "$used" | grep -c . || true) token(s) used, all declared."
 
   detect-kiosk-changes:
+    timeout-minutes: 5
     runs-on: ubuntu-latest
     outputs:
       kiosk-changed: ${{ steps.filter.outputs.kiosk }}
@@ -544,6 +554,7 @@ jobs:
           fi
 
   kiosk:
+    timeout-minutes: 30
     needs: detect-kiosk-changes
     if: needs.detect-kiosk-changes.outputs.kiosk-changed == 'true'
     runs-on: ubuntu-latest
