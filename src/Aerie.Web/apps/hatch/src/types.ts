@@ -619,6 +619,22 @@ export interface Utilization {
   credits: UtilizationCredits | null;
 }
 
+// ---- Who is sitting here ----
+
+/** Who Hatch thinks is at this machine. Mirrors LocalPersonDto.
+
+    Read only where there is no wall: the route answers 204 on any install with
+    one, because there a person is a person because they enrolled and their name
+    is already on everything they write. */
+export interface LocalPerson {
+  /** What events written from this browser will say, instead of `operator`. */
+  name: string;
+  /** Whether anybody actually said so, or whether this is the built-in
+      default. False is what makes the strip explain what to set - the one thing
+      a first run needs told and the one thing correct behaviour cannot say. */
+  configured: boolean;
+}
+
 // ---- The work log ----
 
 /** What one model cost inside one session. Mirrors WorkLogModelUseDto. */

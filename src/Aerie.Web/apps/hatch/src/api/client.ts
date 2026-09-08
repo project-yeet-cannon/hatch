@@ -19,6 +19,7 @@ import type {
   IssuePlaybookRequest,
   IssueRollup,
   IssueSearch,
+  LocalPerson,
   ParsedEpic,
   PastedPlan,
   Plan,
@@ -277,6 +278,18 @@ export const getUtilization = (refresh = false) =>
   fetchJson<Utilization | undefined>(`/api/hatch/utilization${refresh ? '?refresh=true' : ''}`).then(
     (reading) => reading ?? null,
   );
+
+// ---- Who is sitting here ----
+
+/**
+ * Who Hatch thinks is at this machine, or null.
+ *
+ * Null is the 204 and is not a failure: it means this install has a wall, so
+ * the question does not arise and the strip draws nothing at all - the same
+ * shape `getUtilization` takes and for the same reason.
+ */
+export const getLocalPerson = () =>
+  fetchJson<LocalPerson | undefined>('/api/hatch/local-person').then((person) => person ?? null);
 
 // ---- The work log ----
 

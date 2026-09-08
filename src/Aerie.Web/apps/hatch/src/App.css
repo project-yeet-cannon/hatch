@@ -47,6 +47,50 @@
   border-bottom-color: var(--primary);
 }
 
+/* The right-hand end of the strip: who is sitting here, and what is left to
+   spend tonight. Pushed right as one box rather than one auto margin each,
+   because two of those share the free space between them instead of stacking.
+   Empty - and so zero-width - on an installation that has neither. */
+.hatch-nav-aside {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* Who Hatch will name in the trail for anything done from this browser. Drawn
+   only where there is no wall; on a cluster install the route answers nothing
+   and this never renders. Quiet by default - it is a statement of fact, not a
+   control - and louder only when nobody has said what the name should be. */
+.hatch-local-person {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--muted);
+  font-size: var(--t-label);
+}
+
+.hatch-local-person-name {
+  font-weight: 600;
+}
+
+.hatch-local-person-unnamed .hatch-local-person-name {
+  color: var(--warn);
+}
+
+/* The sentence beside the name on a first run. Hidden on a narrow strip rather
+   than wrapped: the name and the tooltip still carry it, and a nav strip that
+   grows a second line is a nav strip that has moved the board down. */
+.hatch-local-person-hint {
+  color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .hatch-local-person-hint {
+    display: none;
+  }
+}
+
 /* min-height: 0 so a board that overflows scrolls inside this box rather than
    stretching the flex column and taking the nav off the top of the screen. */
 .hatch-content {
@@ -2119,9 +2163,8 @@ button.hatch-option.chosen {
    colour in this block would be a bug - see the note at the top of this file. */
 
 .hatch-battery {
-  /* Pushed to the right of the links, which is the whole of its placement: it
-     is not one of them and must not read as one. */
-  margin-left: auto;
+  /* Placed by .hatch-nav-aside, which is what pushes it right - it is not one
+     of the links and must not read as one. */
   display: flex;
   align-items: center;
   gap: var(--sp-1-5);

@@ -1,6 +1,7 @@
 import { NavLink, Route, Routes } from 'react-router-dom';
 import { TopBar } from '@aerie/ui';
 import './App.css';
+import { NavLocalPerson } from './components/NavLocalPerson';
 import { NavUtilization } from './components/NavUtilization';
 import { BoardPage } from './pages/BoardPage';
 import { PlanPage } from './pages/PlanPage';
@@ -39,11 +40,17 @@ export function App() {
           <NavLink to="/playbooks" className={navLinkClass}>Playbooks</NavLink>
           <NavLink to="/import" className={navLinkClass}>Import</NavLink>
 
-          {/* Pushed to the right of the links by the auto margin in App.css.
-              It draws nothing at all on an installation with no Claude token,
-              which is most of them - so the strip is a row of links and no gap
-              where something used to be. */}
-          <NavUtilization />
+          {/* The right-hand group: what the strip says about this session
+              rather than about the board. One box because two elements each
+              pushed right by their own auto margin would share the free space
+              between them and land apart. Both draw nothing on an installation
+              that has no answer for them - a cluster install has neither - so
+              the strip is a row of links and no gap where something used to
+              be. */}
+          <div className="hatch-nav-aside">
+            <NavLocalPerson />
+            <NavUtilization />
+          </div>
         </div>
       </nav>
 
