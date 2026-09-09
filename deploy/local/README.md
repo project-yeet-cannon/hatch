@@ -1,4 +1,4 @@
-# Hatch on your laptop
+# Hatch on your computer
 
 One command, no checkout of this repository, no account anywhere. It pulls two
 published images, migrates a database, and serves the board.
