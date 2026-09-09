@@ -112,6 +112,17 @@ reads its basename off the URL (`lib/basename.ts`) rather than assuming a
 prefix; the two have to change together, since a rewrite the app does not expect
 renders a blank page with nothing in the network panel to explain it.
 
+**At home: the same images, on one laptop.** There is a second place Hatch
+lives, and it is somebody else's machine — `deploy/local/compose.yaml`, published
+to the registry as an OCI artifact beside the two images it names, so one
+`docker compose -f oci://…` line brings up a board with no checkout of this
+repository and no account anywhere. There is no Traefik in front of it and so
+none of the rewriting above: one container serves every app on one origin, the
+wall is off, and the runner comes from the Runner page inside the board rather
+than from a build. That install is a friend's whole tracker, and
+[`hatch-at-home.md`](hatch-at-home.md) is what it is handed — the one line, the
+name, the runner, and the block to paste into their own `CLAUDE.md`.
+
 ## Domain model
 
 Seven tables in the `hatch` schema, all carrying the house `Ef` prefix. The
