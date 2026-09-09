@@ -669,8 +669,11 @@ export interface RunnerDownload {
   url: string;
 }
 
-/** What the Runner page draws. Mirrors RunnerDto. */
-export interface Runner {
+/** What the Runner page draws. Mirrors RunnerDownloadsDto.
+
+    Not `Runner`, which is one running loop on the Runners page: everywhere else
+    in Hatch a runner is a process, so the word belongs to that one. */
+export interface RunnerDownloads {
   /** The commit this image - and therefore every binary below - was built from. */
   revision: string;
   /** In platform order, and only the ones this build actually published. Empty is a

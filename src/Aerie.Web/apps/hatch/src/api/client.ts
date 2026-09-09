@@ -32,6 +32,7 @@ import type {
   ProjectCreateRequest,
   ProjectPatchRequest,
   Runner,
+  RunnerDownloads,
   RunnerPatchRequest,
   SessionSort,
   Status,
@@ -333,7 +334,7 @@ export const putHatchSettings = (request: HatchSettingsWriteRequest) =>
 // browser. See Aerie.Api.Modules.Hatch.RunnerController.
 
 /** Which platforms this image can hand out, and the revision all of them were built from. */
-export const getRunner = () => fetchJson<Runner>('/api/hatch/runner');
+export const getRunner = () => fetchJson<RunnerDownloads>('/api/hatch/runner');
 
 // ---- The work log ----
 
