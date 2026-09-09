@@ -281,6 +281,17 @@ public class AdminSurfaceTests
         "SettingsController.GetHatchSettings",
         "SettingsController.PutHatchSettings",
 
+        // The one route in that class cut the other way, and the only endpoint
+        // in Aerie that hands a live secret back out. It is here because it is
+        // still guarded - a household member who is not an administrator is
+        // refused - but it carries AcceptScope = hatch, unlike its two
+        // siblings, because its ordinary caller is a keyless container runner
+        // that has to authenticate a claude CLI it starts itself. What keeps
+        // that from being a widening is a second gate the attribute cannot
+        // express: the action refuses everyone, key or person, wherever the
+        // wall is up. See Aerie.Api.Modules.Hatch.SettingsController.
+        "SettingsController.GetClaudeToken",
+
         // The runner the image hands out, cut the same way as the settings
         // above it: plain [RequireAdmin], no Hatch scope. Not because a binary
         // is a credential - it is the same program anybody may build from this

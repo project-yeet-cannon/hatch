@@ -1,5 +1,6 @@
 using Aerie.Api.Common;
 using Aerie.Api.Ef;
+using Aerie.Api.Models.Auth;
 using Aerie.Api.Services.Auth;
 using Aerie.Api.Services.DeviceMapping;
 using Microsoft.AspNetCore.Mvc;
@@ -19,26 +20,82 @@ namespace Aerie.Api.Modules.Hatch;
 /// wrote, under the same keys, stored the same way, so an operator who set the
 /// token before this existed finds it already set here.
 ///
-/// Plain <c>[RequireAdmin]</c> with no <c>AcceptScope</c>, unlike
-/// <see cref="UtilizationController"/> and <see cref="LocalPersonController"/>
-/// beside it: those are reads an agent has a use for, and these are not. An
-/// API key that could write here could set the name every event in the house is
-/// signed with, or swap the credential the account's headroom is read through.
-/// A person, at a browser, or nobody.
+/// Both of those routes carry plain <c>[RequireAdmin]</c> with no
+/// <c>AcceptScope</c>, unlike <see cref="UtilizationController"/> and
+/// <see cref="LocalPersonController"/> beside them: those are reads an agent has
+/// a use for, and these are not. An API key that could write here could set the
+/// name every event in the house is signed with, or swap the credential the
+/// account's headroom is read through. A person, at a browser, or nobody.
+///
+/// No class-level attribute even so, and that is the third time this split has
+/// been drawn (<see cref="RunnersController"/>, <see cref="AssigneeController"/>,
+/// <see cref="IssuePlaybookController"/>): <see cref="GetClaudeToken"/> below is
+/// cut the other way - a keyless runner is its ordinary caller - and
+/// <c>RequireAdminAttribute</c> is <c>AllowMultiple = false</c>, so a
+/// method-level attribute silently *replaces* a class-level one rather than
+/// tightening it. Decorating every action explicitly is what keeps the two
+/// person-only routes person-only whatever is added beside them.
 /// </summary>
 [ApiController]
 [Route("api/hatch/settings")]
-[RequireAdmin]
 public class SettingsController(
     AerieContext db,
     ISiteSettingsService siteSettings,
+    IClaudeCredential claudeCredential,
     IOptions<AuthOptions> authOptions) : ControllerBase
 {
     /// <summary>What is stood in for a secret that is set. The admin app's SettingsController redacts to the same string, because it is the same answer.</summary>
     private const string Redacted = "••••••••";
 
     [HttpGet]
+    [RequireAdmin]
     public async Task<HatchSettingsDto> GetHatchSettings(CancellationToken ct) => await ReadAsync(ct);
+
+    /// <summary>
+    /// The token itself, wrapped, for the one caller that has to have it: the
+    /// container runner's entrypoint (containers/hatch-runner/entrypoint.sh),
+    /// which starts a <c>claude</c> CLI of its own and has nowhere else to read
+    /// a credential from. So a friend configures theirs on the Settings page and
+    /// in no second place.
+    /// </summary>
+    /// <remarks>
+    /// <para>Two gates, and they are independent on purpose. The attribute
+    /// accepts a Hatch-scoped key or a keyless runner, unlike the two routes
+    /// above it - a dispatcher is the ordinary caller here, and a person at a
+    /// browser is the unusual one. Then the first line refuses everybody,
+    /// caller and credential alike, wherever the wall is up: a token that
+    /// crosses a network Aerie does not own is a different question from a
+    /// token handed to a container on the same laptop, and this route only
+    /// answers the second one. An install with its wall on has enrolled
+    /// devices, TLS and somewhere to put a secret properly, and should.</para>
+    ///
+    /// <para><c>AuthErrorDto</c> and a bare 403 rather than <c>Forbid()</c>,
+    /// which expects an authentication scheme this app does not register - the
+    /// same shape <c>RequireAdminAttribute</c> itself refuses with, so both
+    /// gates read alike from outside.</para>
+    /// </remarks>
+    [HttpGet("claude-token")]
+    [RequireAdmin(AcceptScope = ApiKeyScopes.Hatch)]
+    public async Task<ActionResult<ClaudeTokenDto>> GetClaudeToken(CancellationToken ct)
+    {
+        if (authOptions.Value.Enabled)
+        {
+            return new ObjectResult(new AuthErrorDto(
+                "this Hatch has its wall on, and a token that crosses a network is a different question - " +
+                "the container runner is for an install with its wall off"))
+            {
+                StatusCode = StatusCodes.Status403Forbidden,
+            };
+        }
+
+        // Through the credential rather than reading the setting again: it is
+        // the one interface that produces this plaintext, and "not set" and
+        // "set to blank" are already the same answer there.
+        var token = await claudeCredential.GetTokenAsync(ct);
+        if (token is null) return NoContent();
+
+        return new ClaudeTokenDto(SecretProtector.Protect(token));
+    }
 
     /// <summary>
     /// The bulk-edit convention, which is Hatch's convention everywhere
@@ -52,6 +109,7 @@ public class SettingsController(
     /// answers null for both.
     /// </summary>
     [HttpPut]
+    [RequireAdmin]
     public async Task<HatchSettingsDto> PutHatchSettings(HatchSettingsWriteRequest request, CancellationToken ct)
     {
         var wrote = false;

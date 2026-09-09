@@ -142,6 +142,7 @@ try
         "questions" => await new QuestionCommands(cli).QuestionsAsync(rest, cancelling.Token),
         "answer" => await new QuestionCommands(cli).AnswerAsync(rest, cancelling.Token),
         "api" => await new ApiCommand(cli).RunAsync(rest, cancelling.Token),
+        "runner-claude-token" => await new ClaudeTokenCommand(cli).RunAsync(rest, cancelling.Token),
 
         // Unreachable: the name was checked against the same table above.
         _ => 1,
@@ -191,6 +192,27 @@ static string Host()
 internal partial class Program
 {
     /// <summary>
+    /// The commands something other than a person runs, and no session is ever
+    /// told about.
+    /// </summary>
+    /// <remarks>
+    /// Real commands, in <see cref="Commands"/> and in <see cref="Usage"/> like
+    /// every other - there is no hidden verb here. What this list is for is the
+    /// block in docs/hatch-at-home.md that a friend pastes into their own
+    /// repository's <c>CLAUDE.md</c>: that block is the contract an agent
+    /// works to, and <c>runner-claude-token</c> is the container entrypoint's
+    /// own plumbing (containers/hatch-runner/entrypoint.sh). Naming it there
+    /// would be telling every session in the house about a command that prints
+    /// a credential, for no work it could ever do with it. DocsContractTests
+    /// holds both halves of that: the rest are named in the block, and these
+    /// are deliberately not.
+    /// </remarks>
+    public static readonly string[] Internal =
+    [
+        "runner-claude-token",
+    ];
+
+    /// <summary>
     /// Every command, in one place - so a name that is not one of them is
     /// refused before anything is loaded, and so the dispatch below and this
     /// list cannot drift apart.
@@ -199,6 +221,7 @@ internal partial class Program
     [
         "config", "board", "next", "queue", "show", "start", "move", "comment", "pr",
         "depends", "ask", "questions", "answer", "api", "work", "go-to-work",
+        .. Internal,
     ];
 
     public static readonly string[] Usage =
@@ -230,6 +253,10 @@ internal partial class Program
         "  hatch answer                 answer them, one at a time, here",
         "  hatch api GET /api/hatch/issues?statusId=2",
         "  hatch api PATCH /api/hatch/issues/AER-12 '{\"dueAt\":\"2026-10-01\"}'",
+        "",
+        "The one the container runner's entrypoint calls, and nobody types:",
+        "",
+        "  hatch runner-claude-token    the Claude token this Hatch holds, decoded",
         "",
         "The two that spawn an agent, and the only two that need a git checkout:",
         "",

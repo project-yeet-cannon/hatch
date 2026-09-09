@@ -9,6 +9,13 @@ namespace Aerie.Hatch.Tests;
 /// So the doc is read here, against <see cref="Program.Commands"/> - the one
 /// list the dispatch itself is built from - and a rename fails the build
 /// instead.
+///
+/// <see cref="Program.Internal"/> is held to the opposite assertion. Those are
+/// the commands something other than a person runs - today, the container
+/// runner's entrypoint reading the Claude token - and the block is what an
+/// agent is told it may do. A command that prints a credential does not belong
+/// in the instructions of every session in the house, so its absence is
+/// asserted rather than merely permitted.
 /// </summary>
 public sealed class DocsContractTests
 {
@@ -22,11 +29,38 @@ public sealed class DocsContractTests
 
         // Word-bounded rather than a bare Contains: "work" is a substring of
         // "go-to-work", and a doc that had lost the short one would still pass.
-        var missing = Program.Commands.Where(command => !Names(block, command)).ToArray();
+        var missing = Program.Commands.Except(Program.Internal)
+            .Where(command => !Names(block, command)).ToArray();
 
         Assert.True(missing.Length == 0,
             $"docs/hatch-at-home.md's CLAUDE.md block does not name: {string.Join(", ", missing)}. " +
             "Either the command was renamed and the doc was not, or the block was edited down.");
+    }
+
+    /// <summary>
+    /// The other half, and not a formality: the exclusion above is only honest
+    /// if the excluded command is genuinely absent from what a session is told.
+    /// </summary>
+    [Fact]
+    public void The_entrypoints_own_commands_are_not_named_in_the_block()
+    {
+        var block = ContractBlock();
+
+        var leaked = Program.Internal.Where(command => Names(block, command)).ToArray();
+
+        Assert.True(leaked.Length == 0,
+            $"docs/hatch-at-home.md's CLAUDE.md block names: {string.Join(", ", leaked)}. " +
+            "Those are the container entrypoint's own commands - an agent has no work to do with them.");
+    }
+
+    /// <summary>
+    /// And the list itself, so an entry that no longer names a command cannot
+    /// sit there quietly excusing a command from the doc that never existed.
+    /// </summary>
+    [Fact]
+    public void Every_internal_command_is_a_command()
+    {
+        Assert.All(Program.Internal, command => Assert.Contains(command, Program.Commands));
     }
 
     /// <summary>
