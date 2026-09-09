@@ -50,6 +50,17 @@ export function App() {
               is this installation's own configuration, and it is the only place
               a Hatch with no admin app beside it can be configured at all. */}
           <NavLink to="/settings" className={navLinkClass}>Settings</NavLink>
+          {/* Out of this app and into the docs one, so a plain anchor and a
+              real page navigation - a NavLink would hand the path to this
+              app's router, which owns none of it. It is never "active" the way
+              a client route is, so it wears the resting class outright rather
+              than the callback the others need. Aimed at one page rather than
+              the docs index: a fresh install's question is "how do I use this",
+              and that page answers it. The path resolves on either host - a
+              local stack serves every app on one origin, and on a cluster the
+              `hatch-direct` Ingress claims every /apps path ahead of the
+              rewrite. */}
+          <a href="/apps/docs/hatch-at-home" className="hatch-nav-link">Docs</a>
 
           {/* The right-hand group: what the strip says about this session
               rather than about the board. One box because two elements each
