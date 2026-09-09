@@ -30,6 +30,11 @@ public static class HatchModule
         services.Configure<HatchOptions>(configuration.GetSection(HatchOptions.SectionName));
         services.AddSingleton<IssueClaims>();
 
+        // The runner's two horizons, on the same terms and for the same reason:
+        // a configured number, no clock, no database, and every judgement taking
+        // the instant it is judging against.
+        services.AddSingleton<Runners>();
+
         // The battery in the nav, in three registrations. All singletons, and
         // the chain has to be: UtilizationCache holds the last good reading for
         // the whole process - which is what lets an unreachable account still

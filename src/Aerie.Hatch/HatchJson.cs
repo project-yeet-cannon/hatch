@@ -32,6 +32,7 @@ namespace Aerie.Hatch;
 [JsonSerializable(typeof(CommentDto))]
 [JsonSerializable(typeof(WorkLogEntryDto))]
 [JsonSerializable(typeof(ClaimTakenDto))]
+[JsonSerializable(typeof(RunnerInstructionDto))]
 [JsonSerializable(typeof(List<StatusDto>))]
 [JsonSerializable(typeof(List<CommentDto>))]
 [JsonSerializable(typeof(List<QuestionDto>))]
@@ -46,5 +47,6 @@ namespace Aerie.Hatch;
 [JsonSerializable(typeof(WorkLogEntryRequest))]
 [JsonSerializable(typeof(ClaimRequest))]
 [JsonSerializable(typeof(ClaimHeartbeatRequest))]
+[JsonSerializable(typeof(RunnerHeartbeatRequest))]
 [JsonSerializable(typeof(NightState))]
 internal sealed partial class HatchJson : JsonSerializerContext;

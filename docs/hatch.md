@@ -861,6 +861,9 @@ Everything under `/api/hatch`, every route `[RequireAdmin(AcceptScope =
 | `/issues/{key}/work-log` | GET, POST | What each session on this issue cost. **POST is a key only** — a browser is refused outright, because the only honest writer of a meter reading is the dispatcher that read it. See [the leaderboard](#the-leaderboard) |
 | `/work-log/sessions` | GET | The sessions in a range, ranked, with the range's own totals — see [the leaderboard](#the-leaderboard) |
 | `/work-log/history` | GET | The same rows folded into equal buckets of time, for the graph |
+| `/runners` | GET | Every runner heard from lately, most recent first — see [runners on the board](#runners-on-the-board) |
+| `/runners/{name}` | POST | The heartbeat: says what this process is, answers with what it has been asked to do. The name is `host:/path/to/checkout`, escaped — a slash in it stays `%2F` |
+| `/runners/{name}` | PATCH | **Person only** — plain `[RequireAdmin]`. `{ state?, under?, maxRuns?, maxSpend?, untilAt? }`, all strings, the bulk rule throughout. An agent that could raise its own `--max-spend` could raise its own budget |
 
 Two of the filters are worth knowing: `ancestorKey` returns everything below an
 issue at any depth — an epic's stories and their tasks in one request — and
@@ -1761,6 +1764,85 @@ closing — and those are the runs whose tally is most worth having. It counts t
 increments, the elapsed time and the spend, and then lists the tickets in two
 groups: the ones that moved, which is what the night got done, and the ones that
 stalled, which is what is waiting on somebody.
+
+### Runners on the board
+
+A loop is a process on somebody's machine, and until it says so nothing on the
+board knows it exists. So it says so: one call at the top of every pass, naming
+itself, carrying the last thing it printed — and reading back, in the same round
+trip, what the board would like it to do next. The **Runners** page is the other
+end of that, and it is how a night is paused, bounded or ended from a browser.
+
+**Nothing on the server starts or stops a process.** Every one of these is
+picked up by the loop itself, between increments, which is what makes it work
+for a runner in a container and for one on a laptop behind a router nothing can
+reach. The cost is honest and is stated on the page: a press takes effect at the
+top of the next pass, *after* whatever increment is in flight has finished.
+
+**The runner is named as its claim names it** — `host:/path/to/checkout`, or
+`HATCH_RUNNER`'s override, the same string every [claim](#claim) already
+carries. A runner has one identity and this is it; the table is keyed on it.
+
+**What it is working is not stored.** A row's ticket and the line beside it are
+read off whichever issue carries that runner's live claim at the moment of the
+request, the way an open question is computed rather than kept. A second copy
+would drift the moment an operator cleared a claim out from under the runner
+holding it. The row's own line is therefore only ever what a runner said
+*between* tickets — "nothing on the board is an agent's to move", "AER-12 moved"
+— because an increment's chatter already rides its lease.
+
+**Two horizons, and only one of them is a setting.** A row is *idle* while it is
+being heard from, *gone* once its last heartbeat is older than
+`Hatch:RunnerGoneAfterSeconds` (90 by default), and dropped from the read
+entirely at ten times that — a quarter of an hour, which is not itself
+configurable. The two are one judgement seen twice, "not answering" and "not
+coming back", and an installation able to set them apart could set the second
+shorter than the first and have rows vanish before they were ever drawn as gone.
+Nothing sweeps: all three are arithmetic against the last heartbeat at the
+moment somebody asks, the same lazy expiry the claim uses, so there is no
+timeout to tune and no background job to notice has stopped. The row itself is
+never deleted — a checkout that runs again next week is the same row, with
+whatever bounds are on it.
+
+**Three things a person can say**, and the loop obeys each at its next
+heartbeat:
+
+- **`stopping`** — finish the increment in flight and exit without picking
+  another, saying on the terminal that the board asked it to.
+- **`paused`** — take no ticket, and *keep heartbeating*, so a loop deliberately
+  doing nothing does not drift from idle to gone while it does it.
+- **`running`** — carry on, which is what every row starts as.
+
+**And the four bounds** `go-to-work` takes on the command line — `--under`,
+`--max-runs`, `--max-spend` and `--until` — are on the row too, folded into the
+loop before the stop conditions are asked, so a cap lowered from a page stops
+that loop at its very next pass. `until` on a row is always an instant, never a
+bare date: "stop by the 12th" is a midnight in a timezone nobody named.
+
+**The flags seed the row once.** The first heartbeat a name is ever seen under
+writes the four bounds from what the process actually started with, which is
+what makes them show on the page immediately; every heartbeat after that leaves
+them alone. That rule is what stops the loop's own half-hourly
+[restart](#what-it-stops-for) — which sends the same argv again — from quietly
+undoing an edit somebody made at midnight. The consequence is worth knowing:
+once a runner has a row, **the row is where its bounds live**, and a flag typed
+at a checkout that already has one seeds nothing.
+
+**`hatch work` and `go-to-work --once` send exactly one heartbeat** and read
+nothing back. There is no second pass in either to apply an instruction to, so
+the row says `once` and the page draws no controls on it — a Pause nothing will
+ever look at is worse than no Pause. It ages out on its own when the process
+ends; nothing deregisters.
+
+**A heartbeat that does not answer is weather**, exactly like a claim's. A Hatch
+that is down, or too old to have the route at all, leaves the loop running on
+the flags it started with — which is what it did before any of this existed.
+
+The read and the heartbeat take a key, like the claim: a dispatcher that could
+not say it was alive would leave a page that could only ever be empty. The write
+does not, for the reason the [playbooks](#playbooks) are closed to one — an
+agent that could raise its own `--max-spend` could raise its own budget, and a
+loop with no end is exactly what the bounds exist to prevent.
 
 ## The level above the board
 

@@ -3,7 +3,7 @@ import { getRunner } from '../api/client';
 import { Command } from '../components/Command';
 import { detectPlatform } from '../lib/runnerPlatform';
 import { useLoaded } from '../lib/useLoaded';
-import type { Runner, RunnerDownload } from '../types';
+import type { RunnerDownloads, RunnerDownload } from '../types';
 
 /**
  * Where the runner comes from: this Hatch.
@@ -20,7 +20,7 @@ import type { Runner, RunnerDownload } from '../types';
  * here next.
  */
 export function RunnerPage() {
-  const { data: runner, error } = useLoaded<Runner>(getRunner);
+  const { data: runner, error } = useLoaded<RunnerDownloads>(getRunner);
 
   // Read once at render from the browser itself. There is no reliable way to
   // tell an Apple Silicon Mac from an Intel one here, so a Mac is guessed as

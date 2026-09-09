@@ -98,6 +98,16 @@ public sealed class WorkCommand(Runtime runtime)
             return 1;
         }
 
+        // One heartbeat, so that an increment run by hand shows up beside the
+        // loops on the Runners page rather than being a session nobody can see.
+        // The answer is not read: there is no second pass here to apply an
+        // instruction to, and the row ages out on its own once this exits.
+        await runtime.Runners().BeatAsync(
+            new RunnerHeartbeatRequest(
+                Kind: RunnerKinds.Once,
+                Line: key is { Length: > 0 } ticket ? $"one increment on {ticket}" : "one increment, by hand"),
+            ct);
+
         WorkDto work;
         Claim claim;
 

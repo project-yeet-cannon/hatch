@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 
 namespace Aerie.Hatch.Tests;
@@ -202,15 +203,34 @@ public sealed class IncrementTests
         h.Wire.Json("GET", "/api/hatch/work/AER-1", Fixtures.Work("AER-1", from: "In Review"));
         h.Wire.Json("GET", "/api/hatch/issues/AER-1/questions", Array.Empty<QuestionDto>());
 
+        List<string?> Carried() => h.Wire.To("POST", "/api/hatch/issues/AER-1/claim/heartbeat")
+            .Select(c => c.Read<ClaimHeartbeatRequest>().Chatter)
+            .Where(c => c is not null)
+            .ToList();
+
+        static bool Says(List<string?> lines) =>
+            lines.Any(c => c!.Contains("make test-api", StringComparison.Ordinal));
+
         h.Sessions.Behaviour = async (_, onLine, ct) =>
         {
             onLine?.Invoke(Fixtures.Init());
             onLine?.Invoke(Fixtures.ToolUse("Bash", "make test-api"));
 
-            // Long enough for a heartbeat to carry what it is inside of.
+            // Inside the tool use until a heartbeat has carried it, rather than
+            // for a span long enough that one usually has - Harness.Eventually's
+            // rule, which this test is the one place that was not keeping. The
+            // beat is 25ms and the old wait was eight of them, so a loaded
+            // machine that missed the window failed a test about whether the
+            // line reaches the board at all. Bounded and not asserted here: the
+            // assertion after the run is what judges it, and a failure there
+            // reads as the missing line rather than as a crashed session.
+            var waited = Stopwatch.StartNew();
             try
             {
-                await Task.Delay(Harness.Beat * 8, ct);
+                while (!Says(Carried()) && waited.ElapsedMilliseconds < 5_000)
+                {
+                    await Task.Delay(Harness.Beat, ct);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -224,12 +244,7 @@ public sealed class IncrementTests
         await h.Runtime.Increment().RunAsync(
             Fixtures.Work("AER-1"), h.Root, "opus", "high", quiet: false, claim, default);
 
-        var carried = h.Wire.To("POST", "/api/hatch/issues/AER-1/claim/heartbeat")
-            .Select(c => c.Read<ClaimHeartbeatRequest>().Chatter)
-            .Where(c => c is not null)
-            .ToList();
-
-        Assert.Contains(carried, c => c!.Contains("make test-api", StringComparison.Ordinal));
+        Assert.Contains(Carried(), c => c!.Contains("make test-api", StringComparison.Ordinal));
 
         await claim.ReleaseAsync();
     }

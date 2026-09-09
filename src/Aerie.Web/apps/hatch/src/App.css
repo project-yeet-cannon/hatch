@@ -2425,3 +2425,27 @@ button.hatch-option.chosen {
 .hatch-assignee-clear {
   color: var(--muted);
 }
+
+/* ---- Runners ---- */
+
+/* The name is a path, and a long one: a checkout three directories deep on a
+   host with a long name is most of a line on its own. Monospace because it is a
+   path somebody may have to compare against one on a terminal, and broken
+   anywhere rather than allowed to widen the table past the controls beside
+   it. */
+.hatch-runner-name {
+  display: block;
+  font-family: var(--mono);
+  font-size: var(--t-small);
+  overflow-wrap: anywhere;
+}
+
+/* The bounds, unfolded under their row - the same shape the playbook prompt
+   takes, for the same reason: what is being edited is worth its own width, and
+   folded away it costs nothing on a page being scanned. */
+.hatch-runner-bounds {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3) 0;
+}

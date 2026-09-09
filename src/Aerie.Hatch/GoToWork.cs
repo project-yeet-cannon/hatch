@@ -53,10 +53,17 @@ public sealed class Tally
     // Everything the loop has to stop for, and none of them set by default. An
     // unattended run that stopped for a reason nobody asked for would be a run
     // somebody has to check on, which is the thing being built away from.
-    public int? MaxRuns { get; init; }
-    public decimal? MaxSpend { get; init; }
-    public string? Until { get; init; }
-    public DateTimeOffset? UntilAt { get; init; }
+    //
+    // Settable rather than fixed at construction, because three of them are
+    // also a control on a page: the board answers a heartbeat with the bounds
+    // it would like, and the loop folds them in between increments. The
+    // counters they are compared against keep counting either way, so a cap
+    // moved below what a night has already spent stops it at the next check -
+    // which is the honest reading of a cap.
+    public int? MaxRuns { get; set; }
+    public decimal? MaxSpend { get; set; }
+    public string? Until { get; set; }
+    public DateTimeOffset? UntilAt { get; set; }
     public string? StopFile { get; init; }
 
     /// <summary>
@@ -484,6 +491,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
     {
         var idle = new SaidOnce();
         var busy = new SaidOnce();
+        var paused = new SaidOnce();
 
         if (!runtime.Sessions.CanSpawn(out var missing))
         {
@@ -492,8 +500,33 @@ public sealed class GoToWorkCommand(Runtime runtime)
             return false;
         }
 
+        // What this loop last did out loud, carried to the board by the next
+        // heartbeat so the Runners page reads like the terminal does. A holder
+        // rather than a return value, because the sentences worth having are
+        // the ones a pass prints on its way past something.
+        var line = new Chatter { Line = "reading the board" };
+
         while (!ct.IsCancellationRequested)
         {
+            // Once per iteration, at the top - which is the one moment in a
+            // pass when no claim is held. That is what makes "picked up between
+            // increments, after the one in flight has finished" true by
+            // construction rather than by a check somewhere.
+            var told = await BeatAsync(line, under, tally, once, ct);
+
+            if (told is { State: RunnerStates.Stopping })
+            {
+                // Not an interrupt and not a failure: the night ends here, with
+                // the ticket that was in flight finished and pushed.
+                tally.StopWhy = "the board asked this runner to stop";
+                return false;
+            }
+
+            // Before the stop conditions are asked, so a cap lowered from a
+            // page is a cap this pass is judged against rather than the next
+            // one.
+            if (told is not null) under = Fold(told, tally, under);
+
             if (tally.ShouldStop()) return false;
 
             // The backstop, read here because here is where no claim is held. An
@@ -512,7 +545,31 @@ public sealed class GoToWorkCommand(Runtime runtime)
                 return true;
             }
 
-            var pass = await PassAsync(under, quiet, tally, idle, busy, interval, once, restart, ct);
+            if (told is { State: RunnerStates.Paused })
+            {
+                // Still heartbeating, so the row does not drift from idle to
+                // gone while it is deliberately doing nothing - a paused loop
+                // that read as dead would be a page that could not tell the two
+                // apart.
+                idle.Clear();
+                busy.Clear();
+                line.Line = "paused - waiting to be set running again";
+                await SayQuietlyAsync(paused, now, interval, once,
+                    digest: "paused",
+                    still: "hatch: still paused",
+                    inFull: () =>
+                    {
+                        runtime.Say.Line("hatch: the board has this runner paused - nothing will be picked up until it is set running");
+                        return Task.CompletedTask;
+                    });
+
+                if (!await NapAsync(interval, tally, ct)) return false;
+                continue;
+            }
+
+            paused.Clear();
+
+            var pass = await PassAsync(under, quiet, tally, idle, busy, interval, once, restart, line, ct);
             if (pass == Pass.Fatal) return false;
             if (pass == Pass.Restarting) return true;
 
@@ -557,9 +614,81 @@ public sealed class GoToWorkCommand(Runtime runtime)
     /// session that would not start, a tree that would not reset, an interrupt -
     /// gives the ticket back.
     /// </remarks>
+    /// <summary>
+    /// Says this runner is here, and answers with what the board would like it
+    /// to do - or null, which is every runner's ordinary state against a Hatch
+    /// that has nothing to say and against one too old to have the route at
+    /// all.
+    /// </summary>
+    /// <remarks>
+    /// The four bounds are sent on every beat and read on none. The server
+    /// writes them when it first sees this name and never again, so what
+    /// somebody set at midnight survives the loop's own half-hourly restart -
+    /// and sending them each time is what makes the row show the truth from its
+    /// first appearance without the runner having to know whether it is new.
+    /// </remarks>
+    private async Task<RunnerInstructionDto?> BeatAsync(
+        Chatter line, string? under, Tally tally, bool once, CancellationToken ct)
+    {
+        var told = await runtime.Runners().BeatAsync(
+            new RunnerHeartbeatRequest(
+                Kind: once ? RunnerKinds.Once : RunnerKinds.Loop,
+                Line: line.Line,
+                Under: under,
+                MaxRuns: tally.MaxRuns,
+                MaxSpend: tally.MaxSpend,
+                UntilAt: tally.UntilAt),
+            ct);
+
+        // `--once` says hello and reads nothing back. There is no second pass
+        // to apply an instruction to, and a single increment that acknowledged
+        // a `stopping` it could not act on would be a lie on the row.
+        return once ? null : told;
+    }
+
+    /// <summary>
+    /// The board's bounds, folded into this loop's - and its scope, which is
+    /// the one that comes back rather than being set. Answers the epic to stay
+    /// inside, or null for the whole board.
+    /// </summary>
+    /// <remarks>
+    /// Wholesale, including the absences: the row was seeded from the flags
+    /// this process started with, so a field that is empty on it is a field
+    /// somebody cleared. Reading an absence as "leave the flag alone" would
+    /// make a cap impossible to take off from the page that set it.
+    /// </remarks>
+    private string? Fold(RunnerInstructionDto told, Tally tally, string? under)
+    {
+        var scope = told.Under is { Length: > 0 } named ? named : null;
+
+        // Said out loud, because the sentence that ends a night names a flag -
+        // "--max-runs 3 reached" - and a terminal that had never seen anybody
+        // type one would be a run that stopped for no reason it could show.
+        // Nothing is said on the ordinary beat, where what comes back is what
+        // this process started with.
+        var moved = new List<string>();
+        if (scope != under) moved.Add($"--under {scope ?? "off"}");
+        if (told.MaxRuns != tally.MaxRuns) moved.Add($"--max-runs {told.MaxRuns?.ToString(CultureInfo.InvariantCulture) ?? "off"}");
+        if (told.MaxSpend != tally.MaxSpend) moved.Add($"--max-spend {told.MaxSpend?.ToString(CultureInfo.InvariantCulture) ?? "off"}");
+        if (told.UntilAt != tally.UntilAt) moved.Add($"--until {told.UntilAt?.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture) ?? "off"}");
+
+        if (moved.Count > 0) runtime.Say.Line($"hatch: the board set {string.Join(", ", moved)}");
+
+        tally.MaxRuns = told.MaxRuns;
+        tally.MaxSpend = told.MaxSpend;
+        tally.UntilAt = told.UntilAt;
+
+        // The hour as somebody would have typed it, because it is printed in
+        // the sentence that ends the night and `--until 06:00` is what that
+        // sentence has always named.
+        tally.Until = told.UntilAt?.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
+
+        return scope;
+    }
+
     private async Task<Pass> PassAsync(
         string? under, bool quiet, Tally tally,
-        SaidOnce idle, SaidOnce busy, int interval, bool once, Restarts restart, CancellationToken ct)
+        SaidOnce idle, SaidOnce busy, int interval, bool once, Restarts restart, Chatter line, CancellationToken ct)
     {
         var picked = await runtime.Picker().PickAsync(under, runtime.OffsetMinutes, ct, runtime.Heartbeat);
         var now = runtime.Clock.GetUtcNow();
@@ -568,6 +697,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
         {
             case Pick.Idle:
                 busy.Clear();
+                line.Line = "nothing on the board is an agent's to move";
                 await SayQuietlyAsync(idle, now, interval, once,
                     digest: string.Join('\n', Digest.Of(picked.Queue)),
                     still: "hatch: still nothing an agent may move",
@@ -576,6 +706,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
 
             case Pick.Busy:
                 idle.Clear();
+                line.Line = "every issue an agent could take is being worked elsewhere";
                 await SayQuietlyAsync(busy, now, interval, once,
                     digest: string.Join('\n', picked.Busy),
                     still: "hatch: every issue an agent could take is still being worked elsewhere",
@@ -589,6 +720,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
             case Pick.Unreadable:
                 // The client already said what went wrong, in a sentence. This
                 // says what is going to happen about it.
+                line.Line = "the board did not answer";
                 runtime.Say.Complain($"hatch: the board did not answer - asking again in {interval}s");
                 return Pass.Waited;
         }
@@ -607,8 +739,8 @@ public sealed class GoToWorkCommand(Runtime runtime)
                 runtime.Say.Lines(digest);
             }
 
-            foreach (var line in picked.Busy)
-                runtime.Say.Line($"hatch:   another runner had{line}");
+            foreach (var held in picked.Busy)
+                runtime.Say.Line($"hatch:   another runner had{held}");
 
             // Here rather than at the top of the pass, and the difference is
             // only ever visible on an idle board: a reset before the board is
@@ -619,6 +751,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
             switch (runtime.Workspace().Prepare())
             {
                 case Reset.Never:
+                    line.Line = "the workspace could not be reset";
                     // The one condition that ends a night without an increment
                     // having failed: a tree that cannot be made current is a
                     // tree every ticket would be built wrong on, and the loop
@@ -629,6 +762,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
                 case Reset.Later:
                     // Nothing was spawned, nothing was spent, and the tree is
                     // where it was.
+                    line.Line = "the workspace is not ready";
                     runtime.Say.Complain($"hatch: the workspace is not ready - trying again in {interval}s");
                     return Pass.Waited;
             }
@@ -663,6 +797,12 @@ public sealed class GoToWorkCommand(Runtime runtime)
             runtime.Say.Line(report.Moved
                 ? $"hatch: {report.Key} moved, {report.Outcome}  ({tally.Runs} increment(s), ${Format.Money(tally.Spent)})"
                 : $"hatch: {report.Key} did not move - {report.Outcome}  ({tally.Runs} increment(s), ${Format.Money(tally.Spent)})");
+
+            // What the next heartbeat carries. In-increment chatter rides the
+            // claim, so what this row wants is what happened to the last one.
+            line.Line = report.Moved
+                ? $"{report.Key} moved, {report.Outcome}"
+                : $"{report.Key} did not move - {report.Outcome}";
 
             return Pass.Worked;
         }

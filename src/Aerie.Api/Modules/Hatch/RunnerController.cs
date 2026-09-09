@@ -59,7 +59,7 @@ public class RunnerController(IAerieRevision revision, IWebHostEnvironment env) 
     /// 404.
     /// </remarks>
     [HttpGet]
-    public RunnerDto Get() => new(
+    public RunnerDownloadsDto Get() => new(
         revision.Revision,
         Platforms
             .Where(p => System.IO.File.Exists(PathFor(p)))
@@ -97,9 +97,15 @@ public class RunnerController(IAerieRevision revision, IWebHostEnvironment env) 
 /// What the Runner page draws: which platforms this image can hand out, and
 /// which commit all of them - and it - were built from.
 /// </summary>
+/// <remarks>
+/// Not <c>RunnerDto</c>, which is one running loop on the board
+/// (<see cref="RunnersController"/>). Everywhere else in Hatch a runner is a
+/// process - the thing a claim names, the thing <c>HATCH_RUNNER</c> renames -
+/// so the word belongs to that, and this is the downloads beside it.
+/// </remarks>
 /// <param name="Revision">The full sha stamped into this build, or "dev" for one nothing stamped.</param>
 /// <param name="Downloads">In platform order, and only the ones present. Empty on a build that published none.</param>
-public record RunnerDto(string Revision, RunnerDownloadDto[] Downloads);
+public record RunnerDownloadsDto(string Revision, RunnerDownloadDto[] Downloads);
 
 /// <summary>
 /// One platform's binary.
