@@ -72,6 +72,26 @@ ARG AERIE_REVISION
 ARG AERIE_SEQUENCE
 RUN dotnet publish src/Aerie.Api/Aerie.Api.csproj -c Release -o out -p:SkipDashboardBuild=true -p:SkipAdminBuild=true -p:SkipDesignBuild=true -p:SkipHomeBuild=true -p:SkipModelerBuild=true -p:SkipDocsBuild=true -p:SkipFamilyBuild=true -p:SkipAuthBuild=true -p:SkipChromeBuild=true -p:SourceRevisionId=$AERIE_REVISION -p:AerieSequence=$AERIE_SEQUENCE
 
+# The runner, one self-contained binary per platform this house supports, so a
+# friend downloads a program rather than an SDK. Built from this same commit,
+# which is what lets the Runner page print one revision for the image and the
+# binary it hands out alike.
+#
+# Inlined rather than `make publish-hatch`: this stage's SDK image carries no
+# `make`, and the two loops are the same lines either way. The RID list is the
+# Makefile's HATCH_RIDS - if one moves, the other moves with it. See AERIE-935.
+RUN for rid in win-x64 osx-arm64 osx-x64 linux-x64; do \
+      dotnet publish src/Aerie.Hatch/Aerie.Hatch.csproj \
+        --runtime $rid \
+        --configuration Release \
+        --output artifacts/hatch/$rid \
+        -p:PublishSingleFile=true \
+        -p:SelfContained=true \
+        -p:PublishTrimmed=true \
+        -p:SourceRevisionId=$AERIE_REVISION \
+      || exit 1; \
+    done
+
 # Build runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /App
@@ -90,4 +110,10 @@ COPY --from=build-env /App/out .
 # Markdown source for DocsController/DocsService (Docs:Path in appsettings.Docker.json),
 # not part of the published .NET output above.
 COPY --from=build-env /App/docs ./docs
+# The four platform binaries RunnerController serves. Beside wwwroot/apps
+# rather than inside it: the static file handlers in Program.cs mount
+# wwwroot/apps at /apps and nothing else, so this directory is reachable only
+# through the controller - which is what keeps the download behind the same
+# [RequireAdmin] as the page that offers it. See AERIE-935.
+COPY --from=build-env /App/artifacts/hatch ./wwwroot/hatch-runner
 ENTRYPOINT ["dotnet", "Aerie.Api.dll"]

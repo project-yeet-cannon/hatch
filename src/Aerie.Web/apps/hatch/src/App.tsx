@@ -13,6 +13,7 @@ import { PlaybooksPage } from './pages/PlaybooksPage';
 import { RunnersPage } from './pages/RunnersPage';
 import { BulkPage } from './pages/BulkPage';
 import { ImportPage } from './pages/ImportPage';
+import { RunnerPage } from './pages/RunnerPage';
 import { SettingsPage } from './pages/SettingsPage';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) => `hatch-nav-link${isActive ? ' active' : ''}`;
@@ -45,6 +46,11 @@ export function App() {
               says which agents are running and what they may spend. */}
           <NavLink to="/runners" className={navLinkClass}>Runners</NavLink>
           <NavLink to="/import" className={navLinkClass}>Import</NavLink>
+          {/* Where the runner comes from: this image publishes it, so a friend
+              who has the stack up needs nothing else to join the loop. Beside
+              Settings because both are about the installation rather than
+              about the board. */}
+          <NavLink to="/runner" className={navLinkClass}>Runner</NavLink>
           {/* A page like any other rather than a strip element: what it holds
               is this installation's own configuration, and it is the only place
               a Hatch with no admin app beside it can be configured at all. */}
@@ -76,6 +82,7 @@ export function App() {
           <Route path="/runners" element={<RunnersPage />} />
           <Route path="/issues/:key" element={<IssuePage />} />
           <Route path="/import" element={<ImportPage />} />
+          <Route path="/runner" element={<RunnerPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           {/* An unknown deep link lands on the board rather than on nothing -
               the board is the app, and there is no page worth writing that

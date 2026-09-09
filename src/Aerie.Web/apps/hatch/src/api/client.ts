@@ -323,6 +323,18 @@ export const getHatchSettings = () => fetchJson<HatchSettings>('/api/hatch/setti
 export const putHatchSettings = (request: HatchSettingsWriteRequest) =>
   fetchJson<HatchSettings>('/api/hatch/settings', { method: 'PUT', ...asJson(request) });
 
+// ---- The runner ----
+//
+// Person only, like Settings above it and unlike the rest of the module: the
+// audience is somebody at a browser setting a machine up, and nobody's
+// dispatcher needs to download the program it is already running as. The
+// download itself is a plain link on the page - it is a file, and a fetch
+// would only mean holding 12MB in memory to hand it straight back to the
+// browser. See Aerie.Api.Modules.Hatch.RunnerController.
+
+/** Which platforms this image can hand out, and the revision all of them were built from. */
+export const getRunner = () => fetchJson<Runner>('/api/hatch/runner');
+
 // ---- The work log ----
 
 /**

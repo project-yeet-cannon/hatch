@@ -1222,6 +1222,60 @@
   text-decoration: underline;
 }
 
+/* ---- The Runner page ---- */
+
+/* The one thing on the page somebody came to press, so it reads as a button
+   rather than as the fourth link in a paragraph. An <a> and not a <button>
+   because it is a download: the href is what makes it work with a middle
+   click, a right-click-save and a browser with JavaScript turned off. */
+.hatch-runner-download {
+  display: inline-block;
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--r-chip);
+  background: var(--primary);
+  color: var(--on-accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.hatch-runner-download:hover {
+  background: var(--primary-ink);
+}
+
+.hatch-runner-pick {
+  margin: var(--sp-3) 0 var(--sp-2);
+}
+
+/* The other three, deliberately quieter: a Mac is guessed rather than detected,
+   so these have to be findable without competing with the pick above. */
+.hatch-runner-others {
+  font-size: var(--t-label);
+}
+
+.hatch-runner-revision code {
+  font-family: var(--mono);
+  font-size: var(--t-label);
+}
+
+.hatch-runner-needs {
+  margin: var(--sp-3) 0;
+  padding-left: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* Stacked rather than inline: two commands side by side would wrap the second
+   one mid-string on a narrow window, and a command that has to be reassembled
+   by eye is a command somebody mistypes. */
+.hatch-runner-commands {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0;
+}
+
 /* The right-hand cell, whichever of the two it is. Pushed right so it stays
    there when a long title wraps the row onto a second line, and the meter is a
    fixed width rather than a shrink-to-fit one so a card full of stories shares

@@ -30,10 +30,15 @@ public sealed record ConfigCommand(
 {
     public static readonly string[] ConfigUsage =
     [
-        "usage: hatch config [--show]",
+        "usage: hatch config [--show | --origin <origin>]",
         "",
-        "  hatch config         asks for the origin and the key, and writes them",
-        "  hatch config --show  says what is set, and which layer it came from",
+        "  hatch config                    asks for the origin and the key, and writes them",
+        "  hatch config --show             says what is set, and which layer it came from",
+        "  hatch config --origin <origin>  writes the origin alone, asking nothing",
+        "",
+        "  --origin is what Hatch's own Runner page hands a new machine to paste. It",
+        "  leaves the key and everything else exactly as they were, so it is also how",
+        "  an origin is changed without retyping a credential.",
         "",
         "  Written to the per-user file, mode 600 where the platform has modes.",
         "  Read back highest-first: an exported variable, then scripts/.env in the",
@@ -63,7 +68,15 @@ public sealed record ConfigCommand(
     {
         if (Usage.Wanted(args)) return Usage.Print(Say, ConfigUsage);
         if (args is ["--show"]) return Show();
-        if (args.Length > 0) return Usage.Refuse(Say, "config takes nothing, or --show", ConfigUsage);
+
+        // Before the refusal below, and the one mode that asks nothing: it is
+        // what the Runner page prints for a machine being set up, where the
+        // origin is already known and typing it back in by hand is the step
+        // that gets it wrong.
+        if (args is ["--origin", var given]) return await OriginAsync(given, ct);
+
+        if (args.Length > 0)
+            return Usage.Refuse(Say, "config takes nothing, --show, or --origin <origin>", ConfigUsage);
 
         if (!In.Interactive)
         {
@@ -91,12 +104,7 @@ public sealed record ConfigCommand(
             return 1;
         }
 
-        if (!origin.StartsWith("http://", StringComparison.Ordinal) &&
-            !origin.StartsWith("https://", StringComparison.Ordinal))
-        {
-            Say.Complain($"hatch: \"{origin}\" has no scheme - every call will fail. Write it as https://...");
-            return 1;
-        }
+        if (!HasScheme(origin)) return NoScheme(origin);
 
         // Read without echo: this is the one value on the screen that a
         // screenshot, a shoulder or a scrollback should not be able to keep.
@@ -124,9 +132,78 @@ public sealed record ConfigCommand(
         Say.Line("");
         Say.Line($"wrote {ConfigPath}");
 
-        // Written before it is proven, on purpose: a key that is refused is
-        // worth keeping on disk to fix, and the message below says what to fix.
-        var settings = new Settings { Base = origin.TrimEnd('/'), Key = key };
+        return await ProveAsync(new Settings { Base = origin.TrimEnd('/'), Key = key }, ct);
+    }
+
+    /// <summary>
+    /// The origin alone, taken from the command line and written without a
+    /// question being asked.
+    /// </summary>
+    /// <remarks>
+    /// <para>The one mode a script - or a person pasting what the Runner page
+    /// printed - can use, and the reason it exists: the origin is the one
+    /// setting Hatch already knows about itself, so a new machine should not
+    /// have to be told it by hand.</para>
+    ///
+    /// <para>Everything else on disk is read back through the same three layers
+    /// and written out again unchanged, so this changes an origin rather than
+    /// replacing a configuration. In particular a key that is already set stays
+    /// set - a command that silently blanked a credential would be a worse way
+    /// to lose one than forgetting it.</para>
+    ///
+    /// <para>Same refusals and same success sentence as the interactive path,
+    /// because they are the same two helpers.</para>
+    /// </remarks>
+    private async Task<int> OriginAsync(string origin, CancellationToken ct)
+    {
+        origin = origin.Trim();
+
+        if (origin.Length == 0)
+        {
+            Say.Complain("hatch: an origin is required");
+            return 1;
+        }
+
+        if (!HasScheme(origin)) return NoScheme(origin);
+
+        var fold = Settings.Layers(CheckoutEnvFile, Environment, ConfigPath);
+        var key = fold("AERIE_HATCH_KEY").Value ?? "";
+        var claudeBin = fold("HATCH_CLAUDE_BIN").Value ?? "";
+
+        Write(origin, key, claudeBin);
+
+        Environment["AERIE_BASE"] = origin;
+
+        Say.Line($"wrote {ConfigPath}");
+
+        if (key.Length == 0)
+            Say.Complain(
+                $"hatch: no key - calls will name themselves \"{RunnerName}\", " +
+                "which only a Hatch with its wall off reads.");
+
+        return await ProveAsync(new Settings { Base = origin.TrimEnd('/'), Key = key }, ct);
+    }
+
+    /// <summary>An origin with no scheme is an origin every call will fail on, so it is caught here rather than at the first request.</summary>
+    private static bool HasScheme(string origin) =>
+        origin.StartsWith("http://", StringComparison.Ordinal) ||
+        origin.StartsWith("https://", StringComparison.Ordinal);
+
+    private int NoScheme(string origin)
+    {
+        Say.Complain($"hatch: \"{origin}\" has no scheme - every call will fail. Write it as https://...");
+        return 1;
+    }
+
+    /// <summary>
+    /// The written settings, proved by using them.
+    /// </summary>
+    /// <remarks>
+    /// Called after the file is written, on purpose: a key that is refused is
+    /// worth keeping on disk to fix, and the message below says what to fix.
+    /// </remarks>
+    private async Task<int> ProveAsync(Settings settings, CancellationToken ct)
+    {
         try
         {
             var columns = await Probe(settings, RunnerName, ct);
