@@ -678,13 +678,23 @@ jobs:
           exit 1
 
       # The database is not reachable from the host, and this is the guard that
-      # keeps it that way: `port` exits non-zero for a service that publishes
-      # nothing, so a `ports:` entry appearing on `db` fails here rather than
-      # in somebody's living room.
+      # keeps it that way: a `ports:` entry appearing on `db` fails here rather
+      # than in somebody's living room. It reads the container's own port
+      # bindings, because `docker compose port` answers for what the image
+      # EXPOSEs — and every upstream Postgres image exposes 5432 — so it says
+      # the same thing whether or not the port is published to the host.
       - name: The database publishes no port
         run: |
-          if docker compose -f deploy/local/compose.yaml port db 5432; then
-            echo "The db service is publishing 5432 to the host. It must not."
+          set -euo pipefail
+          container_id=$(docker compose -f deploy/local/compose.yaml ps -q db)
+          if [ -z "$container_id" ]; then
+            echo "No db container is running, so this guard proved nothing."
+            exit 1
+          fi
+          bindings=$(docker inspect -f '{{json (index .NetworkSettings.Ports "5432/tcp")}}' "$container_id")
+          if [ "$bindings" != "null" ]; then
+            echo "The db service is publishing 5432 to the host: $bindings"
+            echo "It must not."
             exit 1
           fi
           echo "db publishes no port, as intended"
