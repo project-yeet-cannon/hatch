@@ -1,4 +1,4 @@
-# Hatch on one laptop, from published images and nothing else.
+# Hatch on one computer, from published images and nothing else.
 #
 # This file is published to the registry as an OCI artifact beside the two
 # images it names (.github/workflows/publish.yml), so the line that brings the
