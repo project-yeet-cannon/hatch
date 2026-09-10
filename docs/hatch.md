@@ -338,6 +338,42 @@ rule and refused in the playbook's own sentence, so what an issue may be set to
 and what a playbook may be set to cannot drift apart. Setting one is closed to
 an API key; see [The one edge that is deliberately cut](#the-one-edge-that-is-deliberately-cut).
 
+#### Expedite
+
+**One flag meaning *this one first*.** `Expedited` is a boolean on the issue,
+set by a person, and honoured by both halves of Hatch: the board floats the card
+to the top of its column, and the dispatcher considers every expedited candidate
+before anything else.
+
+Two things it deliberately is not.
+
+**It is a sort key, not a gate.** Every existing fold still applies. An open
+question, an unmet dependency, a ready date in the future, a live claim, a
+missing playbook, a person's name on the ticket and a terminal column fold an
+expedited issue exactly as they fold any other, with exactly the same sentence.
+Expedite changes the order candidates are *considered* in, and nothing else —
+so an expedited issue that is blocked is still blocked, and the pass carries on
+past it.
+
+**It marks the issue it is set on, not the subtree under it.** Every type in a
+walkable column is dispatchable — an epic in a breakdown column is broken down
+by the loop the same as a story is implemented — so a flag on one issue means
+something wherever it is set. "Point tonight at this epic" is already
+`work --under`, and a second subtree mechanism beside `ancestorKey` would be two
+answers to one question.
+
+On the board it is `(StatusId, Expedited desc, Rank, Id)`, served that way
+rather than sorted in the browser, so the board, the plan and the queue cannot
+disagree about where a card sits — and a card dropped above an expedited one
+comes to rest below it, because the float wins over the rank. In the dispatcher
+it is [two walks of the columns](#the-dispatcher) rather than a sort of the
+finished rows.
+
+Setting it is closed to an API key; see [The one edge that is deliberately
+cut](#the-one-edge-that-is-deliberately-cut). It follows that there is no
+`hatch expedite` verb — the CLI authenticates with a key, so the terminal shows
+the flag and sets it nowhere.
+
 `CreatedBy` is a **name**, not a foreign key to `People`. The audit trail has to
 read the same after a person row is deleted, and an API key's name goes in this
 column beside a human one — neither of which a `People` FK from a module schema
@@ -1107,6 +1143,15 @@ scheduling policy worth saying out loud: a board worked left to right starts
 everything and finishes nothing; one worked right to left pushes whatever is
 furthest along over the line before it opens anything new. The second is what a
 person does when they mean to ship.
+
+**Except for what somebody expedited**, which is considered first wherever it
+sits. The scan walks the columns twice — every [expedited](#expedite) candidate
+right to left, then everything else right to left — so an expedited bug in the
+leftmost column is reached before a non-expedited story in the rightmost one,
+and inside each half the order is the board's own. Two passes rather than a sort
+of the finished rows, because the [published scan](#what-a-pass-skipped) is the
+explanation of what `next` picked, and a comparator applied afterwards would be
+a second opinion about the order.
 
 `?ancestorKey=AER-1` asks the same question of one epic's subtree instead of the
 whole board — the same rule, narrower candidates, nothing else changed. It
@@ -1982,8 +2027,10 @@ about a ticket that did not move, and what it stops for.
 
 `hatch queue` reads the scan and prints it, one issue a line — key, type,
 column, and either the reason the pass would fold past it or the transition it
-is clear for, in the dispatcher's order: rightmost column first, and within a
-column the order the board itself draws that column in. `hatch queue AER-1`
+is clear for, in the dispatcher's order: every [expedited](#expedite) row first
+whatever column it sits in, then the rest, and inside each half the rightmost
+column first and the order the board itself draws that column in. An expedited
+row is marked, so a queue reordered by one says why. `hatch queue AER-1`
 scopes it to one epic's subtree. It spawns nothing and writes nothing, and an
 empty board prints a sentence saying so rather than a blank line: "there is
 nothing" and "something went wrong and printed nothing" look identical
