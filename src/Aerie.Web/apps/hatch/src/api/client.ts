@@ -2,6 +2,7 @@ import { handledUnauthorized } from '../lib/signIn';
 import type {
   AssigneeDirectory,
   AssigneeRequest,
+  Attention,
   Board,
   Comment,
   CommentCreateRequest,
@@ -312,6 +313,18 @@ export const getUtilization = (refresh = false) =>
   fetchJson<Utilization | undefined>(`/api/hatch/utilization${refresh ? '?refresh=true' : ''}`).then(
     (reading) => reading ?? null,
   );
+
+// ---- What is waiting on a person ----
+
+/**
+ * Whether the loop is waiting on a person, and on what.
+ *
+ * One request for both halves rather than a board read and a questions read.
+ * Two polls can be a poll interval apart, and the disagreement shows up as a
+ * lit control whose panel is empty - the one failure a widget like this does
+ * not recover from, because after it happens twice nobody reads it again.
+ */
+export const getAttention = () => fetchJson<Attention>('/api/hatch/attention');
 
 // ---- Who is sitting here ----
 

@@ -629,6 +629,37 @@ export interface Utilization {
   credits: UtilizationCredits | null;
 }
 
+// ---- What is waiting on a person ----
+
+/** An issue up for review with somewhere to review it. Mirrors ReviewDto. */
+export interface Review {
+  key: string;
+  title: string;
+  type: string;
+  /** Never null, unlike `Issue.pullRequestUrl`: an issue with nowhere to review
+      it is not a row here at all, it is a number in
+      `inReviewWithoutPullRequest`. */
+  pullRequestUrl: string;
+}
+
+/** The two things that stop a night, read at one instant. Mirrors AttentionDto.
+
+    One shape rather than two reads because the control's loudness is a single
+    number, and a badge counted at one instant beside a panel drawn from another
+    shows up as a lit widget whose list is empty. */
+export interface Attention {
+  /** The review column's issues that carry a pull request, in that column's own
+      board order. Which column that is, is the server's to say - measured off
+      the board's shape, and deliberately not re-derived here from `/board`. */
+  reviews: Review[];
+  /** How many stand in that column with nothing to review them. Said in the
+      empty state and never counted towards the badge - see `attentionCount`. */
+  inReviewWithoutPullRequest: number;
+  /** Every open question in the house, oldest first - the same list, order and
+      definition of open the rest of Hatch uses. */
+  questions: Question[];
+}
+
 // ---- Who is sitting here ----
 
 /** Who Hatch thinks is at this machine. Mirrors LocalPersonDto.
