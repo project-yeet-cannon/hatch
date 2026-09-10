@@ -521,7 +521,7 @@ public class WorkController(
                 ProjectKey = i.Project!.Key,
                 i.Number, i.Type, i.Title, i.StatusId, i.Rank,
                 i.ReadyAt, i.ReadyAtHasTime, i.DueAt, i.DueAtHasTime,
-                i.AssigneePersonId, i.AssigneeApiKeyId,
+                i.AssigneePersonId, i.AssigneeApiKeyId, i.Expedited,
                 Claim = new ClaimSnapshot(
                     i.ClaimToken, i.ClaimedBy, i.ClaimRunner,
                     i.ClaimedAt, i.ClaimHeartbeatAt, i.ClaimChatter, i.ClaimChatterAt),
@@ -541,7 +541,8 @@ public class WorkController(
                 IssueMoment.Format(c.ReadyAt, c.ReadyAtHasTime),
                 IssueMoment.Format(c.DueAt, c.DueAtHasTime),
                 Assignee: await IssueProjection.ToAssigneeAsync(actors, c.AssigneePersonId, c.AssigneeApiKeyId, ct),
-                Claim: claims.Project(c.Claim, claimed.Now)));
+                Claim: claims.Project(c.Claim, claimed.Now),
+                Expedited: c.Expedited));
 
         var playbook = to is null ? null : await MatchAsync(from.Id, to.Id, issue.Type, ct);
 

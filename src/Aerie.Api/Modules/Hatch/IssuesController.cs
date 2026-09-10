@@ -158,6 +158,7 @@ public class IssuesController(
                 i.DueAtHasTime,
                 i.AssigneePersonId,
                 i.AssigneeApiKeyId,
+                i.Expedited,
                 Claim = new ClaimSnapshot(
                     i.ClaimToken, i.ClaimedBy, i.ClaimRunner,
                     i.ClaimedAt, i.ClaimHeartbeatAt, i.ClaimChatter, i.ClaimChatterAt),
@@ -182,7 +183,8 @@ public class IssuesController(
                 // and another on the board is the divergence IssueCardDto's own
                 // docstring exists to prevent.
                 Assignee: await IssueProjection.ToAssigneeAsync(actors, i.AssigneePersonId, i.AssigneeApiKeyId, ct),
-                Claim: claims.Project(i.Claim, now)));
+                Claim: claims.Project(i.Claim, now),
+                Expedited: i.Expedited));
 
         return cards;
     }

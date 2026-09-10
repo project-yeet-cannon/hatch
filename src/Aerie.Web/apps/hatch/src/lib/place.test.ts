@@ -18,6 +18,7 @@ const card = (key: string, statusId: number, rank: number): IssueCard => ({
   openQuestions: 0,
   assignee: null,
   claim: null,
+  expedited: false,
 });
 
 /* The board as the API hands it over: grouped by column, ranked within it. */

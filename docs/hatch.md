@@ -815,6 +815,18 @@ the same means. Reading is open, and deliberately: an agent has to be able to
 say whose ticket it is leaving alone, so both `GET /api/hatch/assignees` and the
 `assignee` on `IssueDto` are Hatch-scoped like everything else.
 
+**And so is expediting one**, which is the same edge as the assignee read from
+the other side. An assignee holds a ticket *off* the night shift; expedite puts
+one at the *front* of it — so a key that could set one could put its own ticket
+ahead of everything a person filed, every night, without anything looking wrong
+on the board. `PUT /api/hatch/issues/{key}/expedite` therefore lives on its own
+controller (`IssueExpediteController`) carrying no class-level scope, cut in the
+route by the same means. Reading is open like the rest: `expedited` rides
+`IssueDto` and `IssueCardDto`, because an agent is entitled to know why it was
+sent where it was sent. It follows that there is no `hatch expedite` verb — the
+CLI authenticates with a key, so the terminal *shows* the flag on `board`,
+`queue` and `show` and sets it nowhere.
+
 One related edge is **not** cut, and is stated rather than papered over:
 **nothing stops a key answering its own question.** A key is what
 `hatch answer` types with and it is also what a spawned agent inherits; the
@@ -835,7 +847,7 @@ Everything under `/api/hatch`, every route `[RequireAdmin(AcceptScope =
 | `/projects/{id}` | PATCH, DELETE | PATCH name and key; DELETE 409s unless the project is empty |
 | `/statuses` | GET, POST | |
 | `/statuses/{id}` | PATCH, DELETE | DELETE 409s while any issue holds it |
-| `/board` | GET | Statuses plus every issue, ordered by `(StatusId, Rank, Id)`. Never filtered — the browser folds not-yet-ready cards away; the server hands over all of them |
+| `/board` | GET | Statuses plus every issue, ordered by `(StatusId, Expedited desc, Rank, Id)`. Never filtered — the browser folds not-yet-ready cards away; the server hands over all of them |
 | `/issues` | GET, POST | GET filters on `projectId`, `type`, `statusId`, `parentKey`, `ancestorKey`, `text`, ANDed, all optional |
 | `/issues/bulk` | POST | `keys` plus any of `type`, `statusId`, `parentKey`, `readyAt`, `dueAt` |
 | `/issues/{key}` | GET, PATCH, DELETE | PATCH writes one event per changed field; `""` clears a parent, a date or the pull request URL |
@@ -846,6 +858,7 @@ Everything under `/api/hatch`, every route `[RequireAdmin(AcceptScope =
 | `/issues/{key}/playbook` | PATCH | **Person only** — plain `[RequireAdmin]`. The issue's own model and effort; `""` hands either back to the playbook |
 | `/assignees` | GET | Every person and every live key, plus who the caller is — the picker's rows and *Assign to me* in one read |
 | `/issues/{key}/assignee` | PUT | **Person only** — plain `[RequireAdmin]`. `{ kind, id }`, or both null to unassign — see [Assignee](#assignee) |
+| `/issues/{key}/expedite` | PUT | **Person only** — plain `[RequireAdmin]`. `{ expedited }` — *this one first*, floated on the board and taken first by the dispatcher. Setting what it already holds writes nothing |
 | `/issues/{key}/claim` | POST | Takes the [lease](#claim). `{ runner }`; answers with the token, the holder, when it was taken and the TTL. `409` naming the holder where something live already has it — including the same runner asking twice |
 | `/issues/{key}/claim/heartbeat` | POST | `{ token, chatter? }` — refreshes it, `204`. `409` on a token that is not the row's, and on a lease that is over. `chatter` absent leaves the carried line alone, `""` clears it, anything longer than the column is truncated rather than refused |
 | `/issues/{key}/claim?token=…` | DELETE | Releases it, `204`. A mismatched token is `409` and clears nothing; an issue holding no claim is `204` and writes nothing. **With no token at all it is person-only** — an agent that could clear another runner's claim could take a ticket off it mid-increment |

@@ -59,6 +59,7 @@ public class BoardController(
                 i.DueAtHasTime,
                 i.AssigneePersonId,
                 i.AssigneeApiKeyId,
+                i.Expedited,
                 Claim = new ClaimSnapshot(
                     i.ClaimToken, i.ClaimedBy, i.ClaimRunner,
                     i.ClaimedAt, i.ClaimHeartbeatAt, i.ClaimChatter, i.ClaimChatterAt),
@@ -90,7 +91,8 @@ public class BoardController(
             IssueMoment.Format(i.DueAt, i.DueAtHasTime),
             waiting.GetValueOrDefault(i.Id),
             assignees[i.Id],
-            claims.Project(i.Claim, now))).ToList();
+            claims.Project(i.Claim, now),
+            i.Expedited)).ToList();
 
         return new BoardDto(statuses, cards);
     }

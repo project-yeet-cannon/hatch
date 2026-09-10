@@ -262,6 +262,15 @@ public class AdminSurfaceTests
         "AssigneeController.GetAssignees",
         "AssigneeController.PutIssueAssignee",
 
+        // The same edge read from the other side. An assignee holds a ticket
+        // off the night shift; expedite puts one at the front of it, so a key
+        // that could set one could put its own ticket ahead of everything a
+        // person filed, every night, with nothing looking wrong on the board.
+        // Reading it is open - it rides IssueDto and IssueCardDto, both
+        // Hatch-scoped - and only the write is here. See
+        // IssueExpediteController.
+        "IssueExpediteController.PutIssueExpedite",
+
         // The whole controller, reads included. See
         // Aerie.Api.Controllers.SettingsController.
         "SettingsController.GetAll",

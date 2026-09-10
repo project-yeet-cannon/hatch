@@ -350,6 +350,34 @@ public class EfHatchIssue
     [MaxLength(EfHatchPlaybook.MaxEffortLength)]
     public string? EffortOverride { get; set; }
 
+    /// <summary>
+    /// <em>This one first.</em> Set by a person, honoured by both halves of
+    /// Hatch: the board floats the card to the top of its column, and the
+    /// dispatcher considers every expedited candidate before anything else.
+    /// </summary>
+    /// <remarks>
+    /// <para>A sort key, not a gate. Every fold still applies exactly as it
+    /// applies to any other issue - an open question, an unmet dependency, a
+    /// ready date in the future, a live claim, a missing playbook, a person's
+    /// name on the ticket and a terminal column all fold an expedited issue the
+    /// same (<see cref="WorkController"/>). This changes the order candidates
+    /// are <em>considered</em> in, and nothing else.</para>
+    ///
+    /// <para>It marks the issue it is set on and nothing beneath it. Every type
+    /// in a walkable column is dispatchable, so a flag on one issue means
+    /// something wherever it is set - and "point tonight at this epic" is
+    /// already <c>work --under</c>, which is the subtree mechanism. A second one
+    /// beside it would be two answers to one question.</para>
+    ///
+    /// <para>Writing it is closed to an API key
+    /// (<see cref="IssueExpediteController"/>) for the reason writing an
+    /// assignee and a playbook is: expedite decides what the loop reaches for
+    /// first, so a key that could set one could put its own ticket at the front
+    /// of every night. Reading is open, like everything else a dispatch needs -
+    /// an agent is entitled to know why it was sent where it was sent.</para>
+    /// </remarks>
+    public bool Expedited { get; set; }
+
     // ---- The claim ----
     //
     // A lease on this issue held by a running dispatcher: taken before an
@@ -644,6 +672,15 @@ public class EfHatchIssueEvent
 
     /// <summary>The same, for the thinking budget - see <see cref="EfHatchIssue.EffortOverride"/>.</summary>
     public const string EffortOverrideChanged = "effort_override_changed";
+
+    /// <summary>
+    /// The issue was marked <em>this one first</em>, or unmarked - see
+    /// <see cref="EfHatchIssue.Expedited"/>. The payload carries both sides, so
+    /// the trail says which way it went rather than only that somebody touched
+    /// it: "who put this at the front of the night, and when" is the question a
+    /// flag that reorders a whole board has to be able to answer.
+    /// </summary>
+    public const string ExpeditedChanged = "expedited_changed";
 
     /// <summary>
     /// The issue was made to wait on another, or freed from one. Written on the

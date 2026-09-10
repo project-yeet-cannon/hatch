@@ -140,7 +140,8 @@ public static class IssueProjection
                 issue.CreatedBy,
                 issue.CreatedAt,
                 issue.UpdatedAt,
-                claims.Project(ClaimSnapshot.Of(issue), now));
+                claims.Project(ClaimSnapshot.Of(issue), now),
+                issue.Expedited);
         });
     }
 
