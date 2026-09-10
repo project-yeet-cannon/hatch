@@ -12,7 +12,7 @@ import {
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { Button, EmptyState, PageHeader } from '@aerie/ui';
-import { getBoard, getProjects, moveIssue } from '../api/client';
+import { getAssignees, getBoard, getProjects, moveIssue } from '../api/client';
 import { BoardCard, CardPreview } from '../components/BoardCard';
 import { BoardFilters } from '../components/BoardFilters';
 import { CloseSubtreeDialog } from '../components/CloseSubtreeDialog';
@@ -29,11 +29,17 @@ import { askingCount } from '../lib/questions';
 import { isWaiting } from '../lib/schedule';
 import { useCloseSubtree } from '../lib/useCloseSubtree';
 import { useLoaded } from '../lib/useLoaded';
-import type { Board, IssueCard, Project, Status } from '../types';
+import type { AssigneeDirectory, Board, IssueCard, Project, Status } from '../types';
 
 export function BoardPage() {
   const { data: board, setData: setBoard, error, setError, reload } = useLoaded<Board>(getBoard);
   const [projects, setProjects] = useState<Project[]>([]);
+  /* Who is signed in, read once for the whole board rather than once per card
+     opened. The summary needs it to know whether to offer the expedite press -
+     the write is a person's - and a dialog that fetched its own copy would ask
+     again every time somebody clicked a card. Null where it could not be read,
+     which leaves the press unoffered and the state still drawn. */
+  const [directory, setDirectory] = useState<AssigneeDirectory | null>(null);
   const [filing, setFiling] = useState(false);
   const [filter, setFilter] = useState<CardFilter>(NO_FILTER);
 
@@ -54,6 +60,11 @@ export function BoardPage() {
     getProjects().then(setProjects).catch(() => {
       // The board is readable without the project list; only the New issue
       // dialog needs it, and it says so itself when there is nothing to pick.
+    });
+
+    getAssignees().then(setDirectory).catch(() => {
+      // And without the directory: every card still draws, and the summary
+      // says whether an issue is expedited without offering to change it.
     });
   }, []);
 
@@ -190,6 +201,8 @@ export function BoardPage() {
       <IssuePeek
         card={peeking}
         status={peeking ? board.statuses.find((s) => s.id === peeking.statusId) : undefined}
+        directory={directory}
+        onExpedited={() => void reload()}
         onClose={() => setPeeking(null)}
       />
 

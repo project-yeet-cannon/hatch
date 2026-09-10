@@ -114,6 +114,15 @@ export function place(
  * keeps it right while a filter is on: the index the operator dropped at is an
  * index into what they could see, and the array being rebuilt here holds
  * everything.
+ *
+ * It is the server's own two steps, in the server's own order - place the card
+ * in the column's *rank* order, then float the expedited cards to the top of
+ * it. Nothing here computes a rank; the number is still the server's
+ * (docs/hatch.md, "Rank computation") and this only mirrors where that number
+ * will land the card. Doing the float first, or placing by the order on screen
+ * rather than by rank, gives a different answer the moment a column holds an
+ * expedited card - and a card that has to jump once the refetch arrives is a
+ * board the operator stops trusting.
  */
 function reorder(
   all: IssueCard[],
@@ -125,12 +134,50 @@ function reorder(
   const moved = { ...card, statusId };
   const rest = all.filter((i) => i.key !== card.key);
 
-  const anchor = afterKey ?? beforeKey;
-  if (!anchor) return [...rest, moved];
+  /* The target column as the rank sees it, which is the board's own order with
+     the float undone. Sort is stable, so two cards sharing a rank keep the
+     order the server served them in. */
+  const ranked = rest.filter((i) => i.statusId === statusId).sort((a, b) => a.rank - b.rank);
 
-  const at = rest.findIndex((i) => i.key === anchor);
-  if (at < 0) return [...rest, moved];
+  ranked.splice(insertionIndex(ranked, afterKey, beforeKey), 0, moved);
 
-  const insert = afterKey ? at + 1 : at;
-  return [...rest.slice(0, insert), moved, ...rest.slice(insert)];
+  // And then the float, exactly as the board read applies it: expedited first,
+  // (rank, id) within each half.
+  const ordered = [...ranked.filter((i) => i.expedited), ...ranked.filter((i) => !i.expedited)];
+
+  /* Written back into the slots the column already occupies, so the array stays
+     grouped by column the way the server hands it over. A column with nothing
+     in it has no slot to write into, and the card goes on the end - which is
+     where a card moved into an empty column belongs either way. */
+  const head = rest.findIndex((i) => i.statusId === statusId);
+  if (head < 0) return [...rest, ...ordered];
+
+  const out: IssueCard[] = [];
+  rest.forEach((i, at) => {
+    if (at === head) out.push(...ordered);
+    if (i.statusId !== statusId) out.push(i);
+  });
+
+  return out;
+}
+
+/**
+ * Where in the rank-ordered column the card lands - `RankService.InsertionIndex`,
+ * read from the other end of the wire.
+ *
+ * `beforeKey` is trusted ahead of `afterKey` because that is the order the
+ * server tries them in, and with a filter on the two are not always adjacent:
+ * a card dropped between two visible neighbours with hidden rows between them
+ * lands under the hidden ones, because that is what the server will do with it.
+ */
+function insertionIndex(ranked: IssueCard[], afterKey: string | null, beforeKey: string | null): number {
+  const before = beforeKey ? ranked.findIndex((i) => i.key === beforeKey) : -1;
+  if (before >= 0) return before;
+
+  const after = afterKey ? ranked.findIndex((i) => i.key === afterKey) : -1;
+  if (after >= 0) return after + 1;
+
+  // No neighbours, or neighbours that have since moved out of this column: the
+  // bottom is the honest place for a card whose requested position is gone.
+  return ranked.length;
 }

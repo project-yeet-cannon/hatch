@@ -19,8 +19,10 @@ import {
   patchIssuePlaybook,
   removeDependency,
   setAssignee,
+  setExpedited,
 } from '../api/client';
 import { AssigneeField } from '../components/AssigneeField';
+import { ExpediteControl } from '../components/ExpediteControl';
 import { ClaimPanel } from '../components/ClaimPanel';
 import { ClearClaimDialog } from '../components/ClearClaimDialog';
 import { Choice } from '../components/Choice';
@@ -214,6 +216,24 @@ export function IssuePage() {
     [key, load],
   );
 
+  /* Whether this one goes first. Its own call for the reason `saveAssignee` is -
+     its own endpoint, closed to an API key - and otherwise exactly `save`: it
+     re-reads, so the control, the trail below and the board behind this page
+     all redraw from the server's answer rather than from the assumption that
+     the press worked. A refusal lands in `error` above in the server's own
+     words, and the control goes back to saying what the issue still holds. */
+  const saveExpedited = useCallback(
+    async (expedited: boolean) => {
+      try {
+        await setExpedited(key, expedited);
+        await load();
+      } catch (err) {
+        setError(message(err));
+      }
+    },
+    [key, load],
+  );
+
   /* Taking the ticket back off a runner. Its own call for the reason
      `saveAssignee` is - its own endpoint, closed to an API key - and otherwise
      exactly `save`: it re-reads, so the section, the card and the trail below
@@ -392,6 +412,22 @@ export function IssuePage() {
               assignee={issue.assignee}
               directory={directory}
               onChange={(request) => void saveAssignee(request)}
+            />
+          </Field>
+
+          {/* `as="div"` for the reason the fields above it are. The control
+              draws the current state, so this field says whether the issue is
+              expedited without anybody pressing anything - which is the point
+              of it being here as well as on the card. */}
+          <Field
+            label="Expedite"
+            as="div"
+            hint="This one first: to the top of its column, and the first thing the dispatcher considers."
+          >
+            <ExpediteControl
+              expedited={issue.expedited}
+              directory={directory}
+              onChange={(expedited) => void saveExpedited(expedited)}
             />
           </Field>
 

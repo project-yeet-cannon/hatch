@@ -193,6 +193,20 @@ export const setAssignee = (key: string, request: AssigneeRequest) =>
     body: JSON.stringify(request),
   });
 
+/** *This one first.* Its own route rather than a field on the patch, and for
+    the same reason the assignee has one: writing it is closed to an API key,
+    because expedite decides what the loop reaches for first - see
+    IssueExpediteController.
+
+    The state is sent rather than a toggle, so two browsers looking at the same
+    card cannot flip it back and forth and leave the answer depending on which
+    request landed second. */
+export const setExpedited = (key: string, expedited: boolean) =>
+  fetchJson<Issue>(`/api/hatch/issues/${seg(key)}/expedite`, {
+    method: 'PUT',
+    ...asJson({ expedited }),
+  });
+
 /** Take a ticket back off a runner - the operator's clobber, with no token in
     it, which is why the server refuses it from an API key: a key may release
     only the lease it holds. Answers nothing (204), so the page re-reads rather
