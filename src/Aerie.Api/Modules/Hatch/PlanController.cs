@@ -63,6 +63,7 @@ public class PlanController(
                 i.DueAtHasTime,
                 i.AssigneePersonId,
                 i.AssigneeApiKeyId,
+                i.Expedited,
                 Claim = new ClaimSnapshot(
                     i.ClaimToken, i.ClaimedBy, i.ClaimRunner,
                     i.ClaimedAt, i.ClaimHeartbeatAt, i.ClaimChatter, i.ClaimChatterAt),
@@ -86,7 +87,8 @@ public class PlanController(
                     IssueMoment.Format(c.ReadyAt, c.ReadyAtHasTime),
                     IssueMoment.Format(c.DueAt, c.DueAtHasTime),
                     Assignee: await IssueProjection.ToAssigneeAsync(actors, c.AssigneePersonId, c.AssigneeApiKeyId, ct),
-                    Claim: claims.Project(c.Claim, now)),
+                    Claim: claims.Project(c.Claim, now),
+                    Expedited: c.Expedited),
                 tree.IsLeaf(c.Id),
                 tree.Of(c.Id)));
 
@@ -132,6 +134,7 @@ public class PlanController(
                 i.DueAtHasTime,
                 i.AssigneePersonId,
                 i.AssigneeApiKeyId,
+                i.Expedited,
                 Claim = new ClaimSnapshot(
                     i.ClaimToken, i.ClaimedBy, i.ClaimRunner,
                     i.ClaimedAt, i.ClaimHeartbeatAt, i.ClaimChatter, i.ClaimChatterAt),
@@ -209,7 +212,8 @@ public class PlanController(
                         IssueMoment.Format(row.ReadyAt, row.ReadyAtHasTime),
                         IssueMoment.Format(row.DueAt, row.DueAtHasTime),
                         Assignee: assignees[id],
-                        Claim: claims.Project(row.Claim, now)),
+                        Claim: claims.Project(row.Claim, now),
+                        Expedited: row.Expedited),
                     tree.IsLeaf(id),
                     // The whole subtree, not the epics below it: an epic's
                     // meter is its stories and their tasks, and the nested

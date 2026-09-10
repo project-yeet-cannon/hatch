@@ -5,7 +5,7 @@ import type { IssueCard } from '../types';
 const INBOX = 1;
 const TODO = 2;
 
-const card = (key: string, statusId: number, rank: number): IssueCard => ({
+const card = (key: string, statusId: number, rank: number, expedited = false): IssueCard => ({
   key,
   projectKey: 'AER',
   type: 'task',
@@ -18,6 +18,7 @@ const card = (key: string, statusId: number, rank: number): IssueCard => ({
   openQuestions: 0,
   assignee: null,
   claim: null,
+  expedited,
 });
 
 /* The board as the API hands it over: grouped by column, ranked within it. */
@@ -148,6 +149,64 @@ describe('place, with the board filtered', () => {
 
     expect(placed.statusId).toBe(TODO);
     expect(keysIn(placed.issues, TODO)).toEqual(['AER-9', 'AER-1']);
+  });
+});
+
+/* The float, as the browser has to paint it before the refetch arrives. The
+   server places the card in the column's rank order and then serves the
+   expedited ones above the rest; anything here that did those two in the other
+   order, or that placed by the order on screen, would put the card somewhere it
+   has to jump out of a moment later. */
+describe('place, with something expedited in the column', () => {
+  /* AER-7 is expedited and its rank is the lowest, so it is at the top of the
+     column both ways round - the ordinary case, where a card was expedited
+     where it already sat. */
+  const hurried = [
+    card('AER-7', INBOX, 512, true),
+    card('AER-1', INBOX, 1024),
+    card('AER-2', INBOX, 2048),
+    card('AER-9', TODO, 1024),
+  ];
+
+  it('rests a card dropped above the expedited one below it', () => {
+    // Dropped at the very top of the column: above AER-7 on screen.
+    const placed = place(hurried, hurried, 'AER-2', 'AER-7')!;
+
+    expect(placed.beforeKey).toBe('AER-7');
+    expect(keysIn(placed.issues, INBOX)).toEqual(['AER-7', 'AER-2', 'AER-1']);
+  });
+
+  it('leaves the expedited card at the top when something lands under it', () => {
+    const placed = place(hurried, hurried, 'AER-2', 'AER-1')!;
+
+    expect(keysIn(placed.issues, INBOX)).toEqual(['AER-7', 'AER-2', 'AER-1']);
+  });
+
+  it('floats an expedited card dropped into another column to the top of it', () => {
+    const placed = place(hurried, hurried, 'AER-7', columnDroppableId(TODO))!;
+
+    // Dropped on the column, which is its bottom - and then above AER-9 all the
+    // same, because the float is the last word.
+    expect(placed.afterKey).toBe('AER-9');
+    expect(keysIn(placed.issues, TODO)).toEqual(['AER-7', 'AER-9']);
+  });
+
+  /* The case the rank order and the order on screen come apart: AER-7 was
+     expedited while it sat at the bottom, so it is drawn at the top and ranked
+     last. A card dropped above it is ranked above its rank, which is below
+     everything else - and that is where it has to be painted. */
+  it('paints a drop above a high-ranked expedited card where the rank will put it', () => {
+    const odd = [
+      card('AER-7', INBOX, 4096, true),
+      card('AER-1', INBOX, 1024),
+      card('AER-2', INBOX, 2048),
+      card('AER-3', INBOX, 3072),
+    ];
+
+    const placed = place(odd, odd, 'AER-1', 'AER-7')!;
+
+    expect(placed.beforeKey).toBe('AER-7');
+    expect(keysIn(placed.issues, INBOX)).toEqual(['AER-7', 'AER-2', 'AER-3', 'AER-1']);
   });
 });
 

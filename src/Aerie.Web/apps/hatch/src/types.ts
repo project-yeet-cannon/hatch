@@ -90,6 +90,10 @@ export interface IssueCard {
   assignee: Assignee | null;
   /** The lease a running dispatcher holds on this issue, or null. */
   claim: IssueClaim | null;
+  /** *This one first.* The server serves an expedited card above every
+      non-expedited one in its column, so nothing here sorts - see
+      IssueCardDto.Expedited. */
+  expedited: boolean;
 }
 
 /** The lease a running dispatcher holds on an issue - see IssueClaimDto.
@@ -163,6 +167,12 @@ export interface Issue {
   /** The lease a running dispatcher holds on this issue, or null - the same
       shape the card carries, and null once it has expired. */
   claim: IssueClaim | null;
+  /** *This one first.* The board floats it to the top of its column and the
+      dispatcher considers it before anything else - and nothing else changes,
+      because it is a sort key and not a gate. Readable by anybody a dispatch
+      reaches and writable only by a person, through its own route - see
+      IssueExpediteController. */
+  expedited: boolean;
 }
 
 /** An ordinary note, a question that needs deciding, or the answer to one.

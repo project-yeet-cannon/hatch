@@ -17,6 +17,7 @@ const card = (key: string, parentKey: string | null, projectKey = 'AER'): IssueC
   openQuestions: 0,
   assignee: null,
   claim: null,
+  expedited: false,
 });
 
 const keys = (cards: IssueCard[]) => cards.map((c) => c.key);

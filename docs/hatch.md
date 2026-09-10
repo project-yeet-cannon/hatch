@@ -338,6 +338,42 @@ rule and refused in the playbook's own sentence, so what an issue may be set to
 and what a playbook may be set to cannot drift apart. Setting one is closed to
 an API key; see [The one edge that is deliberately cut](#the-one-edge-that-is-deliberately-cut).
 
+#### Expedite
+
+**One flag meaning *this one first*.** `Expedited` is a boolean on the issue,
+set by a person, and honoured by both halves of Hatch: the board floats the card
+to the top of its column, and the dispatcher considers every expedited candidate
+before anything else.
+
+Two things it deliberately is not.
+
+**It is a sort key, not a gate.** Every existing fold still applies. An open
+question, an unmet dependency, a ready date in the future, a live claim, a
+missing playbook, a person's name on the ticket and a terminal column fold an
+expedited issue exactly as they fold any other, with exactly the same sentence.
+Expedite changes the order candidates are *considered* in, and nothing else —
+so an expedited issue that is blocked is still blocked, and the pass carries on
+past it.
+
+**It marks the issue it is set on, not the subtree under it.** Every type in a
+walkable column is dispatchable — an epic in a breakdown column is broken down
+by the loop the same as a story is implemented — so a flag on one issue means
+something wherever it is set. "Point tonight at this epic" is already
+`work --under`, and a second subtree mechanism beside `ancestorKey` would be two
+answers to one question.
+
+On the board it is `(StatusId, Expedited desc, Rank, Id)`, served that way
+rather than sorted in the browser, so the board, the plan and the queue cannot
+disagree about where a card sits — and a card dropped above an expedited one
+comes to rest below it, because the float wins over the rank. In the dispatcher
+it is [two walks of the columns](#the-dispatcher) rather than a sort of the
+finished rows.
+
+Setting it is closed to an API key; see [The one edge that is deliberately
+cut](#the-one-edge-that-is-deliberately-cut). It follows that there is no
+`hatch expedite` verb — the CLI authenticates with a key, so the terminal shows
+the flag and sets it nowhere.
+
 `CreatedBy` is a **name**, not a foreign key to `People`. The audit trail has to
 read the same after a person row is deleted, and an API key's name goes in this
 column beside a human one — neither of which a `People` FK from a module schema
@@ -815,6 +851,18 @@ the same means. Reading is open, and deliberately: an agent has to be able to
 say whose ticket it is leaving alone, so both `GET /api/hatch/assignees` and the
 `assignee` on `IssueDto` are Hatch-scoped like everything else.
 
+**And so is expediting one**, which is the same edge as the assignee read from
+the other side. An assignee holds a ticket *off* the night shift; expedite puts
+one at the *front* of it — so a key that could set one could put its own ticket
+ahead of everything a person filed, every night, without anything looking wrong
+on the board. `PUT /api/hatch/issues/{key}/expedite` therefore lives on its own
+controller (`IssueExpediteController`) carrying no class-level scope, cut in the
+route by the same means. Reading is open like the rest: `expedited` rides
+`IssueDto` and `IssueCardDto`, because an agent is entitled to know why it was
+sent where it was sent. It follows that there is no `hatch expedite` verb — the
+CLI authenticates with a key, so the terminal *shows* the flag on `board`,
+`queue` and `show` and sets it nowhere.
+
 One related edge is **not** cut, and is stated rather than papered over:
 **nothing stops a key answering its own question.** A key is what
 `hatch answer` types with and it is also what a spawned agent inherits; the
@@ -835,7 +883,7 @@ Everything under `/api/hatch`, every route `[RequireAdmin(AcceptScope =
 | `/projects/{id}` | PATCH, DELETE | PATCH name and key; DELETE 409s unless the project is empty |
 | `/statuses` | GET, POST | |
 | `/statuses/{id}` | PATCH, DELETE | DELETE 409s while any issue holds it |
-| `/board` | GET | Statuses plus every issue, ordered by `(StatusId, Rank, Id)`. Never filtered — the browser folds not-yet-ready cards away; the server hands over all of them |
+| `/board` | GET | Statuses plus every issue, ordered by `(StatusId, Expedited desc, Rank, Id)`. Never filtered — the browser folds not-yet-ready cards away; the server hands over all of them |
 | `/issues` | GET, POST | GET filters on `projectId`, `type`, `statusId`, `parentKey`, `ancestorKey`, `text`, ANDed, all optional |
 | `/issues/bulk` | POST | `keys` plus any of `type`, `statusId`, `parentKey`, `readyAt`, `dueAt` |
 | `/issues/{key}` | GET, PATCH, DELETE | PATCH writes one event per changed field; `""` clears a parent, a date or the pull request URL |
@@ -846,6 +894,7 @@ Everything under `/api/hatch`, every route `[RequireAdmin(AcceptScope =
 | `/issues/{key}/playbook` | PATCH | **Person only** — plain `[RequireAdmin]`. The issue's own model and effort; `""` hands either back to the playbook |
 | `/assignees` | GET | Every person and every live key, plus who the caller is — the picker's rows and *Assign to me* in one read |
 | `/issues/{key}/assignee` | PUT | **Person only** — plain `[RequireAdmin]`. `{ kind, id }`, or both null to unassign — see [Assignee](#assignee) |
+| `/issues/{key}/expedite` | PUT | **Person only** — plain `[RequireAdmin]`. `{ expedited }` — *this one first*, floated on the board and taken first by the dispatcher. Setting what it already holds writes nothing |
 | `/issues/{key}/claim` | POST | Takes the [lease](#claim). `{ runner }`; answers with the token, the holder, when it was taken and the TTL. `409` naming the holder where something live already has it — including the same runner asking twice |
 | `/issues/{key}/claim/heartbeat` | POST | `{ token, chatter? }` — refreshes it, `204`. `409` on a token that is not the row's, and on a lease that is over. `chatter` absent leaves the carried line alone, `""` clears it, anything longer than the column is truncated rather than refused |
 | `/issues/{key}/claim?token=…` | DELETE | Releases it, `204`. A mismatched token is `409` and clears nothing; an issue holding no claim is `204` and writes nothing. **With no token at all it is person-only** — an agent that could clear another runner's claim could take a ticket off it mid-increment |
@@ -1161,6 +1210,15 @@ scheduling policy worth saying out loud: a board worked left to right starts
 everything and finishes nothing; one worked right to left pushes whatever is
 furthest along over the line before it opens anything new. The second is what a
 person does when they mean to ship.
+
+**Except for what somebody expedited**, which is considered first wherever it
+sits. The scan walks the columns twice — every [expedited](#expedite) candidate
+right to left, then everything else right to left — so an expedited bug in the
+leftmost column is reached before a non-expedited story in the rightmost one,
+and inside each half the order is the board's own. Two passes rather than a sort
+of the finished rows, because the [published scan](#what-a-pass-skipped) is the
+explanation of what `next` picked, and a comparator applied afterwards would be
+a second opinion about the order.
 
 `?ancestorKey=AER-1` asks the same question of one epic's subtree instead of the
 whole board — the same rule, narrower candidates, nothing else changed. It
@@ -2036,8 +2094,10 @@ about a ticket that did not move, and what it stops for.
 
 `hatch queue` reads the scan and prints it, one issue a line — key, type,
 column, and either the reason the pass would fold past it or the transition it
-is clear for, in the dispatcher's order: rightmost column first, and within a
-column the order the board itself draws that column in. `hatch queue AER-1`
+is clear for, in the dispatcher's order: every [expedited](#expedite) row first
+whatever column it sits in, then the rest, and inside each half the rightmost
+column first and the order the board itself draws that column in. An expedited
+row is marked, so a queue reordered by one says why. `hatch queue AER-1`
 scopes it to one epic's subtree. It spawns nothing and writes nothing, and an
 empty board prints a sentence saying so rather than a blank line: "there is
 nothing" and "something went wrong and printed nothing" look identical

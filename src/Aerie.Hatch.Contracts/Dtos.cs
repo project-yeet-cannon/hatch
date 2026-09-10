@@ -92,6 +92,14 @@ public record AssigneeDto(string Kind, Guid Id, string Name);
 /// through the board and another through the plan is the divergence this record
 /// exists to prevent.
 /// </param>
+/// <param name="Expedited">
+/// <em>This one first.</em> An expedited card is served above every
+/// non-expedited card in its column, whatever its rank, and the client slices
+/// the one ordered list rather than sorting for itself - so the board, the plan
+/// and the queue cannot disagree about where a card sits. Trailing and
+/// defaulted for the reason <paramref name="OpenQuestions"/> is, though every
+/// list that draws a card fills it.
+/// </param>
 public record IssueCardDto(
     string Key,
     string ProjectKey,
@@ -104,7 +112,8 @@ public record IssueCardDto(
     string? DueAt,
     int OpenQuestions = 0,
     AssigneeDto? Assignee = null,
-    IssueClaimDto? Claim = null);
+    IssueClaimDto? Claim = null,
+    bool Expedited = false);
 
 /// <summary>
 /// The lease a running dispatcher holds on an issue, or null where nothing
@@ -181,6 +190,14 @@ public record IssueClaimDto(
 /// <c>people only</c> rule an assignee is a dispatch gate, and a key that could
 /// write one could hand itself work somebody had reserved.
 /// </param>
+/// <param name="Expedited">
+/// <em>This one first.</em> The board floats it to the top of its column and
+/// the dispatcher considers it before anything else - and nothing else changes,
+/// because it is a sort key and not a gate. Readable by a key for the reason
+/// <paramref name="ModelOverride"/> is, and writable only by a person through
+/// <see cref="IssueExpediteController"/>: a key that could set one could put
+/// its own ticket at the front of every night.
+/// </param>
 public record IssueDto(
     string Key,
     int ProjectId,
@@ -203,7 +220,8 @@ public record IssueDto(
     string CreatedBy,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    IssueClaimDto? Claim = null);
+    IssueClaimDto? Claim = null,
+    bool Expedited = false);
 
 /// <summary>Taking the lease: who is asking is the credential's to say, so the body names only where from.</summary>
 /// <param name="Runner">The checkout holding it - <c>host:/path/to/checkout</c>, as the runner names itself.</param>
@@ -609,6 +627,19 @@ public record IssuePlaybookRequest(string? Model, string? Effort);
 /// a row this process owns.
 /// </remarks>
 public record AssigneeRequest(string? Kind, Guid? Id);
+
+/// <summary>
+/// Whether this one goes first. One required boolean, so the same route both
+/// marks and unmarks and the caller says which it meant.
+/// </summary>
+/// <remarks>
+/// Not a toggle, deliberately. A control that sent "the other one" would race
+/// two browsers looking at the same card into flipping it back and forth, and
+/// the answer to "is this expedited now" would depend on which request landed
+/// second rather than on what anybody pressed. The client reads the state, and
+/// sends the state it wants.
+/// </remarks>
+public record ExpediteRequest(bool Expedited);
 
 /// <summary>
 /// The picker's rows and the answer to "who am I", in one read.

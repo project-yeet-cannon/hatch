@@ -36,13 +36,15 @@ public static class Fixtures
 
     public static IssueDto Issue(
         string key, string type = "task", string title = "A ticket", string description = "The brief.",
-        string? modelOverride = null, string? effortOverride = null, string? parentKey = null) =>
+        string? modelOverride = null, string? effortOverride = null, string? parentKey = null,
+        bool expedited = false) =>
         new(
             Key: key, ProjectId: 1, ProjectKey: "AER", Type: type, Title: title, Description: description,
             StatusId: 3, Rank: 1000, ParentKey: parentKey, ChildKeys: [], DependsOnKeys: [], DependentKeys: [],
             ReadyAt: null, DueAt: null, PullRequestUrl: null,
             ModelOverride: modelOverride, EffortOverride: effortOverride, Assignee: null,
-            CreatedBy: "somebody", CreatedAt: DateTimeOffset.UnixEpoch, UpdatedAt: DateTimeOffset.UnixEpoch);
+            CreatedBy: "somebody", CreatedAt: DateTimeOffset.UnixEpoch, UpdatedAt: DateTimeOffset.UnixEpoch,
+            Expedited: expedited);
 
     public static IssueCardDto Card(string key, string type = "task", string title = "A child") =>
         new(key, "AER", type, title, 3, 1000, null, null, null);
@@ -67,8 +69,8 @@ public static class Fixtures
             Questions: questions ?? [],
             Blocked: blocked);
 
-    public static QueueEntryDto Row(string key, string? blocked = null) =>
-        new(Issue(key), Status(3, "In Progress"), Status(4, "In Review"), blocked);
+    public static QueueEntryDto Row(string key, string? blocked = null, bool expedited = false) =>
+        new(Issue(key, expedited: expedited), Status(3, "In Progress"), Status(4, "In Review"), blocked);
 
     public static QuestionDto Question(long id, string key = "AER-1", string body = "Which way?", bool answered = false) =>
         new(

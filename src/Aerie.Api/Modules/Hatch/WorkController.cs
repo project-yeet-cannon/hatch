@@ -98,11 +98,13 @@ public class WorkController(
     /// returns for the same arguments, because it is the same walk. The
     /// arguments mean exactly what they mean there.</para>
     ///
-    /// <para>The rows arrive in the dispatcher's order: the rightmost column
-    /// first, and within a column the board's own <c>(Rank, Id)</c> - the same
-    /// tuple <see cref="BoardController"/> serves. So a card's position in the
-    /// queue is its position in its column on the board, and nothing between
-    /// the two re-sorts.</para>
+    /// <para>The rows arrive in the dispatcher's order: every expedited
+    /// candidate first, whatever column each sits in, and then everything else.
+    /// Inside each half it is the rightmost column first and the board's own
+    /// <c>(Rank, Id)</c> within a column - the same tuple
+    /// <see cref="BoardController"/> serves. So a card's position in the queue
+    /// is its position in its column on the board, and nothing between the two
+    /// re-sorts.</para>
     /// </summary>
     /// <remarks>
     /// The columns with nowhere to go - a terminal one, and a rightmost one
@@ -137,8 +139,9 @@ public class WorkController(
     // ---- The walk ----
 
     /// <summary>
-    /// The one pass over the board that both work endpoints are built on:
-    /// right to left, top of the column down, every issue judged once.
+    /// The one pass over the board that both work endpoints are built on: the
+    /// expedited candidates right to left and top of the column down, then
+    /// everything else the same way, every issue judged once.
     /// </summary>
     /// <remarks>
     /// Everything a row is judged against is read once here rather than once
@@ -213,21 +216,42 @@ public class WorkController(
 
         var implementation = Columns.Implementation(statuses);
 
+        // The whole walk, twice: every expedited candidate right to left, and
+        // then everything else right to left. So an expedited bug in the
+        // leftmost column is listed above a non-expedited story in the
+        // rightmost one, while inside each half the order is the board's own -
+        // rightmost column first, and (Rank, Id) within a column.
+        //
+        // Two passes over the same columns rather than a sort of the finished
+        // rows, because the published scan is the explanation of what `next`
+        // picked: a comparator applied afterwards would be a second opinion
+        // about the order, and two loops that could disagree is precisely the
+        // bug this endpoint exists to expose.
+        //
+        // Expedite reorders and gates nothing. Every row is judged by the same
+        // Blocked below whichever pass reaches it, so an expedited issue that
+        // is blocked is folded with exactly the sentence it is folded with
+        // today - it is simply folded sooner.
         var rows = new List<ScanRow>();
-        foreach (var status in Enumerable.Reverse(statuses))
+        foreach (var expedited in new[] { true, false })
         {
-            if (Columns.Advance(statuses, status) is not { } to) continue;
-            if (!byColumn.TryGetValue(status.Id, out var column)) continue;
-
-            foreach (var issue in column)
+            foreach (var status in Enumerable.Reverse(statuses))
             {
-                var playbook = Match(playbooks, status.Id, to.Id, issue.Type);
-                open.TryGetValue(issue.Id, out var waiting);
-                rows.Add(new ScanRow(
-                    issue, status, to,
-                    Blocked(
-                        issue, status, to, playbook, waiting, loop, gate, claimed, implementation,
-                        assignees[issue.Id])));
+                if (Columns.Advance(statuses, status) is not { } to) continue;
+                if (!byColumn.TryGetValue(status.Id, out var column)) continue;
+
+                foreach (var issue in column)
+                {
+                    if (issue.Expedited != expedited) continue;
+
+                    var playbook = Match(playbooks, status.Id, to.Id, issue.Type);
+                    open.TryGetValue(issue.Id, out var waiting);
+                    rows.Add(new ScanRow(
+                        issue, status, to,
+                        Blocked(
+                            issue, status, to, playbook, waiting, loop, gate, claimed, implementation,
+                            assignees[issue.Id])));
+                }
             }
         }
 
@@ -484,7 +508,7 @@ public class WorkController(
                 ProjectKey = i.Project!.Key,
                 i.Number, i.Type, i.Title, i.StatusId, i.Rank,
                 i.ReadyAt, i.ReadyAtHasTime, i.DueAt, i.DueAtHasTime,
-                i.AssigneePersonId, i.AssigneeApiKeyId,
+                i.AssigneePersonId, i.AssigneeApiKeyId, i.Expedited,
                 Claim = new ClaimSnapshot(
                     i.ClaimToken, i.ClaimedBy, i.ClaimRunner,
                     i.ClaimedAt, i.ClaimHeartbeatAt, i.ClaimChatter, i.ClaimChatterAt),
@@ -504,7 +528,8 @@ public class WorkController(
                 IssueMoment.Format(c.ReadyAt, c.ReadyAtHasTime),
                 IssueMoment.Format(c.DueAt, c.DueAtHasTime),
                 Assignee: await IssueProjection.ToAssigneeAsync(actors, c.AssigneePersonId, c.AssigneeApiKeyId, ct),
-                Claim: claims.Project(c.Claim, claimed.Now)));
+                Claim: claims.Project(c.Claim, claimed.Now),
+                Expedited: c.Expedited));
 
         var playbook = to is null ? null : await MatchAsync(from.Id, to.Id, issue.Type, ct);
 

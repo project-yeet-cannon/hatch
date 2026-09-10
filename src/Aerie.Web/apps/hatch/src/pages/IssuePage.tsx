@@ -19,8 +19,10 @@ import {
   patchIssuePlaybook,
   removeDependency,
   setAssignee,
+  setExpedited,
 } from '../api/client';
 import { AssigneeField } from '../components/AssigneeField';
+import { ExpediteControl } from '../components/ExpediteControl';
 import { ClaimPanel } from '../components/ClaimPanel';
 import { ClearClaimDialog } from '../components/ClearClaimDialog';
 import { Choice } from '../components/Choice';
@@ -46,6 +48,7 @@ import { waitingChild } from '../lib/next';
 import { openQuestions } from '../lib/questions';
 import { useAutoGrow } from '../lib/useAutoGrow';
 import { useCloseSubtree } from '../lib/useCloseSubtree';
+import { useIssueConfirmations } from '../lib/useIssueConfirmations';
 import { ISSUE_TYPES, LEGAL_PARENT_TYPES, PLAYBOOK_EFFORTS, PLAYBOOK_MODELS } from '../types';
 import type {
   AssigneeDirectory,
@@ -206,6 +209,24 @@ export function IssuePage() {
     async (request: AssigneeRequest) => {
       try {
         await setAssignee(key, request);
+        await load();
+      } catch (err) {
+        setError(message(err));
+      }
+    },
+    [key, load],
+  );
+
+  /* Whether this one goes first. Its own call for the reason `saveAssignee` is -
+     its own endpoint, closed to an API key - and otherwise exactly `save`: it
+     re-reads, so the control, the trail below and the board behind this page
+     all redraw from the server's answer rather than from the assumption that
+     the press worked. A refusal lands in `error` above in the server's own
+     words, and the control goes back to saying what the issue still holds. */
+  const saveExpedited = useCallback(
+    async (expedited: boolean) => {
+      try {
+        await setExpedited(key, expedited);
         await load();
       } catch (err) {
         setError(message(err));
@@ -392,6 +413,22 @@ export function IssuePage() {
               assignee={issue.assignee}
               directory={directory}
               onChange={(request) => void saveAssignee(request)}
+            />
+          </Field>
+
+          {/* `as="div"` for the reason the fields above it are. The control
+              draws the current state, so this field says whether the issue is
+              expedited without anybody pressing anything - which is the point
+              of it being here as well as on the card. */}
+          <Field
+            label="Expedite"
+            as="div"
+            hint="This one first: to the top of its column, and the first thing the dispatcher considers."
+          >
+            <ExpediteControl
+              expedited={issue.expedited}
+              directory={directory}
+              onChange={(expedited) => void saveExpedited(expedited)}
             />
           </Field>
 
@@ -779,6 +816,7 @@ function ChildComposer({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const box = useRef<HTMLInputElement>(null);
+  const { confirm } = useIssueConfirmations();
 
   // Null until somebody chooses, so the first legal type is the default without
   // an effect to set it - and clamped on the way out, because the issue's own
@@ -789,7 +827,11 @@ function ChildComposer({
   async function submit() {
     setSaving(true);
     try {
-      await createIssue({ projectId, type: chosen, title: title.trim(), parentKey });
+      const created = await createIssue({ projectId, type: chosen, title: title.trim(), parentKey });
+      // The same corner the board's dialog raises: a child filed here is an
+      // issue filed, and the key it got is worth as much from this box as from
+      // that one. On the success path only - the catch below is untouched.
+      confirm(created);
       setTitle('');
       setError(null);
       box.current?.focus();

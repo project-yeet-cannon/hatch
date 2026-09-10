@@ -1845,6 +1845,97 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* This one first.
+ *
+ * A stripe down the leading edge rather than a wash over the card, and that is
+ * the whole reason it composes: `asking` already owns the card's background and
+ * its border colour, `waiting` owns the border style, and an expedited card may
+ * be either or both. An inset shadow is under none of them and argues with
+ * nothing - it survives :hover, which the border rules do not, and it is the
+ * one thing on a card the eye finds without reading anything, which is what
+ * "at a glance down a column" means.
+ *
+ * --primary rather than --warn: warn is spoken for by the question that is
+ * owed to somebody, and a column where "look at this" and "you owe an answer"
+ * were the same colour would be a column that says neither. */
+.hatch-card.expedited {
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
+/* Said again for the preview, which carries its own box-shadow to read as
+   lifted - the shorthand replaces rather than adds, so the stripe has to
+   travel with it or the card loses it exactly while it is being moved. */
+.hatch-card-preview.expedited {
+  box-shadow: inset 3px 0 0 var(--primary), var(--shadow);
+}
+
+/* And the badge, for everything the stripe cannot say: what it means, on hover,
+   and to a reader who is not going by colour. */
+.hatch-card-expedited {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--sp-1-5);
+  border-radius: var(--r-pill);
+  background: var(--primary-bg);
+  color: var(--primary-ink);
+  font-size: var(--t-micro);
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+/* The control itself, on the issue page and in the summary: one button that
+   holds its own state, so the thing that says whether an issue is expedited is
+   the thing that changes it. Pressed is a filled pill; unpressed is the quiet
+   outline every other secondary control on these pages wears. */
+.hatch-expedite {
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-label);
+  cursor: pointer;
+}
+
+.hatch-expedite:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.hatch-expedite:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.hatch-expedite.on {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-accent);
+}
+
+/* What a reader who may not press it sees instead: the state as a word. An
+   agent holding this page is refused the write and is still entitled to know
+   why its ticket was reached first - see IssueExpediteController. */
+.hatch-expedite-said {
+  color: var(--muted);
+  font-size: var(--t-label);
+}
+
+.hatch-expedite-said.on {
+  color: var(--primary-ink);
+  font-weight: 600;
+}
+
+/* In the summary the control sits on its own row under the title, with room for
+   a refusal beside it. */
+.hatch-peek-expedite {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
 /* A column says in its header that it is holding a question, because the card
    that is owed an answer may be folded behind `+N waiting` or ten cards down,
    and the header is the part of a column that is always on screen. The pill
@@ -2737,4 +2828,119 @@ button.hatch-option.chosen {
   flex-direction: column;
   gap: var(--sp-3);
   padding: var(--sp-3) 0;
+}
+
+/* ---- Filed-issue confirmations ---- */
+
+/* The corner where an issue filed in this tab says so. Fixed to the window
+   rather than placed in a page, because the chicklet outlives the page it was
+   raised on: filing on the board and then opening the issue leaves the corner
+   as it was. */
+.hatch-confirmations {
+  position: fixed;
+  left: var(--sp-2);
+  bottom: var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  /* Over the page and under Modal's 100, so a dialog is drawn over the
+     chicklets rather than under them. */
+  z-index: 90;
+  /* The region is wider and taller than what it draws, and the board under the
+     empty part of it stays clickable. Each chicklet takes its own clicks back
+     below. */
+  pointer-events: none;
+}
+
+/* Outside the scrolling list, so the way out of a tall stack does not scroll
+   away with it. Indented by the list's own padding so the two line up. */
+.hatch-confirmations-clear {
+  pointer-events: auto;
+  margin-left: var(--sp-1);
+  margin-bottom: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  color: var(--muted);
+  font-size: var(--t-small);
+  cursor: pointer;
+}
+
+.hatch-confirmations-clear:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.hatch-confirmations-list {
+  display: flex;
+  /* Newest first in the DOM with the axis reversed: the scroll container's
+     start edge is then the visual bottom, so the chicklet just raised is in
+     view without anything having to scroll it there, and the older ones run
+     away upward. The chat-log arrangement. */
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  /* So a planning session that files twenty does not run a column of chicklets
+     off the top of the screen. The stack scrolls instead - nothing is dropped,
+     because a confirmation nobody has read is not the thing to throw away. The
+     same cap .hatch-issue-picker-list uses, for the same reason. */
+  max-height: 40vh;
+  overflow-y: auto;
+  margin: 0;
+  /* Room for the shadows: a scroll container clips on every edge, not just the
+     one it scrolls, so without this the box shadow is sheared off the sides. */
+  padding: var(--sp-1);
+  list-style: none;
+}
+
+.hatch-confirmation {
+  pointer-events: auto;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  /* Wide enough for a key and a sentence, and never wide enough to sit on top
+     of the board. */
+  max-width: 24rem;
+  padding: var(--sp-2) var(--sp-2-5);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  font-size: var(--t-small);
+}
+
+/* The key is the link, because the key is what somebody came to the corner
+   for - to copy it, or to open what they just filed. */
+.hatch-confirmation-key {
+  flex: none;
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
+/* Two lines of title at most: enough to recognise which of six filings this
+   one is, and not so much that a long title becomes a wall in the corner. */
+.hatch-confirmation-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  color: var(--muted);
+}
+
+.hatch-confirmation-close {
+  flex: none;
+  margin-left: auto;
+  padding: 0 var(--sp-1);
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: var(--t-body);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hatch-confirmation-close:hover {
+  color: var(--ink);
 }
