@@ -3,6 +3,7 @@ import { Button, Field, Modal } from '@aerie/ui';
 import { createIssue } from '../api/client';
 import { message } from '../lib/errors';
 import { useAutoGrow } from '../lib/useAutoGrow';
+import { useIssueConfirmations } from '../lib/useIssueConfirmations';
 import { MomentField } from './MomentField';
 import { ISSUE_TYPES } from '../types';
 import type { IssueType, Project } from '../types';
@@ -32,6 +33,7 @@ export function NewIssueDialog({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const brief = useAutoGrow(description);
+  const { confirm } = useIssueConfirmations();
 
   // The first project, until somebody picks another. One project is the
   // ordinary case and choosing it for them is one fewer thing to do.
@@ -45,7 +47,11 @@ export function NewIssueDialog({
 
     setSaving(true);
     try {
-      await createIssue({ projectId: chosen, type, title, description, readyAt, dueAt });
+      const created = await createIssue({ projectId: chosen, type, title, description, readyAt, dueAt });
+      // Only here, on the way out of the success path: a filing the server
+      // refused goes to the catch below and raises nothing, and the dialog goes
+      // on showing the refusal as it always has.
+      confirm(created);
       setTitle('');
       setDescription('');
       setReadyAt('');

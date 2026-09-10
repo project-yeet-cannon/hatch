@@ -46,6 +46,7 @@ import { waitingChild } from '../lib/next';
 import { openQuestions } from '../lib/questions';
 import { useAutoGrow } from '../lib/useAutoGrow';
 import { useCloseSubtree } from '../lib/useCloseSubtree';
+import { useIssueConfirmations } from '../lib/useIssueConfirmations';
 import { ISSUE_TYPES, LEGAL_PARENT_TYPES, PLAYBOOK_EFFORTS, PLAYBOOK_MODELS } from '../types';
 import type {
   AssigneeDirectory,
@@ -779,6 +780,7 @@ function ChildComposer({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const box = useRef<HTMLInputElement>(null);
+  const { confirm } = useIssueConfirmations();
 
   // Null until somebody chooses, so the first legal type is the default without
   // an effect to set it - and clamped on the way out, because the issue's own
@@ -789,7 +791,11 @@ function ChildComposer({
   async function submit() {
     setSaving(true);
     try {
-      await createIssue({ projectId, type: chosen, title: title.trim(), parentKey });
+      const created = await createIssue({ projectId, type: chosen, title: title.trim(), parentKey });
+      // The same corner the board's dialog raises: a child filed here is an
+      // issue filed, and the key it got is worth as much from this box as from
+      // that one. On the success path only - the catch below is untouched.
+      confirm(created);
       setTitle('');
       setError(null);
       box.current?.focus();
