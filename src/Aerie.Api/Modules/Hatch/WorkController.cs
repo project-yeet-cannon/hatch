@@ -191,7 +191,7 @@ public class WorkController(
         // right. No type filter - which types a move applies to is the
         // playbook's to say, and a row no playbook covers is folded with the
         // sentence naming that rather than dropped before it is judged.
-        var walkable = statuses.Where(s => Advance(statuses, s) is not null).Select(s => s.Id).ToList();
+        var walkable = statuses.Where(s => Columns.Advance(statuses, s) is not null).Select(s => s.Id).ToList();
 
         var query = db.Issues.Where(i => walkable.Contains(i.StatusId));
         if (scope is not null) query = query.Where(i => scope.Contains(i.Id));
@@ -211,12 +211,12 @@ public class WorkController(
             assignees[issue.Id] = await IssueProjection.ToAssigneeAsync(
                 actors, issue.AssigneePersonId, issue.AssigneeApiKeyId, ct);
 
-        var implementation = Implementation(statuses);
+        var implementation = Columns.Implementation(statuses);
 
         var rows = new List<ScanRow>();
         foreach (var status in Enumerable.Reverse(statuses))
         {
-            if (Advance(statuses, status) is not { } to) continue;
+            if (Columns.Advance(statuses, status) is not { } to) continue;
             if (!byColumn.TryGetValue(status.Id, out var column)) continue;
 
             foreach (var issue in column)
@@ -297,43 +297,6 @@ public class WorkController(
     // instruction; housekeeping does not overrule it.
 
     // ---- Dependencies ----
-
-    /// <summary>
-    /// The last stop before shipped: the column immediately left of the first
-    /// terminal one, or the rightmost column on a board with no terminal column
-    /// at all.
-    ///
-    /// Measured rather than named, and measured the same way the <c>review</c>
-    /// column was placed by the migration that added it
-    /// (20260903204217_Playbooks.cs). An operator renames columns, and a
-    /// hardcoded "review" would be a rule that quietly stopped applying.
-    ///
-    /// <para>It is now a landmark as well as a column: <see cref="Implementation"/>
-    /// is measured from it.</para>
-    /// </summary>
-    private static EfHatchStatus? AwaitingReview(List<EfHatchStatus> statuses)
-    {
-        var terminal = statuses.FindIndex(s => s.IsTerminal);
-        var at = terminal < 0 ? statuses.Count - 1 : terminal - 1;
-        return at >= 0 ? statuses[at] : null;
-    }
-
-    /// <summary>
-    /// The column where an agent writes the code: the one whose own next move
-    /// is into the awaiting-review column. Null on a board too short to have
-    /// one, where a dependency therefore gates nothing.
-    /// </summary>
-    /// <remarks>
-    /// On a stock board that is "In Progress", and the gated move is "To Do" to
-    /// "In Progress" - the one transition where code gets written. Measured and
-    /// not named, for the reason <see cref="AwaitingReview"/> is: an operator
-    /// renames columns, and a hardcoded name is a rule that quietly stops
-    /// applying.
-    /// </remarks>
-    private static EfHatchStatus? Implementation(List<EfHatchStatus> statuses) =>
-        AwaitingReview(statuses) is { } review
-            ? statuses.FirstOrDefault(s => Advance(statuses, s)?.Id == review.Id)
-            : null;
 
     /// <summary>
     /// Every unmet dependency on the board, read once, and the question "what
@@ -512,7 +475,7 @@ public class WorkController(
         ClaimGate claimed, CancellationToken ct)
     {
         var from = statuses.First(s => s.Id == issue.StatusId);
-        var to = Advance(statuses, from);
+        var to = Columns.Advance(statuses, from);
 
         var children = await db.Issues.Where(i => i.ParentId == issue.Id)
             .OrderBy(i => i.Rank).ThenBy(i => i.Id)
@@ -572,7 +535,7 @@ public class WorkController(
             childCards,
             questions,
             Blocked(
-                issue, from, to, playbook, waiting, loop, gate, claimed, Implementation(statuses),
+                issue, from, to, playbook, waiting, loop, gate, claimed, Columns.Implementation(statuses),
                 await IssueProjection.ToAssigneeAsync(actors, issue.AssigneePersonId, issue.AssigneeApiKeyId, ct)));
     }
 
@@ -696,19 +659,6 @@ public class WorkController(
     /// </summary>
     private static string An(string type) =>
         "aeiou".Contains(char.ToLowerInvariant(type[0])) ? $"an {type}" : $"a {type}";
-
-    /// <summary>
-    /// The column immediately to the right, or null at the end of the board.
-    /// Terminal columns are returned rather than skipped - the refusal above
-    /// wants to name the one it is refusing.
-    /// </summary>
-    private static EfHatchStatus? Advance(List<EfHatchStatus> statuses, EfHatchStatus from)
-    {
-        if (from.IsTerminal) return null;
-
-        var at = statuses.FindIndex(s => s.Id == from.Id);
-        return at >= 0 && at + 1 < statuses.Count ? statuses[at + 1] : null;
-    }
 
     /// <summary>
     /// The playbook that speaks for this move. A row naming the issue's type

@@ -153,6 +153,13 @@ public class AdminSurfaceTests
         // IssueThreadController.AddComment.
         "QuestionsController.GetQuestions",
         "QuestionsController.GetIssueQuestions",
+
+        // The same two facts as GetQuestions and GetBoard, read together for
+        // the nav strip: what is up for review, and what is waiting on an
+        // answer. Hatch-scoped like both of the reads it stands in for, and it
+        // widens neither - a key that could not read the board could not read
+        // this, and it says strictly less than the board does.
+        "AttentionController.GetAttention",
         "ImportController.Preview",
         "ImportController.PreviewText",
         "ImportController.Import",

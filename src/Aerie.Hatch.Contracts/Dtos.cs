@@ -431,6 +431,51 @@ public record QuestionDto(
 /// </param>
 public record IssueEventDto(long Id, string Actor, string Kind, JsonElement? Payload, DateTimeOffset At);
 
+// ---- What is waiting on a person ----
+
+/// <summary>
+/// An issue standing in the review column with somewhere to review it.
+/// </summary>
+/// <param name="PullRequestUrl">
+/// Non-null, unlike <see cref="IssueDto.PullRequestUrl"/>: an issue with
+/// nowhere to review it is not a row here at all. It is counted instead - see
+/// <see cref="AttentionDto.InReviewWithoutPullRequest"/> - because a control
+/// that lit up for a ticket nobody can act on is a control nobody reads after
+/// a week.
+/// </param>
+public record ReviewDto(string Key, string Title, string Type, string PullRequestUrl);
+
+/// <summary>
+/// The two things that stop a night, in one read: a pull request nobody has
+/// reviewed, and a question nobody has answered.
+///
+/// One endpoint rather than two because the answer is drawn as a single number.
+/// Two polls can disagree by a poll interval, and that disagreement shows up as
+/// a lit control whose panel is empty - so both halves are read at one instant
+/// or neither is.
+/// </summary>
+/// <param name="Reviews">
+/// The review column's own issues that carry a pull request, in that column's
+/// board order. Which column that is, is measured and not named
+/// (<c>Columns.AwaitingReview</c>); a board too short to have one answers
+/// with none rather than with an error.
+/// </param>
+/// <param name="InReviewWithoutPullRequest">
+/// How many issues stand in that column with no pull request recorded. Not
+/// listed and not counted towards the badge, but said out loud in the empty
+/// state, so a ticket whose agent forgot <c>hatch pr</c> is still visible
+/// without being loud.
+/// </param>
+/// <param name="Questions">
+/// Every open question in the house, oldest first - the same list, the same
+/// order and the same definition of open that <c>/api/hatch/questions</c>
+/// answers with, because it is the same call.
+/// </param>
+public record AttentionDto(
+    IReadOnlyList<ReviewDto> Reviews,
+    int InReviewWithoutPullRequest,
+    IReadOnlyList<QuestionDto> Questions);
+
 // ---- The board ----
 
 /// <summary>
