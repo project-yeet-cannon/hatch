@@ -47,10 +47,12 @@
   border-bottom-color: var(--primary);
 }
 
-/* The right-hand end of the strip: who is sitting here, and what is left to
-   spend tonight. Pushed right as one box rather than one auto margin each,
-   because two of those share the free space between them instead of stacking.
-   Empty - and so zero-width - on an installation that has neither. */
+/* The right-hand end of the strip: who is sitting here, what is left to spend
+   tonight, and whether the loop is waiting on a person. Pushed right as one box
+   rather than one auto margin each, because those share the free space between
+   them instead of stacking. The first two draw nothing on an installation that
+   has neither; the third always draws, because "nothing is waiting" is an
+   answer. */
 .hatch-nav-aside {
   margin-left: auto;
   display: flex;
@@ -2303,6 +2305,293 @@ button.hatch-option.chosen {
 
 .hatch-battery-percent {
   line-height: 1;
+}
+
+/* The attention control: whether the loop is waiting on a person, at the right
+   end of the strip on every route.
+
+   Two states and one width. `min-width` is what holds that: a control that grew
+   when something arrived would shove the battery leftwards and move the strip
+   out from under whatever the pointer was aimed at. Resting is monochrome -
+   muted ink, no fill, no border, a glyph and one word - and asking is a lit
+   glyph and a count pill per non-empty section over a tinted ground.
+
+   Every colour here is a token, both themes, and the tokens flip themselves.
+   A literal in this block would be a bug - see the note at the top of this
+   file. */
+
+.hatch-attention {
+  /* What the panel is anchored to. Placed by .hatch-nav-aside like the battery
+     beside it, and not one of the links. */
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.hatch-attention-control {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1-5);
+  /* About twice the battery, and the same in both states - see above. The
+     battery measures roughly 68px (2 x --sp-2 padding, 2px of border, a 20px
+     glyph, a --sp-1-5 gap and three figures of percentage), so this is that
+     doubled. Both states are narrower than it and centre inside it, which is
+     what makes them measure the same. */
+  min-width: 136px;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-ctl);
+  background: none;
+  color: var(--muted);
+  font-size: var(--t-label);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition), background var(--transition);
+}
+
+.hatch-attention-control:hover {
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+/* Nothing is waiting. Furniture: the same muted ink the links wear, so a quiet
+   control is not a third thing competing with them. */
+.hatch-attention-rest {
+  color: var(--muted);
+}
+
+/* Something is waiting. A tinted ground rather than a fill, so it reads as lit
+   without becoming the loudest thing on a page that also draws overdue cards. */
+.hatch-attention-asking {
+  color: var(--ink);
+  border-color: var(--line);
+  background: var(--primary-bg);
+}
+
+.hatch-attention-asking:hover {
+  border-color: var(--primary);
+}
+
+.hatch-attention-glyph {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
+.hatch-attention-head {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.hatch-attention-antenna {
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+/* The lamp and the eyes: hollow at rest, filled when something is waiting. The
+   whole point of the glyph having two states is that the strip reads as lit
+   from the corner of an eye, before the pills are legible. */
+.hatch-attention-lamp,
+.hatch-attention-eye {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.hatch-attention-eye.lit {
+  fill: var(--primary);
+  stroke: var(--primary);
+}
+
+.hatch-attention-lamp.lit {
+  fill: var(--primary);
+  stroke: var(--primary);
+  /* The one thing on the page that moves without a person having moved it -
+     against the house's calm-motion rule (tokens.css) on purpose, because this
+     control exists to be noticed. Scoped to this one element and nothing else,
+     and off entirely under reduced motion below. */
+  animation: hatch-attention-blink 2s ease-in-out infinite;
+}
+
+@keyframes hatch-attention-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hatch-attention-lamp.lit {
+    animation: none;
+  }
+}
+
+.hatch-attention-word {
+  line-height: 1;
+}
+
+.hatch-attention-pills {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/* A digit, not a dot. The loud state has to be readable without colour - the
+   control's accessible name says the same thing in words. */
+.hatch-attention-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 var(--sp-1);
+  border-radius: var(--r-pill);
+  font-size: var(--t-micro);
+  font-weight: 700;
+  line-height: 1.6;
+  color: var(--on-accent);
+}
+
+/* One colour each, so which half is loud is legible before the panel opens.
+   Which half is which is arbitrary and only has to be stable. */
+.hatch-attention-pill-review {
+  background: var(--primary);
+}
+
+.hatch-attention-pill-question {
+  background: var(--warn);
+}
+
+/* The panel: a dropdown anchored under the control, not a modal. What it holds
+   is a short list of links back into the board, and a modal's overlay would dim
+   the board behind them. */
+.hatch-attention-panel {
+  position: absolute;
+  top: calc(100% + var(--sp-1));
+  /* Anchored to the right, because the control is at the right end of the strip
+     and a panel hung from its left edge would run off the window. */
+  right: 0;
+  width: 380px;
+  max-width: calc(100vw - 2 * var(--sp-4));
+  /* Over the page and under Modal's 100 - the same lane the issue picker's
+     popup takes. */
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-3);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  /* So a night that left nine pull requests up does not push the panel off the
+     bottom of the screen. */
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.hatch-attention-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.hatch-attention-heading {
+  margin: 0;
+  font-size: var(--t-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+/* Not filler. One of the two says an issue has sat in review with nowhere to
+   review it, which is said nowhere else in Hatch. */
+.hatch-attention-empty {
+  margin: 0;
+  font-size: var(--t-label);
+  color: var(--muted);
+}
+
+.hatch-attention-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hatch-attention-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-1-5) var(--sp-2);
+  border-radius: var(--r-in);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.hatch-attention-row:hover,
+.hatch-attention-row:focus-visible {
+  background: var(--primary-bg);
+}
+
+.hatch-attention-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--t-label);
+}
+
+.hatch-attention-key {
+  flex: none;
+  font-weight: 600;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.hatch-attention-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pushed to the far end of the row, because it is the one number somebody
+   scans down the list for. */
+.hatch-attention-waited {
+  margin-left: auto;
+  flex: none;
+  color: var(--muted);
+  font-size: var(--t-micro);
+}
+
+.hatch-attention-url {
+  font-size: var(--t-micro);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The question as it was asked. Two lines, then clamped: the whole of it is on
+   the issue page this row goes to, and a paragraph somebody pasted in must not
+   make one row the height of the panel. */
+.hatch-attention-question {
+  font-size: var(--t-label);
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
 }
 
 /* The detail modal: one row per window the account is enforcing, in the

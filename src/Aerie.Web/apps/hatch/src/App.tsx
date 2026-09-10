@@ -1,6 +1,7 @@
 import { NavLink, Route, Routes } from 'react-router-dom';
 import { TopBar } from '@aerie/ui';
 import './App.css';
+import { NavAttention } from './components/NavAttention';
 import { NavLocalPerson } from './components/NavLocalPerson';
 import { NavUtilization } from './components/NavUtilization';
 import { BoardPage } from './pages/BoardPage';
@@ -68,15 +69,20 @@ export function App() {
           <a href="/apps/docs/hatch-at-home" className="hatch-nav-link">Docs</a>
 
           {/* The right-hand group: what the strip says about this session
-              rather than about the board. One box because two elements each
-              pushed right by their own auto margin would share the free space
-              between them and land apart. Both draw nothing on an installation
+              rather than about the board. One box because elements each pushed
+              right by their own auto margin would share the free space between
+              them and land apart. The first two draw nothing on an installation
               that has no answer for them - a cluster install has neither - so
               the strip is a row of links and no gap where something used to
               be. */}
           <div className="hatch-nav-aside">
             <NavLocalPerson />
             <NavUtilization />
+            {/* Last, at the right end of the strip: whether the loop is
+                waiting on a person. Unlike the two above it this always draws
+                something - "nothing is waiting" is an answer, and it is the
+                one it gives most of the time. */}
+            <NavAttention />
           </div>
         </div>
       </nav>

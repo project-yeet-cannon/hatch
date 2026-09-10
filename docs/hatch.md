@@ -856,6 +856,7 @@ Everything under `/api/hatch`, every route `[RequireAdmin(AcceptScope =
 | `/playbooks` | GET | **Reads only.** POST/PATCH/DELETE are plain `[RequireAdmin]` |
 | `/import/preview`, `/import/preview-text`, `/import` | POST | See [the importer](#the-importer) |
 | `/utilization` | GET | The account's Claude headroom, read by the server. `204` when no token is configured; `?refresh=true` bypasses the cache — see [the battery](#the-battery) |
+| `/attention` | GET | What the loop is waiting on a person for — the issues up for review that carry a pull request, how many in that column carry none, and every open question in the house. One read for both halves — see [what is waiting on you](#what-is-waiting-on-you) |
 | `/local-person` | GET | What to call whoever is sitting here, and whether anybody said so. `204` wherever the wall is up |
 | `/settings` | GET, PUT | **Person only** — plain `[RequireAdmin]`, so a key is refused the read as well as the write. The two settings a Hatch install of its own has — see [the credential](#the-credential). PUT follows the bulk rule: a field left out is left alone, `""` clears it |
 | `/settings/claude-token` | GET | The token itself, wrapped with `SecretProtector` for the wire. The one route in Aerie that hands a live secret back out, and it is cut the opposite way to `/settings` beside it — **a key or a keyless runner may take it**, because its ordinary caller is the container runner's entrypoint (`containers/hatch-runner/`) authenticating a `claude` CLI it starts itself. **Refused outright wherever the wall is up** — every caller, key or person — because a token crossing a network is a different question from one handed to a container on the same laptop. `204` when none is set |
@@ -979,6 +980,71 @@ Two floors bound how often somebody else's endpoint is asked:
 
 `?refresh=true` ignores both. It is the modal's refresh control: one person
 pressing a button once, which is not what the floors exist to bound.
+
+
+## What is waiting on you
+
+Beside the battery, at the right end of the same strip, is the other thing a
+nav strip is for: whether the loop has stopped and is waiting on a person. Two
+things stop a night — a pull request nobody has reviewed, and a question nobody
+has answered — and the server already knows both. The control is quiet while
+neither is true and loud the moment either is, and pressing it hands over the
+links that unblock them.
+
+Unlike the battery, **it always draws something**. "Nothing is waiting" is an
+answer worth having, and it is the one it gives most of the time.
+
+`GET /api/hatch/attention` answers both halves in one read, carrying
+`[RequireAdmin(AcceptScope = "hatch")]` like the rest of the module:
+
+```json
+{
+  "reviews": [
+    { "key": "AER-12", "title": "A story that landed", "type": "story",
+      "pullRequestUrl": "https://forge.example/pulls/12" }
+  ],
+  "inReviewWithoutPullRequest": 3,
+  "questions": [ ... ]
+}
+```
+
+One endpoint rather than two, and that is the design rather than a convenience.
+The control's loudness is a single number; two polls can be a poll interval
+apart, and that disagreement shows on screen as a lit control whose panel is
+empty. After that happens twice nobody reads the control again.
+
+Neither half restates a rule that already lives somewhere:
+
+- **Which column is the review column is measured, not named.** It is the one
+  immediately left of the first terminal column — `Columns.AwaitingReview`, the
+  same answer [the dispatcher](#the-dispatcher) works right to left by. Renaming
+  `In Review` changes nothing, reordering the board changes nothing, and a board
+  too short to have one answers with no rows rather than an error. The browser
+  deliberately does not derive this from `/board`'s status list: that would be
+  one rule written twice, in two languages, and the two would drift.
+- **Open means what it means everywhere else.** `questions` is the same call
+  `/questions` answers with — `Questions.Open`, a question with nothing pointing
+  at it — so the count in the strip and the badge on a board card cannot
+  disagree.
+
+### The issue in review with no pull request
+
+`inReviewWithoutPullRequest` is the one number here that is not a row, and it is
+there for a specific failure. An issue can sit in review for weeks with no pull
+request and no prospect of one — a phase story, something the operator is
+judging by hand. A control that counted those would be permanently loud, and a
+permanently loud control is one nobody reads after a week.
+
+So they never make it loud, and they are not silently dropped either. The
+section's empty state has two wordings, and the count is what picks between
+them: *Nothing is up for review*, or *3 issues are in review with no pull
+request recorded*. A ticket whose agent forgot `hatch pr` is visible without
+shouting.
+
+The control keeps itself current on a sixty-second poll and on
+`visibilitychange`, the way [the battery](#the-battery) does, and a read that
+fails leaves the last answer drawn and says nothing at all. A nav strip is not
+where a fetch failure gets announced.
 
 
 ## The leaderboard
