@@ -29,9 +29,17 @@ public class BoardController(
             .Select(s => new StatusDto(s.Id, s.Name, s.SortOrder, s.IsTerminal, s.Color))
             .ToListAsync(ct);
 
-        // Ordered by (StatusId, Rank, Id) so the client can slice the one list
-        // into columns without sorting, and so two cards sharing a rank do not
-        // trade places between refetches.
+        // Ordered by (StatusId, Expedited desc, Rank, Id) so the client can
+        // slice the one list into columns without sorting, and so two cards
+        // sharing a rank do not trade places between refetches.
+        //
+        // The float is here rather than in the browser, and that is the whole
+        // of it: an expedited card is served above every non-expedited card in
+        // its column whatever its rank, two expedited cards keep the board's
+        // own (Rank, Id) between them, and the client still slices one ordered
+        // list. Sorting in the client would have been a second opinion about
+        // where a card sits, and the board, the plan and the queue disagreeing
+        // about that is exactly what the server's ordering exists to rule out.
         // One grouped read for the whole board rather than a count per card.
         // A card that is waiting on somebody has to say so here: the board is
         // where the operator looks, and a question they cannot see is a question
@@ -40,6 +48,7 @@ public class BoardController(
 
         var issues = await db.Issues.AsNoTracking()
             .OrderBy(i => i.StatusId)
+            .ThenByDescending(i => i.Expedited)
             .ThenBy(i => i.Rank)
             .ThenBy(i => i.Id)
             .Select(i => new

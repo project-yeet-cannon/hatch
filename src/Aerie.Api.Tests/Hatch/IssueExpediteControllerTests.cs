@@ -205,6 +205,71 @@ public class IssueExpediteControllerTests
         Assert.True(board.Issues.Single(c => c.Key == issue.Key).Expedited);
     }
 
+    // ---- The float ----
+
+    [Fact]
+    public async Task AnExpeditedCard_IsServedAboveEveryOtherCardInItsColumn()
+    {
+        var h = await NewAsync();
+        await h.FileAsync(title: "first");
+        await h.FileAsync(title: "second");
+        var last = await h.FileAsync(title: "last");
+
+        await h.ExpediteAsync(last.Key, true);
+
+        // The bottom card of the column, above the two that outrank it. The
+        // ordering is the server's, so this is what a client that only slices
+        // the list will draw.
+        Assert.Equal([last.Key, "AER-1", "AER-2"], await h.ColumnAsync(h.InboxId));
+    }
+
+    [Fact]
+    public async Task TwoExpeditedCards_KeepTheBoardsOwnOrderBetweenThem()
+    {
+        var h = await NewAsync();
+        var first = await h.FileAsync(title: "first");
+        await h.FileAsync(title: "second");
+        var last = await h.FileAsync(title: "last");
+
+        await h.ExpediteAsync(last.Key, true);
+        await h.ExpediteAsync(first.Key, true);
+
+        // (Rank, Id) inside the expedited half as well as outside it - the
+        // float is one more key in front of the tuple, not a replacement for
+        // it.
+        Assert.Equal([first.Key, last.Key, "AER-2"], await h.ColumnAsync(h.InboxId));
+    }
+
+    [Fact]
+    public async Task Unmarking_ReturnsTheCardToItsRankPosition()
+    {
+        var h = await NewAsync();
+        await h.FileAsync(title: "first");
+        await h.FileAsync(title: "second");
+        var last = await h.FileAsync(title: "last");
+
+        await h.ExpediteAsync(last.Key, true);
+        await h.ExpediteAsync(last.Key, false);
+
+        Assert.Equal(["AER-1", "AER-2", last.Key], await h.ColumnAsync(h.InboxId));
+    }
+
+    [Fact]
+    public async Task TheFloat_IsWithinAColumnAndNotAcrossTheBoard()
+    {
+        var h = await NewAsync();
+        var here = await h.FileAsync(title: "here");
+        var there = await h.FileAsync(title: "there");
+        Value(await h.Issues.MoveIssue(there.Key, new IssueMoveRequest(h.DoneId, null, null), default));
+
+        await h.ExpediteAsync(there.Key, true);
+
+        // Expedite is a sort key inside a column. Where the columns themselves
+        // sit is the status's SortOrder, and nothing about a card moves that.
+        Assert.Equal([here.Key], await h.ColumnAsync(h.InboxId));
+        Assert.Equal([there.Key], await h.ColumnAsync(h.DoneId));
+    }
+
     // ---- Harness ----
 
     private static readonly DateTimeOffset Now = new(2026, 9, 2, 12, 0, 0, TimeSpan.Zero);
@@ -218,6 +283,7 @@ public class IssueExpediteControllerTests
         public required IssueThreadController Thread { get; init; }
         public required FakeTimeProvider Time { get; init; }
         public required int ProjectId { get; init; }
+        public required int InboxId { get; init; }
         public required int DoneId { get; init; }
 
         public async Task<IssueDto> FileAsync(string type = "task", string title = "a thing") =>
@@ -230,6 +296,13 @@ public class IssueExpediteControllerTests
 
         public async Task<IssueDto> PatchAsync(string key, IssuePatchRequest patch) =>
             Value(await Issues.PatchIssue(key, patch, default));
+
+        /// <summary>One column of the board, in the order the server served it.</summary>
+        public async Task<IReadOnlyList<string>> ColumnAsync(int statusId) =>
+            Value(await Board.GetBoard(default)).Issues
+                .Where(c => c.StatusId == statusId)
+                .Select(c => c.Key)
+                .ToList();
 
         /// <summary>The column itself, which is what the projection is read against.</summary>
         public async Task<EfHatchIssue> RowAsync(string key)
@@ -253,7 +326,8 @@ public class IssueExpediteControllerTests
 
         var aerie = new EfHatchProject { Key = "AER", Name = "Aerie", CreatedAt = Now };
         db.Add(aerie);
-        db.Add(new EfHatchStatus { Name = "inbox", SortOrder = 10 });
+        var inbox = new EfHatchStatus { Name = "inbox", SortOrder = 10 };
+        db.Add(inbox);
         var done = new EfHatchStatus { Name = "done", SortOrder = 20, IsTerminal = true };
         db.Add(done);
         await db.SaveChangesAsync();
@@ -271,6 +345,7 @@ public class IssueExpediteControllerTests
             Thread = new IssueThreadController(db, caller, time),
             Time = time,
             ProjectId = aerie.Id,
+            InboxId = inbox.Id,
             DoneId = done.Id,
         };
     }
