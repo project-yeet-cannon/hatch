@@ -84,6 +84,79 @@ jobs:
       - name: Push Docker image
         run: docker push --all-tags ghcr.io/eouw0o83hf/aerie-api
 
+  # The runner in a container, published beside the two images the local stack
+  # already names. Unconditional on every push, not path-filtered through
+  # detect-image-changes like aerie-db / backup / kuma-provision: this image
+  # carries src/Aerie.Hatch, which changes on nearly every story in this epic,
+  # and a filter watching containers/hatch-runner alone would ship a stale
+  # runner every time.
+  build-and-push-hatch-runner-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+
+    steps:
+      # No sparse-checkout, unlike the three container jobs below: the build
+      # context is the repository root, because the image builds
+      # src/Aerie.Hatch from source.
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Two architectures, because a friend's laptop is as likely to be an
+      # Apple Silicon Mac as an Intel one, and an emulated runner would spend
+      # every increment paying for it. The Dockerfile pins its SDK stage to
+      # BUILDPLATFORM and cross-publishes, so only the small runtime stage -
+      # apt-get and the claude installer - is ever emulated here.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/eouw0o83hf/hatch-runner
+          # Two tags, not the api image's three. Its timestamped one exists for
+          # the cluster's image automation to order builds by, and nothing
+          # deploys this image that way - it is pulled by name from a compose
+          # file on somebody's laptop.
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ github.sha }}
+
+      # Before the build rather than after it, unlike the api job above. That
+      # one builds with `load: true` and pushes as a separate step; a
+      # multi-platform build cannot be loaded into the local daemon at all, so
+      # build and push are one step here and the CI gate has to come first.
+      - name: Wait for CI to succeed
+        uses: ./.github/actions/wait-for-ci
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./containers/hatch-runner/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            AERIE_REVISION=${{ github.sha }}
+
   detect-db-changes:
     runs-on: ubuntu-latest
     permissions:

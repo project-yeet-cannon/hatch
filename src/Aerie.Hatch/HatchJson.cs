@@ -33,6 +33,7 @@ namespace Aerie.Hatch;
 [JsonSerializable(typeof(WorkLogEntryDto))]
 [JsonSerializable(typeof(ClaimTakenDto))]
 [JsonSerializable(typeof(RunnerInstructionDto))]
+[JsonSerializable(typeof(ClaudeTokenDto))]
 [JsonSerializable(typeof(List<StatusDto>))]
 [JsonSerializable(typeof(List<CommentDto>))]
 [JsonSerializable(typeof(List<QuestionDto>))]

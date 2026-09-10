@@ -15,9 +15,9 @@ import type { RunnerDownloads, RunnerDownload } from '../types';
  * therefore the commit the download was built from too.
  *
  * Its own page rather than a section of Settings: what it holds - a platform, a
- * download, a revision, three prerequisites and two commands - is a page's
- * worth, and Settings has no shape for the container-runner controls that land
- * here next.
+ * download, a revision, three prerequisites, two commands, and what the
+ * container runner beside them can and cannot do - is a page's worth, and
+ * Settings has no shape for any of it.
  */
 export function RunnerPage() {
   const { data: runner, error } = useLoaded<RunnerDownloads>(getRunner);
@@ -135,6 +135,32 @@ export function RunnerPage() {
           Run <code>go-to-work</code> from inside a checkout of the repository the board is about.
           If this Hatch has its wall up you will need a key too — <code>hatch config</code> asks for
           one.
+        </p>
+      </Card>
+
+      {/* The container runner, described rather than offered: there is no
+          button here, because starting it is a line in the terminal that
+          brought the stack up and this page cannot reach that terminal. What
+          it can do is say honestly which repositories it suits, so that the
+          decision is made before the pull rather than after the first failed
+          build. AERIE-939, criterion 7 - the same paragraph is in the "Hatch
+          at home" document, for the person who never opens this page. */}
+      <Card>
+        <h2 className="hatch-section-title">Or run it as a container</h2>
+        <p className="text-muted">
+          The same stack can start a container that carries the runner, <code>git</code> and the{' '}
+          <code>claude</code> CLI, mounts one of your checkouts and works tickets under this board's
+          control — <code>docker compose --profile runner up -d</code>, with{' '}
+          <code>HATCH_CHECKOUT</code> naming the repository. It takes its Claude credential from the
+          Settings page, so there is nothing to log in to.
+        </p>
+        <p className="text-muted">
+          It carries no language runtimes, though — no .NET, no Node, no Python, no compilers. So it
+          can plan, break work down, analyse and write code in any repository at all, and commit and
+          push what it wrote; it <em>cannot</em> build or test one whose toolchain it lacks, and no
+          general image has everybody's. Where "done" means a green build, the download above is the
+          one to use: it runs on your machine, with whatever you already have installed. The "Hatch
+          at home" document has the full recipe, including how it gets something to push with.
         </p>
       </Card>
     </div>

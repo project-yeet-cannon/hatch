@@ -1111,3 +1111,24 @@ public record RunnerPatchRequest(
     string? MaxRuns = null,
     string? MaxSpend = null,
     string? UntilAt = null);
+
+/// <summary>
+/// The Claude token this Hatch holds, wrapped for the wire.
+/// </summary>
+/// <remarks>
+/// <para>The one place in Aerie where a live secret is handed back out of the
+/// API on purpose, and it exists for one caller: the container runner's
+/// entrypoint, which has to authenticate a <c>claude</c> CLI it starts itself
+/// and has nowhere else to read the token from. Every other secret-valued
+/// setting is redacted on read, and the route that answers this one refuses
+/// outright wherever the wall is up - see docs/hatch.md, "API surface".</para>
+///
+/// <para>Wrapped rather than plain because it crosses a network, over the
+/// scheme the store already uses (<c>SecretProtector</c>). That is a courtesy
+/// and not a lock: the algorithm is a fixed XOR key both sides carry, which is
+/// exactly what lets a container holding nothing but <c>git</c> and this
+/// binary reverse it without a second round trip. A token that has to be safe
+/// in transit needs TLS, which is the operator's to put in front of Hatch.</para>
+/// </remarks>
+/// <param name="ProtectedToken">The token as <c>SecretProtector.Protect</c> wrote it: <c>v1:&lt;base64&gt;</c>.</param>
+public record ClaudeTokenDto(string ProtectedToken);

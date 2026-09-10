@@ -1,8 +1,12 @@
+using System.Reflection;
 using Aerie.Api.Common;
 using Aerie.Api.Ef;
+using Aerie.Api.Models.Auth;
 using Aerie.Api.Modules.Hatch;
 using Aerie.Api.Services.Auth;
 using Aerie.Api.Services.DeviceMapping;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -159,6 +163,92 @@ public class SettingsControllerTests
         Assert.True((await NewFixture().Controller.GetHatchSettings(default)).LocalPersonNameApplies);
     }
 
+    // ---- The token itself, for the container runner ----
+
+    /// <summary>
+    /// The one endpoint in Aerie that hands a live secret back out, and what
+    /// makes it usable: a container holding nothing but git and the hatch
+    /// binary reverses the wrapper locally, with no second round trip and no
+    /// openssl.
+    /// </summary>
+    [Fact]
+    public async Task TheTokenRoute_AnswersItWrappedTheWayTheStoreWrapsIt()
+    {
+        var fixture = NewFixture();
+        await fixture.Controller.PutHatchSettings(new(ClaudeSubscriptionToken: "sk-ant-oat-1", null), default);
+
+        var answer = await fixture.Controller.GetClaudeToken(default);
+
+        var dto = Assert.IsType<ClaudeTokenDto>(answer.Value);
+        Assert.DoesNotContain("sk-ant-oat-1", dto.ProtectedToken);
+        Assert.Equal("sk-ant-oat-1", SecretProtector.Unprotect(dto.ProtectedToken));
+    }
+
+    /// <summary>
+    /// Nothing set is not a failure - it is the state a friend is in between
+    /// starting the stack and pasting a token, and the entrypoint waits it out
+    /// (criterion 4). So the same 204 the battery answers with, and not a 404.
+    /// </summary>
+    [Fact]
+    public async Task WithNoTokenSaved_TheTokenRouteAnswersNoContent()
+    {
+        var answer = await NewFixture().Controller.GetClaudeToken(default);
+
+        Assert.IsType<NoContentResult>(answer.Result);
+    }
+
+    /// <summary>A token cleared reads exactly like one nobody set, here too.</summary>
+    [Fact]
+    public async Task WithTheTokenCleared_TheTokenRouteAnswersNoContent()
+    {
+        var fixture = NewFixture();
+        await fixture.Controller.PutHatchSettings(new(ClaudeSubscriptionToken: "sk-ant-oat-1", null), default);
+        await fixture.Controller.PutHatchSettings(new(ClaudeSubscriptionToken: "", null), default);
+
+        Assert.IsType<NoContentResult>((await fixture.Controller.GetClaudeToken(default)).Result);
+    }
+
+    /// <summary>
+    /// The second gate, and the one the attribute cannot express: wherever the
+    /// wall is up nobody gets the token - not a scoped key, not an
+    /// administrator at a browser. A route this far inside the filter has
+    /// already been told the caller is allowed, so this refusal is the action's
+    /// own and it is unconditional.
+    /// </summary>
+    [Fact]
+    public async Task WithTheWallUp_TheTokenRouteRefusesEverybody()
+    {
+        var fixture = NewFixture(authEnabled: true);
+        await fixture.Controller.PutHatchSettings(new(ClaudeSubscriptionToken: "sk-ant-oat-1", null), default);
+
+        var answer = await fixture.Controller.GetClaudeToken(default);
+
+        var refusal = Assert.IsType<ObjectResult>(answer.Result);
+        Assert.Equal(StatusCodes.Status403Forbidden, refusal.StatusCode);
+        Assert.IsType<AuthErrorDto>(refusal.Value);
+        Assert.DoesNotContain("sk-ant-oat-1", System.Text.Json.JsonSerializer.Serialize(refusal.Value));
+    }
+
+    /// <summary>
+    /// The split itself, asserted rather than described: the token route takes
+    /// a Hatch-scoped key because a keyless runner is its ordinary caller, and
+    /// the two routes beside it still take a person and nothing else. Read off
+    /// the attributes because that is where the decision lives - and because
+    /// RequireAdminAttribute is AllowMultiple = false, so an attribute added at
+    /// the class level later would silently replace all three.
+    /// </summary>
+    [Fact]
+    public void TheTokenRouteTakesAKeyAndTheOtherTwoDoNot()
+    {
+        Assert.Equal(ApiKeyScopes.Hatch, Guard(nameof(SettingsController.GetClaudeToken)).AcceptScope);
+        Assert.Null(Guard(nameof(SettingsController.GetHatchSettings)).AcceptScope);
+        Assert.Null(Guard(nameof(SettingsController.PutHatchSettings)).AcceptScope);
+
+        static RequireAdminAttribute Guard(string action) =>
+            typeof(SettingsController).GetMethod(action)!.GetCustomAttribute<RequireAdminAttribute>()
+            ?? throw new Xunit.Sdk.XunitException($"{action} carries no [RequireAdmin] of its own.");
+    }
+
     private static Fixture NewFixture(params (string Key, string Value)[] seed) => NewFixture(false, seed);
 
     private static Fixture NewFixture(bool authEnabled, params (string Key, string Value)[] seed)
@@ -176,10 +266,11 @@ public class SettingsControllerTests
         // by the controller's own Invalidate, which is the point.
         var settings = new SiteSettingsService(new TestDbContextFactory(options), new FakeTimeProvider());
 
+        var credential = new SiteSettingClaudeCredential(settings);
         var controller = new SettingsController(
-            db, settings, Options.Create(new AuthOptions { Enabled = authEnabled }));
+            db, settings, credential, Options.Create(new AuthOptions { Enabled = authEnabled }));
 
-        return new Fixture(controller, db, settings, new SiteSettingClaudeCredential(settings));
+        return new Fixture(controller, db, settings, credential);
     }
 
     private sealed record Fixture(
