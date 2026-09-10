@@ -12,6 +12,11 @@ public sealed class IssueCommands(Cli cli)
         "",
         "  The brief, its edges and where it is, plus every comment on it. The",
         "  description is markdown and goes to the terminal as it was written.",
+        "",
+        "  An expedited ticket says so: somebody marked it \"this one first\", and",
+        "  the board and the dispatcher both reach for it before anything else.",
+        "  There is no verb here that sets one - the CLI holds a key, and that is",
+        "  a person's write.",
     ];
 
     public static readonly string[] StartUsage =
@@ -73,6 +78,11 @@ public sealed class IssueCommands(Cli cli)
 
         cli.Say.Line($"{issue.Key}  [{issue.Type}]  {issue.Title}");
         cli.Say.Line($"status:   {column}");
+
+        // Said only where it is set, the way the parent, the dates and the
+        // edges below are. Nearly every ticket is not expedited, and a line
+        // saying so on every read of every one of them is a line nobody reads.
+        if (issue.Expedited) cli.Say.Line("expedite: yes - this one goes first");
         if (issue.ParentKey is { Length: > 0 } parent) cli.Say.Line($"parent:   {parent}");
         if (issue.ChildKeys.Count > 0) cli.Say.Line($"children: {string.Join(", ", issue.ChildKeys)}");
         if (issue.DependsOnKeys.Count > 0) cli.Say.Line($"depends:  {string.Join(", ", issue.DependsOnKeys)}");

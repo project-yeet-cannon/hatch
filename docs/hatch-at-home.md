@@ -330,8 +330,10 @@ about a ticket that did not move, and what it stops for.
 
 `hatch queue` reads the scan and prints it, one issue a line — key, type,
 column, and either the reason the pass would fold past it or the transition it
-is clear for, in the dispatcher's order: rightmost column first, and within a
-column the order the board itself draws that column in. `hatch queue AER-1`
+is clear for, in the dispatcher's order: every expedited row first whatever
+column it sits in, then the rest, and inside each half the rightmost column
+first and the order the board itself draws that column in. A row marked `!` is
+one somebody expedited. `hatch queue AER-1`
 scopes it to one epic's subtree. It spawns nothing and writes nothing, and an
 empty board prints a sentence saying so rather than a blank line: "there is
 nothing" and "something went wrong and printed nothing" look identical

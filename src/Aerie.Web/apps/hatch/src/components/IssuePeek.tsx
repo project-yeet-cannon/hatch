@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button, Modal } from '@aerie/ui';
-import { getIssue, patchIssue } from '../api/client';
+import { getIssue, patchIssue, setExpedited } from '../api/client';
 import { DescriptionEditor } from './DescriptionEditor';
+import { ExpediteControl } from './ExpediteControl';
 import { MomentChip } from './MomentChip';
 import { StatusPill } from './StatusPill';
 import { TypeBadge } from './TypeBadge';
 import { appHref } from '../lib/basename';
 import { message } from '../lib/errors';
-import type { IssueCard, Status } from '../types';
+import type { AssigneeDirectory, IssueCard, Status } from '../types';
 
 /** What the peek had to ask for, and the card it asked about. `description`
     undefined is "not here yet", which is what the Loading line reads off. */
@@ -17,6 +18,10 @@ interface Asked {
   description?: string;
   loadError?: string;
   saveError?: string;
+  /** What the server last said about the flag, or undefined while the card's own value stands. */
+  expedited?: boolean;
+  expediteError?: string;
+  expediting?: boolean;
 }
 
 /**
@@ -46,11 +51,20 @@ interface Asked {
 export function IssuePeek({
   card,
   status,
+  directory,
+  onExpedited,
   onClose,
 }: {
   card: IssueCard | null;
   /** The column it is sitting in, or undefined if the board has moved underneath. */
   status?: Status;
+  /** Everybody who could own an issue, and who the caller is - fetched once by
+      the board and handed down, so a dialog opening does not cost a request to
+      find out whether the reader is a person. Null while it is still loading,
+      or where it could not be read. */
+  directory: AssigneeDirectory | null;
+  /** Something on this card changed on the server: the board reloads. */
+  onExpedited: () => void;
   onClose: () => void;
 }) {
   const key = card?.key ?? null;
@@ -108,6 +122,26 @@ export function IssuePeek({
     [key, apply],
   );
 
+  /* This one first, or no longer. Its own endpoint - the write is closed to an
+     API key - and it repaints from the answer rather than from the press: the
+     server's value is what is drawn, and a refusal leaves the control saying
+     what the issue still holds with the sentence beside it. The board behind
+     the dialog is reloaded too, because the float moves the card. */
+  const expedite = useCallback(
+    async (next: boolean) => {
+      if (!key) return;
+      apply(key, { expediting: true, expediteError: undefined });
+      try {
+        const issue = await setExpedited(key, next);
+        apply(key, { expedited: issue.expedited, expediting: false });
+        onExpedited();
+      } catch (err) {
+        apply(key, { expediting: false, expediteError: message(err) });
+      }
+    },
+    [key, apply, onExpedited],
+  );
+
   // Rendered unconditionally so the dialog's own open/closed handling - focus,
   // escape, the scrim - is the one that runs. Its title needs a card, though,
   // so a closed peek has nothing to say. Below every hook: the rules of hooks
@@ -149,6 +183,21 @@ export function IssuePeek({
         </div>
 
         <p className="hatch-peek-title">{card.title}</p>
+
+        {/* The same control the issue page draws, so a card is expedited
+            without leaving the board. The card's own value until the server has
+            said otherwise: the board is reloaded on a press, but the dialog
+            stays open over it, and a control that waited for the refetch to
+            catch up would read as not having noticed. */}
+        <div className="hatch-peek-expedite">
+          <ExpediteControl
+            expedited={asked.expedited ?? card.expedited}
+            directory={directory}
+            busy={asked.expediting ?? false}
+            onChange={(next) => void expedite(next)}
+          />
+          {asked.expediteError && <span className="text-danger">{asked.expediteError}</span>}
+        </div>
 
         {(card.readyAt || card.dueAt) && (
           <div className="hatch-card-dates">

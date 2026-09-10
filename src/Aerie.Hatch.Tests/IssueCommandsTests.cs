@@ -79,8 +79,33 @@ public sealed class IssueCommandsTests
 
         await new IssueCommands(h.Cli).ShowAsync(["AER-12"], default);
 
-        foreach (var absent in new[] { "parent:", "children:", "depends:", "blocks:", "ready:", "due:" })
+        foreach (var absent in new[] { "parent:", "children:", "depends:", "blocks:", "ready:", "due:", "expedite:" })
             Assert.DoesNotContain(absent, h.Said);
+    }
+
+    [Fact]
+    public async Task Show_says_when_the_issue_is_expedited()
+    {
+        using var h = new CliHarness();
+        h.Wire.Json("GET", "/api/hatch/issues/AER-12", AnIssue() with { Expedited = true });
+        h.Wire.Json("GET", "/api/hatch/statuses", new[] { Fixtures.Status(3, "In Progress") });
+        h.Wire.Json("GET", "/api/hatch/issues/AER-12/comments", Array.Empty<CommentDto>());
+
+        Assert.Equal(0, await new IssueCommands(h.Cli).ShowAsync(["AER-12"], default));
+
+        Assert.Contains("expedite: yes - this one goes first", h.Said);
+    }
+
+    /// <summary>
+    /// The terminal reads the flag and writes it nowhere: the CLI authenticates
+    /// with a key, and this is a person's write (docs/hatch.md, "The one edge
+    /// that is deliberately cut"). An omission somebody would otherwise file a
+    /// bug about, so it is a test.
+    /// </summary>
+    [Fact]
+    public void There_is_no_expedite_verb()
+    {
+        Assert.DoesNotContain("expedite", Program.Commands, StringComparer.Ordinal);
     }
 
     [Fact]

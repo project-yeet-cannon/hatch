@@ -1843,6 +1843,97 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* This one first.
+ *
+ * A stripe down the leading edge rather than a wash over the card, and that is
+ * the whole reason it composes: `asking` already owns the card's background and
+ * its border colour, `waiting` owns the border style, and an expedited card may
+ * be either or both. An inset shadow is under none of them and argues with
+ * nothing - it survives :hover, which the border rules do not, and it is the
+ * one thing on a card the eye finds without reading anything, which is what
+ * "at a glance down a column" means.
+ *
+ * --primary rather than --warn: warn is spoken for by the question that is
+ * owed to somebody, and a column where "look at this" and "you owe an answer"
+ * were the same colour would be a column that says neither. */
+.hatch-card.expedited {
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
+/* Said again for the preview, which carries its own box-shadow to read as
+   lifted - the shorthand replaces rather than adds, so the stripe has to
+   travel with it or the card loses it exactly while it is being moved. */
+.hatch-card-preview.expedited {
+  box-shadow: inset 3px 0 0 var(--primary), var(--shadow);
+}
+
+/* And the badge, for everything the stripe cannot say: what it means, on hover,
+   and to a reader who is not going by colour. */
+.hatch-card-expedited {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--sp-1-5);
+  border-radius: var(--r-pill);
+  background: var(--primary-bg);
+  color: var(--primary-ink);
+  font-size: var(--t-micro);
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+/* The control itself, on the issue page and in the summary: one button that
+   holds its own state, so the thing that says whether an issue is expedited is
+   the thing that changes it. Pressed is a filled pill; unpressed is the quiet
+   outline every other secondary control on these pages wears. */
+.hatch-expedite {
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-label);
+  cursor: pointer;
+}
+
+.hatch-expedite:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.hatch-expedite:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.hatch-expedite.on {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-accent);
+}
+
+/* What a reader who may not press it sees instead: the state as a word. An
+   agent holding this page is refused the write and is still entitled to know
+   why its ticket was reached first - see IssueExpediteController. */
+.hatch-expedite-said {
+  color: var(--muted);
+  font-size: var(--t-label);
+}
+
+.hatch-expedite-said.on {
+  color: var(--primary-ink);
+  font-weight: 600;
+}
+
+/* In the summary the control sits on its own row under the title, with room for
+   a refusal beside it. */
+.hatch-peek-expedite {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
 /* A column says in its header that it is holding a question, because the card
    that is owed an answer may be folded behind `+N waiting` or ten cards down,
    and the header is the part of a column that is always on screen. The pill

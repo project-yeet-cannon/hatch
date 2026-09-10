@@ -705,6 +705,85 @@ public class WorkControllerTests
     }
 
     [Fact]
+    public async Task Queue_ListsEveryExpeditedCandidateBeforeEveryOtherOne()
+    {
+        var h = await NewAsync();
+        var judged = await h.FileAsync("story", "awaiting the operator", h.Review);
+        var underway = await h.FileAsync("story", "underway", h.InProgress);
+        var hurry = await h.FileAsync("bug", "the one somebody is waiting on", h.Inbox);
+
+        await h.ExpediteAsync(hurry);
+
+        // An expedited bug in the leftmost column, above a non-expedited story
+        // in the rightmost one. Right to left is the policy; this is the one
+        // thing that comes before it.
+        Assert.Equal(
+            new[] { hurry, judged, underway }.Select(Key),
+            Value(await h.Work.GetQueue(0, null, default)).Select(e => e.Issue.Key));
+    }
+
+    [Fact]
+    public async Task Queue_KeepsTheBoardsOwnOrderInsideEachHalf()
+    {
+        var h = await NewAsync();
+        var judged = await h.FileAsync("story", "awaiting the operator", h.Review);
+        var top = await h.FileAsync("story", "top of todo", h.Todo, rank: 1024);
+        var below = await h.FileAsync("story", "below it", h.Todo, rank: 2048);
+        var hurryLeft = await h.FileAsync("story", "hurried, in the inbox", h.Inbox);
+        var hurryRight = await h.FileAsync("story", "hurried, further along", h.Review, rank: 2048);
+
+        await h.ExpediteAsync(hurryLeft);
+        await h.ExpediteAsync(hurryRight);
+
+        // Rightmost column first and (Rank, Id) within a column, applied twice:
+        // once to the expedited candidates and once to everything else.
+        Assert.Equal(
+            new[] { hurryRight, hurryLeft, judged, top, below }.Select(Key),
+            Value(await h.Work.GetQueue(0, null, default)).Select(e => e.Issue.Key));
+    }
+
+    [Fact]
+    public async Task NextWork_TakesTheFirstUnblockedRowOfThatQueue()
+    {
+        var h = await NewAsync();
+        await h.FileAsync("story", "awaiting the operator", h.Review);
+        var hurry = await h.FileAsync("story", "the hurried one", h.Todo);
+
+        await h.ExpediteAsync(hurry);
+
+        var queue = Value(await h.Work.GetQueue(0, null, default));
+        var work = Value(await h.Work.GetNextWork(0, null, null, default));
+
+        // Still one walk, reported and acted on. The queue expedite publishes
+        // is the queue next takes.
+        Assert.Equal(Key(hurry), work.Issue.Key);
+        Assert.Equal(queue.First(e => e.Blocked is null).Issue.Key, work.Issue.Key);
+    }
+
+    [Fact]
+    public async Task AnExpeditedIssueThatIsBlocked_IsFoldedWithTheSameSentenceAndThePassCarriesOn()
+    {
+        var h = await NewAsync();
+        var hurried = await h.FileAsync("story", "hurried, waiting on a person", h.Todo, rank: 1024);
+        var ordinary = await h.FileAsync("story", "waiting on a person", h.Todo, rank: 2048);
+        var next = await h.FileAsync("story", "the one behind them", h.Todo, rank: 3072);
+        await h.AskAsync(hurried, "per-node or global?");
+        await h.AskAsync(ordinary, "per-node or global?");
+
+        await h.ExpediteAsync(hurried);
+
+        var queue = Value(await h.Work.GetQueue(0, null, default));
+
+        // Expedite carries nothing past its own reason: the row is considered
+        // first, folded with exactly the sentence the same fold gives an
+        // ordinary issue, and the pass goes on to the next one.
+        Assert.Equal(Key(hurried), queue[0].Issue.Key);
+        Assert.NotNull(queue[0].Blocked);
+        Assert.Equal(queue.Single(e => e.Issue.Key == Key(ordinary)).Blocked, queue[0].Blocked);
+        Assert.Equal(Key(next), Value(await h.Work.GetNextWork(0, null, null, default)).Issue.Key);
+    }
+
+    [Fact]
     public async Task Queue_LeavesOutTheColumnsWithNowhereToGo()
     {
         var h = await NewAsync();
@@ -1030,6 +1109,26 @@ public class WorkControllerTests
     }
 
     [Fact]
+    public async Task Queue_UnderAnEpic_ReordersOnlyWhatIsInsideTheScope()
+    {
+        var h = await NewAsync();
+        var mine = await h.FileAsync("epic", "the one I am pushing", h.Todo);
+        var judged = await h.FileAsync("story", "under mine, further along", h.Review, parentId: mine.Id);
+        var hurry = await h.FileAsync("story", "under mine, hurried", h.Todo, parentId: mine.Id);
+        var elsewhere = await h.FileAsync("story", "somebody else's, hurried", h.Review);
+
+        await h.ExpediteAsync(hurry);
+        await h.ExpediteAsync(elsewhere);
+
+        // The scope narrows the candidates before either walk, so a hurried
+        // ticket outside it is not reached at all - and inside it the float
+        // applies exactly as it does to the whole board.
+        Assert.Equal(
+            new[] { hurry, judged }.Select(Key),
+            Value(await h.Work.GetQueue(0, Key(mine), default)).Select(e => e.Issue.Key));
+    }
+
+    [Fact]
     public async Task Queue_UnderAKeyNobodyMinted_IsTheSentenceTheSearchEndpointUses()
     {
         var h = await NewAsync();
@@ -1166,6 +1265,19 @@ public class WorkControllerTests
         {
             issue.ModelOverride = model;
             issue.EffortOverride = effort;
+            await Db.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// <em>This one first</em>, written straight onto the row. What the
+        /// route that writes it accepts and refuses - and above all who may
+        /// press it - is <see cref="IssueExpediteControllerTests"/>'s business;
+        /// these tests are about what the dispatcher does with the flag once it
+        /// is set.
+        /// </summary>
+        public async Task ExpediteAsync(EfHatchIssue issue)
+        {
+            issue.Expedited = true;
             await Db.SaveChangesAsync();
         }
 

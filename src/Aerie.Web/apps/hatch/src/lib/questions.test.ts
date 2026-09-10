@@ -90,6 +90,7 @@ const card = (over: Partial<IssueCard> = {}): IssueCard => ({
   openQuestions: 0,
   assignee: null,
   claim: null,
+  expedited: false,
   ...over,
 });
 

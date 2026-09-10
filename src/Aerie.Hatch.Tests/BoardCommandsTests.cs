@@ -21,8 +21,9 @@ public sealed class BoardCommandsTests
             cards);
 
     private static IssueCardDto Card(
-        string key, int statusId, string type = "task", string? readyAt = null, string? dueAt = null) =>
-        new(key, "AER", type, $"{key}'s title", statusId, 1000, null, readyAt, dueAt);
+        string key, int statusId, string type = "task", string? readyAt = null, string? dueAt = null,
+        bool expedited = false) =>
+        new(key, "AER", type, $"{key}'s title", statusId, 1000, null, readyAt, dueAt, Expedited: expedited);
 
     [Fact]
     public async Task The_board_is_every_column_and_what_is_on_it_with_the_terminal_one_marked()
@@ -194,6 +195,75 @@ public sealed class BoardCommandsTests
             AER-1000  [story]  To Do        it waits on AER-1
             """.ReplaceLineEndings("\n"),
             h.Said);
+    }
+
+    // ---- What goes first ----
+
+    [Fact]
+    public async Task The_board_says_how_many_of_a_column_are_expedited()
+    {
+        using var h = new CliHarness();
+        h.Wire.Json("GET", "/api/hatch/board", ABoard(
+            Card("AER-1", 2, expedited: true), Card("AER-2", 2), Card("AER-3", 3)));
+
+        Assert.Equal(0, await new BoardCommands(h.Cli).BoardAsync([], default));
+
+        // Only where there are any: a stock board has none, and "(0 expedited)"
+        // on every row would be five lines of nothing.
+        Assert.Equal(
+            """
+            Backlog: 0
+            To Do: 2  (1 expedited)
+            In Progress: 1
+            Done (terminal): 0
+            """.ReplaceLineEndings("\n"),
+            h.Said);
+    }
+
+    [Fact]
+    public async Task Next_marks_the_card_it_prints_when_somebody_expedited_it()
+    {
+        using var h = new CliHarness();
+        h.Wire.Json("GET", "/api/hatch/board", ABoard(Card("AER-1", 2, expedited: true)));
+
+        Assert.Equal(0, await new BoardCommands(h.Cli).NextAsync([], default));
+        Assert.Equal("AER-1  [task]  AER-1's title  (expedited)", h.Said);
+    }
+
+    [Fact]
+    public async Task The_queue_marks_its_expedited_rows_and_keeps_the_rest_in_line()
+    {
+        using var h = new CliHarness();
+        h.Wire.Json("GET", "/api/hatch/work/queue", new[]
+        {
+            Fixtures.Row("AER-7", expedited: true),
+            Fixtures.Row("AER-1", blocked: "it waits on AER-7"),
+        });
+
+        await new BoardCommands(h.Cli).QueueAsync([], default);
+
+        Assert.Equal(
+            """
+            ! AER-7  [task]  In Progress  -> In Review
+              AER-1  [task]  In Progress  it waits on AER-7
+            """.ReplaceLineEndings("\n"),
+            h.Said);
+    }
+
+    /// <summary>
+    /// The marker is a column that appears, not two spaces that are always
+    /// there: a board with nothing expedited prints exactly what it printed
+    /// before the flag existed.
+    /// </summary>
+    [Fact]
+    public async Task The_queue_draws_no_marker_column_when_nothing_is_expedited()
+    {
+        using var h = new CliHarness();
+        h.Wire.Json("GET", "/api/hatch/work/queue", new[] { Fixtures.Row("AER-1") });
+
+        await new BoardCommands(h.Cli).QueueAsync([], default);
+
+        Assert.StartsWith("AER-1", h.Said);
     }
 
     /// <summary>A row with no next column still says something rather than nothing.</summary>

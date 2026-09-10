@@ -19,6 +19,11 @@ export interface CardProps {
 /** Owed an answer, and drawn as such wherever the card is drawn. */
 const askingClass = (card: IssueCard) => (card.openQuestions > 0 ? ' asking' : '');
 
+/** Somebody said this one first. Wherever the card is drawn, including the
+    preview under the cursor - a card being moved is exactly the card where
+    knowing it is the one going first matters. */
+const expeditedClass = (card: IssueCard) => (card.expedited ? ' expedited' : '');
+
 /**
  * One card. A <Link> as well as a draggable, so middle-click, copy-link and
  * open-in-new-tab all work - an issue key is meant to be passed around, and a
@@ -46,7 +51,7 @@ export function BoardCard({
     <Link
       ref={setNodeRef}
       to={`/issues/${card.key}`}
-      className={`hatch-card${isDragging ? ' dragging' : ''}${waiting ? ' waiting' : ''}${askingClass(card)}`}
+      className={`hatch-card${isDragging ? ' dragging' : ''}${waiting ? ' waiting' : ''}${askingClass(card)}${expeditedClass(card)}`}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       onClick={(e) => {
         if (!isPlainClick(e)) return;
@@ -71,7 +76,7 @@ export function BoardCard({
  */
 export function CardPreview({ card, waiting = false, terminal = false }: CardProps) {
   return (
-    <div className={`hatch-card hatch-card-preview${askingClass(card)}`}>
+    <div className={`hatch-card hatch-card-preview${askingClass(card)}${expeditedClass(card)}`}>
       <CardFace card={card} waiting={waiting} terminal={terminal} />
     </div>
   );
@@ -91,6 +96,15 @@ function CardFace({ card, waiting, terminal }: Required<Omit<CardProps, 'card'>>
       <div className="hatch-card-head">
         <span className="hatch-card-key">{card.key}</span>
         <TypeBadge type={card.type} />
+        {/* This one first. On the face beside the type rather than pushed to
+            the end of the head, because it is a fact about which card to read
+            next and the eye is already at the left edge - where the stripe in
+            App.css is drawing the same thing at arm's length. */}
+        {card.expedited && (
+          <span className="hatch-card-expedited" title="Expedited - this one goes first">
+            ↑
+          </span>
+        )}
         {/* Something is holding this one right now. On the face rather than on
             the page, so the drag preview carries it too - a card being moved is
             exactly the card where knowing a runner is mid-increment on it

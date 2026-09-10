@@ -30,6 +30,10 @@ public sealed class BoardCommands(Cli cli)
         "  Every issue a dispatch pass would look at, in the order it looks, each",
         "  with the reason it would be folded past - or the transition it is clear",
         "  for. It spawns nothing and writes nothing.",
+        "",
+        "  A row marked \"!\" is expedited: somebody said this one first, and the",
+        "  pass considers every one of them before anything else, whatever column",
+        "  each sits in.",
     ];
 
     /// <summary>Every column, and how many cards are on it.</summary>
@@ -44,8 +48,16 @@ public sealed class BoardCommands(Cli cli)
         foreach (var status in board.Statuses)
         {
             var terminal = status.IsTerminal ? " (terminal)" : "";
-            var count = board.Issues.Count(i => i.StatusId == status.Id);
-            cli.Say.Line($"{status.Name}{terminal}: {count}");
+            var column = board.Issues.Where(i => i.StatusId == status.Id).ToList();
+
+            // What this command draws is a count, so this is where an expedited
+            // card is marked: how many of the column are going first. Said only
+            // where there are any, because a stock board has none and
+            // "(0 expedited)" on every row would be five lines of nothing.
+            var hurried = column.Count(i => i.Expedited);
+            var first = hurried > 0 ? $"  ({hurried} expedited)" : "";
+
+            cli.Say.Line($"{status.Name}{terminal}: {column.Count}{first}");
         }
 
         return 0;
@@ -55,10 +67,11 @@ public sealed class BoardCommands(Cli cli)
     /// The top workable card of a column.
     /// </summary>
     /// <remarks>
-    /// The board arrives ordered by (status, rank, id), so "the top card" is the
-    /// first survivor of the filter and no sorting happens here. A client with
-    /// its own opinion about which ticket is next is the drift the server's
-    /// ordering exists to rule out.
+    /// The board arrives ordered by (status, expedited desc, rank, id), so "the
+    /// top card" is the first survivor of the filter and no sorting happens
+    /// here - which is also how an expedited card comes back from this without
+    /// a line of code about it. A client with its own opinion about which
+    /// ticket is next is the drift the server's ordering exists to rule out.
     /// </remarks>
     public async Task<int> NextAsync(string[] args, CancellationToken ct)
     {
@@ -84,7 +97,8 @@ public sealed class BoardCommands(Cli cli)
         }
 
         var due = card.DueAt is { Length: > 0 } by ? $"  (due {by})" : "";
-        cli.Say.Line($"{card.Key}  [{card.Type}]  {card.Title}{due}");
+        var first = card.Expedited ? "  (expedited)" : "";
+        cli.Say.Line($"{card.Key}  [{card.Type}]  {card.Title}{first}{due}");
         return 0;
     }
 
@@ -130,14 +144,22 @@ public sealed class BoardCommands(Cli cli)
     /// The rows, padded to the widest value in the answer rather than to a
     /// guessed width - status names are rows the operator renames.
     /// </summary>
+    /// <remarks>
+    /// The <c>!</c> in front of an expedited row is the same idea one step
+    /// further: the column appears only when the answer holds one, so a board
+    /// with nothing expedited prints exactly what it printed before, and a
+    /// queue whose order has been reordered by somebody says which rows did it.
+    /// </remarks>
     public static IReadOnlyList<string> Draw(IReadOnlyList<QueueEntryDto> queue)
     {
         var keyWidth = queue.Max(q => q.Issue.Key.Length);
         var typeWidth = queue.Max(q => q.Issue.Type.Length) + 2;
         var columnWidth = queue.Max(q => q.FromStatus.Name.Length);
+        var anyFirst = queue.Any(q => q.Issue.Expedited);
 
         return queue.Select(q =>
-                q.Issue.Key.PadRight(keyWidth) + "  "
+                (anyFirst ? (q.Issue.Expedited ? "! " : "  ") : "")
+                + q.Issue.Key.PadRight(keyWidth) + "  "
                 + $"[{q.Issue.Type}]".PadRight(typeWidth) + "  "
                 + q.FromStatus.Name.PadRight(columnWidth) + "  "
                 + (q.Blocked is { Length: > 0 } why ? why : $"-> {q.ToStatus?.Name ?? "?"}"))
