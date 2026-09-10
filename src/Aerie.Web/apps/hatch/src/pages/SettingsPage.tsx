@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button, Card, Field, PageHeader } from '@aerie/ui';
 import { getHatchSettings, putHatchSettings } from '../api/client';
+import { Command } from '../components/Command';
 import { message } from '../lib/errors';
 import { nameSave, tokenClear, tokenIsSet, tokenPlaceholder, tokenSave } from '../lib/hatchSettings';
 import { announceLocalPersonChanged } from '../lib/localPerson';
@@ -59,6 +60,24 @@ export function SettingsPage() {
       {settings && (
         <Card>
           <h2 className="hatch-section-title">Claude subscription token</h2>
+          <ol className="hatch-runner-needs">
+            <li>
+              Install the{' '}
+              <a href="https://docs.claude.com/en/docs/claude-code/setup" target="_blank" rel="noreferrer">
+                claude CLI
+              </a>{' '}
+              if it isn&rsquo;t already there, and make sure it&rsquo;s logged into the claude.ai
+              account whose subscription you want tracked.
+            </li>
+            <li>
+              Run <Command command="claude setup-token" /> and authorize it in the browser prompt
+              that opens.
+            </li>
+            <li>
+              It prints a token starting with <code>sk-ant-oat-</code> — copy it.
+            </li>
+            <li>Paste it into the Token field below and click Save token.</li>
+          </ol>
           <Field
             label="Token"
             hint="An OAuth token for your own Claude subscription. It is what lets the nav strip say how much headroom the account has left, and it is entirely optional - without one Hatch simply has no battery. Stored obfuscated, and never read back."
