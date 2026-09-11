@@ -14,10 +14,11 @@ Claude, in that order.
 ## Prerequisites
 
 - **Docker Desktop**, running. It is the only thing the board itself needs.
-- **On Windows, PowerShell 7 or newer** (`pwsh`). The one line below chains two
-  commands with `&&`, and Windows PowerShell 5.1 — the blue one that ships with
-  the OS — does not understand that operator and will refuse the line.
-  Everything else here works in either.
+- **On Windows, either PowerShell** — 5.1, the blue one that ships with the OS,
+  or 7 (`pwsh`). Every line on this page runs in both, with two exceptions that
+  say so where they appear: the restore line, and the backup line beside it,
+  which needs 7 because 5.1 writes UTF-16 through `>` and `psql` will not read
+  that back.
 - **git**, and the **`claude` CLI, logged in**. Neither is needed to run the
   board; both are needed by the runner, which branches, commits and pushes from
   a checkout and spends each increment inside a `claude` session. The Runner
@@ -26,22 +27,25 @@ Claude, in that order.
 ## The one line
 
 ```
-docker compose -f oci://ghcr.io/eouw0o83hf/hatch-local up -d && echo "Open http://localhost:8080/apps/hatch/"
+docker compose -f oci://ghcr.io/eouw0o83hf/hatch-local up -d
 ```
 
-The same line in PowerShell and in a macOS terminal, character for character.
-There is no checkout of anything and no account anywhere: the compose file is
-published to the registry as an artifact beside the two images it names, so
-`-f oci://…` is the whole of "get the file."
+Then open **http://localhost:8080/apps/hatch/**. Compose says nothing about the
+address once it has gone to the background, so that part is on this page rather
+than in your terminal.
+
+The same line in both PowerShells and in a macOS terminal, character for
+character. There is no checkout of anything and no account anywhere: the
+compose file is published to the registry as an artifact beside the two images
+it names, so `-f oci://…` is the whole of "get the file."
 
 The first run takes a few minutes — it pulls the images, runs the migration to
-completion, and only then starts the API. The `echo` is in the line you paste
-rather than something the app announces because Compose has no way to tell you
-the address itself once it has gone to the background.
+completion, and only then starts the API.
 
 Port 8080 is only the default. If something on your machine already has it,
 `HATCH_PORT` moves it — and that is one of the two places on this page
-where the two shells differ (the other is the restore line, further down):
+where the two shells differ (the other is the backup and restore pair, further
+down):
 
 macOS / Linux:
 
@@ -60,10 +64,9 @@ address turned out to be — `http://localhost:8080` unless you moved it.
 
 ## Opening the board and setting your name
 
-Open the address the line printed. That is the board, and it is empty in a
-particular way: the columns are there — Draft through Done, the ones every
-Hatch ships with — and there is no project yet, so there is nothing for an
-issue key to be made of.
+Open that address. That is the board, and it is empty in a particular way: the
+columns are there — Draft through Done, the ones every Hatch ships with — and
+there is no project yet, so there is nothing for an issue key to be made of.
 
 **Projects → New project** is therefore the first thing to do. A project is a
 key namespace rather than a container: give it a short key and every issue

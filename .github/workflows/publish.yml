@@ -788,6 +788,15 @@ jobs:
   # image, keep your data".
   publish-local-compose-stack:
     needs: [smoke-test-local-stack]
+    # The `if` is load-bearing and is not the same thing as having no `if`.
+    # A skip propagates down the whole `needs` graph, not just one edge, and
+    # build-and-push-db-image is skipped on every push that does not touch the
+    # database image - which is nearly all of them. smoke-test-local-stack
+    # survives that with its own always(), but a job with no condition at all
+    # still inherits the skip from further up, so this one was skipped on every
+    # run from the day it was written and the artifact was never published.
+    # Naming the one result it actually depends on is what breaks the chain.
+    if: always() && needs.smoke-test-local-stack.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

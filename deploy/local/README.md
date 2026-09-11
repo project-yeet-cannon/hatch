@@ -6,24 +6,22 @@ published images, migrates a database, and serves the board.
 ## What you need
 
 - **Docker Desktop**, running.
-- **On Windows: PowerShell 7 or newer** (`pwsh`). The line below chains two
-  commands with `&&`; Windows PowerShell 5.1 - the blue one that ships with the
-  OS - does not understand that operator and will refuse the line. Everything
-  else here works in either.
+- **On Windows: either PowerShell** - 5.1, the blue one that ships with the OS,
+  or 7 (`pwsh`). Every line here runs in both.
 
 ## Start it
 
 ```
-docker compose -f oci://ghcr.io/eouw0o83hf/hatch-local up -d && echo "Open http://localhost:8080/apps/hatch/"
+docker compose -f oci://ghcr.io/eouw0o83hf/hatch-local up -d
 ```
 
-The same line in PowerShell and in a macOS terminal, character for character.
-The first run takes a few minutes: it pulls the images, runs the migration to
-completion, and only then starts the API. Open the address it prints.
+Then open **http://localhost:8080/apps/hatch/**.
 
-Compose has no way to tell you the address itself once it has gone to the
-background, which is why it is in the line you paste rather than something the
-app announces.
+The same line in both PowerShells and in a macOS terminal, character for
+character. The first run takes a few minutes: it pulls the images, runs the
+migration to completion, and only then starts the API. Compose has no way to
+tell you the address once it has gone to the background, which is why it is
+written here rather than printed in your terminal.
 
 ## Stop it
 
