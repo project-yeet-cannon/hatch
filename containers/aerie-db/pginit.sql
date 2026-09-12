@@ -9,17 +9,14 @@ CREATE DATABASE quartz;
 
 -- This script is for PostgreSQL
 
--- CREATE TABLE/INDEX below carry IF NOT EXISTS (the cluster plan Phase 4b.8,
--- Finding 3) so a rebuild of this host during the Phase 4-7 transition is
--- idempotent, matching deploy/cluster/data/quartz-ddl.sql - the DDL lifted out
--- for CNPG's restore Job to run there instead. Keep both copies in sync until
--- this file is retired with compose.prod.yml in Phase 7.
+-- CREATE TABLE/INDEX below carry IF NOT EXISTS so a rebuild of this container
+-- is idempotent.
 
 -- This initializes the database to pristine for Quartz, by recreating every
--- table from scratch if it is not already present. Kept in sync with
--- deploy/cluster/data/schema/quartz-ddl.sql - see that file for why the
--- upstream reference script's DropDb-gated DO $$ ... $$ block was dropped
--- rather than carried over.
+-- table from scratch if it is not already present. This is the one copy of
+-- the DDL - Aerie.Api.Tests/MinimalStartupTests.cs reads it directly (split at
+-- the `\c quartz` line above, which only psql's own init machinery can run)
+-- rather than keeping a second copy that could drift from this one.
 
 CREATE TABLE IF NOT EXISTS qrtz_job_details
   (
