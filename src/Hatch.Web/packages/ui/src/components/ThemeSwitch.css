@@ -1,0 +1,118 @@
+/* Styles travel with the component: this file is imported by ThemeSwitch.tsx,
+   not by the consuming app's stylesheet, so an app cannot render the component
+   and forget to dress it. @hatch/ui ships source and the app's Vite bundles it,
+   which is what makes that import work at all.
+
+   Every value here comes from tokens.css. The two literals are optical: a 1px
+   hairline, and the 2px focus-ring offset. */
+
+.hatch-theme-switch {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0;
+  /* A <fieldset> arrives with a border, padding and min-inline-size the layout
+     did not ask for. */
+  margin: 0;
+  padding: 2px;
+  /* The tone below repaints these two; they are stated here as well so the
+     base class alone is never a currentColor border on a transparent box. */
+  border: 1px solid var(--line);
+  background: var(--bg);
+  border-radius: var(--r-ctl);
+  min-inline-size: 0;
+}
+
+/* On a page or a card. Phase 2's appearance, unchanged. */
+.hatch-theme-switch--surface {
+  border-color: var(--line);
+  background: var(--bg);
+}
+
+/* On a filled bar. The ink is --on-accent - the token that exists for exactly
+   this, and that flips with the theme rather than being white forever - and
+   the ground is the bar's own gradient showing through, so the control reads
+   as cut out of the bar rather than dropped on it. */
+.hatch-theme-switch--accent {
+  border-color: var(--on-accent-wash);
+  background: transparent;
+}
+
+/* Visually hidden, not display:none - the group still needs a name announced.
+   Clip rather than a zero-size box so it is never read as an empty label. */
+.hatch-theme-switch__legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.hatch-theme-switch__option {
+  display: inline-flex;
+}
+
+/* The input keeps its focus and keyboard behaviour and gives up only its
+   painting; the <span> next to it is what the operator sees and clicks. */
+.hatch-theme-switch__option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  margin: 0;
+  pointer-events: none;
+}
+
+.hatch-theme-switch__option span {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--sp-1) var(--sp-2-5);
+  border-radius: var(--r-in);
+  font-size: var(--t-label);
+  font-weight: 500;
+  line-height: var(--lh-tight);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.hatch-theme-switch--surface .hatch-theme-switch__option span {
+  color: var(--muted);
+}
+
+.hatch-theme-switch--surface .hatch-theme-switch__option input:checked + span {
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.hatch-theme-switch--surface .hatch-theme-switch__option input:not(:checked) + span:hover {
+  color: var(--ink);
+}
+
+/* Every label at full --on-accent, checked or not: dimming the inactive two
+   was the obvious way to separate them and it puts 12px type at about 3.5:1 on
+   the primary fill, under the 4.5:1 floor. The filled pill carries the state
+   instead, which is legible without spending contrast. Hovering an inactive
+   option previews that fill. */
+.hatch-theme-switch--accent .hatch-theme-switch__option span {
+  color: var(--on-accent);
+}
+
+.hatch-theme-switch--accent .hatch-theme-switch__option input:checked + span,
+.hatch-theme-switch--accent .hatch-theme-switch__option input:not(:checked) + span:hover {
+  background: var(--on-accent-wash);
+}
+
+.hatch-theme-switch--surface .hatch-theme-switch__option input:focus-visible + span {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* A --primary ring on the --primary fill would be invisible. */
+.hatch-theme-switch--accent .hatch-theme-switch__option input:focus-visible + span {
+  outline: 2px solid var(--on-accent);
+  outline-offset: 2px;
+}

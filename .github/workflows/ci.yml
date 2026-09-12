@@ -18,10 +18,10 @@ jobs:
       # `make test-api` runnable on a laptop with no Postgres, and makes this
       # variable the difference between the claim's guarantee being *asserted*
       # here and merely being assertable. See
-      # src/Aerie.Api.Tests/Hatch/HatchDatabase.cs for why the tests demand an
+      # src/Hatch.Api.Tests/Hatch/HatchDatabase.cs for why the tests demand an
       # explicit database rather than discovering one: they drop what they
       # connect to.
-      AERIE_TEST_DATABASE_URL: postgresql://aerie:aerie@localhost:5432/aerie_test
+      HATCH_TEST_DATABASE_URL: postgresql://hatch:hatch@localhost:5432/hatch_test
     # A real Postgres, because the claim is a Postgres statement. Whether a
     # conditional UPDATE matches one row or zero is what decides which of two
     # runners holds a ticket, and EF's in-memory provider refuses the statement
@@ -32,9 +32,9 @@ jobs:
       postgres:
         image: postgres:18
         env:
-          POSTGRES_USER: aerie
-          POSTGRES_PASSWORD: aerie
-          POSTGRES_DB: aerie_test
+          POSTGRES_USER: hatch
+          POSTGRES_PASSWORD: hatch
+          POSTGRES_DB: hatch_test
         ports:
           - 5432:5432
         # Without this the test step can start before the server accepts
@@ -55,17 +55,17 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Restore
-        run: dotnet restore src/Aerie.slnx
+        run: dotnet restore src/Hatch.slnx
 
       - name: Build
-        run: dotnet build src/Aerie.slnx --no-restore --configuration Release
+        run: dotnet build src/Hatch.slnx --no-restore --configuration Release
 
-      # The solution, so this one step covers both suites: Aerie.Api.Tests
-      # against the Postgres above, and Aerie.Hatch.Tests - the runner behind
+      # The solution, so this one step covers both suites: Hatch.Api.Tests
+      # against the Postgres above, and Hatch.Cli.Tests - the runner behind
       # `hatch.sh work` and `hatch.sh go-to-work` - which needs neither a
       # database nor a network, since its wire and its sessions are stubs.
       - name: Test
-        run: dotnet test src/Aerie.slnx --no-build --configuration Release
+        run: dotnet test src/Hatch.slnx --no-build --configuration Release
 
   # The shippable `hatch`, for every platform this house runs on.
   #
@@ -101,7 +101,7 @@ jobs:
       # fails and the log says which platform it was.
       - name: Publish
         run: |
-          dotnet publish src/Aerie.Hatch/Aerie.Hatch.csproj \
+          dotnet publish src/Hatch.Cli/Hatch.Cli.csproj \
             --runtime ${{ matrix.rid }} \
             --configuration Release \
             --output artifacts/hatch/${{ matrix.rid }} \
@@ -134,28 +134,28 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version-file: src/Aerie.Web/.nvmrc
+          node-version-file: src/Hatch.Web/.nvmrc
           cache: npm
-          cache-dependency-path: src/Aerie.Web/package-lock.json
+          cache-dependency-path: src/Hatch.Web/package-lock.json
 
-      # Aerie.Web is one npm workspace, so the install is the whole workspace's
+      # Hatch.Web is one npm workspace, so the install is the whole workspace's
       # and every job pays for it. That redundancy is bought deliberately: the
       # matrix is what makes a PR check say *which* app broke, and a job per app
       # is worth more than the minutes a single job would save.
       - name: Install dependencies
-        working-directory: src/Aerie.Web
+        working-directory: src/Hatch.Web
         run: npm ci
 
       - name: Lint
-        working-directory: src/Aerie.Web
+        working-directory: src/Hatch.Web
         run: npm run lint -w apps/${{ matrix.app }}
 
       - name: Test
-        working-directory: src/Aerie.Web
+        working-directory: src/Hatch.Web
         run: npm run test --if-present -w apps/${{ matrix.app }}
 
       - name: Build
-        working-directory: src/Aerie.Web
+        working-directory: src/Hatch.Web
         run: npm run build -w apps/${{ matrix.app }}
 
   # One job that depends on every other, so a merge gate has exactly one

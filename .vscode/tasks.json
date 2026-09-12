@@ -7,7 +7,7 @@
             "type": "process",
             "args": [
                 "build",
-                "${workspaceFolder}/src/Aerie.Api/Aerie.Api.csproj",
+                "${workspaceFolder}/src/Hatch.Api/Hatch.Api.csproj",
                 "/property:GenerateFullPaths=true",
                 "/consoleloggerparameters:NoSummary"
             ],
@@ -19,7 +19,7 @@
             "type": "process",
             "args": [
                 "publish",
-                "${workspaceFolder}/src/Aerie.Api/Aerie.Api.csproj",
+                "${workspaceFolder}/src/Hatch.Api/Hatch.Api.csproj",
                 "/property:GenerateFullPaths=true",
                 "/consoleloggerparameters:NoSummary"
             ],
@@ -33,7 +33,7 @@
                 "watch",
                 "run",
                 "--project",
-                "${workspaceFolder}/src/Aerie.Api/Aerie.Api.csproj"
+                "${workspaceFolder}/src/Hatch.Api/Hatch.Api.csproj"
             ],
             "problemMatcher": "$msCompile"
         }

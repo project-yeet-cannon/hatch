@@ -2,8 +2,8 @@
 
 ## Summary
 
-Aerie's web apps share one vocabulary and one set of components, both living in
-**`@aerie/ui`** — a package inside the `src/Aerie.Web` npm workspace, consumed
+Hatch's web apps share one vocabulary and one set of components, both living in
+**`@hatch/ui`** — a package inside the `src/Hatch.Web` npm workspace, consumed
 by every app that renders house chrome.
 
 The design goal is a *property*, not a style guide.
@@ -18,94 +18,50 @@ Three things follow from it and are the rest of this document:
 
 - **The vocabulary** — what is a token, what is not, and why the list is closed.
 - **The day/night contract** — one stored choice, honoured by React apps and by
-  the two pages that are not apps, resolved with no JavaScript in the common
-  case.
+  pages that are not apps, resolved with no JavaScript in the common case.
 - **The gallery** — `apps/design`, where every token and component is rendered
   in both themes and in the states an app never shows you.
 
 The mechanics of each consuming app live next to that app, in its own README.
 What is here is the part no single app owns.
 
-**What this document does not do is decide what Aerie looks like.** Every value
-in `tokens.css` is admin's existing value carried across and given a name. The
-four-step radius scale, the named type registers and the single spacing base are
-the dashboard's *philosophy*; the numbers in them are placeholders with a home.
-A design pass moves the numbers, and the whole point of the structure below is
-that moving them is an edit to one file rather than a rewrite of eight apps.
+**What this document does not do is decide what Hatch looks like.** Every value
+in `tokens.css` is a carried-across, considered starting point, not a final
+answer. The four-step radius scale, the named type registers and the single
+spacing base are the *philosophy*; the numbers in them are placeholders with a
+home. A design pass moves the numbers, and the whole point of the structure
+below is that moving them is an edit to one file rather than a rewrite of every
+app.
 
 ## The workspace
 
-`src/Aerie.Web` is a single npm workspace: `apps/*` and `packages/*`, one
+`src/Hatch.Web` is a single npm workspace: `apps/*` and `packages/*`, one
 hoisted `package-lock.json` at the root, one `node_modules`.
 
 ```
-src/Aerie.Web/
+src/Hatch.Web/
   package.json          workspaces: ["apps/*", "packages/*"]
   package-lock.json     one lockfile, hoisted
   apps/
-    admin  auth  chrome  dashboard  design  docs
-    family  hatch  home  logo  modeler  trading
+    design  hatch
   packages/
-    ui                  @aerie/ui   — the vocabulary and the components
-    lib                 @aerie/lib  — the logic two apps share
+    ui                  @hatch/ui   — the vocabulary and the components
 ```
-
-It was six standalone apps with six lockfiles, and the cost of that was already
-on the floor: `lib/scale.ts` and `lib/cameraStream.ts` existed in both `admin`
-and `dashboard` and had **drifted** — same filename, different contents, and
-nothing in any build that would ever have said so. Both now live in
-`@aerie/lib`, which is the concrete debt the conversion was for.
-
-### The two packages, and the line between them
-
-| | `@aerie/ui` | `@aerie/lib` |
-|---|---|---|
-| What | Tokens, the document layer, React components | Framework-free logic |
-| Imports React | Yes, as a peer dependency | **Never** |
-| Entry points | A barrel (`.`) plus `./tokens.css`, `./base.css`, `./standalone/topbar` | One per module: `./scale`, `./cameraStream` |
-| Build step | None | None |
-
-Neither package builds. Both ship `.ts`/`.tsx`/`.css` source and the consuming
-app's Vite bundles it, so a token edit is a one-file edit with no publish or
-compile round-trip — and in `npm run dev` it hot-reloads into whatever app is
-open. That is what makes the gallery a workbench rather than a report.
-
-The entry-point difference is deliberate. `@aerie/ui` exports a barrel because
-each component imports its own colocated stylesheet, and a CSS import is a side
-effect the consuming app wants in its bundle anyway; both consumers render most
-of the library, so per-component entry points would buy nothing and cost every
-import site an extra specifier. `@aerie/lib` has no such reason, and a barrel
-there would put the camera protocol into the bundle of an app that only wanted
-to draw an axis.
-
-A module earns its way into `@aerie/lib` by already existing in two apps and
-having started to drift. It is not a place to put things that might be shared.
 
 ### Who consumes what
 
-| App | `@aerie/ui` | Note |
+| App | `@hatch/ui` | Note |
 |---|---|---|
-| `admin` | yes | Also `@aerie/lib`. The app the primitives were extracted from |
-| `home` | yes | The app picker |
 | `design` | yes | The gallery |
-| `docs`, `modeler`, `hatch`, `trading` | yes | Adopted the bar and the tokens |
-| `chrome` | yes | Not an app — the build that emits the standalone bar |
-| `dashboard` | **no** | Also `@aerie/lib`. Its palette is the circadian engine — see below |
-| `auth`, `family` | not yet | Carry their own palettes, in the same token *names* |
-| `logo` | n/a | A static export; it wears the standalone bar |
+| `hatch` | yes | Adopted the bar and the tokens |
 
-`auth` and `family` are the honest state of things rather than an oversight:
-they use the same token names (`--bg`, `--card`, `--ink`, `--muted`, `--line`,
-`--primary`…) with their own values, so adopting `@aerie/ui` is a stylesheet
-swap rather than a rewrite. `family`'s palette is sky and slate rather than
-admin's neutral grey because it is the family-facing side of the product; which
-of the two is right is a design decision, and until it is made, two palettes
-under one set of names is better than one palette imposed by whoever edited
-last.
+Both apps use the same token names (`--bg`, `--card`, `--ink`, `--muted`,
+`--line`, `--primary`…), so a future app can carry its own values under those
+names and adopt `@hatch/ui` as a stylesheet swap rather than a rewrite.
 
 ## The vocabulary
 
-[`packages/ui/src/tokens.css`](../src/Aerie.Web/packages/ui/src/tokens.css)
+[`packages/ui/src/tokens.css`](../src/Hatch.Web/packages/ui/src/tokens.css)
 is the whole vocabulary. It states values and paints nothing.
 
 ### The rules
@@ -155,7 +111,7 @@ is the whole vocabulary. It states values and paints nothing.
 
 ### The contract
 
-One stored choice — `auto | light | dark` — under one key, `aerie.theme`,
+One stored choice — `auto | light | dark` — under one key, `hatch.theme`,
 namespaced because every app shares an origin.
 
 ```
@@ -180,19 +136,19 @@ JavaScript involved.
 
 ### The mechanism, and why it is in two files
 
-[`theme/themeStore.ts`](../src/Aerie.Web/packages/ui/src/theme/themeStore.ts) is
+[`theme/themeStore.ts`](../src/Hatch.Web/packages/ui/src/theme/themeStore.ts) is
 the whole mechanism — read, write, resolve, apply, watch — with **no React in
-it**. [`theme/ThemeProvider.tsx`](../src/Aerie.Web/packages/ui/src/theme/ThemeProvider.tsx)
+it**. [`theme/ThemeProvider.tsx`](../src/Hatch.Web/packages/ui/src/theme/ThemeProvider.tsx)
 is only the React around it: the state components read, the subscription, the
 context.
 
 The split exists because there are two callers. The other is
-[`standalone/topbar.ts`](../src/Aerie.Web/packages/ui/src/standalone/topbar.ts),
-the bar on pages Aerie did not build with Vite. Those pages must read and write
+[`standalone/topbar.ts`](../src/Hatch.Web/packages/ui/src/standalone/topbar.ts),
+the bar on pages Hatch did not build with Vite. Those pages must read and write
 the *same* stored choice as the apps — a house where the theme you picked in
-admin does not survive the click into Swagger is a house with two themes — and
-importing `ThemeProvider` to get it would drag React onto a static page to run
-twelve lines of `localStorage`.
+one app does not survive the click into Swagger is a house with two themes —
+and importing `ThemeProvider` to get it would drag React onto a static page to
+run twelve lines of `localStorage`.
 
 Three behaviours worth knowing before touching it:
 
@@ -206,30 +162,7 @@ Three behaviours worth knowing before touching it:
   is harder to find than a stack trace, and `<TopBar>` always renders the switch
   — so a provider above it is a requirement, not a nicety.
 
-### Why the wall's circadian engine is not this
-
-The dashboard's [`circadianTheme.ts`](../src/Aerie.Web/apps/dashboard/src/lib/circadianTheme.ts)
-is a 14-keyframe OKLCh timeline deriving ~30 custom properties per instant under
-contrast floors. It is good and it is not what a design system needs, for three
-reasons worth writing down so this is not relitigated:
-
-- **It is a property of the room, not the user.** The wall tablet is in a known
-  room whose light the sun controls. A laptop at 5pm is in an office with the
-  blinds down, or on a train. Golden-hour parchment is wrong there, and the OS
-  preference already encodes the truth.
-- **It costs CSS.** A continuously-changing palette is applied as inline styles
-  on the root. A design system whose colors are not addressable from a
-  stylesheet is one a designer cannot work in.
-- **The keyframe table is load-bearing elsewhere.** It is read on the Kotlin
-  side by `CircadianBrightness.kt`. Making it serve a second,
-  differently-shaped consumer is a way to break the wall's backlight.
-
-So the dashboard keeps the sun, takes `@aerie/lib` and not `@aerie/ui`, and what
-comes across from it into the design system is its *philosophy*: one radius
-scale stated once, named type registers, a single spacing base, renders-nothing
-discipline, and calm.
-
-## Adopting `@aerie/ui`
+## Adopting `@hatch/ui`
 
 ### The wiring
 
@@ -237,15 +170,15 @@ An app's own stylesheet takes the vocabulary and the document layer:
 
 ```css
 /* apps/<app>/src/theme.css */
-@import '@aerie/ui/tokens.css';
-@import '@aerie/ui/base.css';
+@import '@hatch/ui/tokens.css';
+@import '@hatch/ui/base.css';
 ```
 
 and the entry point provides the theme and the bar:
 
 ```tsx
 /* apps/<app>/src/main.tsx */
-import { ThemeProvider } from '@aerie/ui';
+import { ThemeProvider } from '@hatch/ui';
 import './theme.css';
 
 createRoot(document.getElementById('root')!).render(
@@ -263,13 +196,13 @@ createRoot(document.getElementById('root')!).render(
 
 ```tsx
 /* apps/<app>/src/App.tsx */
-import { TopBar } from '@aerie/ui';
-<TopBar appName="Aerie <App>" />
+import { TopBar } from '@hatch/ui';
+<TopBar appName="Hatch <App>" />
 ```
 
-Add `"@aerie/ui": "*"` to the app's `dependencies` — a workspace link, so
+Add `"@hatch/ui": "*"` to the app's `dependencies` — a workspace link, so
 editing a token hot-reloads with no publish step — and add
-`../Aerie.Web/packages/*/src/**/*.*;../Aerie.Web/packages/*/package.json` to the
+`../Hatch.Web/packages/*/src/**/*.*;../Hatch.Web/packages/*/package.json` to the
 app's MSBuild `Inputs` glob. Without that last line a token edit will not
 retrigger the app's incremental build, and the app will ship a stale palette
 from a build that looked successful.
@@ -282,17 +215,17 @@ the native form controls.
 
 The native controls are why `base.css` exists at all rather than being a
 convenience. `<Field>` renders a label around a control the *app* supplies — a
-raw `<input>`, `<select>`, `<textarea>`. If the rules that make those look like
-Aerie's had stayed in admin's stylesheet, a `<Field>` specimen in the gallery
-would render a naked browser input, and a gallery that shows a component looking
+raw `<input>`, `<select>`, `<textarea>`. If those rules lived only in one
+consuming app's own stylesheet, a `<Field>` specimen in the gallery would
+render a naked browser input, and a gallery that shows a component looking
 different from how it looks in the app is worse than no gallery.
 
 Two rules are deliberately **not** in `base.css`, and each app states its own:
 
-- **`p { margin: 0 }`.** Admin's pages are laid out against the browser's
-  default paragraph margins and its own utilities stack on top of them. The
-  gallery makes the opposite call. Zeroing it centrally would move text on every
-  admin page.
+- **`p { margin: 0 }`.** An app laid out against the browser's default
+  paragraph margins, with its own utilities stacked on top, and the gallery
+  making the opposite call, are both legitimate choices. Zeroing it centrally
+  would move text on every page of the first kind of app.
 - **`html, body, #root { height: 100% }`.** A full-height flex shell is an
   app-shell decision, not a property of the vocabulary.
 
@@ -306,10 +239,9 @@ Two rules are deliberately **not** in `base.css`, and each app states its own:
 | Text | `<Badge>`, `<Text>` |
 | The exception | `<EmptyState>` |
 
-The nine primitives after the chrome are the nine patterns that already existed
-as CSS conventions in admin — the `text-*` tones at 117 sites, `btn-*` at 104,
-`field` at 105 — extracted rather than invented. That is why the set is small
-and why it is the right small set.
+The nine primitives after the chrome are extracted from CSS conventions that
+already existed and repeated across the house's apps, rather than invented.
+That is why the set is small and why it is the right small set.
 
 Four conventions run through them:
 
@@ -349,29 +281,22 @@ way.
 
 ### Pages that are not React apps
 
-Two pages in the house cannot render `<TopBar>`: **Swagger UI**, which is
-Swashbuckle's document that Aerie reaches only through injected `<head>`
-content, and **`apps/logo`**, a static export whose runtime loads its own React
-from a CDN. Both were one-way trips from the app picker.
-
-`@aerie/ui/standalone/topbar` is the same bar built with DOM calls, for a page
-that cannot import the React component. (The `apps/chrome` build that once
-emitted it as `topbar.js` + `topbar.css` for Swagger UI and the logo export
-left with those two pages; the standalone entry point remains in the library
-for the next page that needs it.)
+`@hatch/ui/standalone/topbar` is `<TopBar>` built with DOM calls instead of
+React, for a page that cannot import the React component — Swagger UI
+(Swashbuckle's own document, reached only through injected `<head>` content)
+is the one currently in the house, and a static export would be another. It is
+kept in the library even while nothing currently wires it up, for the next
+page that needs it:
 
 ```html
-<link rel="stylesheet" href="/apps/chrome/topbar.css">
-<script>window.aerieTopBar = { appName: 'Aerie Logo', theme: 'light' };</script>
-<script src="/apps/chrome/topbar.js"></script>
+<link rel="stylesheet" href="topbar.css">
+<script>window.hatchTopBar = { appName: 'Hatch API', theme: 'switch' };</script>
+<script src="topbar.js"></script>
 ```
 
 `theme` is `switch` (the page is themed — render the Auto/Light/Dark control) or
 `light`/`dark` (the page has one appearance — pin the root to it and render no
-control). Swagger takes `switch`, because it is dressed from the same tokens and
-the control is therefore telling the truth about the whole page. The logo export
-takes `light`: it is a fixed cream design, and a toggle there would recolor a
-48px bar and leave the page behind it.
+control).
 
 What is shared is the stylesheets — the *same* `TopBar.css`, `AppSwitcher.css`
 and `ThemeSwitch.css` files the React components import — and the theme store.
@@ -381,24 +306,24 @@ it appears in one of the three React components. A change to the CSS reaches
 both; a change to the *markup* has to be made twice, and that is the price of
 not shipping React to a static page.
 
-`base.css` is deliberately not imported there. It paints the body, and these are
-host pages with their own designs; the bar dresses itself and touches nothing
+`base.css` is deliberately not imported there. It paints the body, and a host
+page like this has its own design; the bar dresses itself and touches nothing
 outside its own `<header>`.
 
 ## The gallery
 
-[`apps/design`](../src/Aerie.Web/apps/design/README.md), served at
+[`apps/design`](../src/Hatch.Web/apps/design/README.md), served at
 `/apps/design`, is every token and component rendered in both themes and in the
 states an app never shows you.
 
 It is a workbench, not a product surface. Its purpose is that a component built
 after it exists is developed *there* — against its own disabled, loading, error,
-empty and long-content states — rather than inside a page of admin where only
-the happy path is visible.
+empty and long-content states — rather than inside a page of a consuming app
+where only the happy path is visible.
 
 ### Adding a section
 
-One entry in [`src/sections.ts`](../src/Aerie.Web/apps/design/src/sections.ts):
+One entry in [`src/sections.ts`](../src/Hatch.Web/apps/design/src/sections.ts):
 
 ```ts
 { group: 'Components', slug: 'toolbar', title: 'Toolbar', Page: ToolbarPage },
@@ -416,7 +341,7 @@ so a designer reading the nav top to bottom reads it in the order the decisions
 compound.
 
 A page is built from three helpers in
-[`components/Gallery.tsx`](../src/Aerie.Web/apps/design/src/components/Gallery.tsx):
+[`components/Gallery.tsx`](../src/Hatch.Web/apps/design/src/components/Gallery.tsx):
 `<GalleryPage>` (title, one line saying what the group is for, the specimens),
 `<GallerySection>` (a named run, whose `note` carries **the rule the run exists
 to state** — the rule is the part a designer needs and the swatch is only the
@@ -426,7 +351,7 @@ evidence), and `<TokenName>`/`<TokenValue>`.
 
 - **It reads the values the browser resolved** rather than restating them, so a
   swatch can never disagree with the token it claims to show. That is
-  [`lib/useTokenValues.ts`](../src/Aerie.Web/apps/design/src/lib/useTokenValues.ts).
+  [`lib/useTokenValues.ts`](../src/Hatch.Web/apps/design/src/lib/useTokenValues.ts).
 - **It holds no component CSS of its own.** It shows a component by rendering
   it, never by restating its styles. The only rules in `App.css` are the
   gallery's own chrome and the frames its specimens sit in. A gallery whose copy
@@ -439,59 +364,46 @@ And it wears the bar it documents, which is not decoration: the one context a
 top bar is never shown in on a specimen page is an actual app, and this is the
 app that can show both at once.
 
-## The plumbing tax: a new app, in six places
+## The plumbing tax: a new app, in several places
 
-A new app under `apps/` costs six edits outside its own folder. This is the list,
-and it has been paid twice knowingly — by `apps/design` and by `apps/home` — so
-it is a checklist rather than an estimate.
+A new app under `apps/` costs edits outside its own folder, each paid once
+already by `apps/design` — the only other app to join `apps/hatch` so far — so
+this is a checklist rather than an estimate.
 
-1. **`src/Aerie.Api/Aerie.Api.csproj`** — an `<AppName>Source` `ItemGroup` and a
+1. **`src/Hatch.Api/Hatch.Api.csproj`** — an `<AppName>Source` `ItemGroup` and a
    `Build<AppName>` target `BeforeTargets="Build" DependsOnTargets="NpmInstall"`,
    guarded by `Condition="'$(Skip<AppName>Build)' != 'true'"`, running
-   `npm run build -w apps/<app>` from `../Aerie.Web`. `NpmInstall` is the only
+   `npm run build -w apps/<app>` from `../Hatch.Web`. `NpmInstall` is the only
    target that shells out to `npm install`, and it does it once at the workspace
    root. **The `Inputs` glob stays per-app** — that is what keeps an edit to one
-   app from rebuilding all the others — so an app consuming a shared package must
-   include `../Aerie.Web/packages/*/src/**/*.*` in its own glob. Spelled
+   app from rebuilding the other — so an app consuming a shared package must
+   include `../Hatch.Web/packages/*/src/**/*.*` in its own glob. Spelled
    `packages/*/src` rather than `packages/**` so a stray `node_modules` under a
    package can never widen it.
-2. **`src/Aerie.Api/Dockerfile.api`** — a `COPY` of the app's `package.json` into
+2. **`src/Hatch.Api/Dockerfile.api`** — a `COPY` of the app's `package.json` into
    the `web-build` stage *ahead of* `npm ci`, and `-p:Skip<AppName>Build=true` on
    the `dotnet publish` line. The first is not optional: `npm ci` reads the
    lockfile, finds a `link:` entry for every workspace, and fails outright if
-   that manifest is not on disk. The list is ten app manifests plus both
-   packages.
-3. **`src/Aerie.Api/Program.cs`** — `AddRedirect("^apps/<app>$", "apps/<app>/")`,
-   and `MapFallbackToFile("/apps/<app>/{*path:nonfile}", …)` **only if the app
-   has a client-side router**. `apps/home` deliberately has no fallback: it is
-   one page, and a fallback would answer every mistyped path under `/apps/home/`
-   with the picker and a 200 instead of the 404 that path deserves.
+   that manifest is not on disk.
+3. **`src/Hatch.Api/Program.cs`** — `AddRedirect("^apps/<app>$", "apps/<app>/")`
+   and `MapFallbackToFile("/apps/<app>/{*path:nonfile}", …)` for an app with a
+   client-side router.
 4. **`.github/workflows/ci.yml`** — the `app:` matrix.
 5. **`Makefile`** — the `test-web` app list. The apps are named one at a time
    rather than run with `--workspaces` so the `==>` line says which one is
    building when something fails.
-6. **`src/Aerie.Web/apps/home/src/apps.ts`** — a tile, in one of the three tiers.
-   Nothing else in the picker enumerates the services.
 
 Inside the app's own folder: `package.json` (name, the standard
-`dev`/`build`/`lint`/`preview` scripts, `"@aerie/ui": "*"`), and a
+`dev`/`build`/`lint`/`preview` scripts, `"@hatch/ui": "*"`), and a
 `vite.config.ts` with `base: '/apps/<app>/'`, `outDir` pointing at
-`src/Aerie.Api/wwwroot/apps/<app>`, `emptyOutDir: true`, and the
-`aerieRevision({ app: '<app>' })` plugin.
+`src/Hatch.Api/wwwroot/apps/<app>`, `emptyOutDir: true`, and the
+`hatchRevision({ app: '<app>' })` plugin.
 
 One trap, because it has cost time before: **`.gitignore`'s NuGet
 `**/[Pp]ackages/*` rule is a path glob, not a NuGet-aware one**, and it
-silently swallowed `src/Aerie.Web/packages/` — `git add` reported nothing and
+silently swallowed `src/Hatch.Web/packages/` — `git add` reported nothing and
 `git status` stayed clean. It is negated explicitly now, but anything new under
 a directory called `packages` wants a `git check-ignore` before it is trusted.
-
-Two apps are deliberately or accidentally outside part of that list, and both
-are worth knowing before reading the csproj as the definitive one.
-`apps/trading` has no MSBuild target because its bundle is served by the trading
-service and builds into `src/Aerie.Trading/`, not into `wwwroot/apps`.
-`apps/hatch` has none either — it is built by `make test-web` and, in the
-release image, by the `web-build` stage's `npm run build --workspaces`, but a
-local `make build` does not produce it. That is a gap rather than a decision.
 
 Build with `make` (`make build`, `make test-web`) rather than a bare `dotnet`:
 the npm step needs the shell profile.
@@ -511,11 +423,9 @@ The properties above stop holding if any of these is done:
   what the components declare.
 - **Component CSS copied into the gallery.** A gallery that restates a component
   can be wrong about it, and it will be wrong exactly when it matters.
-- **An app consuming `@aerie/ui` without `packages/*/src` in its MSBuild
+- **An app consuming `@hatch/ui` without `packages/*/src` in its MSBuild
   `Inputs`.** The build stays green and ships a stale palette.
-- **React imported into `@aerie/lib`, or into `theme/themeStore.ts`.** The first
-  breaks the package's usability from a test or a worker; the second puts React
-  on Swagger UI.
+- **React imported into `theme/themeStore.ts`.** That puts React on Swagger UI.
 - **Extending `<TopBar>` by forking it.** It takes `leading` and `trailing` for
   exactly this reason.
 
@@ -524,5 +434,5 @@ The properties above stop holding if any of these is done:
 - [`docs/ethos.md`](ethos.md) — the rule that constrains every commit, and which
   applies to gallery sample content as hard as to the apps: a `<Card>` example
   says "Living Room", never a real room in a real house, and never a real domain.
-- [`src/Aerie.Web/apps/design/README.md`](../src/Aerie.Web/apps/design/README.md)
+- [`src/Hatch.Web/apps/design/README.md`](../src/Hatch.Web/apps/design/README.md)
   — the gallery, app-side.

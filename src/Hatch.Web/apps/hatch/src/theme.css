@@ -1,0 +1,23 @@
+/* Hatch's base layer.
+
+   The vocabulary is @hatch/ui/tokens.css and the document layer - box model,
+   body, headings, native form controls - is @hatch/ui/base.css. A color,
+   radius, type step or spacing value written here as a literal is a bug. */
+@import '@hatch/ui/tokens.css';
+@import '@hatch/ui/base.css';
+
+/* The board is a full-height app: the bar, then columns that scroll sideways
+   as a group and downwards on their own. That needs a height to work against
+   all the way up the tree, and base.css leaves app-shell decisions to the app. */
+html, body, #root {
+  width: 100%;
+  height: 100%;
+}
+
+.text-muted {
+  color: var(--muted);
+}
+
+.text-danger {
+  color: var(--danger);
+}

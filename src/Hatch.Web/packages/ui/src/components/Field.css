@@ -1,0 +1,47 @@
+/* Admin's .field / .field-label, unchanged: a stacked label over a control,
+   the label at the label register in --muted.
+
+   Two nested flex columns rather than one, because the <label> has to end
+   before the hint and the error begin — see Field.tsx. Visually it is the same
+   column it always was.
+
+   The child combinator rather than a descendant selector, so a <Field> holding
+   a small composite — a combobox with its own inner input, an icon picker —
+   does not have those inner controls stretched to full width by a rule meant
+   for the field's own one. */
+
+.hatch-field,
+.hatch-field__control {
+  display: flex;
+  flex-direction: column;
+}
+
+.hatch-field__label {
+  display: block;
+  font-size: var(--t-label);
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: var(--sp-1);
+}
+
+.hatch-field__control > input,
+.hatch-field__control > select,
+.hatch-field__control > textarea {
+  width: 100%;
+}
+
+/* The line under a control. It sits at the label register: it is about the
+   control, not part of the page's prose. */
+.hatch-field__hint,
+.hatch-field__error {
+  margin-top: var(--sp-1);
+  font-size: var(--t-label);
+}
+
+.hatch-field__hint {
+  color: var(--muted);
+}
+
+.hatch-field__error {
+  color: var(--danger);
+}

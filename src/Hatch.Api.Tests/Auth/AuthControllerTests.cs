@@ -1,0 +1,546 @@
+using Hatch.Api.Common;
+using Hatch.Api.Controllers;
+using Hatch.Api.Ef;
+using Hatch.Api.Models.Auth;
+using Hatch.Api.Services.Auth;
+using Hatch.Api.Services.Media;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using System.Net;
+
+namespace Hatch.Api.Tests.Auth;
+
+/// <summary>
+/// The forwardAuth endpoint and the three endpoints a device uses on itself.
+///
+/// Verify carries the load here. Traefik proxies a *copy* of the original
+/// request to it, so the request this controller can see is always GET
+/// /api/auth/verify on this pod - a path that is itself on the allow-list.
+/// Every case below is really one question: does the endpoint answer about the
+/// request Traefik asked about, or about itself?
+/// </summary>
+public class AuthControllerTests
+{
+    private static readonly DateTimeOffset Now = new(2026, 8, 21, 12, 0, 0, TimeSpan.Zero);
+
+    [Theory]
+    [InlineData("/health/ready")]
+    [InlineData("/media/Beatles/Revolver/01.flac")]
+    [InlineData("/api/ui-logs")]
+    [InlineData("/apps/auth/r/K3M9P2QT")]
+    public async Task VerifyAllowsAnExemptOriginalPath(string uri)
+    {
+        var controller = NewController(out var context);
+        Forwarded(context, uri);
+
+        Assert.IsType<NoContentResult>(await controller.Verify(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task VerifyFailsClosedWhenTraefikDidNotSayWhatItIsAskingAbout()
+    {
+        // The trap: this request's own path is /api/auth/verify, which is
+        // exempt. Falling back to it would answer 204 to everything the moment
+        // the forwardAuth headers stopped arriving - a gate that opens when it
+        // breaks, which is worse than no gate because it looks like one.
+        var controller = NewController(out var context);
+
+        Assert.IsType<UnauthorizedResult>(await controller.Verify(CancellationToken.None));
+    }
+
+    [Theory]
+    // Both spellings of the traversal, because Traefik forwards the raw URI and
+    // Kestrel will have collapsed it by the time anything is served.
+    [InlineData("/media/../apps/admin")]
+    [InlineData("/media/%2e%2e/apps/admin")]
+    [InlineData("/media/./../apps/admin")]
+    public async Task VerifyJudgesThePathTheOriginServerWillActuallyServe(string uri)
+    {
+        var controller = NewController(out var context);
+        Forwarded(context, uri);
+
+        Assert.IsType<UnauthorizedResult>(await controller.Verify(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task VerifyRedirectsANavigationAndCarriesTheOriginalUrl()
+    {
+        var controller = NewController(out var context);
+        Forwarded(context, "/apps/admin/devices?tab=zones");
+        context.Request.Headers["Sec-Fetch-Mode"] = "navigate";
+
+        var result = Assert.IsType<StatusCodeResult>(await controller.Verify(CancellationToken.None));
+
+        Assert.Equal(StatusCodes.Status302Found, result.StatusCode);
+        // Absolute, on the host the browser was actually going to. Traefik
+        // resolves a redirect from this endpoint against its own request to it,
+        // so the relative form AuthMiddleware returns would reach the browser
+        // as http://api.<ns>.svc.cluster.local:8080/apps/auth/ - see
+        // AuthChallenge.SignInLocation. ?r= stays a relative path regardless.
+        Assert.Equal(
+            "https://home.example.com/apps/auth/?r=%2Fapps%2Fadmin%2Fdevices%3Ftab%3Dzones",
+            context.Response.Headers.Location.ToString());
+        Assert.Equal("no-store", context.Response.Headers.CacheControl.ToString());
+    }
+
+    [Fact]
+    public async Task VerifyBouncesEachHostBackToItself()
+    {
+        // The cookie's Domain attribute covers every subdomain, so the tablet
+        // enrolls on kiosk. and is done. Sending it to home. to sign in would
+        // work and would still be wrong: it is a hostname change mid-flow on a
+        // device whose whole point is that nobody is operating it.
+        var controller = NewController(out var context);
+        Forwarded(context, "/", host: "kiosk.example.com");
+        context.Request.Headers["Sec-Fetch-Mode"] = "navigate";
+
+        Assert.IsType<StatusCodeResult>(await controller.Verify(CancellationToken.None));
+        Assert.Equal(
+            "https://kiosk.example.com/apps/auth/?r=%2F",
+            context.Response.Headers.Location.ToString());
+    }
+
+    [Theory]
+    // Not a host at all, and a host somewhere else entirely.
+    [InlineData("evil.example.com/path")]
+    [InlineData("evil.test")]
+    [InlineData("home.example.com.evil.test")]
+    public async Task VerifyWillNotBuildTheRedirectFromAHostItDoesNotOwn(string host)
+    {
+        // X-Forwarded-Host is a header, and the sign-in page is the one page
+        // everybody in the house is trained to trust - an open redirect through
+        // it is the classic own-goal. Outside the cookie's domain we fall back
+        // to the relative form rather than emitting somebody else's origin.
+        var controller = NewController(out var context);
+        Forwarded(context, "/apps/family/", host: host);
+        context.Request.Headers["Sec-Fetch-Mode"] = "navigate";
+
+        Assert.IsType<StatusCodeResult>(await controller.Verify(CancellationToken.None));
+        Assert.Equal(
+            "/apps/auth/?r=%2Fapps%2Ffamily%2F",
+            context.Response.Headers.Location.ToString());
+    }
+
+    [Fact]
+    public async Task VerifyStaysRelativeWhenThereIsNoCookieDomainToTrust()
+    {
+        // `make run`: no proxy, no cookie domain, and the relative redirect
+        // this endpoint has always returned is the correct one there.
+        var controller = NewController(out var context, cookieDomain: "");
+        Forwarded(context, "/apps/family/", host: "localhost:5080");
+        context.Request.Headers["Sec-Fetch-Mode"] = "navigate";
+
+        Assert.IsType<StatusCodeResult>(await controller.Verify(CancellationToken.None));
+        Assert.Equal(
+            "/apps/auth/?r=%2Fapps%2Ffamily%2F",
+            context.Response.Headers.Location.ToString());
+    }
+
+    [Fact]
+    public async Task VerifyRefusesAFetchWithABare401()
+    {
+        var controller = NewController(out var context);
+        Forwarded(context, "/api/zones");
+        context.Request.Headers["Sec-Fetch-Mode"] = "cors";
+        context.Request.Headers.Accept = "*/*";
+
+        Assert.IsType<UnauthorizedResult>(await controller.Verify(CancellationToken.None));
+        Assert.False(context.Response.Headers.ContainsKey("Location"));
+    }
+
+    [Fact]
+    public async Task VerifyStillDecidesForRealWhileThePodItselfEnforcesNothing()
+    {
+        // The canary split, stated as a test: EnforceInProcess suspends the
+        // in-process middleware and nothing else. If it ever reached the gate
+        // as well, the canary would answer 204 to every route Traefik asks
+        // about - one flag walling nothing instead of walling one app.
+        var controller = NewController(out var context, enforceInProcess: false);
+        Forwarded(context, "/apps/docs/");
+        context.Request.Headers["Sec-Fetch-Mode"] = "cors";
+
+        Assert.IsType<UnauthorizedResult>(await controller.Verify(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task VerifyReadsTheMethodTraefikForwardedRatherThanItsOwnGet()
+    {
+        // The proxied request is always a GET, so a POST that must not be
+        // bounced is only distinguishable from X-Forwarded-Method.
+        var controller = NewController(out var context);
+        Forwarded(context, "/api/zones", method: HttpMethods.Post);
+        context.Request.Headers["Sec-Fetch-Mode"] = "navigate";
+
+        Assert.IsType<UnauthorizedResult>(await controller.Verify(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task VerifyNamesTheGrantForTraefikToCopyOnward()
+    {
+        var grant = Grant();
+        var controller = NewController(out var context, new StubAuthService(grant));
+        Forwarded(context, "/apps/admin/devices");
+        context.Request.Headers.Cookie = "hatch_grant=a-token";
+
+        Assert.IsType<NoContentResult>(await controller.Verify(CancellationToken.None));
+        Assert.Equal(grant.Id.ToString(), context.Response.Headers[AuthChallenge.GrantHeader].ToString());
+        Assert.Equal("Kitchen tablet", context.Response.Headers[AuthChallenge.LabelHeader].ToString());
+    }
+
+    [Fact]
+    public async Task VerifyKeepsAnAwkwardLabelFromBecomingASecondHeaderLine()
+    {
+        // A label is free text an admin typed, and this one is about to become
+        // a response header.
+        var controller = NewController(out var context, new StubAuthService(Grant("Ada\r\nX-Admin: yes")));
+        Forwarded(context, "/apps/admin/devices");
+        context.Request.Headers.Cookie = "hatch_grant=a-token";
+
+        await controller.Verify(CancellationToken.None);
+
+        Assert.Equal("Ada??X-Admin: yes", context.Response.Headers[AuthChallenge.LabelHeader].ToString());
+    }
+
+    [Fact]
+    public async Task VerifyUsesTheForwardedHostSoAnExemptHostStaysExempt()
+    {
+        var controller = NewController(out var context, exemptHosts: ["files.example.com"]);
+        Forwarded(context, "/hatch-kiosk.apk", host: "files.example.com");
+
+        Assert.IsType<NoContentResult>(await controller.Verify(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RedeemMintsAGrantAndHandsBackTheCookie()
+    {
+        var grant = Grant();
+        var auth = new StubAuthService { RedeemResult = new AuthRedemption(grant, "a-token", null) };
+        var controller = NewController(out var context, auth);
+        context.Request.Headers.UserAgent = "Mozilla/5.0 (iPhone)";
+
+        var result = Assert.IsType<OkObjectResult>(
+            await controller.Redeem(new RedeemRequest("HATCH-K3M9-P2QT", "Ada's iPhone"), CancellationToken.None));
+
+        var dto = Assert.IsType<AuthGrantDto>(result.Value);
+        Assert.Equal(grant.Id, dto.Id);
+        Assert.True(dto.IsCurrent);
+        Assert.Equal([("HATCH-K3M9-P2QT", "Ada's iPhone", "Mozilla/5.0 (iPhone)", "10.0.0.7")], auth.Redemptions);
+
+        var headers = context.Response.Headers.SetCookie;
+        var cookie = headers[0]!;
+        Assert.StartsWith("hatch_grant=a-token;", cookie);
+        Assert.Contains("domain=.example.com", cookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
+
+        // The second header is the tombstone for a host-only cookie of the same
+        // name - the landmine left in any browser that signed in before
+        // Auth:CookieDomain was supplied. It carries no Domain, so it
+        // matches only that cookie and never the one just issued.
+        var tombstone = headers[1]!;
+        Assert.StartsWith("hatch_grant=;", tombstone);
+        Assert.DoesNotContain("domain=", tombstone, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("expires=Thu, 01 Jan 1970", tombstone, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(AuthRedemption.InvalidCode)]
+    [InlineData(AuthRedemption.Expired)]
+    [InlineData(AuthRedemption.AlreadyRedeemed)]
+    public async Task ARefusedRedemptionSaysWhichRefusalItWasAndSetsNoCookie(string error)
+    {
+        // "That code expired" and "that isn't a code" send a person to
+        // different next actions, and neither tells an attacker anything a
+        // 15-minute single-use code hadn't already conceded.
+        var auth = new StubAuthService { RedeemResult = AuthRedemption.Failed(error) };
+        var controller = NewController(out var context, auth);
+
+        var result = Assert.IsType<BadRequestObjectResult>(
+            await controller.Redeem(new RedeemRequest("HATCH-0000-0000", null), CancellationToken.None));
+
+        Assert.Equal(error, Assert.IsType<AuthErrorDto>(result.Value).Error);
+        Assert.Equal(0, context.Response.Headers.SetCookie.Count);
+    }
+
+    [Fact]
+    public async Task MeAnswersFromTheCookieWhenTheWallIsDown()
+    {
+        // Every phase before 5, and all of local dev: the middleware never
+        // looked, so "who am I" has to look for itself.
+        var auth = new StubAuthService(Grant());
+        var controller = NewController(out var context, auth, enabled: false);
+        context.Request.Headers.Cookie = "hatch_grant=a-token";
+
+        var result = Assert.IsType<OkObjectResult>(await controller.Me(CancellationToken.None));
+
+        Assert.Equal("Kitchen tablet", Assert.IsType<AuthGrantDto>(result.Value).Label);
+        var (presented, ip) = Assert.Single(auth.Verified);
+        Assert.Equal(["a-token"], presented);
+        Assert.Equal("10.0.0.7", ip);
+    }
+
+    [Fact]
+    public async Task MeReusesWhatTheMiddlewareAlreadyResolvedRatherThanVerifyingTwice()
+    {
+        var grant = Grant();
+        var auth = new StubAuthService(grant);
+        var controller = NewController(out var context, auth);
+        context.SetAuthGrant(grant);
+
+        Assert.IsType<OkObjectResult>(await controller.Me(CancellationToken.None));
+        Assert.Empty(auth.Verified);
+    }
+
+    [Fact]
+    public async Task MeRefusesAnUnenrolledCaller()
+    {
+        var controller = NewController(out _, new StubAuthService(null));
+
+        Assert.IsType<UnauthorizedResult>(await controller.Me(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SigningOutDeletesTheGrantAndExpiresTheCookie()
+    {
+        var grant = Grant();
+        var auth = new StubAuthService(grant);
+        var controller = NewController(out var context, auth);
+        context.Request.Headers.Cookie = "hatch_grant=a-token";
+
+        Assert.IsType<NoContentResult>(await controller.SignOutDevice(CancellationToken.None));
+
+        // Revocation is deletion - the same operation the Sessions page
+        // performs on someone else's device, so there is no second notion of a
+        // "signed out but still enrolled" grant to keep consistent.
+        Assert.Equal([grant.Id], auth.Revoked);
+        var cookie = context.Response.Headers.SetCookie.ToString();
+        Assert.StartsWith("hatch_grant=;", cookie);
+        Assert.Contains("expires=Thu, 01 Jan 1970", cookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("domain=.example.com", cookie, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SigningOutWithNothingToSignOutOfStillClearsTheCookie()
+    {
+        // A cookie holding a token no row answers to is exactly the state that
+        // makes "sign out and try again" fail to fix anything.
+        var auth = new StubAuthService(null);
+        var controller = NewController(out var context, auth);
+        context.Request.Headers.Cookie = "hatch_grant=a-stale-token";
+
+        Assert.IsType<NoContentResult>(await controller.SignOutDevice(CancellationToken.None));
+
+        Assert.Empty(auth.Revoked);
+        Assert.StartsWith("hatch_grant=;", context.Response.Headers.SetCookie.ToString());
+    }
+
+    [Fact]
+    public async Task TheSessionListMarksTheCallersOwnDeviceAndOnlyThat()
+    {
+        var mine = Grant("This laptop");
+        var theirs = Grant("Kitchen tablet");
+        var auth = new StubAuthService(mine);
+        auth.Grants.AddRange([theirs, mine]);
+        var controller = NewController(out var context, auth);
+        context.Request.Headers.Cookie = "hatch_grant=a-token";
+
+        var result = Assert.IsType<OkObjectResult>(await controller.ListGrants(CancellationToken.None));
+
+        var dtos = Assert.IsType<List<AuthGrantDto>>(result.Value);
+        Assert.Equal(["Kitchen tablet", "This laptop"], dtos.Select(d => d.Label));
+        Assert.Equal([false, true], dtos.Select(d => d.IsCurrent));
+    }
+
+    [Fact]
+    public async Task TheSessionListMarksNothingCurrentWhenTheCallerHoldsNoGrant()
+    {
+        // Every phase before 5 and all of local dev: the wall is down, so the
+        // page is reachable without a grant and no row is "this device".
+        var auth = new StubAuthService(null);
+        auth.Grants.Add(Grant());
+        var controller = NewController(out _, auth, enabled: false);
+
+        var result = Assert.IsType<OkObjectResult>(await controller.ListGrants(CancellationToken.None));
+
+        Assert.False(Assert.Single(Assert.IsType<List<AuthGrantDto>>(result.Value)).IsCurrent);
+    }
+
+    [Fact]
+    public async Task RevokingAnotherDeviceDeletesIt()
+    {
+        var auth = new StubAuthService(Grant());
+        var controller = NewController(out var context, auth);
+        context.Request.Headers.Cookie = "hatch_grant=a-token";
+        var theirs = Guid.NewGuid();
+
+        Assert.IsType<NoContentResult>(await controller.RevokeGrant(theirs, CancellationToken.None));
+        Assert.Equal([theirs], auth.Revoked);
+    }
+
+    [Fact]
+    public async Task RevokingYourOwnDeviceIsRefusedRatherThanLeavingACookieNoRowAnswersTo()
+    {
+        // Not squeamishness about lockout - it is that this path deletes the
+        // row and cannot clear the cookie on the browser it isn't answering,
+        // which is the state that makes "sign out and back in" fail to help.
+        var mine = Grant();
+        var auth = new StubAuthService(mine);
+        var controller = NewController(out var context, auth);
+        context.Request.Headers.Cookie = "hatch_grant=a-token";
+
+        var result = Assert.IsType<BadRequestObjectResult>(await controller.RevokeGrant(mine.Id, CancellationToken.None));
+
+        Assert.Equal(AuthController.OwnGrantError, Assert.IsType<AuthErrorDto>(result.Value).Error);
+        Assert.Empty(auth.Revoked);
+    }
+
+    [Fact]
+    public async Task RevokingAGrantThatIsAlreadyGoneIsA404()
+    {
+        var auth = new StubAuthService(Grant()) { RevokeResult = false };
+        var controller = NewController(out var context, auth);
+        context.Request.Headers.Cookie = "hatch_grant=a-token";
+
+        Assert.IsType<NotFoundResult>(await controller.RevokeGrant(Guid.NewGuid(), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AnInviteComesBackOnceWithEverythingAQrAndAReadingVoiceNeed()
+    {
+        var auth = new StubAuthService(Grant());
+        var controller = NewController(out var context, auth);
+
+        var result = Assert.IsType<OkObjectResult>(
+            await controller.CreateInvite(new CreateInviteRequest("Ada's iPhone"), CancellationToken.None));
+
+        var dto = Assert.IsType<AuthInviteDto>(result.Value);
+        Assert.Equal("K3M9P2QT", dto.Code);
+        Assert.Equal("HATCH-K3M9-P2QT", dto.FormattedCode);
+        // Built from Auth:SignInPath, so an install that mounts the shell
+        // elsewhere moves the QR target with it.
+        Assert.Equal("/apps/auth/r/K3M9P2QT", dto.RedeemPath);
+        Assert.Equal("Ada's iPhone", dto.Label);
+        Assert.Equal([("Ada's iPhone", (Guid?)null, false)], auth.InvitesCreated);
+        // A live credential has no business in a cache, anyone's.
+        Assert.Equal("no-store", context.Response.Headers.CacheControl.ToString());
+    }
+
+    private static EfAuthGrant Grant(string label = "Kitchen tablet") => new()
+    {
+        Id = Guid.NewGuid(),
+        TokenHash = AuthTokens.Hash("a-token"),
+        Label = label,
+        Kind = AuthGrantKind.Interactive,
+        CreatedAt = Now,
+        CookieIssuedAt = Now,
+    };
+
+    /// <summary>The headers Traefik's forwardAuth adds; everything else on the request is the original's, unchanged.</summary>
+    private static void Forwarded(HttpContext context, string uri, string? method = null, string host = "home.example.com")
+    {
+        context.Request.Headers["X-Forwarded-Method"] = method ?? HttpMethods.Get;
+        context.Request.Headers["X-Forwarded-Proto"] = "https";
+        context.Request.Headers["X-Forwarded-Host"] = host;
+        context.Request.Headers["X-Forwarded-Uri"] = uri;
+    }
+
+    [Fact]
+    public async Task LinksADeviceToAPerson()
+    {
+        var auth = new StubAuthService();
+        var controller = NewController(out _, auth);
+        var grantId = Guid.NewGuid();
+        var personId = Guid.NewGuid();
+
+        Assert.IsType<NoContentResult>(await controller.LinkGrantPerson(grantId, new LinkPersonRequest(personId), CancellationToken.None));
+
+        Assert.Equal([(grantId, personId)], auth.PersonLinks);
+    }
+
+    [Fact]
+    public async Task UnlinksOnANullPersonRatherThanIgnoringTheCall()
+    {
+        // "Nobody" has to be something the API can be *told*. A handler that
+        // treated a null as "nothing to do" would leave the Sessions page with
+        // no way to undo a mistaken link at all.
+        var auth = new StubAuthService();
+        var controller = NewController(out _, auth);
+        var grantId = Guid.NewGuid();
+
+        Assert.IsType<NoContentResult>(await controller.LinkGrantPerson(grantId, new LinkPersonRequest(null), CancellationToken.None));
+
+        Assert.Equal([(grantId, (Guid?)null)], auth.PersonLinks);
+    }
+
+    [Fact]
+    public async Task TellsAStaleListApartFromAStaleDropdown()
+    {
+        // Two failures, two status codes, because they send whoever is standing
+        // at the Sessions page to two different next actions: refresh the list,
+        // or refresh the people.
+        var missingGrant = new StubAuthService { LinkResult = GrantLinkResult.NoSuchGrant };
+        Assert.IsType<NotFoundResult>(
+            await NewController(out _, missingGrant).LinkGrantPerson(Guid.NewGuid(), new LinkPersonRequest(Guid.NewGuid()), CancellationToken.None));
+
+        var missingPerson = new StubAuthService { LinkResult = GrantLinkResult.NoSuchPerson };
+        var refused = Assert.IsType<BadRequestObjectResult>(
+            await NewController(out _, missingPerson).LinkGrantPerson(Guid.NewGuid(), new LinkPersonRequest(Guid.NewGuid()), CancellationToken.None));
+        Assert.Equal(AuthController.UnknownPersonError, Assert.IsType<AuthErrorDto>(refused.Value).Error);
+    }
+
+    [Fact]
+    public async Task CarriesThePersonThroughToTheInvite()
+    {
+        var auth = new StubAuthService();
+        var controller = NewController(out _, auth);
+        var personId = Guid.NewGuid();
+
+        await controller.CreateInvite(new CreateInviteRequest("Ada's iPhone", personId), CancellationToken.None);
+
+        // The link is set by the redemption rather than as a second step on the
+        // Sessions page afterwards.
+        Assert.Equal([("Ada's iPhone", (Guid?)personId, false)], auth.InvitesCreated);
+    }
+
+    private static AuthController NewController(
+        out HttpContext context,
+        IAuthService? auth = null,
+        bool enabled = true,
+        bool enforceInProcess = true,
+        string[]? exemptHosts = null,
+        string cookieDomain = ".example.com")
+    {
+        var options = Options.Create(new AuthOptions
+        {
+            Enabled = enabled,
+            EnforceInProcess = enforceInProcess,
+            CookieName = "hatch_grant",
+            CookieDomain = cookieDomain,
+            ExemptHosts = exemptHosts ?? [],
+        });
+
+        auth ??= new StubAuthService();
+        var gate = new AuthGate(
+            auth,
+            options,
+            Options.Create(new MediaLibraryOptions { RequestPath = "/media" }),
+            NullLogger<AuthGate>.Instance);
+
+        var httpContext = new DefaultHttpContext();
+        httpContext.Connection.RemoteIpAddress = IPAddress.Parse("10.0.0.7");
+        httpContext.Request.Method = HttpMethods.Get;
+        httpContext.Request.Scheme = "https";
+        httpContext.Request.Host = new HostString("api.hatch.svc.cluster.local");
+        httpContext.Request.Path = "/api/auth/verify";
+        context = httpContext;
+
+        var caller = new CallerIdentity(
+            new HttpContextAccessor { HttpContext = httpContext }, auth, options, new StubSiteSettings());
+
+        return new AuthController(gate, auth, caller, options, NullLogger<AuthController>.Instance)
+        {
+            ControllerContext = new ControllerContext { HttpContext = httpContext },
+        };
+    }
+}

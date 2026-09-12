@@ -45,8 +45,8 @@ Both go on the same `PATCH` as the description, and either may be a date
 ## Finding tickets, and editing a lot of them at once
 
 ```
-GET  ${AERIE_BASE}/api/hatch/issues?ancestorKey=AER-12&type=task&statusId=2
-POST ${AERIE_BASE}/api/hatch/issues/bulk
+GET  ${HATCH_BASE}/api/hatch/issues?ancestorKey=AER-12&type=task&statusId=2
+POST ${HATCH_BASE}/api/hatch/issues/bulk
 ```
 
 The filters are `projectId`, `type`, `statusId`, `parentKey`, `ancestorKey` and
@@ -68,8 +68,8 @@ request, one audit timestamp, and one place to read what did not apply.
 ## Where a project stands
 
 ```
-GET  ${AERIE_BASE}/api/hatch/plan             # every epic, and what it adds up to
-GET  ${AERIE_BASE}/api/hatch/plan/AER-12      # one issue, and each of its children
+GET  ${HATCH_BASE}/api/hatch/plan             # every epic, and what it adds up to
+GET  ${HATCH_BASE}/api/hatch/plan/AER-12      # one issue, and each of its children
 ```
 
 Both count **leaves** — issues with no children — so a subtree's total is the

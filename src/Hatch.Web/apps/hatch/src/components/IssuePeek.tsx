@@ -1,0 +1,241 @@
+import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Button, Modal } from '@hatch/ui';
+import { getIssue, patchIssue, setExpedited } from '../api/client';
+import { DescriptionEditor } from './DescriptionEditor';
+import { ExpediteControl } from './ExpediteControl';
+import { MomentChip } from './MomentChip';
+import { StatusPill } from './StatusPill';
+import { TypeBadge } from './TypeBadge';
+import { appHref } from '../lib/basename';
+import { isSettled } from '../lib/columns';
+import { message } from '../lib/errors';
+import type { AssigneeDirectory, IssueCard, Status } from '../types';
+
+/** What the peek had to ask for, and the card it asked about. `description`
+    undefined is "not here yet", which is what the Loading line reads off. */
+interface Asked {
+  key: string | null;
+  description?: string;
+  loadError?: string;
+  saveError?: string;
+  /** What the server last said about the flag, or undefined while the card's own value stands. */
+  expedited?: boolean;
+  expediteError?: string;
+  expediting?: boolean;
+}
+
+/**
+ * What a card says when you click it: everything the board already knew, at
+ * once, plus the one field people open a card to read.
+ *
+ * Key, type, title, column, parent and dates came down with the board
+ * (IssueCardDto), so the dialog paints the moment it opens. The description is
+ * the exception, and it is fetched here rather than shipped with every card:
+ * putting it on the board would slow the request every visit makes to save one
+ * on the clicks that actually want a brief. So it arrives a moment later, under
+ * its own heading, and can be fixed where it is read - skimming a column and
+ * correcting a brief are then the same gesture.
+ *
+ * The comments and the history are still deliberately not fetched: they are the
+ * reason the issue page exists, and so are the title, the type, the column, the
+ * parent and the dates. This dialog adds one field, not a second issue page,
+ * and it still hands over two ways to go further: the full issue in this tab,
+ * or in a new one.
+ *
+ * It is laid out against the modal's `footer`: the three ways out sit under the
+ * body rather than at the end of it, so a card whose brief runs to a page still
+ * opens on a dialog you can close. The description gets a box of its own inside
+ * that - a paragraph's worth, the same in both views - because the field people
+ * open a card to skim should not be the field that fills the dialog.
+ */
+export function IssuePeek({
+  card,
+  status,
+  directory,
+  onExpedited,
+  onClose,
+}: {
+  card: IssueCard | null;
+  /** The column it is sitting in, or undefined if the board has moved underneath. */
+  status?: Status;
+  /** Everybody who could own an issue, and who the caller is - fetched once by
+      the board and handed down, so a dialog opening does not cost a request to
+      find out whether the reader is a person. Null while it is still loading,
+      or where it could not be read. */
+  directory: AssigneeDirectory | null;
+  /** Something on this card changed on the server: the board reloads. */
+  onExpedited: () => void;
+  onClose: () => void;
+}) {
+  const key = card?.key ?? null;
+  /* Everything that had to be asked for, and the card it was asked for.
+
+     One slot rather than three, because which card the answers belong to is
+     the thing that has to be right: a response is applied only while its own
+     key is still the key on screen, and that guard is the state itself rather
+     than a flag beside it, so there is nothing to fall out of step with what
+     is drawn. It covers the fetch and the save alike - a save has no cleanup
+     function to hang a cancellation flag on, and two stale rules that differ
+     is the drift this component is otherwise removing. Without it, a request
+     resolving after the operator has clicked a different card paints the old
+     issue's brief on the new one. */
+  const [asked, setAsked] = useState<Asked>({ key });
+
+  /* Reset while rendering rather than in an effect, which is the same shape as
+     the draft reconciliation in DescriptionEditor: the new card's title and
+     the old card's description never reach the screen together, because React
+     re-renders on this before it commits. An effect would clear it a frame
+     late. BoardPage mounts the peek permanently with card={null} while it is
+     closed, so nothing here ever unmounts on its own and this is the only
+     thing that clears it. */
+  if (asked.key !== key) setAsked({ key });
+
+  /** Records an answer, if the card it was asked about is still the one on screen. */
+  const apply = useCallback((about: string, answer: Partial<Asked>) => {
+    setAsked((prev) => (prev.key === about ? { ...prev, ...answer } : prev));
+  }, []);
+
+  useEffect(() => {
+    if (!key) return;
+    getIssue(key)
+      .then((issue) => apply(key, { description: issue.description }))
+      .catch((err: unknown) => apply(key, { loadError: message(err) }));
+  }, [key, apply]);
+
+  /* Never throws: DescriptionEditor awaits this and reads the answer, and a
+     rejection would leave it reading busy for ever. The board is not reloaded -
+     no card draws a description, so there is nothing out there for this to
+     change. */
+  const save = useCallback(
+    async (next: string): Promise<boolean> => {
+      if (!key) return false;
+      apply(key, { saveError: undefined });
+      try {
+        const issue = await patchIssue(key, { description: next });
+        apply(key, { description: issue.description });
+        return true;
+      } catch (err) {
+        apply(key, { saveError: message(err) });
+        return false;
+      }
+    },
+    [key, apply],
+  );
+
+  /* This one first, or no longer. Its own endpoint - the write is closed to an
+     API key - and it repaints from the answer rather than from the press: the
+     server's value is what is drawn, and a refusal leaves the control saying
+     what the issue still holds with the sentence beside it. The board behind
+     the dialog is reloaded too, because the float moves the card. */
+  const expedite = useCallback(
+    async (next: boolean) => {
+      if (!key) return;
+      apply(key, { expediting: true, expediteError: undefined });
+      try {
+        const issue = await setExpedited(key, next);
+        apply(key, { expedited: issue.expedited, expediting: false });
+        onExpedited();
+      } catch (err) {
+        apply(key, { expediting: false, expediteError: message(err) });
+      }
+    },
+    [key, apply, onExpedited],
+  );
+
+  // Rendered unconditionally so the dialog's own open/closed handling - focus,
+  // escape, the scrim - is the one that runs. Its title needs a card, though,
+  // so a closed peek has nothing to say. Below every hook: the rules of hooks
+  // are an error here.
+  if (!card) return <Modal open={false} onClose={onClose} title="" />;
+
+  // Shipped or shelved: either way nobody is waiting on the date any more, so
+  // the due chip stops warning. The same call the issue page makes.
+  const stopped = isSettled(status);
+  const head = <h4 className="hatch-section-title">Description</h4>;
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={card.key}
+      footer={
+        <div className="hatch-form-actions">
+          <Button onClick={onClose}>Close</Button>
+          {/* An anchor rather than a <Link>: target="_blank" opens a second
+              document, which React Router does not route. appHref is what keeps
+              that second document on the right prefix - see lib/basename.ts. */}
+          <Button as="a" href={appHref(`/issues/${card.key}`)} target="_blank" rel="noreferrer">
+            New tab ↗
+          </Button>
+          <Button as={Link} variant="primary" to={`/issues/${card.key}`} onClick={onClose}>
+            Open the issue
+          </Button>
+        </div>
+      }
+    >
+      <div className="hatch-peek">
+        <div className="hatch-peek-meta">
+          <TypeBadge type={card.type} />
+          {status && <StatusPill status={status} />}
+          {card.parentKey && (
+            <Link to={`/issues/${card.parentKey}`} onClick={onClose}>
+              ↳ {card.parentKey}
+            </Link>
+          )}
+        </div>
+
+        <p className="hatch-peek-title">{card.title}</p>
+
+        {/* The same control the issue page draws, so a card is expedited
+            without leaving the board. The card's own value until the server has
+            said otherwise: the board is reloaded on a press, but the dialog
+            stays open over it, and a control that waited for the refetch to
+            catch up would read as not having noticed. */}
+        <div className="hatch-peek-expedite">
+          <ExpediteControl
+            expedited={asked.expedited ?? card.expedited}
+            directory={directory}
+            busy={asked.expediting ?? false}
+            onChange={(next) => void expedite(next)}
+          />
+          {asked.expediteError && <span className="text-danger">{asked.expediteError}</span>}
+        </div>
+
+        {(card.readyAt || card.dueAt) && (
+          <div className="hatch-card-dates">
+            <MomentChip kind="ready" value={card.readyAt} />
+            <MomentChip kind="due" value={card.dueAt} muted={stopped} />
+          </div>
+        )}
+
+        <div className="hatch-peek-description">
+          {asked.loadError ? (
+            <>
+              <div className="hatch-section-head">{head}</div>
+              <p className="text-danger">{asked.loadError}</p>
+            </>
+          ) : asked.description === undefined ? (
+            <>
+              <div className="hatch-section-head">{head}</div>
+              <p className="text-muted">Loading…</p>
+            </>
+          ) : (
+            /* The key is load-bearing: it is what gives a second card a fresh
+               draft and a fresh preview flag rather than the first card's. */
+            <DescriptionEditor
+              key={card.key}
+              title={head}
+              value={asked.description}
+              onSave={save}
+              error={asked.saveError ?? null}
+              editorClassName="hatch-peek-box"
+              previewClassName="hatch-peek-box"
+              rows={8}
+            />
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}

@@ -1,0 +1,27 @@
+/* The gallery's base layer.
+
+   The box model, the body, the heading scale and the native form controls all
+   come from @hatch/ui/base.css - the same file admin imports, so a control
+   shown on a specimen page is the control an app renders rather than a copy of
+   it that can drift.
+
+   It states no component rules of its own (.card, .btn-*, .field). Those are
+   real components in @hatch/ui now, and the gallery shows them by rendering
+   them: a gallery holding its own copy of a component's styles is a gallery
+   that can be wrong about the component it exists to document. */
+@import '@hatch/ui/tokens.css';
+@import '@hatch/ui/base.css';
+
+/* The two rules base.css deliberately leaves to the app. The full-height root
+   is this app's shell - a bar over a rail beside a scrolling column - and the
+   flow margin is a decision: the gallery lays its own text out with gaps, so a
+   paragraph arriving with 14px of browser margin would double every one of
+   them. Admin makes the opposite call, which is why neither is in base.css. */
+html, body, #root {
+  width: 100%;
+  height: 100%;
+}
+
+p {
+  margin: 0;
+}

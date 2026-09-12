@@ -1,0 +1,19 @@
+/* Deliberately almost nothing.
+
+   Admin says "No zones yet." as one muted paragraph in the flow of the page,
+   and that is exactly what this renders. It is not a centred illustration with
+   a headline and a call to action: that is a design, and Phase 4 does not get
+   to make one. What this component buys today is a *name* for the pattern —
+   somewhere for commitment 3 to point when it says empty states are deliberate
+   — and one place for Phase 6 to change all of them at once. */
+
+.hatch-empty {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  color: var(--muted);
+}
+
+.hatch-empty__message {
+  margin: 0;
+}

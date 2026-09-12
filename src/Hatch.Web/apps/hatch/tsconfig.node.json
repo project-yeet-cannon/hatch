@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    // A composite project must emit, and this one's inputs now include the
+    // shared plugin one directory up - so without an outDir, `tsc -b` drops a
+    // .mjs and a .d.mts next to Hatch.Web/vite-plugin-hatch-revision.mts.
+    // That is worse than untidy: Vite resolves .mjs ahead of .mts, so a stale
+    // emit would silently win over the source every config here imports.
+    // rootDir has to be stated once outDir is: TypeScript otherwise infers it
+    // from the inputs, decides it is this app's own directory, and rejects the
+    // shared plugin for sitting above it.
+    "outDir": "./node_modules/.tmp/node-build",
+    "rootDir": "../..",
+    "skipLibCheck": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    "strict": true
+  },
+  "include": ["vite.config.ts", "../../vite-plugin-hatch-revision.mts"]
+}

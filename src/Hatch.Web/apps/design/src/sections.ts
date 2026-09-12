@@ -1,0 +1,82 @@
+import type { ComponentType } from 'react';
+import { ColorPage } from './pages/ColorPage';
+import { TypePage } from './pages/TypePage';
+import { SpacingPage } from './pages/SpacingPage';
+import { RadiusPage } from './pages/RadiusPage';
+import { ElevationPage } from './pages/ElevationPage';
+import { SeriesPage } from './pages/SeriesPage';
+import { TopBarPage } from './pages/TopBarPage';
+import { PageHeaderPage } from './pages/PageHeaderPage';
+import { CardPage } from './pages/CardPage';
+import { GridPage } from './pages/GridPage';
+import { TablePage } from './pages/TablePage';
+import { ModalPage } from './pages/ModalPage';
+import { FieldPage } from './pages/FieldPage';
+import { ButtonPage } from './pages/ButtonPage';
+import { BadgePage } from './pages/BadgePage';
+import { TextPage } from './pages/TextPage';
+import { EmptyStatePage } from './pages/EmptyStatePage';
+
+export interface Section {
+  /** The nav heading this section files under. Groups render in the order
+      they first appear below, so adding a section is one entry, not two. */
+  group: string;
+  /** The URL segment, and the key everything else is derived from. */
+  slug: string;
+  /** What the nav shows. */
+  title: string;
+  Page: ComponentType;
+}
+
+/**
+ * Every page in the gallery, in nav order.
+ *
+ * This is the file Phase 3 and Phase 4 edit: a component lands in @hatch/ui,
+ * its page lands in pages/, and one entry here puts it in the nav, on a route
+ * and behind a deep link. Nothing else in the app enumerates the sections.
+ *
+ * Groups appear when they have something in them: "Components" arrived with
+ * the first component, rather than sitting empty in the nav as a promise the
+ * app could not keep.
+ *
+ * Within Components the order is the order a page is built — the chrome, then
+ * the frame, then what goes in it, then what it says — rather than
+ * alphabetical. A designer reading the nav top to bottom reads it in the order
+ * the decisions compound.
+ */
+export const SECTIONS: Section[] = [
+  { group: 'Foundations', slug: 'color', title: 'Color', Page: ColorPage },
+  { group: 'Foundations', slug: 'type', title: 'Type', Page: TypePage },
+  { group: 'Foundations', slug: 'spacing', title: 'Spacing', Page: SpacingPage },
+  { group: 'Foundations', slug: 'radius', title: 'Radius', Page: RadiusPage },
+  { group: 'Foundations', slug: 'elevation', title: 'Elevation & motion', Page: ElevationPage },
+  { group: 'Foundations', slug: 'series', title: 'Series', Page: SeriesPage },
+  { group: 'Components', slug: 'top-bar', title: 'Top bar', Page: TopBarPage },
+  { group: 'Components', slug: 'page-header', title: 'Page header', Page: PageHeaderPage },
+  { group: 'Components', slug: 'card', title: 'Card', Page: CardPage },
+  { group: 'Components', slug: 'grid', title: 'Grid', Page: GridPage },
+  { group: 'Components', slug: 'table', title: 'Table', Page: TablePage },
+  { group: 'Components', slug: 'modal', title: 'Modal', Page: ModalPage },
+  { group: 'Components', slug: 'field', title: 'Field', Page: FieldPage },
+  { group: 'Components', slug: 'button', title: 'Button', Page: ButtonPage },
+  { group: 'Components', slug: 'badge', title: 'Badge', Page: BadgePage },
+  { group: 'Components', slug: 'text', title: 'Text', Page: TextPage },
+  { group: 'Components', slug: 'empty-state', title: 'Empty state', Page: EmptyStatePage },
+];
+
+/** The first section, and so where `/` and any unknown route land. */
+export const DEFAULT_SLUG = SECTIONS[0].slug;
+
+/** The sections grouped for the nav, preserving first-appearance order. */
+export function groupedSections(): { group: string; sections: Section[] }[] {
+  const groups: { group: string; sections: Section[] }[] = [];
+  for (const section of SECTIONS) {
+    const existing = groups.find((candidate) => candidate.group === section.group);
+    if (existing) {
+      existing.sections.push(section);
+    } else {
+      groups.push({ group: section.group, sections: [section] });
+    }
+  }
+  return groups;
+}

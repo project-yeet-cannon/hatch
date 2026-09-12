@@ -49,7 +49,7 @@ export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
 # environment, which git reads through an askpass helper. A mounted credential
 # helper and an SSH agent socket arrive already configured - as a bind-mounted
 # .gitconfig / .git-credentials, or as SSH_AUTH_SOCK - and wiring anything up
-# for them here would override what the person mounted. src/Aerie.Web/apps/hatch/public/hatch-at-home.md
+# for them here would override what the person mounted. src/Hatch.Web/apps/hatch/public/hatch-at-home.md
 # shows all three, on both platforms.
 if [ -n "${HATCH_GIT_TOKEN:-}" ]; then
     export GIT_ASKPASS=/usr/local/bin/git-askpass.sh
