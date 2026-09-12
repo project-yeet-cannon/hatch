@@ -278,8 +278,58 @@ public sealed class GoToWorkCommand(Runtime runtime)
     /// <summary>Changed paths named on a restart before the rest are counted instead.</summary>
     private const int NamedPaths = 5;
 
+    public static readonly string[] GoToWorkUsage =
+    [
+        "usage: hatch go-to-work [--under <epic key>] [--once] [--quiet]",
+        "                        [--interval <seconds>] [--max-runs <n>]",
+        "                        [--max-spend <dollars>] [--until <HH:MM>]",
+        "                        [--stop-file <path>]",
+        "                        [--restart-after <minutes> | --no-restart]",
+        "",
+        "  `work` in a circle: the next actionable issue, one increment, ask again -",
+        "  until nothing on the board is an agent's to move, and then wait and ask",
+        "  again every interval. Run inside the checkout the board is about; one loop",
+        "  per checkout.",
+        "",
+        "  It takes no ticket key. One increment on a named ticket is `hatch work",
+        "  AER-12`; this command's question is what is next, asked again and again.",
+        "",
+        "  --under        stay inside one epic's subtree",
+        "  --once         one pass, and out",
+        "  --quiet        no per-increment stream, only what each one ended as",
+        "  --interval     seconds to wait when there was nothing to do (default 60)",
+        "",
+        "  None of the bounds are set by default - an unattended run that stopped for",
+        "  a reason nobody asked for is a run somebody has to go and check on. Each is",
+        "  read between increments and through every wait, so the increment in flight",
+        "  always finishes:",
+        "",
+        "  --max-runs     stop after this many increments",
+        "  --max-spend    stop once the run has cost this much, in dollars",
+        "  --until        stop at this wall-clock hour - tomorrow, if it has gone by",
+        "  --stop-file    stop once this path exists. `touch` it from anywhere: no pid",
+        "                 to find, and no signal that could land in the middle of a push",
+        "",
+        "  A run also ends on three failed increments in a row, on a workspace that",
+        "  cannot be reset, and when the board's Runners page asks this runner to stop.",
+        "",
+        "  A loop whose own source changed on the trunk asks to be restarted as the",
+        "  new build, which needs something standing over the process to rebuild and",
+        "  run it again. A hatch started by hand has no such supervisor, and these",
+        "  three do nothing there:",
+        "",
+        "  --restart-after   come back as a newer build at least this often (default 30)",
+        "  --restart-after 0 ...only when its own source actually changed",
+        "  --no-restart      ...never",
+        "",
+        "  Exits 0 when the run ended; 1 on a refusal; 75 asking a supervisor to",
+        "  rebuild and run it again; 130 on an interrupt.",
+    ];
+
     public async Task<int> RunAsync(string[] args, CancellationToken ct)
     {
+        if (Usage.Wanted(args)) return Usage.Print(runtime.Say, GoToWorkUsage);
+
         string? key = null, under = null, until = null, stopFile = null;
         var interval = 60;
         var once = false;
@@ -341,8 +391,7 @@ public sealed class GoToWorkCommand(Runtime runtime)
                     break;
                 case "--no-restart": noRestart = true; break;
                 case var flag when flag.StartsWith('-'):
-                    runtime.Say.Complain($"hatch: go-to-work does not take {flag}");
-                    return 1;
+                    return Usage.Refuse(runtime.Say, $"go-to-work does not take {flag}", GoToWorkUsage);
                 default: key = args[i]; break;
             }
         }

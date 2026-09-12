@@ -1,9 +1,113 @@
+import { Link } from 'react-router-dom';
 import { Card, PageHeader } from '@aerie/ui';
 import { getRunner } from '../api/client';
 import { Command } from '../components/Command';
 import { detectPlatform } from '../lib/runnerPlatform';
 import { useLoaded } from '../lib/useLoaded';
 import type { RunnerDownloads, RunnerDownload } from '../types';
+
+/**
+ * The command reference under "4. Using it".
+ *
+ * The same surface `hatch --help` prints, in the same order, because a page
+ * that taught a different vocabulary from the binary it hands out would be a
+ * second thing to keep true. Held as data rather than as markup so the rows
+ * line up on one grid however long a note runs, and every one of them is a
+ * <Command/> - a reference nobody can copy out of is a reference somebody
+ * retypes, and a mistyped flag is an overnight run that did not happen.
+ *
+ * Deliberately not the whole of it: `api`, and the planning shapes it reaches,
+ * are a document rather than a row. The Docs link at the end is where they are.
+ */
+const REFERENCE: { title: string; blurb?: string; rows: { command: string; note: string }[] }[] = [
+  {
+    title: 'One increment — hatch work',
+    blurb:
+      'Claims a ticket, spawns one headless claude session with the prompt, model and effort its column and type call for, streams what that session does, and exits when it ends. Run it inside the checkout the board is about.',
+    rows: [
+      { command: 'hatch work', note: 'the next actionable issue anywhere on the board' },
+      { command: 'hatch work AER-12', note: '…or this one, whatever else is above it' },
+      { command: 'hatch work --under AER-1', note: '…or the next one under that epic' },
+      { command: 'hatch work --dry-run', note: 'print the prompt and exit — claims nothing, spawns nothing' },
+      { command: 'hatch work -i AER-12', note: 'a session you sit in, rather than a headless one' },
+      { command: 'hatch work --quiet', note: 'say nothing until the increment is finished' },
+      { command: 'hatch work --model opus --effort xhigh AER-12', note: 'beat the playbook, for this run only' },
+    ],
+  },
+  {
+    title: 'The loop — hatch go-to-work',
+    blurb:
+      'The same thing in a circle: next actionable issue, one increment, ask again — until nothing on the board is an agent’s to move, and then it waits and asks again every interval. A process per increment, so each ticket starts cold. One loop per checkout.',
+    rows: [
+      { command: 'hatch go-to-work', note: 'until told to stop' },
+      { command: 'hatch go-to-work --once', note: 'one pass, and out' },
+      { command: 'hatch go-to-work --under AER-1', note: 'only inside that epic’s subtree' },
+      { command: 'hatch go-to-work --interval 300', note: 'seconds to wait when there was nothing to do (default 60)' },
+      { command: 'hatch go-to-work --quiet', note: 'no per-increment stream, only what each one ended as' },
+    ],
+  },
+  {
+    title: 'Bounds, timeouts and stopping',
+    blurb:
+      'None of these are set by default. They are read between increments and through every wait, so the increment in flight always finishes, commits and pushes. The same three bounds are controls on the Runners page, and a value set there is folded in on the next heartbeat.',
+    rows: [
+      { command: 'hatch go-to-work --max-runs 5', note: 'stop after five increments' },
+      { command: 'hatch go-to-work --max-spend 20', note: 'stop once the run has cost $20' },
+      { command: 'hatch go-to-work --until 08:00', note: 'stop at that hour — tomorrow, if it has gone by today' },
+      { command: 'hatch go-to-work --stop-file /tmp/stop', note: 'stop once that path exists' },
+      { command: 'touch /tmp/stop', note: '…which is how you stop it from another terminal: no pid to find' },
+      { command: 'hatch go-to-work --no-restart', note: 'never come back as a newer build (needs a supervisor either way)' },
+    ],
+  },
+  {
+    title: 'Reading the board, spending nothing',
+    blurb:
+      'None of these spawn anything or write anything, and none of them need a checkout. queue is the dry run for the loop, and the answer to “why did it not pick up the ticket I meant”.',
+    rows: [
+      { command: 'hatch board', note: 'the columns, and how many cards in each' },
+      { command: 'hatch queue', note: 'every card a pass would look at, in the order it looks, and why it folds past' },
+      { command: 'hatch queue AER-1', note: '…under one epic' },
+      { command: 'hatch next', note: 'top workable card of “todo”' },
+      { command: 'hatch next "in progress"', note: '…or of any column' },
+      { command: 'hatch show AER-12', note: 'the brief, plus its comments' },
+      { command: 'hatch questions', note: 'everything waiting on an answer' },
+    ],
+  },
+  {
+    title: 'Driving a ticket by hand',
+    rows: [
+      { command: 'hatch start AER-12', note: 'move it to “in progress”' },
+      { command: 'hatch move AER-12 todo', note: '…or to any non-terminal column' },
+      { command: 'hatch comment AER-12 "sha abc123 on branch aer-12-thing"', note: 'the trail somebody reads in six months' },
+      { command: 'hatch pr AER-12 https://…', note: 'record the pull request — a field, not a sentence in a comment' },
+      { command: 'hatch depends AER-13 AER-12', note: 'AER-13 waits on AER-12, and the loop honours it' },
+      { command: 'hatch answer', note: 'answer the open questions, one at a time, here' },
+    ],
+  },
+];
+
+function Reference() {
+  return (
+    <div className="hatch-runner-reference">
+      {REFERENCE.map((group) => (
+        <section key={group.title} className="hatch-runner-group">
+          <h3 className="hatch-runner-group-title">{group.title}</h3>
+          {group.blurb && <p className="text-muted">{group.blurb}</p>}
+          <dl className="hatch-runner-rows">
+            {group.rows.map((row) => (
+              <div key={row.command} className="hatch-runner-row">
+                <dt>
+                  <Command command={row.command} />
+                </dt>
+                <dd className="text-muted">{row.note}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ))}
+    </div>
+  );
+}
 
 /**
  * Where the runner comes from: this Hatch.
@@ -15,9 +119,15 @@ import type { RunnerDownloads, RunnerDownload } from '../types';
  * therefore the commit the download was built from too.
  *
  * Its own page rather than a section of Settings: what it holds - a platform, a
- * download, a revision, three prerequisites, two commands, and what the
+ * download, a revision, three prerequisites, the two commands that point it at
+ * this board, the reference that makes the first night confident, and what the
  * container runner beside them can and cannot do - is a page's worth, and
  * Settings has no shape for any of it.
+ *
+ * The reference is here and not only in the "Hatch at home" document because
+ * this is the page somebody is already standing on when the binary lands in
+ * their downloads folder. Sending them elsewhere to find out what to type is
+ * the gap between having the runner and using it.
  */
 export function RunnerPage() {
   const { data: runner, error } = useLoaded<RunnerDownloads>(getRunner);
@@ -135,6 +245,35 @@ export function RunnerPage() {
           Run <code>go-to-work</code> from inside a checkout of the repository the board is about.
           If this Hatch has its wall up you will need a key too — <code>hatch config</code> asks for
           one.
+        </p>
+      </Card>
+
+      <Card>
+        <h2 className="hatch-section-title">4. Using it</h2>
+        <p className="text-muted">
+          The whole surface is <code>hatch --help</code>, and every command takes <code>-h</code> for
+          its own. These are the ones a working day is made of. Only <code>work</code> and{' '}
+          <code>go-to-work</code> need a git checkout — the rest are one request and a sentence about
+          the answer, so <code>hatch board</code> from anywhere is the ordinary case.
+        </p>
+        <Reference />
+        <p className="text-muted">
+          Before every increment the loop fetches, puts the checkout back on the default branch, and
+          stashes anything uncommitted — named for the hour it was taken, recoverable with{' '}
+          <code>git stash pop</code>. Committed work is never at risk. The practical consequence:
+          don't leave something half-finished in the tree and then start the loop in it.
+        </p>
+        <p className="text-muted">
+          What each session is told — its prompt, its model, its effort — comes from a{' '}
+          <Link to="/playbooks">playbook</Link>, a row per column transition and issue type. Those are
+          yours to edit and not your agents': the API refuses the write from a key.
+        </p>
+        <p className="text-muted">
+          {/* Out of this app and into the docs one, so a plain anchor - see the
+              Docs link in the nav strip, which goes to the same page. */}
+          The long version, including the block to paste into your repository's <code>CLAUDE.md</code>{' '}
+          so your agents know how to reach this board:{' '}
+          <a href="/apps/docs/hatch-at-home">Hatch at home</a>.
         </p>
       </Card>
 

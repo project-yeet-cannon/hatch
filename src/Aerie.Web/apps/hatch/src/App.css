@@ -1278,6 +1278,59 @@
   margin: var(--sp-3) 0;
 }
 
+/* ---- The command reference on the Runner page ---- */
+.hatch-runner-reference {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  margin: var(--sp-4) 0;
+}
+
+.hatch-runner-group-title {
+  font-size: var(--t-label);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 0 0 var(--sp-2);
+}
+
+.hatch-runner-rows {
+  margin: var(--sp-2) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* Two columns on a window with room for them, so the notes share a left edge
+   and the block can be read down rather than across. The command column is
+   shrink-to-fit up to a cap: a reference whose widest line set the width for
+   every row would push every note off the right of a narrow card. */
+.hatch-runner-row {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(12rem, 1fr);
+  align-items: baseline;
+  gap: var(--sp-2) var(--sp-3);
+}
+
+.hatch-runner-row > dt {
+  min-width: 0;
+}
+
+.hatch-runner-row > dd {
+  margin: 0;
+  font-size: var(--t-label);
+}
+
+/* One column when there is not room for two. A command chip does not wrap - it
+   scrolls - so the alternative is a note squeezed into three characters. */
+@media (max-width: 40rem) {
+  .hatch-runner-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-1);
+  }
+}
+
 /* The right-hand cell, whichever of the two it is. Pushed right so it stays
    there when a long title wraps the row onto a second line, and the meter is a
    fixed width rather than a shrink-to-fit one so a card full of stories shares

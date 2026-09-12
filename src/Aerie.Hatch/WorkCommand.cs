@@ -11,8 +11,34 @@ namespace Aerie.Hatch;
 /// </remarks>
 public sealed class WorkCommand(Runtime runtime)
 {
+    public static readonly string[] WorkUsage =
+    [
+        "usage: hatch work [<issue key>] [--under <epic key>] [-i] [--quiet]",
+        "                  [--model <model>] [--effort <effort>] [--dry-run]",
+        "",
+        "  One increment: claim a ticket, spawn one headless claude session with the",
+        "  prompt, model and effort its column and type call for, and exit when that",
+        "  session ends. Run inside the checkout the board is about.",
+        "",
+        "  With no key it takes the next actionable issue on the board. A key names",
+        "  one outright; --under names the epic to look under. Not both - one says",
+        "  which ticket, the other says where to look for one.",
+        "",
+        "  -i             a session you sit in, rather than a headless one",
+        "  --quiet        say nothing until the increment is finished",
+        "  --model        beat the playbook, for this run only",
+        "  --effort       ...and likewise",
+        "  --dry-run      print the prompt and exit: claims nothing, spawns nothing",
+        "",
+        "  Exits 0 when an increment ran, whatever the session itself exited with;",
+        "  1 on a refusal; 2 when there is nothing to do - the board is idle, the",
+        "  ticket is blocked, or another runner has it; 130 on an interrupt.",
+    ];
+
     public async Task<int> RunAsync(string[] args, CancellationToken ct)
     {
+        if (Usage.Wanted(args)) return Usage.Print(runtime.Say, WorkUsage);
+
         string? key = null, under = null, model = null, effort = null;
         var dry = false;
         var attach = false;
@@ -29,8 +55,7 @@ public sealed class WorkCommand(Runtime runtime)
                 case "--quiet": quiet = true; break;
                 case "-i" or "--interactive": attach = true; break;
                 case var flag when flag.StartsWith('-'):
-                    runtime.Say.Complain($"hatch: work does not take {flag}");
-                    return 1;
+                    return Usage.Refuse(runtime.Say, $"work does not take {flag}", WorkUsage);
                 default: key = args[i]; break;
             }
         }

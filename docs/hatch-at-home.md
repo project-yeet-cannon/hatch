@@ -11,6 +11,15 @@ checkout, and the block to paste into your own repository's `CLAUDE.md` so your
 agents know how to reach the board. It is written for a person and for a
 Claude, in that order.
 
+**Quick links.** The `hatch` CLI — the runner that works your tickets — is
+handed out by your own Hatch, from the **Runner** page in the nav:
+
+- [**Runner → download `hatch`**](/apps/hatch/runner) · or
+  `<your-hatch-origin>/apps/hatch/runner` in a browser
+- [What to do with it once it is on your `PATH`](#the-hatch-cli-command-by-command)
+- [`hatch work` — one increment](#one-increment-hatch-work) ·
+  [`hatch go-to-work` — the loop](#the-loop-hatch-go-to-work)
+
 ## Prerequisites
 
 - **Docker Desktop**, running. It is the only thing the board itself needs.
@@ -41,6 +50,14 @@ it names, so `-f oci://…` is the whole of "get the file."
 
 The first run takes a few minutes — it pulls the images, runs the migration to
 completion, and only then starts the API.
+
+Newer Compose versions stop once before any of that to list the variables they
+found in the file and ask whether to go ahead, which makes the one line a
+two-step. Answering `y` is the whole of it; `up -d -y` answers it in advance.
+The table it prints has a row with no name on it and a row for `USER` that is
+unset on Windows — both are that summary reading the one variable in the file
+that carries a fallback (`USERNAME` on Windows, `USER` elsewhere) as more
+variables than it is, and neither is anything to fix.
 
 Port 8080 is only the default. If something on your machine already has it,
 `HATCH_PORT` moves it — and that is one of the two places on this page
@@ -120,6 +137,11 @@ key; `hatch config` asks for one anyway, and against this stack you can leave
 it blank.
 
 Run `go-to-work` from inside a checkout of the repository the board is about.
+
+[The `hatch` CLI, command by command](#the-hatch-cli-command-by-command) is
+the rest of what it takes — one increment, the loop, the bounds that stop it,
+and the reads that spend nothing. The Runner page carries the same reference,
+beneath the download.
 
 ## Running the runner as a container instead
 
@@ -428,40 +450,199 @@ own **Docs** page, in the nav beside this one. Every Hatch image carries the
 whole of this documentation, so the sessions your board dispatches can read it
 without leaving the machine.
 
-## Running `hatch work` and `hatch go-to-work`
+## The `hatch` CLI, command by command
 
-Two commands, and the difference between them is how many times they do it.
+Everything below runs against the board you pointed it at with `hatch config`.
+Only `work` and `go-to-work` need to be run inside a git checkout — the rest are
+one request and a sentence about the answer, so `hatch board` from anywhere is
+the ordinary case.
 
-**`hatch work` is one increment.** It asks the board for the next actionable
-issue, spawns a headless `claude` session with the prompt, model and effort
-that issue's column and type call for, and streams what the run is doing as it
-happens — every tool call, a thinking-token pulse, and a heartbeat naming what
-it is still waiting on. It prints the session id first and last with the
-`claude --resume` command beside it, so an increment you want to look at again
-is one paste away. When the session ends, so does `work`.
+```
+hatch --help                 every command, from the program itself
+hatch <command> -h           ...and what one of them takes
+```
 
-That prompt, model and effort come from a **playbook** — a row per (column
-transition, issue type). The board ships with a working set of them, and the
-Playbooks page is where you change what your sessions are told. They are yours
-to edit and not your agents': the API refuses the write from a key, on purpose,
-because an agent that could widen its own instructions and its own budget is a
-loop with no end.
+### Pointing it at a board
 
-**`hatch go-to-work` is that in a circle.** Next actionable issue, one
-increment, ask again — until the board has nothing left that an agent may
-move, and then it waits, asking again every interval. That is what "leave it
-running overnight" has to mean when the answer to "is anything left" can change
-while nobody is watching.
+```
+hatch config                              ask for the origin and the key, and write them
+hatch config --origin <your-hatch-origin> ...without being asked for the origin
+hatch config --show                       what is set, and which layer it came from
+```
 
-It is a loop of separate processes rather than one long session on purpose: a
+Written to a per-user file — mode 600, under the platform's application-data
+directory, outside every repository — so it follows you between checkouts and
+you do it once. A Hatch with its wall off needs no key; leave it blank.
+
+### One increment: `hatch work`
+
+Asks the board for a ticket, claims it, spawns one headless `claude` session
+with the prompt, model and effort that ticket's column and type call for,
+streams what the session does, and exits when the session ends. One ticket, one
+process.
+
+```
+hatch work                        the next actionable issue anywhere on the board
+hatch work AER-12                 ...or this one, whatever else is above it
+hatch work --under AER-1          ...or the next one under that epic's subtree
+```
+
+A key and `--under` together are refused: one names the ticket, the other names
+where to look for it.
+
+```
+hatch work --dry-run              print the prompt and exit - claims nothing, spawns nothing
+hatch work -i AER-12              a session you sit in, rather than a headless one
+hatch work --quiet                say nothing until it is finished
+hatch work --model opus --effort xhigh AER-12
+```
+
+`--model` and `--effort` beat the playbook for this run only. They are one
+opinion about one ticket, which is why `go-to-work` has neither.
+
+What it prints, and why: the session id first and last with the
+`claude --resume` line beside it, then every tool call, a thinking-token pulse,
+and a heartbeat naming what it is still waiting on. The `claude` CLI's own
+default output prints nothing until the run ends, and four minutes of blank
+terminal is indistinguishable from a hang.
+
+It also beats once against the Runners page, so an increment run by hand shows
+up beside the loops rather than being a session nobody can see.
+
+Exit codes:
+
+```
+0    an increment ran - whatever the session itself exited with
+1    a refusal: no claude CLI, an unreadable board, a flag it does not take
+2    nothing to do: the board is idle, the ticket is blocked, or somebody else has it
+130  interrupted
+```
+
+### The loop: `hatch go-to-work`
+
+`work` in a circle: next actionable issue, one increment, ask again — until the
+board has nothing an agent may move, and then it waits and asks again every
+interval. A process per increment rather than one long session, because a
 session that ran all night would carry six hours of context into its last
-ticket, and the earliest decisions in that context are exactly the ones nobody
-can audit afterwards. A process per increment starts each ticket cold, and
-costs less for the privilege.
+ticket, and the earliest decisions in that context are the ones nobody can
+audit afterwards.
 
-**What the loop does to your checkout, before every increment**, so that a
-session's first act is cutting a branch and the thing it cuts from is not in
-question:
+```
+hatch go-to-work                  until told to stop
+hatch go-to-work --once           one pass, and out
+hatch go-to-work --under AER-1    only inside that epic's subtree
+hatch go-to-work --interval 300   seconds to wait when there was nothing to do (default 60)
+hatch go-to-work --quiet          no per-increment stream, only what each one ended as
+```
+
+A ticket key is refused here: this command's question is "what is next", asked
+again and again, and one ticket cannot be the answer to it twice. One increment
+on a named ticket is `hatch work AER-12`.
+
+#### One pass, in order
+
+1. **Heartbeat.** Says this runner is here, and reads back what the Runners
+   page would like it to do — paused, stopping, a different scope, a different
+   cap. Read at the top of a pass, which is the one moment no claim is held.
+2. **Stop conditions**, below.
+3. **Pick.** The first issue the dispatcher clears, folding past everything it
+   does not, and takes a claim on it. No claim, no spawn — that is what keeps
+   two runners off one ticket.
+4. **Reset the checkout.** Fetch, and put the tree back on the default branch
+   at the tip the remote has right now.
+5. **Check its own source.** If `go-to-work` was rebuilt on the trunk under it,
+   it stops here and asks to come back as the new build, holding no ticket.
+6. **Spawn the increment**, and record what it cost and whether the ticket
+   moved.
+
+An increment that ran is followed by the next one immediately; the interval is
+only what to do when there was nothing to do.
+
+**A ticket that did not move is a stall.** The loop comments on it saying so and
+opens a question against it, and nothing further is dispatched at that ticket
+until somebody answers. One bad ticket costs one increment instead of a night.
+
+#### Bounds, timeouts and stopping
+
+None of these are set by default. An unattended run that stopped for a reason
+nobody asked for is a run somebody has to go and check on.
+
+```
+hatch go-to-work --max-runs 5             stop after five increments
+hatch go-to-work --max-spend 20           stop once the night has cost $20
+hatch go-to-work --until 08:00            stop at that wall-clock hour (tomorrow, if it has gone by today)
+hatch go-to-work --stop-file /tmp/stop    stop once that path exists
+hatch go-to-work --max-runs 5 --max-spend 20 --until 08:00
+```
+
+They are checked between increments and through every wait, so the increment in
+flight always finishes, is committed and is pushed. `--stop-file` is the one to
+reach for from another terminal or another machine — stopping a loop then needs
+nothing but a shell and a path, no pid to find and no signal that could land
+mid-push:
+
+```
+touch /tmp/stop                           # the loop ends after the increment in flight
+```
+
+The same three bounds are controls on the **Runners** page, and a value set
+there is folded in on the next heartbeat — including being cleared. Pause,
+resume and "stop after this one" live there too.
+
+**Ctrl-C** lets go of the claim on the way out and exits 130. A second one is
+immediate, and leaves the ticket claimed until the lease ages out.
+
+And four things end a run without a bound having been reached:
+
+```
+three increments in a row failed        whatever is broken is broken for every ticket
+the workspace could not be reset        every ticket after it would be built on the wrong tree
+the board asked this runner to stop     the Runners page, mid-night
+there is no claude CLI to spawn         nothing was ever going to run
+```
+
+It finishes by printing the night: what moved, what stalled, how many
+increments and what they cost.
+
+#### Restarts
+
+A loop whose own source changed on the trunk asks to be restarted as the new
+build, because a process cannot exec itself into one.
+
+```
+hatch go-to-work --restart-after 60   come back as a newer build at least that often (default 30)
+hatch go-to-work --restart-after 0    ...only when its own source actually changed
+hatch go-to-work --no-restart         ...never
+```
+
+**This needs something standing over the process**, because a process cannot
+rebuild itself. A `hatch` you started by hand has nothing standing over it, so
+it is the loop it started as and these three flags do nothing there. The
+supervisor is Aerie's own `scripts/hatch.sh`, which catches the 75, compiles
+the new source and runs it again. The container runner is a third case: it
+carries the binary its image was built with, so `docker compose pull` is how it
+becomes a newer one.
+
+Exit codes:
+
+```
+0    the night ended, for one of the reasons above
+1    a refusal: a flag it does not take, a stop file that already exists, a lock it could not take
+75   asking the supervisor to rebuild and run it again
+130  interrupted
+```
+
+#### One loop per checkout
+
+A second `go-to-work` in the same tree is refused, naming the pid of the one
+that has it. Two loops no longer collide over the board — the claim divides it —
+but they would still collide over the tree, one increment's reset landing in the
+middle of another's branch. Two checkouts, two loops, and both are welcome.
+
+#### What it does to your checkout
+
+Before every increment, so that a session's first act is cutting a branch and
+the thing it cuts from is not in question:
 
 - It fetches, and puts the checkout back on the default branch at the tip the
   remote has it at right now.
@@ -479,10 +660,72 @@ The practical consequence: work that matters is work that is committed. Do not
 leave something half-finished in the tree and then start the loop in the same
 checkout.
 
-`hatch queue` is the dry run. It prints every issue a pass would look at, in
-the order it looks, each with either the reason it would be folded past or the
-transition it is clear for. It spawns nothing and writes nothing, and it is the
-answer to "why did it not pick up the ticket I meant."
+### Reading the board, spending nothing
+
+```
+hatch board                       the columns, and how many cards in each
+hatch queue                       every card a pass would look at, in the order it looks
+hatch queue AER-1                 ...under one epic
+hatch next                        top workable card of "todo"
+hatch next "in progress"          ...or of any column
+hatch show AER-12                 the brief, plus its comments
+hatch questions                   everything waiting on an answer
+hatch questions AER-12            ...or just this ticket's
+```
+
+`hatch queue` is the dry run for the loop, and the answer to "why did it not
+pick up the ticket I meant": each line is a key, a type, a column, and either
+the reason the pass would fold past it or the transition it is clear for. It
+spawns nothing and writes nothing. An empty board says so in a sentence rather
+than printing a blank line — "there is nothing" and "something went wrong and
+printed nothing" look identical otherwise.
+
+Columns are found by name rather than by id, on the letters and digits alone,
+so `todo` reaches the column the board calls `To Do`.
+
+### Driving a ticket by hand
+
+```
+hatch start AER-12                move it to "in progress"
+hatch move AER-12 todo            ...or to any non-terminal column
+hatch comment AER-12 "sha abc123 on branch aer-12-thing"
+hatch pr AER-12                   where it is being reviewed
+hatch pr AER-12 https://...       ...or say where, having opened one
+hatch pr AER-12 --clear           ...or take it off the one it has
+hatch depends AER-13 AER-12       AER-13 waits on AER-12
+hatch depends AER-13 --remove AER-12        ...no longer
+hatch answer                      answer the open questions, one at a time, here
+hatch api GET /api/hatch/issues?statusId=2
+hatch api PATCH /api/hatch/issues/AER-12 '{"dueAt":"2026-10-01"}'
+```
+
+`hatch answer` walks the open questions serially on purpose: six printed at once
+get answered in aggregate, which is how a wrong assumption gets in.
+
+### Settings
+
+Read in three layers, highest first: an exported variable, then `scripts/.env`
+in the checkout you are standing in, then the per-user file `hatch config`
+writes.
+
+```
+AERIE_BASE         the origin of your Hatch
+AERIE_HATCH_KEY    aerie_ak_... Optional against a Hatch with its wall off
+HATCH_CLAUDE_BIN   the claude CLI, if it is not on PATH
+HATCH_BASE_BRANCH  the trunk go-to-work resets to between increments
+HATCH_RUNNER       what the board calls this runner (default host:/path)
+HATCH_ROOT         the checkout to work in (default: upwards from here)
+HATCH_HEARTBEAT    seconds of silence before the renderer says what it is waiting on
+```
+
+### Where the prompt comes from
+
+The prompt, model and effort of every increment come from a **playbook** — a row
+per (column transition, issue type). The board ships with a working set, and the
+Playbooks page is where you change what your sessions are told. They are yours
+to edit and not your agents': the API refuses the write from a key, on purpose,
+because an agent that could widen its own instructions and its own budget is a
+loop with no end.
 
 ## Upgrading
 
@@ -570,6 +813,26 @@ no undo. Use it when you want to start over from an empty board, and not
 otherwise.
 
 ## If something is wrong
+
+**`the system cannot find the file specified`, naming a pipe or a socket.** In
+full it is `open //./pipe/dockerDesktopLinuxEngine` on Windows, or
+`/var/run/docker.sock` on macOS, and it comes after the variable table rather
+than instead of it — because fetching the compose file and reading the
+variables out of it are registry work, and the first thing that needs the
+engine is the first image. Nothing about the stack failed: Docker Desktop is
+installed and not running. Start it and wait for its dashboard to say **Engine
+running** — a fresh install does not start itself, and the first start brings
+WSL2 up with it and can take a couple of minutes. `docker version` printing a
+**Server** block as well as a **Client** one is how you know it is ready. If
+the installer asked for a sign-out or a reboot and did not get one, that is the
+other half of this: the group membership it added is not in effect until then.
+
+**`error from registry: unauthorized`.** Not yours to fix, and nothing you
+typed. The compose file came down, so the registry is reachable; one of the
+images it names is published privately, and an anonymous pull of a private
+package is refused with exactly this. Send the line to whoever publishes the
+stack — every image the file names has to be a public package, and the one that
+is not is named in the service that failed.
 
 ```
 docker compose -f oci://ghcr.io/eouw0o83hf/hatch-local ps
