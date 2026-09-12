@@ -157,3 +157,22 @@ jobs:
       - name: Build
         working-directory: src/Aerie.Web
         run: npm run build -w apps/${{ matrix.app }}
+
+  # One job that depends on every other, so a merge gate has exactly one
+  # check to name instead of one per job (and one per matrix leg).
+  ci:
+    name: CI
+    if: always()
+    needs: [api, hatch-cli, web]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check that every job succeeded
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "At least one required job failed."
+            exit 1
+          fi
+          if [[ "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "At least one required job was cancelled."
+            exit 1
+          fi
