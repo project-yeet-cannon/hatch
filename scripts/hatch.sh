@@ -4,11 +4,11 @@
 #
 # Almost nothing happens here any more. Every command - board, next, queue,
 # show, start, move, comment, pr, depends, ask, questions, answer, api, config,
-# work and go-to-work - is a command of the `hatch` program in src/Aerie.Hatch,
+# work and go-to-work - is a command of the `hatch` program in src/Hatch.Cli,
 # and this file finds it, builds it if it has to, and hands over.
 #
 # It stopped being the CLI in AERIE-934. The reason is not that shell was the
-# wrong language for `curl | jq`; it is that an operator who clones Aerie into
+# wrong language for `curl | jq`; it is that an operator who clones Hatch into
 # their own house has no copy of this file on their PATH, and a tracker that can
 # only be reached from one checkout is a tracker for one person. `hatch` is one
 # binary, published for four platforms, with settings that live with the person
@@ -29,7 +29,7 @@
 #
 # Settings are the program's and are documented in `hatch --help`: an exported
 # variable wins, then scripts/.env in this checkout, then the per-user file
-# `hatch config` writes. Never a key in this repository, either way - Aerie
+# `hatch config` writes. Never a key in this repository, either way - Hatch
 # ships to other operators, and a key in the artifact is one operator's key
 # inherited by everybody who clones it.
 #
@@ -62,8 +62,8 @@ runner_cmd() {
   fi
 
   for bin in \
-    "${root}/src/Aerie.Hatch/bin/Release/net10.0/hatch" \
-    "${root}/src/Aerie.Hatch/bin/Debug/net10.0/hatch"
+    "${root}/src/Hatch.Cli/bin/Release/net10.0/hatch" \
+    "${root}/src/Hatch.Cli/bin/Debug/net10.0/hatch"
   do
     [ -x "$bin" ] || continue
     echo "$bin"
@@ -72,7 +72,7 @@ runner_cmd() {
 
   command -v dotnet >/dev/null || {
     cat >&2 <<'MISSING'
-hatch: needs either a build of src/Aerie.Hatch or the dotnet SDK.
+hatch: needs either a build of src/Hatch.Cli or the dotnet SDK.
 
     make build-hatch          builds it once, and every command after is fast
     make publish-hatch        ...or one self-contained binary per platform
@@ -81,7 +81,7 @@ MISSING
     exit 1
   }
 
-  echo "dotnet|run|--project|${root}/src/Aerie.Hatch/Aerie.Hatch.csproj|--"
+  echo "dotnet|run|--project|${root}/src/Hatch.Cli/Hatch.Cli.csproj|--"
 }
 
 # The command and how to launch it, in RUNNER_ARGV - a global because bash 3.2
@@ -202,7 +202,7 @@ rebuild_runner() {
     make -C "$root" build-hatch >&2 \
       || echo "hatch: the rebuild failed - carrying on with the binary that is there" >&2
   elif command -v dotnet >/dev/null; then
-    dotnet build "${root}/src/Aerie.Hatch/Aerie.Hatch.csproj" --configuration Release >&2 \
+    dotnet build "${root}/src/Hatch.Cli/Hatch.Cli.csproj" --configuration Release >&2 \
       || echo "hatch: the rebuild failed - carrying on with the binary that is there" >&2
   else
     echo "hatch: neither make nor dotnet is here - carrying on with the binary that is there" >&2

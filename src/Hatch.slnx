@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="Hatch.Api.Tests/Hatch.Api.Tests.csproj" />
+  <Project Path="Hatch.Api/Hatch.Api.csproj" />
+  <Project Path="Hatch.Contracts/Hatch.Contracts.csproj" />
+  <Project Path="Hatch.Cli/Hatch.Cli.csproj" />
+  <Project Path="Hatch.Cli.Tests/Hatch.Cli.Tests.csproj" />
+</Solution>

@@ -5,13 +5,13 @@
 The house project tracker: a kanban board at `hatch.${DOMAIN}`, issues with
 Jira-style keys (`AER-12`), operator-editable columns, comments, and an
 append-only audit trail. It replaced a folder of markdown plan files, and it is
-the system of record for what Aerie is working on.
+the system of record for what Hatch is working on.
 
 The name is the product. You hatch a plan here, and epics hatch into stories
 into shipped work.
 
 It is spelled `Hatch` / `hatch` everywhere — C# namespace
-`Aerie.Api.Modules.Hatch`, Postgres schema `hatch`, routes under `/api/hatch`,
+`Hatch.Api.Modules.Hatch`, Postgres schema `hatch`, routes under `/api/hatch`,
 bundle at `/apps/hatch/`, and its own host `hatch.${DOMAIN}`.
 
 Four properties carry the design:
@@ -22,7 +22,7 @@ Four properties carry the design:
 - **Behind the wall, and admin-gated on top of it.** The bundle 404s and the
   API 403s for anyone who is not the operator — the same posture the admin app
   takes, through the same gate.
-- **Claude is a first-class caller.** An `Authorization: Bearer aerie_ak_…` key
+- **Claude is a first-class caller.** An `Authorization: Bearer hatch_ak_…` key
   reaches `/api/hatch/*` and nothing else, decided by the same gate that
   decides everything else. A ticket link is a complete instruction, and the
   ticket is where the answer goes back.
@@ -72,18 +72,18 @@ absence starts to hurt:
 
 ## Where it lives
 
-**Backend: a module.** `src/Aerie.Api/Modules/Hatch`, its own `hatch` schema,
-its own migration history, one line in `AddAerieModules` — the shape
-[`Modules/README.md`](../src/Aerie.Api/Modules/README.md) describes. Splitting
+**Backend: a module.** `src/Hatch.Api/Modules/Hatch`, its own `hatch` schema,
+its own migration history, one line in `AddAppModules` — the shape
+[`Modules/README.md`](../src/Hatch.Api/Modules/README.md) describes. Splitting
 it into its own service later is a connection-string change, so "part of the
 API for now" costs nothing architecturally.
 
 **Frontend: its own workspace SPA**, not a family-shell module.
-`src/Aerie.Web/apps/hatch`, built into `wwwroot/apps/hatch`, served by the same
+`src/Hatch.Web/apps/hatch`, built into `wwwroot/apps/hatch`, served by the same
 pod — the arrangement the admin and docs apps already use. It is an operator's
 tool, and the family shell is the household's.
 
-**The wire contract: its own project.** `src/Aerie.Hatch.Contracts` holds the
+**The wire contract: its own project.** `src/Hatch.Contracts` holds the
 records the API serves and the records a client sends it — nothing else, and
 nothing that needs a `DbContext` to compile. It is a project rather than a file
 in the module because there are now two kinds of client compiled against it: the
@@ -92,7 +92,7 @@ shape of a dispatch would drift from the server the first time somebody added a
 field, and drift *silently*, because JSON does not complain about what it did
 not find.
 
-**The runner: a program.** `src/Aerie.Hatch` is `work` and `go-to-work` — see
+**The runner: a program.** `src/Hatch.Cli` is `work` and `go-to-work` — see
 [where the loop lives](#where-the-loop-lives), which is about why they stopped
 being shell.
 
@@ -105,7 +105,7 @@ key can `curl` the API on the same origin the browser uses. The bundle reads its
 basename off the URL (`lib/basename.ts`) rather than assuming a prefix, which is
 what lets it serve unchanged wherever `/apps/hatch/` ends up mounted.
 
-**Read [`hatch-at-home.md`](../src/Aerie.Web/apps/hatch/public/hatch-at-home.md)**
+**Read [`hatch-at-home.md`](../src/Hatch.Web/apps/hatch/public/hatch-at-home.md)**
 for the operator-facing version of the above — the one line, the runner, and
 the block to paste into a friend's own `CLAUDE.md`. It ships inside the Hatch
 bundle itself (`/apps/hatch/hatch-at-home.md`) rather than living only in this
@@ -114,7 +114,7 @@ repository, so it travels with the board it describes.
 ## Domain model
 
 Seven tables in the `hatch` schema, all carrying the house `Ef` prefix. The
-authority is [`Entities.cs`](../src/Aerie.Api/Modules/Hatch/Entities.cs), which
+authority is [`Entities.cs`](../src/Hatch.Api/Modules/Hatch/Entities.cs), which
 carries the per-field reasoning; this is the shape and the decisions worth
 having in one place.
 
@@ -267,7 +267,7 @@ than decorative. A bare date has to be pinned to *some* midnight to be stored,
 and a reader west of UTC would otherwise draw the day before. So a bare date is
 read in UTC, where its components are the ones that were typed, and an instant
 is read in the caller's zone, where the hour somebody meant is the hour they
-meant. [`IssueMoment.cs`](../src/Aerie.Api/Modules/Hatch/IssueMoment.cs) holds
+meant. [`IssueMoment.cs`](../src/Hatch.Api/Modules/Hatch/IssueMoment.cs) holds
 the server half of that contract and `lib/schedule.ts` the browser's.
 
 Only formal validity is checked. A past due date is accepted without comment —
@@ -419,7 +419,7 @@ in memory.
 first − 1024 (negatives are fine). When `a + 1 == b` there is no midpoint: the
 whole column is rewritten to 0, 1024, 2048… in the same transaction and the card
 is then placed. That is
-[`RankService`](../src/Aerie.Api/Modules/Hatch/RankService.cs), with unit tests.
+[`RankService`](../src/Hatch.Api/Modules/Hatch/RankService.cs), with unit tests.
 
 Lexorank strings were considered and rejected: string midpoint arithmetic has
 sharp edge cases, and a column here holds tens of cards, not millions —
@@ -692,7 +692,7 @@ counted, and it cannot block a dispatch.
 at it. That is why the link runs answer→question rather than the other way: a
 decision can be refined by a second answer without editing the first, and a
 question can never be open and answered at once because two writes disagreed.
-[`Questions.cs`](../src/Aerie.Api/Modules/Hatch/Questions.cs) holds the single
+[`Questions.cs`](../src/Hatch.Api/Modules/Hatch/Questions.cs) holds the single
 definition, and the three callers that need it — the board badging a card, the
 dispatcher refusing a run, and the list somebody sits down to answer — share it
 rather than writing three.
@@ -754,7 +754,7 @@ and Phase 6 of its build taught the outer one a second lane.
 
 - **The wall** (`AuthGate` + `AuthMiddleware`, enforced at Traefik and in
   process) decides whether a request reaches the app at all. `hatch.${DOMAIN}`
-  carries the same `aerie-auth` middleware annotation as `home` and `kiosk`.
+  carries the same `hatch-auth` middleware annotation as `home` and `kiosk`.
 - **The admin gate** (`AdminGate`) decides whether an already-authenticated
   request may do an operator's things. Every Hatch controller carries
   `[RequireAdmin(AcceptScope = "hatch")]`, and the bundle is in
@@ -779,13 +779,13 @@ what the wall's allow-list exists to prevent.
 `EfApiKey` — `Name` (unique), `Prefix`, `Hash`, `Scopes` (`text[]`),
 `CreatedAt`, `LastUsedAt`, `RevokedAt`.
 
-A secret is `aerie_ak_` + 32 characters from a cryptographic RNG, drawn from
+A secret is `hatch_ak_` + 32 characters from a cryptographic RNG, drawn from
 letters and digits only because a key is copied through shells, YAML and JSON
 and every one of those has an opinion about punctuation. It is shown **exactly
 once**, at mint, on the admin app's **API keys** page.
 
-The `aerie_ak_` prefix is not decoration. It is there so that a string pasted
-into a config file, a log line or a commit is recognisable as an Aerie
+The `hatch_ak_` prefix is not decoration. It is there so that a string pasted
+into a config file, a log line or a commit is recognisable as a Hatch
 credential on sight — by a person reading a diff, and by the secret scanners
 that read public repositories for exactly these shapes.
 
@@ -957,7 +957,7 @@ Everything under `/api/hatch`, every route `[RequireAdmin(AcceptScope =
 | `/attention` | GET | What the loop is waiting on a person for — the issues up for review that carry a pull request, how many in that column carry none, and every open question in the house. One read for both halves — see [what is waiting on you](#what-is-waiting-on-you) |
 | `/local-person` | GET | What to call whoever is sitting here, and whether anybody said so. `204` wherever the wall is up |
 | `/settings` | GET, PUT | **Person only** — plain `[RequireAdmin]`, so a key is refused the read as well as the write. The two settings a Hatch install of its own has — see [the credential](#the-credential). PUT follows the bulk rule: a field left out is left alone, `""` clears it |
-| `/settings/claude-token` | GET | The token itself, wrapped with `SecretProtector` for the wire. The one route in Aerie that hands a live secret back out, and it is cut the opposite way to `/settings` beside it — **a key or a keyless runner may take it**, because its ordinary caller is the container runner's entrypoint (`containers/hatch-runner/`) authenticating a `claude` CLI it starts itself. **Refused outright wherever the wall is up** — every caller, key or person — because a token crossing a network is a different question from one handed to a container on the same laptop. `204` when none is set |
+| `/settings/claude-token` | GET | The token itself, wrapped with `SecretProtector` for the wire. The one route in Hatch that hands a live secret back out, and it is cut the opposite way to `/settings` beside it — **a key or a keyless runner may take it**, because its ordinary caller is the container runner's entrypoint (`containers/hatch-runner/`) authenticating a `claude` CLI it starts itself. **Refused outright wherever the wall is up** — every caller, key or person — because a token crossing a network is a different question from one handed to a container on the same laptop. `204` when none is set |
 | `/issues/{key}/work-log` | GET, POST | What each session on this issue cost. **POST is a key only** — a browser is refused outright, because the only honest writer of a meter reading is the dispatcher that read it. See [the leaderboard](#the-leaderboard) |
 | `/work-log/sessions` | GET | The sessions in a range, ranked, with the range's own totals — see [the leaderboard](#the-leaderboard) |
 | `/work-log/history` | GET | The same rows folded into equal buckets of time, for the graph |
@@ -1001,7 +1001,7 @@ there is no wall, because with one the name comes from the grant. It lives in
 Hatch rather than on the admin app's Settings page so that an installation with
 no admin app — which is every installation that is only somebody's tracker —
 can still set both. It is an OAuth token for the operator's own Claude subscription, and
-like every other credential in Aerie it is the operator's to supply
+like every other credential in Hatch it is the operator's to supply
 ([`docs/ethos.md`](ethos.md)) — nothing about one household's account may be
 true of the artifact.
 
@@ -1563,7 +1563,7 @@ take the same ticket. The board divides it now, and the only thing two loops in
 in the middle of another's branch.
 
 **Two spellings of one path are one checkout.** On a case-insensitive filesystem
-`/x/code/Aerie` and `/x/code/aerie` are one directory, and a lock keyed on the
+`/x/code/Hatch` and `/x/code/hatch` are one directory, and a lock keyed on the
 string would let two loops into it, which is the one thing the lock is for. So
 the key is the canonical path: each segment resolved to the name the directory
 it sits in actually holds, with symlinks followed first. That is the answer
@@ -1721,7 +1721,7 @@ than acted on, and `GetNextWork` is the first clear row of that scan rather
 than a second walk that happens to agree with it — so a runner asks two
 questions and cannot get two different boards. Everything
 above is decided in one place, in one order, in
-[`WorkController.cs`](../src/Aerie.Api/Modules/Hatch/WorkController.cs).
+[`WorkController.cs`](../src/Hatch.Api/Modules/Hatch/WorkController.cs).
 
 The alternative was **the client**, and it is the cheaper thing to write:
 `queue` already parses the board, and folding the not-yet-ready and the
@@ -1745,7 +1745,7 @@ applying it to tickets nobody looked at.
 
 ### Where the loop lives
 
-The CLI is one program — [`src/Aerie.Hatch`](../src/Aerie.Hatch), published as a
+The CLI is one program — [`src/Hatch.Cli`](../src/Hatch.Cli), published as a
 single binary called `hatch`. Every command is a command of it: `board`, `next`,
 `queue`, `show`, `start`, `move`, `comment`, `pr`, `depends`, `ask`,
 `questions`, `answer`, `api`, `config`, `work` and `go-to-work`.
@@ -1766,7 +1766,7 @@ assert what a recorded request log happens to show.
 
 The other fourteen followed, and not because shell was the wrong language for
 `curl | jq` — it was a perfectly good one, and the ported code says the same
-things. They followed because an operator who clones Aerie into their own house
+things. They followed because an operator who clones Hatch into their own house
 has no copy of `scripts/hatch.sh` on their `PATH`, and a tracker reachable from
 one checkout is a tracker for one person. `hatch` installs once, runs from
 wherever somebody is standing, and keeps its settings with the person rather
@@ -1780,10 +1780,10 @@ it is the two things that are genuinely its own: that door, and the restart
 supervisor below, which a process cannot be for itself.
 
 So: a console program in the solution, compiled against
-`src/Aerie.Hatch.Contracts` — the same records the API serves, so a fixture that
+`src/Hatch.Contracts` — the same records the API serves, so a fixture that
 goes stale does not quietly deserialise into a dispatch with empty fields, it
 stops compiling — and asserted in
-[`src/Aerie.Hatch.Tests`](../src/Aerie.Hatch.Tests), which `make test` and CI
+[`src/Hatch.Cli.Tests`](../src/Hatch.Cli.Tests), which `make test` and CI
 already run because the solution already builds and tests everything in it. Two
 loops racing one ticket, a lease refused mid-session, an interrupt between a
 claim and its release, two spellings of one checkout: each of those is a test
@@ -1888,7 +1888,7 @@ collides with nothing else it answers with), and `hatch.sh` rebuilds it and runs
 it again. Two triggers, because the answer to which one on the ticket was both:
 
 - **Its own source changed on the trunk.** The set is `scripts/hatch.sh` and
-  everything under `src/Aerie.Hatch` and `src/Aerie.Hatch.Contracts` — the loop,
+  everything under `src/Hatch.Cli` and `src/Hatch.Contracts` — the loop,
   the wire records it is compiled against, and the script that resolves and
   launches it — hashed on disk rather than read out of git, since the files that
   are there are the files that run. The baseline is taken once at startup, and
@@ -2068,7 +2068,7 @@ wherever its issue happens to stand, which is the rule the attention panel
 states, and a count that quietly dropped would be a question nobody ever
 answers.
 
-[`Rollup.cs`](../src/Aerie.Api/Modules/Hatch/Rollup.cs) loads the tracker once
+[`Rollup.cs`](../src/Hatch.Api/Modules/Hatch/Rollup.cs) loads the tracker once
 and folds post-order — O(n) for the tree rather than a walk per node — because
 the Plan page asks about every epic in the house at once. It is server-side for
 the reason the rank and the dispatcher's pick are: a browser that re-derived a
@@ -2119,14 +2119,14 @@ those two are about a codebase. The other fourteen are one request and a
 sentence about the answer, and `hatch board` from a directory that has never
 been a repository is the ordinary case.
 
-Its settings are read in three layers, highest first: an exported `AERIE_BASE`
-or `AERIE_HATCH_KEY`, then `scripts/.env` in the checkout you happen to be
+Its settings are read in three layers, highest first: an exported `HATCH_BASE`
+or `HATCH_KEY`, then `scripts/.env` in the checkout you happen to be
 standing in, then the per-user file `hatch config` writes — mode 600, under the
 platform's application-data directory, outside every repository. An operator
 configures once and every checkout on that machine is reached; a repository that
 wants to pin its own origin still can. **The key lives outside the artifact** —
 never a tracked file, never a value in a commit, never pasted into an issue.
-That is not ordinary secret hygiene: Aerie ships to other operators, and a
+That is not ordinary secret hygiene: Hatch ships to other operators, and a
 credential in the artifact is one operator's credential inherited by everyone
 who clones it ([`ethos.md`](ethos.md)).
 
@@ -2250,7 +2250,7 @@ code already settles is a round trip through a person for nothing.
 
 ## Deferred on purpose
 
-- **The loop lifted onto the Aerie platform, headless.** Two checkouts on one
+- **The loop lifted onto the Hatch platform, headless.** Two checkouts on one
   box and several boxes in the house are what the [claim](#claim) makes
   possible; a loop that is a service rather than a terminal somebody left open
   is the run after that, and it is not this one. What is deferred is the

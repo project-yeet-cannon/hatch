@@ -1,0 +1,116 @@
+/* @hatch/ui — the document layer.
+   ---------------------------------------------------------------------------
+   The rules an app needs before it renders anything of its own: the box model,
+   the body's face and ground, the heading scale, and the native form controls.
+
+   This is a separate entry point from tokens.css because it is a different
+   kind of thing. tokens.css states values and paints nothing; base.css paints,
+   and an app that wanted the vocabulary without the opinions could take the
+   first and skip the second. In practice every app takes both.
+
+   It exists at all because of the native controls. <Field> in this package
+   renders a label around a control the *app* supplies — a raw <input>, a
+   <select>, a <textarea>. If the rules that make those controls look like
+   Hatch's lived in admin's stylesheet, a <Field> specimen in the gallery would
+   render a naked browser input, and a gallery that shows a component looking
+   different from how it looks in the app is worse than no gallery.
+
+   What is deliberately NOT here:
+
+   - `p { margin: 0 }`. Admin's pages are laid out against the browser's
+     default paragraph margins, and its own margin utilities stack on top of
+     them. Zeroing it here would move text on every admin page, which Phase 4
+     may not do. An app that wants flow margins gone states it itself.
+   - `html, body, #root { height: 100% }`. That is an app-shell decision — a
+     full-height flex column — not a property of the vocabulary.
+
+   Every value comes from tokens.css. A literal here is a bug. */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--ui);
+  font-size: var(--t-body);
+  line-height: var(--lh-body);
+}
+
+/* The type register, bound to the outline. A page states its rank with the
+   right element and gets the right size; a size chosen by hand is a bug. */
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+  font-weight: 600;
+  line-height: var(--lh-tight);
+}
+
+h1 { font-size: var(--t-title); }
+h2 { font-size: var(--t-heading); }
+h3 { font-size: var(--t-subhead); }
+h4 { font-size: var(--t-section); }
+h5 { font-size: var(--t-body); }
+h6 { font-size: var(--t-label); }
+
+code {
+  font-family: var(--mono);
+  font-size: var(--t-label);
+}
+
+/* ---------------------------------------------------------------------------
+   Native controls.
+
+   <button> is styled as an element rather than only through <Button> because
+   an app legitimately builds bare controls out of it — an icon button, a
+   link-shaped button, a photo tile that is really a control — and those all
+   start from this rule and remove from it. <Button> restates the whole
+   appearance rather than leaning on this, so it renders correctly in an app
+   that never imported base.css. */
+button,
+input[type="button"],
+input[type="submit"] {
+  padding: var(--sp-2) var(--sp-4);
+  border: none;
+  border-radius: var(--r-ctl);
+  font-family: inherit;
+  font-size: var(--t-body);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Enumerated rather than `input:not([type=checkbox])`: a type this house has
+   not used yet should arrive looking wrong and get a decision, not inherit a
+   text field's padding by accident. */
+input[type="text"],
+input[type="email"],
+input[type="number"],
+input[type="password"],
+input[type="datetime-local"],
+select,
+textarea {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-in);
+  font-family: inherit;
+  font-size: var(--t-body);
+  color: var(--ink);
+  background: var(--card);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-bg);
+}

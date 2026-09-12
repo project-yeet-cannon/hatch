@@ -5,11 +5,11 @@
 # break down, analyse and implement in any repository; it cannot build or test
 # one whose toolchain this image does not happen to carry, and no generic image
 # carries everybody's. The base-OS runner the Runner page hands out is the
-# primary path for anything else - see src/Aerie.Web/apps/hatch/public/hatch-at-home.md.
+# primary path for anything else - see src/Hatch.Web/apps/hatch/public/hatch-at-home.md.
 #
-# Build context is the repository root, like src/Aerie.Api/Dockerfile.api and
+# Build context is the repository root, like src/Hatch.Api/Dockerfile.api and
 # unlike the three containers/ images beside this one: this needs
-# src/Aerie.Hatch, which is not under this directory.
+# src/Hatch.Cli, which is not under this directory.
 
 # --platform=$BUILDPLATFORM pins this stage to whatever is doing the building,
 # and the RID below is what makes it produce the *target's* binary anyway. The
@@ -30,20 +30,20 @@ COPY . ./
 # environment variable the deployment could get wrong, for the reason
 # Dockerfile.api gives at greater length.
 ARG TARGETARCH
-ARG AERIE_REVISION
+ARG HATCH_REVISION
 RUN case "$TARGETARCH" in \
       amd64) rid=linux-x64 ;; \
       arm64) rid=linux-arm64 ;; \
       *) echo "hatch-runner: no .NET RID for TARGETARCH=$TARGETARCH" >&2; exit 1 ;; \
     esac \
- && dotnet publish src/Aerie.Hatch/Aerie.Hatch.csproj \
+ && dotnet publish src/Hatch.Cli/Hatch.Cli.csproj \
       --runtime $rid \
       --configuration Release \
       --output /out \
       -p:PublishSingleFile=true \
       -p:SelfContained=true \
       -p:PublishTrimmed=true \
-      -p:SourceRevisionId=$AERIE_REVISION
+      -p:SourceRevisionId=$HATCH_REVISION
 
 # Debian-family, and that is load-bearing: the publish above targets glibc, so
 # an Alpine (musl) base would produce an image whose binary cannot start. This

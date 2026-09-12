@@ -10,9 +10,9 @@
             "request": "launch",
             "preLaunchTask": "build",
             // If you have changed target frameworks, make sure to update the program path.
-            "program": "${workspaceFolder}/src/Aerie.Api/bin/Debug/net7.0/Aerie.Api.dll",
+            "program": "${workspaceFolder}/src/Hatch.Api/bin/Debug/net7.0/Hatch.Api.dll",
             "args": [],
-            "cwd": "${workspaceFolder}/src/Aerie.Api",
+            "cwd": "${workspaceFolder}/src/Hatch.Api",
             "stopAtEntry": false,
             // Enable launching a web browser when ASP.NET Core starts. For more information: https://aka.ms/VSCode-CS-LaunchJson-WebBrowser
             "serverReadyAction": {

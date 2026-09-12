@@ -1,0 +1,145 @@
+using System.Security.Cryptography;
+using System.Text;
+using Hatch.Api.Ef;
+using Microsoft.AspNetCore.WebUtilities;
+
+namespace Hatch.Api.Services.Auth;
+
+/// <summary>
+/// The three secrets the wall deals in, and the only place any of them is
+/// generated, hashed, formatted or parsed.
+///
+/// They are deliberately different shapes because they are handled by different
+/// things. A grant token is read by a browser and nothing else, so it is 256
+/// bits of base64url and as long as it likes. An invite code is read aloud
+/// across a room and typed on a tablet's soft keyboard, so it is eight
+/// Crockford characters - the same alphabet and the same fold-on-parse rules as
+/// <see cref="Hatch.Api.Modules.Storage.CrateCode"/>, for the same reason: a
+/// character a person can mistake is a character that sends them nowhere. An
+/// API key is read by a program out of a file, so it optimises for a third
+/// thing again: being unmistakable on sight, which is what the
+/// <c>hatch_ak_</c> prefix buys.
+///
+/// All three are stored only as SHA-256. Plain SHA-256 rather than a password
+/// KDF is right for the token and the key - the input is full-entropy random,
+/// so there is nothing for iteration count to defend - and is an accepted,
+/// bounded compromise for the code, whose 40 bits are protected by a
+/// minutes-long TTL and single use instead (see EfAuthInvite).
+/// </summary>
+public static class AuthTokens
+{
+    /// <summary>Bytes of entropy in a grant token. 256 bits, matching Pkce's generator and for the same reason.</summary>
+    public const int TokenBytes = 32;
+
+    /// <summary>Characters in an invite code. Eight of Crockford's 32 is ~40 bits - short enough to say out loud, behind a TTL and a rate limiter.</summary>
+    public const int InviteCodeLength = 8;
+
+    /// <summary>Crockford's alphabet: 0-9 then A-Z without I, L, O and U.</summary>
+    public const string InviteAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+    /// <summary>What a formatted code leads with, so someone looking at eight characters on a screen knows what they are for.</summary>
+    public const string InvitePrefix = "HATCH";
+
+    /// <summary>
+    /// What every API key secret starts with. It is there so that a string
+    /// pasted into a config file, a log line, or a commit is recognisable as an
+    /// Hatch credential on sight - by a person reading it, and by the secret
+    /// scanners that read a public repository for exactly these shapes.
+    /// </summary>
+    public const string ApiKeyPrefix = "hatch_ak_";
+
+    /// <summary>Random characters after the prefix. 32 of 62 is ~190 bits, which is a secret nobody guesses and a string that still fits on one line.</summary>
+    public const int ApiKeyBodyLength = 32;
+
+    /// <summary>Letters and digits only: a key is copied through shells, YAML and JSON, and every one of those has an opinion about punctuation.</summary>
+    public const string ApiKeyAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+    private const int InviteGroupSize = InviteCodeLength / 2;
+
+    /// <summary>A fresh grant token. Rendered base64url so it survives a Set-Cookie header without escaping.</summary>
+    public static string NewToken() => WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(TokenBytes));
+
+    /// <summary>A fresh invite code, bare and uppercase. Cryptographic RNG so a batch of codes doesn't correlate.</summary>
+    public static string NewInviteCode() => RandomNumberGenerator.GetString(InviteAlphabet, InviteCodeLength);
+
+    /// <summary>"K3M9P2QT" -> "HATCH-K3M9-P2QT". Presentation only; the bare form is what gets hashed.</summary>
+    public static string FormatInviteCode(string code) =>
+        code.Length == InviteCodeLength
+            ? $"{InvitePrefix}-{code[..InviteGroupSize]}-{code[InviteGroupSize..]}"
+            : code;
+
+    /// <summary>
+    /// Turns whatever was typed, pasted or scanned into the bare stored form,
+    /// or null if it can't be one. Accepts the full "HATCH-K3M9-P2QT" a paste
+    /// carries, and applies Crockford's substitutions (I/L -> 1, O -> 0) so a
+    /// code someone heard as "eye" and typed as I still lands.
+    /// </summary>
+    public static string? NormalizeInviteCode(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return null;
+
+        Span<char> stripped = stackalloc char[InvitePrefix.Length + InviteCodeLength];
+        var kept = 0;
+
+        foreach (var raw in input)
+        {
+            if (raw is '-' or ' ' or '_') continue;
+            if (kept == stripped.Length) return null;
+            stripped[kept++] = char.ToUpperInvariant(raw);
+        }
+
+        // The prefix comes off before the Crockford fold, not after: "HATCH"
+        // contains an I, and folding first would turn it into "AER1E" and stop
+        // matching itself.
+        var body = stripped[..kept];
+        if (body.StartsWith(InvitePrefix)) body = body[InvitePrefix.Length..];
+        if (body.Length != InviteCodeLength) return null;
+
+        Span<char> code = stackalloc char[InviteCodeLength];
+        for (var i = 0; i < body.Length; i++)
+        {
+            var c = body[i] switch
+            {
+                'I' or 'L' => '1',
+                'O' => '0',
+                var other => other,
+            };
+
+            if (!InviteAlphabet.Contains(c)) return null;
+            code[i] = c;
+        }
+
+        return new string(code);
+    }
+
+    /// <summary>
+    /// A fresh API key secret. Read by a program out of a file rather than by a
+    /// person off a screen, so unlike an invite code it optimises for entropy
+    /// and for being unmistakable, not for being sayable.
+    /// </summary>
+    public static string NewApiKey() =>
+        ApiKeyPrefix + RandomNumberGenerator.GetString(ApiKeyAlphabet, ApiKeyBodyLength);
+
+    /// <summary>
+    /// The leading characters of a secret, which is all of it that is ever
+    /// stored in the clear or shown twice - enough to tell two keys apart in a
+    /// list, and useless to anybody holding it.
+    /// </summary>
+    public static string ApiKeyPrefixOf(string secret) =>
+        secret.Length <= EfApiKey.PrefixLength ? secret : secret[..EfApiKey.PrefixLength];
+
+    /// <summary>SHA-256 of a secret, as it is stored. ASCII because both secrets are drawn from ASCII alphabets by construction.</summary>
+    public static byte[] Hash(string secret) => SHA256.HashData(Encoding.UTF8.GetBytes(secret));
+
+    /// <summary>
+    /// Fixed-time comparison of two stored hashes. The index lookup that found
+    /// the row already leaked nothing (it matched on a hash, not on the
+    /// secret), so this is belt to that suspenders - but it costs one call and
+    /// it means no code path in the wall compares credential material with ==.
+    /// </summary>
+    public static bool Matches(byte[]? stored, byte[] presented) =>
+        stored is not null
+        && stored.Length == AuthHash.Length
+        && presented.Length == AuthHash.Length
+        && CryptographicOperations.FixedTimeEquals(stored, presented);
+}

@@ -1,0 +1,75 @@
+/* The three variants admin already had, carried across unchanged.
+
+   The base rule restates what base.css says about <button> rather than
+   inheriting it. That is deliberate duplication: a component in this package
+   has to render correctly in an app that took the tokens and not the document
+   layer, and a button whose padding depends on a stylesheet it does not import
+   is a button that silently collapses. The values are the same values; if one
+   moves in Phase 6 both move.
+
+   :disabled is base.css's 0.5 opacity, restated here for the same reason. */
+
+.hatch-btn {
+  padding: var(--sp-2) var(--sp-4);
+  border: none;
+  border-radius: var(--r-ctl);
+  font-family: inherit;
+  font-size: var(--t-body);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.hatch-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.hatch-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.hatch-btn--primary {
+  background: var(--primary);
+  color: var(--on-accent);
+}
+
+.hatch-btn--primary:hover:not(:disabled) {
+  background: var(--primary-ink);
+}
+
+.hatch-btn--danger {
+  background: var(--danger);
+  color: var(--on-accent);
+}
+
+.hatch-btn--danger:hover:not(:disabled) {
+  background: var(--danger-ink);
+}
+
+.hatch-btn--secondary {
+  background: var(--line);
+  color: var(--ink);
+}
+
+.hatch-btn--secondary:hover:not(:disabled) {
+  background: var(--line-strong);
+}
+
+/* An anchor wearing the button's clothes. It needs three things a <button>
+   gets from the UA: a box that centres its label, no underline, and the
+   inherited font. Qualified by element so a real <button> - which is already
+   inline-block and baseline-aligned - is left exactly as it was. */
+a.hatch-btn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+/* A focus ring drawn in --primary is invisible on the primary fill, so the
+   two filled variants ring in their own ink instead. */
+.hatch-btn--primary:focus-visible,
+.hatch-btn--danger:focus-visible {
+  outline-color: var(--on-accent);
+}

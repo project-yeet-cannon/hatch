@@ -17,7 +17,7 @@ env:
   # (docs/ethos.md) - GITHUB_TOKEN's registry permission is scoped to packages
   # under this same owner, so a literal here would be wrong the moment this
   # repository is forked or renamed, exactly as it was when Hatch moved out of
-  # Aerie's repository and every push here still named the old one.
+  # Hatch's repository and every push here still named the old one.
   IMAGE_NAMESPACE: ghcr.io/${{ github.repository_owner }}
 
 jobs:
@@ -63,7 +63,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.IMAGE_NAMESPACE }}/aerie-api
+          images: ${{ env.IMAGE_NAMESPACE }}/hatch-api
           tags: |
             type=raw,value=latest
             type=raw,value=${{ github.event.workflow_run.head_sha }}
@@ -73,13 +73,13 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: ./src/Aerie.Api/Dockerfile.api
+          file: ./src/Hatch.Api/Dockerfile.api
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            AERIE_REVISION=${{ github.event.workflow_run.head_sha }}
-            AERIE_SEQUENCE=${{ steps.revision.outputs.sequence }}
+            HATCH_REVISION=${{ github.event.workflow_run.head_sha }}
+            HATCH_SEQUENCE=${{ steps.revision.outputs.sequence }}
 
   # The runner in a container, published beside the two images the local stack
   # already names.
@@ -138,7 +138,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            AERIE_REVISION=${{ github.event.workflow_run.head_sha }}
+            HATCH_REVISION=${{ github.event.workflow_run.head_sha }}
 
   build-and-push-db-image:
     if: github.event.workflow_run.conclusion == 'success'
@@ -154,7 +154,7 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           sparse-checkout: |
-            containers/aerie-db
+            containers/hatch-db
 
       - name: Log in to the Container registry
         uses: docker/login-action@v4
@@ -167,7 +167,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.IMAGE_NAMESPACE }}/aerie-db
+          images: ${{ env.IMAGE_NAMESPACE }}/hatch-db
           tags: |
             type=raw,value=latest
             type=raw,value=${{ github.event.workflow_run.head_sha }}
@@ -175,8 +175,8 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
         with:
-          context: ./containers/aerie-db
-          file: ./containers/aerie-db/Dockerfile.db
+          context: ./containers/hatch-db
+          file: ./containers/hatch-db/Dockerfile.db
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

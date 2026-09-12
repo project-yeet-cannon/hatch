@@ -1,6 +1,6 @@
-# Working on Aerie
+# Working on Hatch
 
-Notes for Claude. Read [`README.md`](README.md) for what Aerie is,
+Notes for Claude. Read [`README.md`](README.md) for what Hatch is,
 [`docs/ethos.md`](docs/ethos.md) for the one rule that constrains every commit
 (*nothing in this repo may be true of exactly one installation*), and
 [`docs/hatch.md`](docs/hatch.md) for the tracker every ticket below comes off.
@@ -19,8 +19,8 @@ alone, so `todo` reaches the column the board calls `To Do`. Prefer it to raw
 `curl`; the raw calls below are what it is doing. `hatch --help` lists the
 surface, and every subcommand takes `-h` for its own.
 
-It is one program — [`src/Aerie.Hatch`](src/Aerie.Hatch), published as a single
-binary for macOS, Windows and Linux — because an operator who clones Aerie has
+It is one program — [`src/Hatch.Cli`](src/Hatch.Cli), published as a single
+binary for macOS, Windows and Linux — because an operator who clones Hatch has
 no copy of this repository's scripts on their `PATH`. Only `work` and
 `go-to-work` need to be run inside a git checkout.
 
@@ -29,11 +29,11 @@ those commands**, finding or building the binary and handing over. Use it where
 `hatch` is not installed; the two are the same commands and the same arguments,
 and this file writes `./scripts/hatch.sh` below for exactly that reason.
 
-Access is an API key — `Authorization: Bearer aerie_ak_…` — read from three
-layers, highest first: an exported `AERIE_BASE`/`AERIE_HATCH_KEY`, then
+Access is an API key — `Authorization: Bearer hatch_ak_…` — read from three
+layers, highest first: an exported `HATCH_BASE`/`HATCH_KEY`, then
 `scripts/.env` in this checkout (ignored by git), then the per-user file
 `hatch config` writes. **The key lives outside the artifact**: never a tracked
-file, never a value in a commit, never pasted into a plan or an issue. Aerie is
+file, never a value in a commit, never pasted into a plan or an issue. Hatch is
 headed for release to other operators, and a credential in the artifact is one
 operator's credential inherited by everyone who clones it. The key carries the
 `hatch` scope and reaches `/api/hatch/*` and nothing else, so a `403` means the
@@ -91,8 +91,8 @@ writable only by a person — as is a model or effort pinned on a single ticket.
 a playbook is wrong, say so on the ticket. The API refuses to let you route
 around it, and it refuses on purpose.
 
-Work on the loop itself — `src/Aerie.Hatch`, `scripts/hatch.sh`,
-`src/Aerie.Hatch.Contracts` — reaches the next increment rather than the next
+Work on the loop itself — `src/Hatch.Cli`, `scripts/hatch.sh`,
+`src/Hatch.Contracts` — reaches the next increment rather than the next
 night: when its own source changes on the trunk, the loop rebuilds and comes
 back as the new version.
 
@@ -130,10 +130,10 @@ What the repository can answer, answer by reading the repository.
 A `hatch.${DOMAIN}/issues/AER-12` link, or a bare `AER-12`, means:
 
 ```
-GET  ${AERIE_BASE}/api/hatch/issues/AER-12          # title, description, status, parent, children
-GET  ${AERIE_BASE}/api/hatch/issues/AER-12/comments
-GET  ${AERIE_BASE}/api/hatch/issues/AER-12/questions?open=false   # decisions asked for, and given
-GET  ${AERIE_BASE}/api/hatch/issues/AER-12/events   # what has happened to it, newest first
+GET  ${HATCH_BASE}/api/hatch/issues/AER-12          # title, description, status, parent, children
+GET  ${HATCH_BASE}/api/hatch/issues/AER-12/comments
+GET  ${HATCH_BASE}/api/hatch/issues/AER-12/questions?open=false   # decisions asked for, and given
+GET  ${HATCH_BASE}/api/hatch/issues/AER-12/events   # what has happened to it, newest first
 ```
 
 Read it, then get to work. The description is markdown and is the brief.

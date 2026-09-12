@@ -1,6 +1,6 @@
 # Hatch, from source, on one computer. This is the standard way to run this
 # install locally: `docker compose up -d`, then open
-# http://localhost:8080/apps/hatch/. See src/Aerie.Web/apps/hatch/public/hatch-at-home.md
+# http://localhost:8080/apps/hatch/. See src/Hatch.Web/apps/hatch/public/hatch-at-home.md
 # for the full walkthrough (also served in the app itself, under Docs in the nav).
 #
 # Named explicitly so the stack is the same stack however this file is reached,
@@ -10,7 +10,7 @@ name: hatch-local
 services:
   db:
     build:
-      context: ./containers/aerie-db
+      context: ./containers/hatch-db
       dockerfile: Dockerfile.db
     ports:
       # Published, unlike a shipped-image deployment would publish it: this is
@@ -29,26 +29,26 @@ services:
       timeout: 5s
       retries: 5
 
-  # The api image in its migration mode (Program.cs reads AERIE_MIGRATE) and
+  # The api image in its migration mode (Program.cs reads HATCH_MIGRATE) and
   # then exited. It carries no `restart:` on purpose: the default of `no` is
   # what leaves it in the "completed successfully" state `api` waits on, on
   # every start rather than only the first.
   migrate:
     build:
       context: .
-      dockerfile: src/Aerie.Api/Dockerfile.api
+      dockerfile: src/Hatch.Api/Dockerfile.api
     depends_on:
       db:
         condition: service_healthy
     environment:
       DOTNET_ENVIRONMENT: Docker
       Auth__Enabled: "false"
-      AERIE_MIGRATE: "1"
+      HATCH_MIGRATE: "1"
 
   api:
     build:
       context: .
-      dockerfile: src/Aerie.Api/Dockerfile.api
+      dockerfile: src/Hatch.Api/Dockerfile.api
     # Not `depends_on: db` - the API does not retry a schema that is not there
     # yet, it exits (AERIE-931). Waiting for the migration to *finish* is the
     # difference between a stack that comes up and one that races.
@@ -56,7 +56,7 @@ services:
       migrate:
         condition: service_completed_successfully
     volumes:
-      - ./src/Aerie.Api/.env.json:/App/.env.json
+      - ./src/Hatch.Api/.env.json:/App/.env.json
     environment:
       DOTNET_ENVIRONMENT: Docker
       Auth__Enabled: "false"
@@ -76,7 +76,7 @@ services:
   # Every variable below defaults to empty on purpose. What this container
   # actually needs is checked by its own entrypoint, at the moment it starts,
   # where the refusal can say what to fix. See
-  # src/Aerie.Web/apps/hatch/public/hatch-at-home.md.
+  # src/Hatch.Web/apps/hatch/public/hatch-at-home.md.
   runner:
     build:
       context: .
@@ -95,7 +95,7 @@ services:
     environment:
       # The service name, over Compose's own network. Nothing about this
       # crosses the machine.
-      AERIE_BASE: http://api:8080
+      HATCH_BASE: http://api:8080
       HATCH_RUNNER: "${HATCH_RUNNER_NAME:-hatch-runner}"
       HATCH_ROOT: /checkout
       GIT_AUTHOR_NAME: "${HATCH_GIT_NAME:-}"
@@ -107,7 +107,7 @@ services:
       # up inside of and wrong everywhere else - so set HATCH_CHECKOUT.
       - "${HATCH_CHECKOUT:-.}:/checkout"
       # Uncomment whichever push credential you use; see
-      # src/Aerie.Web/apps/hatch/public/hatch-at-home.md for what goes in each.
+      # src/Hatch.Web/apps/hatch/public/hatch-at-home.md for what goes in each.
       #
       # A credential helper, as git already has it configured on the host:
       # - "${HOME}/.gitconfig:/root/.gitconfig:ro"
@@ -117,26 +117,26 @@ services:
       # the environment above:
       # - "${SSH_AUTH_SOCK}:/ssh-agent"
 
-  # The UI Design library's gallery (src/Aerie.Web/apps/design) - every token
-  # and component in @aerie/ui, browsable on its own. Off by default, same
+  # The UI Design library's gallery (src/Hatch.Web/apps/design) - every token
+  # and component in @hatch/ui, browsable on its own. Off by default, same
   # reasoning as `runner`: this stack is Hatch's, and the gallery is a bonus
   # for anyone touching the design system.
   #
   # A plain Vite dev server rather than a build, so an edit under packages/ui
   # or apps/design hot-reloads without a rebuild - the workflow the gallery is
-  # for (see src/Aerie.Web/apps/design/README.md). `npm ci` runs on every start
+  # for (see src/Hatch.Web/apps/design/README.md). `npm ci` runs on every start
   # rather than being baked into an image, which keeps this profile free for
   # anyone who never asks for it.
   design:
     image: node:22-alpine
     profiles: ["design"]
-    working_dir: /repo/src/Aerie.Web
+    working_dir: /repo/src/Hatch.Web
     command: sh -c "npm ci && npm run dev -w apps/design -- --host 0.0.0.0 --port 5173"
     volumes:
       - .:/repo
       # Anonymous volumes so the container's own installs are not shadowed by
       # (or shadow) whatever is checked out on the host.
-      - /repo/src/Aerie.Web/node_modules
+      - /repo/src/Hatch.Web/node_modules
     ports:
       - "5173:5173"
 
