@@ -141,7 +141,6 @@ void AddHaClient<TClient>() where TClient : BaseClient =>
 
 // Services
 builder.Services.AddTransient<IEnvironmentService, EnvironmentService>();
-builder.Services.AddSingleton<IDocsService, DocsService>();
 // Singleton so the parsed index.html is read once per replica rather than once
 // per poll - every kiosk tablet hits this on a timer for as long as it's up.
 builder.Services.AddSingleton<IAppVersionService, AppVersionService>();
@@ -600,18 +599,12 @@ app.MapControllers();
 app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });
 app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = c => c.Tags.Contains("ready") });
 
-// SPA fallback so client-side routes (e.g. /apps/admin/devices) survive a hard refresh.
-// The :nonfile constraint excludes paths with a dot in the last segment (e.g.
-// assets/index-abc123.js) so real static assets still resolve via UseStaticFiles above
-// instead of being swallowed by this catch-all route during endpoint matching.
-if (Directory.Exists(Path.Combine(appsPath, "admin")))
-{
-    app.MapFallbackToFile("/apps/admin/{*path:nonfile}", "apps/admin/index.html");
-}
-if (Directory.Exists(Path.Combine(appsPath, "docs")))
-{
-    app.MapFallbackToFile("/apps/docs/{*path:nonfile}", "apps/docs/index.html");
-}
+// SPA fallback so client-side routes (e.g. /apps/hatch/issues/AER-12) survive a
+// hard refresh. The :nonfile constraint excludes paths with a dot in the last
+// segment (e.g. assets/index-abc123.js) so real static assets still resolve via
+// UseStaticFiles above instead of being swallowed by this catch-all route
+// during endpoint matching.
+//
 // Hatch deep links are the point rather than a nicety: /apps/hatch/issues/AER-12
 // is what gets pasted into a chat window and into a VS Code prompt, so it has
 // to survive being opened cold (docs/hatch.md).
@@ -623,75 +616,18 @@ if (Directory.Exists(Path.Combine(appsPath, "design")))
 {
     app.MapFallbackToFile("/apps/design/{*path:nonfile}", "apps/design/index.html");
 }
-// The family shell needs this for more than refresh survival: a printed QR
-// label encodes /apps/family/storage/c/{code} directly, so a cold scan from
-// the stock camera app is *always* a deep link into a route that only exists
-// client-side (see docs/family-apps-architecture.md).
-if (Directory.Exists(Path.Combine(appsPath, "family")))
-{
-    app.MapFallbackToFile("/apps/family/{*path:nonfile}", "apps/family/index.html");
-}
-// Same reasoning for the sign-in shell, twice over: /apps/auth/r/{code} is the
-// URL a scanned invite QR resolves to, and it exists only client-side; and this
-// is the page a gated request is redirected to, so a 404 here is a person
-// locked out with nothing to read (docs/auth-architecture.md).
-if (Directory.Exists(Path.Combine(appsPath, "auth")))
-{
-    app.MapFallbackToFile("/apps/auth/{*path:nonfile}", "apps/auth/index.html");
-}
 
 var opt = new RewriteOptions();
-// The picker is an app now (src/Aerie.Web/apps/home), so it lives at
-// /apps/home/ like every other one rather than being an index.html sitting in
-// wwwroot/apps. Both of its old addresses still land on it: `/` is what the
-// house is bookmarked as, and `/apps/` is what the app-switcher in every
-// app's top bar has always pointed at.
-opt.AddRedirect("^$", "apps/home/");
-opt.AddRedirect("^apps/?$", "apps/home/");
-opt.AddRedirect("^apps/home$", "apps/home/");
-opt.AddRedirect("^apps/dashboard$", "apps/dashboard/");
-opt.AddRedirect("^apps/admin$", "apps/admin/");
+// Hatch is the only app this install serves, so both of the house's old
+// general-purpose addresses land straight on it.
+opt.AddRedirect("^$", "apps/hatch/");
+opt.AddRedirect("^apps/?$", "apps/hatch/");
 opt.AddRedirect("^apps/hatch$", "apps/hatch/");
-opt.AddRedirect("^apps/logo$", "apps/logo/");
-opt.AddRedirect("^apps/modeler$", "apps/modeler/");
-opt.AddRedirect("^apps/docs$", "apps/docs/");
 opt.AddRedirect("^apps/design$", "apps/design/");
-opt.AddRedirect("^apps/family$", "apps/family/");
-opt.AddRedirect("^apps/auth$", "apps/auth/");
-// Short enough to read out over the phone to someone holding a new tablet -
-// "go to home.<domain> slash auth" - which is the fallback that keeps the QR
-// optional rather than required.
-opt.AddRedirect("^auth/?$", "apps/auth/");
 app.UseRewriter(opt);
 
 app.UseSwagger();
-
-////////
-/// Swagger UI wears the same bar as every other page in the house.
-///
-/// It is Swashbuckle's document, not one of the Vite apps, so it cannot render
-/// <TopBar> - it gets the standalone build of the same component instead
-/// (Aerie.Web/apps/chrome, served out of wwwroot/apps/chrome). Three
-/// injections, and the head content is the one that has to be a <script>:
-/// InjectJavascript writes a src and nothing else, so the bar's configuration
-/// cannot ride on the tag and arrives as a global the bundle reads instead.
-///
-/// swagger.css is what earns the theme control on that bar. It dresses
-/// Swagger's own surfaces from @aerie/ui's tokens, so Auto/Light/Dark moves
-/// the whole page rather than recoloring a 48px strip above a white one. It
-/// reads the tokens topbar.css defines, so the two ship together or not at all.
-app.UseSwaggerUI(c =>
-{
-    // The tab said "Swagger UI", which is the same orphaning the bar fixes -
-    // one of a dozen Aerie tabs, the only one not saying so.
-    c.DocumentTitle = "Aerie API";
-
-    c.InjectStylesheet("/apps/chrome/topbar.css");
-    c.InjectStylesheet("/apps/chrome/swagger.css");
-    c.InjectJavascript("/apps/chrome/topbar.js");
-    c.HeadContent = """<script>window.aerieTopBar = { appName: "Aerie API", theme: "switch" };</script>""";
-});
-
+app.UseSwaggerUI(c => c.DocumentTitle = "Aerie API");
 app.MapSwagger();
 
 await app.RunAsync();

@@ -25,21 +25,12 @@ WORKDIR /repo
 # Every workspace's package.json is an input to `npm ci`, so they are copied
 # ahead of the sources: an edit to any app's *code* then reuses this layer.
 COPY src/Aerie.Web/package.json src/Aerie.Web/package-lock.json src/Aerie.Web/
-COPY src/Aerie.Web/apps/admin/package.json src/Aerie.Web/apps/admin/
-COPY src/Aerie.Web/apps/auth/package.json src/Aerie.Web/apps/auth/
-COPY src/Aerie.Web/apps/chrome/package.json src/Aerie.Web/apps/chrome/
-COPY src/Aerie.Web/apps/dashboard/package.json src/Aerie.Web/apps/dashboard/
 COPY src/Aerie.Web/apps/design/package.json src/Aerie.Web/apps/design/
-COPY src/Aerie.Web/apps/docs/package.json src/Aerie.Web/apps/docs/
-COPY src/Aerie.Web/apps/family/package.json src/Aerie.Web/apps/family/
 COPY src/Aerie.Web/apps/hatch/package.json src/Aerie.Web/apps/hatch/
-COPY src/Aerie.Web/apps/home/package.json src/Aerie.Web/apps/home/
-COPY src/Aerie.Web/apps/modeler/package.json src/Aerie.Web/apps/modeler/
-# The shared packages are workspaces too: `npm ci` reads the lockfile, finds a
-# link: entry for each, and fails outright if that package.json is not on disk.
-# Neither has a build script, so `--workspaces --if-present` below skips them
-# and the consuming apps bundle their source.
-COPY src/Aerie.Web/packages/lib/package.json src/Aerie.Web/packages/lib/
+# The shared package is a workspace too: `npm ci` reads the lockfile, finds a
+# link: entry for it, and fails outright if this package.json is not on disk.
+# It has no build script, so `--workspaces --if-present` below skips it and the
+# consuming apps bundle its source.
 COPY src/Aerie.Web/packages/ui/package.json src/Aerie.Web/packages/ui/
 RUN npm --prefix src/Aerie.Web ci
 
@@ -70,7 +61,7 @@ RUN dotnet restore src/Aerie.Api/Aerie.Api.csproj
 # is a use that has to trust it (see Services/AerieRevision.cs).
 ARG AERIE_REVISION
 ARG AERIE_SEQUENCE
-RUN dotnet publish src/Aerie.Api/Aerie.Api.csproj -c Release -o out -p:SkipDashboardBuild=true -p:SkipAdminBuild=true -p:SkipDesignBuild=true -p:SkipHomeBuild=true -p:SkipModelerBuild=true -p:SkipDocsBuild=true -p:SkipFamilyBuild=true -p:SkipAuthBuild=true -p:SkipChromeBuild=true -p:SourceRevisionId=$AERIE_REVISION -p:AerieSequence=$AERIE_SEQUENCE
+RUN dotnet publish src/Aerie.Api/Aerie.Api.csproj -c Release -o out -p:SkipDesignBuild=true -p:SourceRevisionId=$AERIE_REVISION -p:AerieSequence=$AERIE_SEQUENCE
 
 # The runner, one self-contained binary per platform this house supports, so a
 # friend downloads a program rather than an SDK. Built from this same commit,
@@ -107,9 +98,6 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build-env /App/out .
-# Markdown source for DocsController/DocsService (Docs:Path in appsettings.Docker.json),
-# not part of the published .NET output above.
-COPY --from=build-env /App/docs ./docs
 # The four platform binaries RunnerController serves. Beside wwwroot/apps
 # rather than inside it: the static file handlers in Program.cs mount
 # wwwroot/apps at /apps and nothing else, so this directory is reachable only

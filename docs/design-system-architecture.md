@@ -6,8 +6,7 @@ Aerie's web apps share one vocabulary and one set of components, both living in
 **`@aerie/ui`** — a package inside the `src/Aerie.Web` npm workspace, consumed
 by every app that renders house chrome.
 
-The design goal is the same shape as the one behind
-[the family apps](family-apps-architecture.md): a *property*, not a style guide.
+The design goal is a *property*, not a style guide.
 The property is that **a color, radius, type step or spacing value written as a
 literal in an app is a bug** — there is one place those values live, a designer
 can change them there, and every app changes with them. Nothing enforces that
@@ -222,9 +221,8 @@ reasons worth writing down so this is not relitigated:
   on the root. A design system whose colors are not addressable from a
   stylesheet is one a designer cannot work in.
 - **The keyframe table is load-bearing elsewhere.** It is read on the Kotlin
-  side by `CircadianBrightness.kt` ([kiosk-architecture.md](kiosk-architecture.md)).
-  Making it serve a second, differently-shaped consumer is a way to break the
-  wall's backlight.
+  side by `CircadianBrightness.kt`. Making it serve a second,
+  differently-shaped consumer is a way to break the wall's backlight.
 
 So the dashboard keeps the sun, takes `@aerie/lib` and not `@aerie/ui`, and what
 comes across from it into the design system is its *philosophy*: one radius
@@ -356,9 +354,11 @@ Swashbuckle's document that Aerie reaches only through injected `<head>`
 content, and **`apps/logo`**, a static export whose runtime loads its own React
 from a CDN. Both were one-way trips from the app picker.
 
-`@aerie/ui/standalone/topbar` is the same bar built with DOM calls, and
-[`apps/chrome`](../src/Aerie.Web/apps/chrome/README.md) is the build that emits
-it as `topbar.js` + `topbar.css` under `/apps/chrome/`:
+`@aerie/ui/standalone/topbar` is the same bar built with DOM calls, for a page
+that cannot import the React component. (The `apps/chrome` build that once
+emitted it as `topbar.js` + `topbar.css` for Swagger UI and the logo export
+left with those two pages; the standalone entry point remains in the library
+for the next page that needs it.)
 
 ```html
 <link rel="stylesheet" href="/apps/chrome/topbar.css">
@@ -526,13 +526,3 @@ The properties above stop holding if any of these is done:
   says "Living Room", never a real room in a real house, and never a real domain.
 - [`src/Aerie.Web/apps/design/README.md`](../src/Aerie.Web/apps/design/README.md)
   — the gallery, app-side.
-- [`src/Aerie.Web/apps/home/README.md`](../src/Aerie.Web/apps/home/README.md) —
-  the picker, and why it stopped being a static file.
-- [`src/Aerie.Web/apps/chrome/README.md`](../src/Aerie.Web/apps/chrome/README.md)
-  — the standalone bar's build.
-- [`src/Aerie.Web/packages/lib/README.md`](../src/Aerie.Web/packages/lib/README.md)
-  — what earns a place in the shared logic package.
-- [`docs/family-apps-architecture.md`](family-apps-architecture.md) — the same
-  "app #2 costs a folder and an afternoon" goal, one layer down.
-- [`docs/kiosk-architecture.md`](kiosk-architecture.md) — the circadian engine
-  this system deliberately does not adopt.
