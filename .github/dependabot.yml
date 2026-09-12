@@ -1,8 +1,8 @@
 version: 2
 
 # Actions only, deliberately. The application dependencies (nuget under src/,
-# npm under src/Aerie.Web/apps/*, gradle under apps/kiosk) are covered by CI
-# builds and tests, so a bad bump there fails loudly and cheaply. Action
+# npm under src/Aerie.Web/apps/*) are covered by CI builds and tests, so a bad
+# bump there fails loudly and cheaply. Action
 # versions have no such backstop: nothing in this repo builds or tests them,
 # so they drift silently until GitHub deprecates the runtime underneath them
 # and every job starts printing a warning. That is exactly how checkout, the

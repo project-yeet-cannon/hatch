@@ -1,5 +1,0 @@
-<!-- Drawn as text rather than as paths, like every other app's mark here, so
-     the glyph is whatever the viewer's own emoji font says it is. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <text x="32" y="48" font-size="52" text-anchor="middle">📊</text>
-</svg>
