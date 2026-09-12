@@ -96,32 +96,20 @@ not find.
 [where the loop lives](#where-the-loop-lives), which is about why they stopped
 being shell.
 
-**Host: `hatch.${DOMAIN}`**, pointed at the existing `api` Service with a
-Traefik `replacePathRegex` rewriting `/…` to `/apps/hatch/…`
-(`charts/aerie/templates/middleware-hatch.yaml`). No new container, no new
-monitor, no new backup entry.
+**Host: one container, one origin.** The root [`compose.yaml`](../compose.yaml)
+is the standard way to run this install: `db`, a `migrate` step, and `api`
+serving every app — Hatch included — from `http://localhost:8080` (or
+`HATCH_PORT`). There is no reverse proxy in front of it and nothing to rewrite:
+the bundle's own assets live under `/apps/hatch/`, and `/api/hatch/*` is how a
+key can `curl` the API on the same origin the browser uses. The bundle reads its
+basename off the URL (`lib/basename.ts`) rather than assuming a prefix, which is
+what lets it serve unchanged wherever `/apps/hatch/` ends up mounted.
 
-The rewrite covers *every* path, not just `/`, because
-`hatch.${DOMAIN}/issues/AER-12` is the link that gets pasted into a chat window
-and has to survive being opened cold. Three prefixes are kept off that router by
-a second Ingress (`hatch-direct` in `ingress.yaml`) which carries no rewrite:
-the bundle's own assets under `/apps/hatch/`, the sign-in shell at `/apps/auth/`,
-and `/api/hatch/*` — which is how a key can `curl` the API on the same host the
-browser uses. Because a client-side router cannot see any of this, the bundle
-reads its basename off the URL (`lib/basename.ts`) rather than assuming a
-prefix; the two have to change together, since a rewrite the app does not expect
-renders a blank page with nothing in the network panel to explain it.
-
-**At home: the same images, on one laptop.** There is a second place Hatch
-lives, and it is somebody else's machine — `deploy/local/compose.yaml`, published
-to the registry as an OCI artifact beside the two images it names, so one
-`docker compose -f oci://…` line brings up a board with no checkout of this
-repository and no account anywhere. There is no Traefik in front of it and so
-none of the rewriting above: one container serves every app on one origin, the
-wall is off, and the runner comes from the Runner page inside the board rather
-than from a build. That install is a friend's whole tracker, and
-[`hatch-at-home.md`](hatch-at-home.md) is what it is handed — the one line, the
-name, the runner, and the block to paste into their own `CLAUDE.md`.
+**Read [`hatch-at-home.md`](../src/Aerie.Web/apps/hatch/public/hatch-at-home.md)**
+for the operator-facing version of the above — the one line, the runner, and
+the block to paste into a friend's own `CLAUDE.md`. It ships inside the Hatch
+bundle itself (`/apps/hatch/hatch-at-home.md`) rather than living only in this
+repository, so it travels with the board it describes.
 
 ## Domain model
 
@@ -319,7 +307,7 @@ Neither column is a foreign key, and neither could be: Hatch owns its own schema
 and its own migration history, and a constraint from a module into
 `public.People` is the coupling `Modules/README.md` exists to prevent — the same
 reason `CreatedBy` is a name. `ON DELETE SET NULL` would not have worked anyway,
-because [revoking a key](auth-architecture.md) sets a column and keeps the row
+because revoking a key sets a column and keeps the row
 on purpose.
 
 What does the work instead is **one predicate every reader applies**: an
@@ -759,8 +747,8 @@ some type from one column to the next. See [the dispatcher](#the-dispatcher).
 ## The wall, the admin gate, and API keys
 
 Hatch adds no authentication of its own. It sits behind the two boundaries
-[`auth-architecture.md`](auth-architecture.md) describes, and Phase 6 of its
-build taught the outer one a second lane.
+every other app in the house does — the wall, and the admin gate on top of it —
+and Phase 6 of its build taught the outer one a second lane.
 
 ### The posture
 
@@ -1008,7 +996,7 @@ Hatch's own **Settings** page and stored the way the Immich key and the
 Anthropic key already are: obfuscated at rest, redacted on read, never leaving
 the API. That page holds two settings and no others: this token, and
 `LocalPersonName` — what Hatch calls whoever is sitting at the machine
-([auth-architecture.md](auth-architecture.md), "Local mode"), shown only where
+("Local mode"), shown only where
 there is no wall, because with one the name comes from the grant. It lives in
 Hatch rather than on the admin app's Settings page so that an installation with
 no admin app — which is every installation that is only somebody's tracker —
@@ -2143,7 +2131,7 @@ credential in the artifact is one operator's credential inherited by everyone
 who clones it ([`ethos.md`](ethos.md)).
 
 The key is optional. Against a Hatch started with its wall off
-([`auth-architecture.md`](auth-architecture.md), "Local mode") there is no
+("Local mode") there is no
 credential to present, and every call names itself with an `X-Hatch-Runner`
 header instead — which is a name and not a proof, and only that Hatch reads one.
 So a `401` is two different sentences, and says which happened: a key that was

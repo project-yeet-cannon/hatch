@@ -269,11 +269,11 @@ export function RunnerPage() {
           yours to edit and not your agents': the API refuses the write from a key.
         </p>
         <p className="text-muted">
-          {/* Out of this app and into the docs one, so a plain anchor - see the
-              Docs link in the nav strip, which goes to the same page. */}
+          {/* A static file shipped beside this bundle, so a plain anchor - see
+              the Docs link in the nav strip, which goes to the same page. */}
           The long version, including the block to paste into your repository's <code>CLAUDE.md</code>{' '}
           so your agents know how to reach this board:{' '}
-          <a href="/apps/docs/hatch-at-home">Hatch at home</a>.
+          <a href="/apps/hatch/hatch-at-home.md">Hatch at home</a>.
         </p>
       </Card>
 

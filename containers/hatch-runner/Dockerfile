@@ -5,7 +5,7 @@
 # break down, analyse and implement in any repository; it cannot build or test
 # one whose toolchain this image does not happen to carry, and no generic image
 # carries everybody's. The base-OS runner the Runner page hands out is the
-# primary path for anything else - see docs/hatch-at-home.md.
+# primary path for anything else - see src/Aerie.Web/apps/hatch/public/hatch-at-home.md.
 #
 # Build context is the repository root, like src/Aerie.Api/Dockerfile.api and
 # unlike the three containers/ images beside this one: this needs

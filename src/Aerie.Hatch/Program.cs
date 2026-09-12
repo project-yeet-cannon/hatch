@@ -198,7 +198,7 @@ internal partial class Program
     /// <remarks>
     /// Real commands, in <see cref="Commands"/> and in <see cref="Usage"/> like
     /// every other - there is no hidden verb here. What this list is for is the
-    /// block in docs/hatch-at-home.md that a friend pastes into their own
+    /// block in src/Aerie.Web/apps/hatch/public/hatch-at-home.md that a friend pastes into their own
     /// repository's <c>CLAUDE.md</c>: that block is the contract an agent
     /// works to, and <c>runner-claude-token</c> is the container entrypoint's
     /// own plumbing (containers/hatch-runner/entrypoint.sh). Naming it there
