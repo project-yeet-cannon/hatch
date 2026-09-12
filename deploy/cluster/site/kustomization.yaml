@@ -1,8 +1,0 @@
-# Layer for the site-source Flux Kustomization (../site.yaml): the single
-# object that says where the private per-installation site repo is. Nothing
-# else lives here - the repo it points at is what site-config in ../site.yaml
-# reconciles from next.
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-resources:
-  - gitrepository.yaml

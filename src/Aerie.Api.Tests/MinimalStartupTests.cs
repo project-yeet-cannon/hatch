@@ -223,15 +223,23 @@ internal static class MinimalDatabases
             Once.Release();
         }
 
-        // The one that ships, read from where the cluster reads it. Copying it
-        // in here would be a fourth copy of the same DDL, and the copy the
-        // tests read is the one that could silently stop matching the one the
-        // cluster runs.
+        // The one that ships, read from where `db` reads it - containers/aerie-db/pginit.sql,
+        // the script the compose db container runs on its own first boot. Copying
+        // the DDL in here would be a second copy that could silently stop
+        // matching the one the container runs; reading it up to and including
+        // the CREATE DATABASE/`\c quartz` lines that only psql's own init
+        // machinery can execute is the alternative to that copy, not a licence
+        // to drift from that file's shape.
+        var pginit = await File.ReadAllTextAsync(
+            Path.Combine(RepositoryRoot(), "containers", "aerie-db", "pginit.sql"));
+        var afterConnect = pginit.IndexOf("\\c quartz", StringComparison.Ordinal);
+        Assert.True(afterConnect >= 0, "containers/aerie-db/pginit.sql has no `\\c quartz` line to split the Quartz DDL from.");
+        var quartzDdl = pginit[(afterConnect + "\\c quartz".Length)..];
+
         await using (var quartzDb = new NpgsqlConnection(quartz))
         {
             await quartzDb.OpenAsync();
-            await ExecuteAsync(quartzDb, await File.ReadAllTextAsync(
-                Path.Combine(RepositoryRoot(), "deploy", "cluster", "data", "schema", "quartz-ddl.sql")));
+            await ExecuteAsync(quartzDb, quartzDdl);
         }
 
         return (aerie, quartz);

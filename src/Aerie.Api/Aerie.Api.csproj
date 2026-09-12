@@ -5,7 +5,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Anthropic" Version="12.42.0" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.2" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
     <PackageReference Include="HADotNet.Core" Version="1.6.0" />
@@ -80,58 +79,11 @@
     <Exec Command="npm install" WorkingDirectory="../Aerie.Web" />
   </Target>
 
-  <ItemGroup>
-    <!-- The dashboard consumes @aerie/lib (the chart scales and the camera
-         stream protocol it shares with admin), so packages/ is one of its
-         inputs too. It does not consume @aerie/ui: the wall's palette is the
-         circadian engine, which is deliberately not the design system. -->
-    <DashboardSource Include="../Aerie.Web/apps/dashboard/src/**/*.*;../Aerie.Web/apps/dashboard/index.html;../Aerie.Web/apps/dashboard/package.json;../Aerie.Web/apps/dashboard/vite.config.ts;../Aerie.Web/packages/*/src/**/*.*;../Aerie.Web/packages/*/package.json" />
-  </ItemGroup>
-
-  <Target Name="BuildDashboard" BeforeTargets="Build" DependsOnTargets="NpmInstall" Condition="'$(SkipDashboardBuild)' != 'true'" Inputs="@(DashboardSource)" Outputs="wwwroot/apps/dashboard/index.html">
-    <Exec Command="npm run build -w apps/dashboard" WorkingDirectory="../Aerie.Web" />
-  </Target>
-
-  <ItemGroup>
-    <!-- admin consumes @aerie/ui and @aerie/lib, so the shared packages are
-         among its inputs: without this line a token edit would not retrigger an
-         incremental admin build. Every app that adopts either needs the same
-         line.
-         Spelled as packages/*/src rather than packages/** so a stray
-         node_modules under a package can never widen the glob. -->
-    <AdminSource Include="../Aerie.Web/apps/admin/src/**/*.*;../Aerie.Web/apps/admin/index.html;../Aerie.Web/apps/admin/package.json;../Aerie.Web/apps/admin/vite.config.ts;../Aerie.Web/packages/*/src/**/*.*;../Aerie.Web/packages/*/package.json" />
-  </ItemGroup>
-
-  <Target Name="BuildAdmin" BeforeTargets="Build" DependsOnTargets="NpmInstall" Condition="'$(SkipAdminBuild)' != 'true'" Inputs="@(AdminSource)" Outputs="wwwroot/apps/admin/index.html">
-    <Exec Command="npm run build -w apps/admin" WorkingDirectory="../Aerie.Web" />
-  </Target>
-
-  <ItemGroup>
-    <!-- Consumes @aerie/ui since it adopted the shared bar and tokens, so the
-         shared packages are among its inputs - without this line a token edit
-         would not retrigger an incremental modeler build. -->
-    <ModelerSource Include="../Aerie.Web/apps/modeler/src/**/*.*;../Aerie.Web/apps/modeler/index.html;../Aerie.Web/apps/modeler/package.json;../Aerie.Web/apps/modeler/vite.config.ts;../Aerie.Web/packages/*/src/**/*.*;../Aerie.Web/packages/*/package.json" />
-  </ItemGroup>
-
-  <Target Name="BuildModeler" BeforeTargets="Build" DependsOnTargets="NpmInstall" Condition="'$(SkipModelerBuild)' != 'true'" Inputs="@(ModelerSource)" Outputs="wwwroot/apps/modeler/index.html">
-    <Exec Command="npm run build -w apps/modeler" WorkingDirectory="../Aerie.Web" />
-  </Target>
-
-  <ItemGroup>
-    <!-- Consumes @aerie/ui since it adopted the shared bar and tokens - see the
-         note on ModelerSource above. -->
-    <DocsSource Include="../Aerie.Web/apps/docs/src/**/*.*;../Aerie.Web/apps/docs/index.html;../Aerie.Web/apps/docs/package.json;../Aerie.Web/apps/docs/vite.config.ts;../Aerie.Web/packages/*/src/**/*.*;../Aerie.Web/packages/*/package.json" />
-  </ItemGroup>
-
-  <Target Name="BuildDocs" BeforeTargets="Build" DependsOnTargets="NpmInstall" Condition="'$(SkipDocsBuild)' != 'true'" Inputs="@(DocsSource)" Outputs="wwwroot/apps/docs/index.html">
-    <Exec Command="npm run build -w apps/docs" WorkingDirectory="../Aerie.Web" />
-  </Target>
-
   <!--
-    The design gallery. Like admin it consumes @aerie/ui, so the shared package
-    is one of its inputs - and more so than admin's: this app exists to show the
+    The design gallery. It consumes @aerie/ui, so the shared package is one of
+    its inputs - and more so than most apps would: this app exists to show the
     library, and a token edit that did not retrigger its build would leave the
-    gallery describing a palette the apps no longer use.
+    gallery describing a palette Hatch no longer uses.
   -->
   <ItemGroup>
     <DesignSource Include="../Aerie.Web/apps/design/src/**/*.*;../Aerie.Web/apps/design/public/**/*.*;../Aerie.Web/apps/design/index.html;../Aerie.Web/apps/design/package.json;../Aerie.Web/apps/design/vite.config.ts;../Aerie.Web/packages/*/src/**/*.*;../Aerie.Web/packages/*/package.json" />
@@ -139,85 +91,5 @@
 
   <Target Name="BuildDesign" BeforeTargets="Build" DependsOnTargets="NpmInstall" Condition="'$(SkipDesignBuild)' != 'true'" Inputs="@(DesignSource)" Outputs="wwwroot/apps/design/index.html">
     <Exec Command="npm run build -w apps/design" WorkingDirectory="../Aerie.Web" />
-  </Target>
-
-  <!--
-    The family shell PWA. Unlike the apps above, its public/ folder is a build
-    input worth tracking: the manifest and icons are what make "Add to Home
-    Screen" work, and editing one without touching src/ must still rebuild.
-  -->
-  <ItemGroup>
-    <FamilySource Include="../Aerie.Web/apps/family/src/**/*.*;../Aerie.Web/apps/family/public/**/*.*;../Aerie.Web/apps/family/index.html;../Aerie.Web/apps/family/package.json;../Aerie.Web/apps/family/vite.config.ts" />
-  </ItemGroup>
-
-  <Target Name="BuildFamily" BeforeTargets="Build" DependsOnTargets="NpmInstall" Condition="'$(SkipFamilyBuild)' != 'true'" Inputs="@(FamilySource)" Outputs="wwwroot/apps/family/index.html">
-    <Exec Command="npm run build -w apps/family" WorkingDirectory="../Aerie.Web" />
-  </Target>
-
-  <!--
-    The sign-in shell. Nothing else in the build depends on it, but a deploy
-    that ships without it is a deploy where every redirect from the gate lands
-    on a 404 - so it is built like the rest rather than left to a manual step.
-  -->
-  <ItemGroup>
-    <AuthSource Include="../Aerie.Web/apps/auth/src/**/*.*;../Aerie.Web/apps/auth/index.html;../Aerie.Web/apps/auth/package.json;../Aerie.Web/apps/auth/vite.config.ts" />
-  </ItemGroup>
-
-  <Target Name="BuildAuth" BeforeTargets="Build" DependsOnTargets="NpmInstall" Condition="'$(SkipAuthBuild)' != 'true'" Inputs="@(AuthSource)" Outputs="wwwroot/apps/auth/index.html">
-    <Exec Command="npm run build -w apps/auth" WorkingDirectory="../Aerie.Web" />
-  </Target>
-
-  <!--
-    The app picker. It was a static file copied straight into wwwroot/apps by a
-    CopyAppsIndex target until it became an app of its own - which is what let
-    it drop its hand-rolled font hedge and pick up @aerie/ui, so the shared
-    package is one of its inputs like admin's and the gallery's.
-
-    It builds to wwwroot/apps/home like every other app. /apps/ redirects here
-    (Program.cs); building into wwwroot/apps itself to keep that URL would need
-    emptyOutDir: false, one absent-minded edit away from wiping every sibling
-    app's bundle.
-  -->
-  <ItemGroup>
-    <HomeSource Include="../Aerie.Web/apps/home/src/**/*.*;../Aerie.Web/apps/home/public/**/*.*;../Aerie.Web/apps/home/index.html;../Aerie.Web/apps/home/package.json;../Aerie.Web/apps/home/vite.config.ts;../Aerie.Web/packages/*/src/**/*.*;../Aerie.Web/packages/*/package.json" />
-  </ItemGroup>
-
-  <Target Name="BuildHome" BeforeTargets="Build" DependsOnTargets="NpmInstall" Condition="'$(SkipHomeBuild)' != 'true'" Inputs="@(HomeSource)" Outputs="wwwroot/apps/home/index.html">
-    <Exec Command="npm run build -w apps/home" WorkingDirectory="../Aerie.Web" />
-  </Target>
-
-  <!--
-    Shared page chrome (../Aerie.Web/apps/chrome). Not an app: it builds the
-    top bar as a plain topbar.js/topbar.css pair for the two pages that cannot
-    import @aerie/ui - Swagger UI, which is Swashbuckle's document (see the
-    UseSwaggerUI call in Program.cs), and the static logo export below.
-
-    Its output name is wwwroot/apps/chrome/topbar.js rather than an index.html,
-    which is why Outputs differs from every target above. packages/ is in its
-    inputs for the usual reason and then some: this build is almost entirely
-    @aerie/ui, so a token edit that did not retrigger it would leave the two
-    static pages wearing last week's bar.
-  -->
-  <ItemGroup>
-    <ChromeSource Include="../Aerie.Web/apps/chrome/src/**/*.*;../Aerie.Web/apps/chrome/public/**/*.*;../Aerie.Web/apps/chrome/package.json;../Aerie.Web/apps/chrome/vite.config.ts;../Aerie.Web/packages/*/src/**/*.*;../Aerie.Web/packages/*/package.json" />
-  </ItemGroup>
-
-  <Target Name="BuildChrome" BeforeTargets="Build" DependsOnTargets="NpmInstall" Condition="'$(SkipChromeBuild)' != 'true'" Inputs="@(ChromeSource)" Outputs="wwwroot/apps/chrome/topbar.js">
-    <Exec Command="npm run build -w apps/chrome" WorkingDirectory="../Aerie.Web" />
-  </Target>
-
-  <!--
-    Logo app (../Aerie.Web/apps/logo) - a static Claude Design export
-    (index.html + generated support.js), no npm build step needed. Its
-    index.html references /apps/chrome/topbar.{js,css}, which BuildChrome above
-    produces; the two are independent targets because the copy does not consume
-    the bundle, the browser does.
-  -->
-  <ItemGroup>
-    <LogoAppSource Include="../Aerie.Web/apps/logo/**/*.*" />
-  </ItemGroup>
-
-  <Target Name="CopyLogoApp" BeforeTargets="Build" Inputs="@(LogoAppSource)" Outputs="wwwroot/apps/logo/index.html">
-    <Copy SourceFiles="@(LogoAppSource)" DestinationFolder="wwwroot/apps/logo" />
   </Target>
 </Project>

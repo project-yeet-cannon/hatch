@@ -215,11 +215,9 @@ public static class SiteSettingKeys
     public const string CalendarAgendaDays = "CalendarAgendaDays";
 
     /// <summary>
-    /// Anthropic API key, used by the game module to write games from what a
-    /// player types - see Modules/Game. Operator-supplied like the Google
-    /// credentials above: it is billed to whoever runs this house, so it is a
-    /// setting rather than anything shipped (docs/ethos.md). Unset simply means
-    /// the game app says so instead of offering a text box.
+    /// Anthropic API key. Operator-supplied like the Google credentials above:
+    /// it is billed to whoever runs this house, so it is a setting rather than
+    /// anything shipped (docs/ethos.md).
     /// </summary>
     public const string AnthropicApiKey = "AnthropicApiKey";
 

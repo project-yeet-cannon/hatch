@@ -1,5 +1,4 @@
 using Aerie.Api.Modules.Gather;
-using Aerie.Api.Modules.Game;
 using Aerie.Api.Modules.Hatch;
 using Aerie.Api.Modules.Photos;
 using Aerie.Api.Modules.Quill;
@@ -30,7 +29,6 @@ public static class ModuleRegistration
         // and its services, so this list stays a table of contents.
         services.AddStorageModule(configuration);
         services.AddGatherModule(configuration);
-        services.AddGameModule(configuration);
         services.AddPhotosModule(configuration);
         services.AddQuillModule(configuration);
         services.AddHatchModule(configuration);
