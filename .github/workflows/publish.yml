@@ -16,6 +16,12 @@ on:
 
 env:
   REGISTRY: ghcr.io
+  # Derived from the repository rather than a literal operator/org name
+  # (docs/ethos.md) - GITHUB_TOKEN's registry permission is scoped to packages
+  # under this same owner, so a literal here would be wrong the moment this
+  # repository is forked or renamed, exactly as it was when Hatch moved out of
+  # Aerie's repository and every push here still named the old one.
+  IMAGE_NAMESPACE: ghcr.io/${{ github.repository_owner }}
 
 jobs:
   build-and-push-api-image:
@@ -56,7 +62,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/eouw0o83hf/aerie-api
+          images: ${{ env.IMAGE_NAMESPACE }}/aerie-api
           tags: |
             type=raw,value=latest
             type=raw,value=${{ github.sha }}
@@ -81,7 +87,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push Docker image
-        run: docker push --all-tags ghcr.io/eouw0o83hf/aerie-api
+        run: docker push --all-tags ${{ env.IMAGE_NAMESPACE }}/aerie-api
 
   # The runner in a container, published beside the two images the local stack
   # already names. Unconditional on every push, not path-filtered through
@@ -124,7 +130,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/eouw0o83hf/hatch-runner
+          images: ${{ env.IMAGE_NAMESPACE }}/hatch-runner
           # Two tags, not the api image's three. Its timestamped one exists for
           # the cluster's image automation to order builds by, and nothing
           # deploys this image that way - it is pulled by name from a compose
@@ -177,7 +183,7 @@ jobs:
         id: filter
         uses: ./.github/actions/detect-image-changes
         with:
-          image: ghcr.io/eouw0o83hf/aerie-db
+          image: ${{ env.IMAGE_NAMESPACE }}/aerie-db
           path: containers/aerie-db
           registry-username: ${{ github.actor }}
           registry-password: ${{ secrets.GITHUB_TOKEN }}
@@ -211,7 +217,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/eouw0o83hf/aerie-db
+          images: ${{ env.IMAGE_NAMESPACE }}/aerie-db
           tags: |
             type=raw,value=latest
             type=raw,value=${{ github.sha }}
@@ -232,4 +238,4 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push Docker image
-        run: docker push --all-tags ghcr.io/eouw0o83hf/aerie-db
+        run: docker push --all-tags ${{ env.IMAGE_NAMESPACE }}/aerie-db
