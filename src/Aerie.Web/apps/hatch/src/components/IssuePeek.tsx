@@ -8,6 +8,7 @@ import { MomentChip } from './MomentChip';
 import { StatusPill } from './StatusPill';
 import { TypeBadge } from './TypeBadge';
 import { appHref } from '../lib/basename';
+import { isSettled } from '../lib/columns';
 import { message } from '../lib/errors';
 import type { AssigneeDirectory, IssueCard, Status } from '../types';
 
@@ -148,7 +149,9 @@ export function IssuePeek({
   // are an error here.
   if (!card) return <Modal open={false} onClose={onClose} title="" />;
 
-  const terminal = status?.isTerminal ?? false;
+  // Shipped or shelved: either way nobody is waiting on the date any more, so
+  // the due chip stops warning. The same call the issue page makes.
+  const stopped = isSettled(status);
   const head = <h4 className="hatch-section-title">Description</h4>;
 
   return (
@@ -202,7 +205,7 @@ export function IssuePeek({
         {(card.readyAt || card.dueAt) && (
           <div className="hatch-card-dates">
             <MomentChip kind="ready" value={card.readyAt} />
-            <MomentChip kind="due" value={card.dueAt} muted={terminal} />
+            <MomentChip kind="due" value={card.dueAt} muted={stopped} />
           </div>
         )}
 

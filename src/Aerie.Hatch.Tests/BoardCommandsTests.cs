@@ -197,6 +197,37 @@ public sealed class BoardCommandsTests
             h.Said);
     }
 
+    /// <summary>
+    /// A deferred column is not a lane, so it is printed after every column
+    /// that is - including one the operator has sorted into the middle of the
+    /// board. The board page cannot draw it at all; a printed count can, and a
+    /// shelf holding two tickets is worth a line rather than silence.
+    /// </summary>
+    [Fact]
+    public async Task The_board_prints_the_deferred_columns_after_the_lanes()
+    {
+        using var h = new CliHarness();
+        h.Wire.Json("GET", "/api/hatch/board", new BoardDto(
+            [
+                Fixtures.Status(1, "Backlog"),
+                Fixtures.Status(5, "Shelved", deferred: true),
+                Fixtures.Status(3, "In Progress"),
+                Fixtures.Status(4, "Done", terminal: true),
+            ],
+            [Card("AER-1", 5), Card("AER-2", 5), Card("AER-3", 3)]));
+
+        Assert.Equal(0, await new BoardCommands(h.Cli).BoardAsync([], default));
+
+        Assert.Equal(
+            """
+            Backlog: 0
+            In Progress: 1
+            Done (terminal): 0
+            Shelved (deferred): 2
+            """.ReplaceLineEndings("\n"),
+            h.Said);
+    }
+
     // ---- What goes first ----
 
     [Fact]

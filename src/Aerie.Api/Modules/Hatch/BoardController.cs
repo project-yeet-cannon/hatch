@@ -26,7 +26,7 @@ public class BoardController(
         var statuses = await db.Statuses.AsNoTracking()
             .OrderBy(s => s.SortOrder)
             .ThenBy(s => s.Id)
-            .Select(s => new StatusDto(s.Id, s.Name, s.SortOrder, s.IsTerminal, s.Color))
+            .Select(s => new StatusDto(s.Id, s.Name, s.SortOrder, s.IsTerminal, s.IsDeferred, s.Color))
             .ToListAsync(ct);
 
         // Ordered by (StatusId, Expedited desc, Rank, Id) so the client can

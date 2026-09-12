@@ -1517,6 +1517,67 @@ public class IssuesControllerTests
 
         Assert.Equal(["inbox", "todo", "done", "review"], Value(await h.Statuses.GetStatuses(default)).Select(s => s.Name));
         Assert.False(created.IsTerminal);
+        Assert.False(created.IsDeferred);
+    }
+
+    // ---- Deferred columns ----
+    //
+    // The second flag a column can carry, and the one the board reads as "do
+    // not draw this". Independent of the first: the two answer different
+    // questions - "this shipped" and "stop counting this" - and a board may
+    // have several of either.
+
+    [Fact]
+    public async Task AColumnMayBeDeferredFromTheStart()
+    {
+        var h = await NewAsync();
+
+        var created = Created(await h.Statuses.CreateStatus(
+            new StatusCreateRequest("shelved", null, null, null, true), default));
+
+        Assert.True(created.IsDeferred);
+        Assert.False(created.IsTerminal);
+    }
+
+    [Fact]
+    public async Task DeferredIsTickedAndUntickedLikeTheDoneBox()
+    {
+        var h = await NewAsync();
+
+        Assert.True(Value(await h.Statuses.PatchStatus(h.Todo, new StatusPatchRequest(null, null, null, null, true), default)).IsDeferred);
+        Assert.False(Value(await h.Statuses.PatchStatus(h.Todo, new StatusPatchRequest(null, null, null, null, false), default)).IsDeferred);
+    }
+
+    /// <summary>
+    /// Null is "leave it alone" here as everywhere, so renaming a shelf does
+    /// not quietly put it back on the board.
+    /// </summary>
+    [Fact]
+    public async Task PatchingSomethingElse_LeavesDeferredWhereItWas()
+    {
+        var h = await NewAsync();
+        await h.Statuses.PatchStatus(h.Todo, new StatusPatchRequest(null, null, null, null, true), default);
+
+        var patched = Value(await h.Statuses.PatchStatus(h.Todo, new StatusPatchRequest("later", null, null), default));
+
+        Assert.Equal("later", patched.Name);
+        Assert.True(patched.IsDeferred);
+    }
+
+    /// <summary>
+    /// More than one shelf is allowed, and they are ordinary columns in every
+    /// other way - the board is simply not where they are drawn.
+    /// </summary>
+    [Fact]
+    public async Task AnyNumberOfColumnsMayBeDeferred()
+    {
+        var h = await NewAsync();
+        await h.Statuses.CreateStatus(new StatusCreateRequest("shelved", null, null, null, true), default);
+        await h.Statuses.CreateStatus(new StatusCreateRequest("someday", null, null, null, true), default);
+
+        Assert.Equal(
+            ["shelved", "someday"],
+            Value(await h.Statuses.GetStatuses(default)).Where(s => s.IsDeferred).Select(s => s.Name));
     }
 
     [Fact]

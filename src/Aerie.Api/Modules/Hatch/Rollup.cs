@@ -34,7 +34,7 @@ public static class Rollup
         var statuses = await db.Statuses.AsNoTracking()
             .OrderBy(s => s.SortOrder)
             .ThenBy(s => s.Id)
-            .Select(s => new { s.Id, s.IsTerminal })
+            .Select(s => new { s.Id, s.IsTerminal, s.IsDeferred })
             .ToListAsync(ct);
 
         var nodes = await NodesAsync(db, ct);
@@ -45,7 +45,7 @@ public static class Rollup
         var waiting = await Questions.OpenCountsAsync(db, ct);
 
         return new Tree(
-            statuses.Select(s => (s.Id, s.IsTerminal)).ToList(),
+            statuses.Select(s => (s.Id, s.IsTerminal, s.IsDeferred)).ToList(),
             nodes,
             waiting);
     }
@@ -149,7 +149,7 @@ public static class Rollup
     /// </summary>
     public sealed class Tree
     {
-        private readonly IReadOnlyList<(int Id, bool IsTerminal)> statuses;
+        private readonly IReadOnlyList<(int Id, bool IsTerminal, bool IsDeferred)> statuses;
         private readonly Dictionary<long, int> statusOf;
         private readonly Dictionary<long, List<long>> children;
         private readonly Dictionary<long, int> waiting;
@@ -157,7 +157,7 @@ public static class Rollup
 
         /// <summary>A tree is loaded through <see cref="Rollup.LoadAsync"/>, which is the only thing that knows how to fill one.</summary>
         internal Tree(
-            IReadOnlyList<(int Id, bool IsTerminal)> statuses,
+            IReadOnlyList<(int Id, bool IsTerminal, bool IsDeferred)> statuses,
             List<Node> nodes,
             Dictionary<long, int> waiting)
         {
@@ -213,19 +213,36 @@ public static class Rollup
         }
 
         /// <summary>A folded total, dressed for the wire.</summary>
+        /// <remarks>
+        /// Deferred leaves are left out of all three numbers rather than
+        /// counted as done or as outstanding. "12 of 20" is a promise about
+        /// work somebody still intends to do, and a shelved ticket is neither
+        /// half of it: counting it done would have the meter claim something
+        /// shipped that never did, and counting it outstanding would leave an
+        /// epic that is finished except for three parked tasks stuck at 85%
+        /// forever, which is how a progress bar stops being read.
+        ///
+        /// <para>The slices go with the total for the arithmetic's sake as much
+        /// as the meaning's: the bar's segments are shares of <c>leaves</c>, and
+        /// a stripe drawn from a count that is not in the denominator is a bar
+        /// that does not add up to itself.</para>
+        /// </remarks>
         private RollupDto Shape(Subtree subtree)
         {
+            var counted = statuses.Where(s => !s.IsDeferred).ToList();
+
             // Board order, and a status no leaf is sitting in is absent rather
             // than zero: the client already holds the column list and does not
             // need a row that draws nothing.
-            var slices = statuses
+            var slices = counted
                 .Where(s => subtree.Leaves.ContainsKey(s.Id))
                 .Select(s => new RollupSliceDto(s.Id, subtree.Leaves[s.Id]))
                 .ToList();
 
-            var done = statuses.Where(s => s.IsTerminal).Sum(s => subtree.Leaves.GetValueOrDefault(s.Id));
+            var done = counted.Where(s => s.IsTerminal).Sum(s => subtree.Leaves.GetValueOrDefault(s.Id));
+            var leaves = counted.Sum(s => subtree.Leaves.GetValueOrDefault(s.Id));
 
-            return new RollupDto(subtree.Leaves.Values.Sum(), done, subtree.Waiting, slices);
+            return new RollupDto(leaves, done, subtree.Waiting, slices);
         }
 
         /// <summary>A subtree's two totals: its leaves by status, and the questions under it nobody has answered.</summary>

@@ -21,6 +21,7 @@ import { NewIssueDialog } from '../components/NewIssueDialog';
 import { StatusDot } from '../components/StatusPill';
 import { statusVars } from '../lib/color';
 import { closeOffer } from '../lib/closeSubtree';
+import { boardColumns } from '../lib/columns';
 import { message } from '../lib/errors';
 import { NO_FILTER, assigneeFacets, filterCards, isFiltering } from '../lib/filter';
 import type { CardFilter } from '../lib/filter';
@@ -77,6 +78,14 @@ export function BoardPage() {
 
   const cards = board?.issues;
   const visible = useMemo(() => filterCards(cards ?? [], filter), [cards, filter]);
+
+  /* The board's own columns. The API sends every status - the issue page needs
+     the deferred ones to offer them - and this is where they stop, so a parked
+     column is never drawn and never a drop target. The cards sitting in one are
+     dropped with it: there is no lane for them here, which is the point of
+     shelving something, and they are still a click away by key or from their
+     parent's Filed under list. */
+  const columns = useMemo(() => boardColumns(board?.statuses ?? []), [board?.statuses]);
 
   /* Derived from the whole board rather than from what survives the filter,
      so choosing somebody does not empty the list you chose them from. */
@@ -157,7 +166,7 @@ export function BoardPage() {
 
       {error && <p className="text-danger">{error}</p>}
 
-      {board.statuses.length === 0 ? (
+      {columns.length === 0 ? (
         <EmptyState message="This board has no columns yet." />
       ) : (
         <DndContext
@@ -169,7 +178,7 @@ export function BoardPage() {
           onDragEnd={(e) => void onDragEnd(e)}
         >
           <div className="hatch-board">
-            {board.statuses.map((status) => (
+            {columns.map((status) => (
               <Column
                 key={status.id}
                 status={status}

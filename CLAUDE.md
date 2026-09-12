@@ -167,9 +167,11 @@ here, because getting them wrong is not recoverable by reading further:
   commit is what makes that search short.
 - `./scripts/hatch.sh pr AER-12 <url>` if you opened a pull request. `pr AER-12`
   with no URL reads back the one that is set, and `--clear` takes it off.
-- **Never move a ticket to a terminal status.** Only the operator decides that
-  something shipped. Implementation ends in *in progress*, with a comment saying
-  what landed and what did not.
+- **Never move a ticket to a terminal or a deferred status.** Only the operator
+  decides that something shipped, and only the operator decides that something
+  is not worth doing now. Implementation ends in *in progress*, with a comment
+  saying what landed and what did not; work that should be shelved is said on
+  the ticket.
 - **End by saying what you did**, in a fenced block:
 
   ~~~

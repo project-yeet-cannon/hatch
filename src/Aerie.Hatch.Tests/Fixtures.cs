@@ -31,8 +31,8 @@ public static class Fixtures
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    public static StatusDto Status(int id, string name, bool terminal = false) =>
-        new(id, name, id, terminal, "#888888");
+    public static StatusDto Status(int id, string name, bool terminal = false, bool deferred = false) =>
+        new(id, name, id, terminal, deferred, "#888888");
 
     public static IssueDto Issue(
         string key, string type = "task", string title = "A ticket", string description = "The brief.",

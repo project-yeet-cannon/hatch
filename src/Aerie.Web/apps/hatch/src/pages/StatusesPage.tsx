@@ -48,7 +48,10 @@ export function StatusesPage() {
 
   return (
     <div className="hatch-page">
-      <PageHeader title="Statuses" description="One status is one column on the board, left to right." />
+      <PageHeader
+        title="Statuses"
+        description="One status is one column on the board, left to right - unless it is deferred, which is a status the board does not draw."
+      />
 
       {error && <p className="text-danger">{error}</p>}
 
@@ -74,6 +77,9 @@ export function StatusesPage() {
                 <th>Name</th>
                 <th>Colour</th>
                 <th>Done column</th>
+                <th title="Parked work. Not drawn on the board and not dragged into - the issue page is the only way in.">
+                  Deferred
+                </th>
                 <th>Order</th>
                 <th />
               </tr>
@@ -96,6 +102,20 @@ export function StatusesPage() {
                       checked={status.isTerminal}
                       aria-label={`${status.name} means shipped`}
                       onChange={(e) => void act(() => patchStatus(status.id, { isTerminal: e.target.checked }))}
+                    />
+                  </td>
+                  {/* Independent of the box beside it, the way the two flags are
+                      stored apart: done is "this shipped", deferred is "stop
+                      counting this", and a board is free to have several of
+                      either. Ticking this takes the column off the board on the
+                      next load - the issues in it keep their status and stay
+                      reachable by key, by search, and from their parents. */}
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={status.isDeferred}
+                      aria-label={`${status.name} is deferred`}
+                      onChange={(e) => void act(() => patchStatus(status.id, { isDeferred: e.target.checked }))}
                     />
                   </td>
                   <td>

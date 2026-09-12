@@ -1,9 +1,15 @@
-/* What closes when an issue closes.
+/* What closes when an issue closes, and what is shelved when an issue is.
 
    Moving a parent into a terminal column has never moved anything under it, so
    an epic reads shipped while eleven leaves still count as waiting. The board
    now offers to close them too - and this module is the whole of that offer:
    whether there is anything to ask about, which cards, and in what order.
+
+   Deferring is the same offer with the same shape, because it is the same
+   mistake in the other direction: an epic put on the shelf with eleven live
+   tasks under it has not been shelved, it has been hidden, and the work under
+   it goes on being dispatched from a board nobody can see the parent on. A
+   stack of work is deferred as a unit or not at all.
 
    It is a module rather than a helper inside a page for the reason lib/place.ts
    gives: getting it slightly wrong has no visible symptom. The wrong number of
@@ -16,23 +22,29 @@
    "Non-goals") and this adds none: the answer is a person's, asked after the
    move has already committed. */
 
+import { isSettled } from './columns';
 import type { Board, IssueCard, Status } from '../types';
 
 export interface CloseOffer {
   /** The issue that was closed. */
   key: string;
-  /** The terminal column it landed in - the one its descendants would join. */
+  /** The column it landed in - terminal or deferred, and the one its
+      descendants would join. `column.isDeferred` is what the dialog words
+      itself from: the two offers are one mechanism and two sentences. */
   column: Status;
   /** The descendants that would move, in board order. */
   cards: IssueCard[];
 }
 
 /**
- * Every descendant at any depth that is not already in a terminal column.
+ * Every descendant at any depth that has not already stopped.
  *
- * A descendant already sitting in one is left out rather than restamped into
- * the parent's column: it is already closed, and closing it again in a
- * different flavour rewrites what happened to it.
+ * A descendant already sitting in a terminal or a deferred column is left out
+ * rather than restamped into the parent's column: it has already stopped, and
+ * stopping it again in a different flavour rewrites what happened to it. That
+ * cuts both ways, and deliberately - a task that shipped is not un-shipped by
+ * its epic being shelved, and a task somebody parked on purpose is not quietly
+ * marked done by its epic closing.
  *
  * The result comes back in **board order** - the order the API handed the cards
  * over, `(statusId, rank, id)` - rather than in the order the walk visited
@@ -70,22 +82,22 @@ export function closeSubtree(cards: IssueCard[], key: string, statuses: Status[]
     generation = next;
   }
 
-  // Applied last, so a *terminal* issue with open work under it does not hide
+  // Applied last, so a *stopped* issue with open work under it does not hide
   // that work: the walk reaches through it, and only the cards themselves are
   // filtered. Ready dates are not consulted at all - the fold is a view, and a
   // card folded off the board is still work under this issue.
-  const terminal = new Set(statuses.filter((s) => s.isTerminal).map((s) => s.id));
-  return cards.filter((card) => found.has(card.key) && !terminal.has(card.statusId));
+  const stopped = new Set(statuses.filter(isSettled).map((s) => s.id));
+  return cards.filter((card) => found.has(card.key) && !stopped.has(card.statusId));
 }
 
 /**
  * The question to ask after a move, or null when there is nothing to ask.
  *
  * The whole of "is there anything to offer", so that neither screen has to
- * spell it out: a drop into a column that is not terminal, a reorder inside the
- * column a card was already in, an issue with no children, and an issue whose
- * every descendant is already closed all come back null and behave exactly as
- * they do today.
+ * spell it out: a drop into a column that neither ships nor shelves, a reorder
+ * inside the column a card was already in, an issue with no children, and an
+ * issue whose every descendant has already stopped all come back null and
+ * behave exactly as they do today.
  *
  * @param from The column the issue was in before the move, or null if unknown.
  * @param to The column it landed in.
@@ -96,7 +108,7 @@ export function closeOffer(board: Board, key: string, from: number | null, to: n
   if (from === to) return null;
 
   const column = board.statuses.find((s) => s.id === to);
-  if (!column?.isTerminal) return null;
+  if (!column || !isSettled(column)) return null;
 
   const cards = closeSubtree(board.issues, key, board.statuses);
   return cards.length > 0 ? { key, column, cards } : null;

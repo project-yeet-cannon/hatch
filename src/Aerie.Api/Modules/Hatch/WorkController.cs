@@ -643,6 +643,14 @@ public class WorkController(
         if (from.IsTerminal)
             return $"\"{from.Name}\" is where work ends - there is nothing after it";
 
+        // Said before the column-after test, which would otherwise refuse this
+        // with "there is nowhere for this to go" - true, and no use to somebody
+        // reading a queue trying to work out why a ticket they filed is not
+        // moving. Nothing comes off the shelf on a pass's say-so: a deferred
+        // ticket is waiting on a person deciding it is work again.
+        if (from.IsDeferred)
+            return $"\"{from.Name}\" is deferred - a person puts it back on the board, not a pass";
+
         if (to is null)
             return $"there is no column after \"{from.Name}\", so there is nowhere for this to go";
 
@@ -739,5 +747,5 @@ public class WorkController(
         db.Statuses.AsNoTracking().OrderBy(s => s.SortOrder).ThenBy(s => s.Id).ToListAsync(ct);
 
     private static StatusDto ToStatusDto(EfHatchStatus s) =>
-        new(s.Id, s.Name, s.SortOrder, s.IsTerminal, s.Color);
+        new(s.Id, s.Name, s.SortOrder, s.IsTerminal, s.IsDeferred, s.Color);
 }

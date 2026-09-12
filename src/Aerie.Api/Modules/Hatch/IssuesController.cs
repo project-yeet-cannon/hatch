@@ -421,14 +421,22 @@ public class IssuesController(
 
         if (status is not null)
         {
-            var from = await db.Statuses.Where(s => s.Id == issue.StatusId).Select(s => s.Name).FirstOrDefaultAsync(ct);
-            events.Add(Event(actor, EfHatchIssueEvent.StatusChanged, new { from, to = status.Name }, now));
+            // The whole row rather than the name, because two of its flags are
+            // read below - what is being left as well as what is being entered.
+            var from = await db.Statuses.AsNoTracking().FirstOrDefaultAsync(s => s.Id == issue.StatusId, ct);
+            events.Add(Event(actor, EfHatchIssueEvent.StatusChanged, new { from = from?.Name, to = status.Name }, now));
 
             issue.StatusId = status.Id;
             // A column change through PATCH has no neighbours to sit between,
             // so the card goes to the bottom of the new column. The board sends
             // its drops to `move`, which does have them.
             issue.Rank = await bottoms.NextAsync(status.Id, ct);
+
+            // Newly shelved - not shuffled between two deferred columns. See
+            // Deferrals: the issues waiting on this one are about to wait
+            // indefinitely, and they are told on their own tickets.
+            if (status.IsDeferred && from?.IsDeferred != true)
+                await Deferrals.NoteAsync(db, [issue.Id], status, actor, now, ct);
         }
 
         // Both dates read present-but-empty as the clear, the same way ParentKey
@@ -542,10 +550,17 @@ public class IssuesController(
         {
             var actor = await caller.ActorNameAsync(ct);
             var now = time.GetUtcNow();
-            var from = await db.Statuses.Where(s => s.Id == issue.StatusId).Select(s => s.Name).FirstOrDefaultAsync(ct);
-            issue.Events.Add(Event(actor, EfHatchIssueEvent.StatusChanged, new { from, to = status.Name }, now));
+            var from = await db.Statuses.AsNoTracking().FirstOrDefaultAsync(s => s.Id == issue.StatusId, ct);
+            issue.Events.Add(Event(actor, EfHatchIssueEvent.StatusChanged, new { from = from?.Name, to = status.Name }, now));
             issue.UpdatedAt = now;
             issue.StatusId = status.Id;
+
+            // The board has no deferred column to drop onto, so this endpoint
+            // is not how a ticket is usually shelved - but it is an endpoint,
+            // and a note owed to whoever is waiting is not owed less because
+            // the move came in through a different door. Same call, same rule.
+            if (status.IsDeferred && from?.IsDeferred != true)
+                await Deferrals.NoteAsync(db, [issue.Id], status, actor, now, ct);
         }
 
         // The rank is computed after the column is set, and both are saved in

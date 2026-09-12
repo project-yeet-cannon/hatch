@@ -266,8 +266,17 @@ public class ImportController(HatchContext db, PlanImportParser parser, RankServ
     /// </summary>
     private sealed record Columns(int Todo, int InProgress, int Done)
     {
-        public static Columns From(IReadOnlyList<EfHatchStatus> ordered)
+        public static Columns From(IReadOnlyList<EfHatchStatus> all)
         {
+            // Deferred columns are not candidates for any of the three. A plan
+            // being imported is work somebody has just decided to do, and none
+            // of its three states is "shelved" - so the picks below are made
+            // over the board's own columns, the same ones the board draws.
+            // The fallback covers a board that is nothing but sidings, where
+            // landing the work somewhere beats refusing the import.
+            List<EfHatchStatus> ordered = [.. all.Where(s => !s.IsDeferred)];
+            if (ordered.Count == 0) ordered = [.. all];
+
             // Done is the leftmost column that says work shipped - the flag,
             // not the name, because that flag is the one thing about a column
             // this module actually understands. Failing that, the rightmost

@@ -249,6 +249,120 @@ public class IssueDependenciesControllerTests
         Assert.Empty(await h.EventsAsync(first.Key));
     }
 
+    // ---- What a deferred blocker says out loud ----
+    //
+    // The gate does not open for one: only work that lands satisfies an edge
+    // (see the DependencyGate in WorkController), because a story built on a
+    // branch that was never written is the failure the whole feature exists to
+    // prevent. What is added here is the sentence that stops the gate holding
+    // in silence - a shelved ticket leaves the board, and without this the
+    // issue waiting on it simply stops being dispatched with nothing anywhere
+    // saying why.
+
+    [Fact]
+    public async Task DeferringABlocker_LeavesANoteOnEverythingWaitingOnIt()
+    {
+        var h = await NewAsync();
+        var blocker = await h.FileAsync(title: "phase one");
+        var waiting = await h.FileAsync(title: "phase two");
+        await h.AddAsync(waiting.Key, blocker.Key);
+
+        await h.MoveAsync(blocker.Key, h.Shelf);
+
+        var note = Assert.Single(await h.CommentsAsync(waiting.Key));
+        Assert.Contains(blocker.Key, note.Body);
+        Assert.Contains("shelved", note.Body);
+        Assert.Equal("Nathan", note.Author);
+
+        // The edge itself is untouched: this says what happened, it does not
+        // decide anything. The issue still waits.
+        Assert.Equal([blocker.Key], (await h.ReadAsync(waiting.Key)).DependsOnKeys);
+    }
+
+    [Fact]
+    public async Task DeferringABlocker_SaysSoOnEveryIssueWaitingOnIt()
+    {
+        var h = await NewAsync();
+        var blocker = await h.FileAsync(title: "the foundation");
+        var first = await h.FileAsync(title: "on top of it");
+        var second = await h.FileAsync(title: "also on top of it");
+        await h.AddAsync(first.Key, blocker.Key);
+        await h.AddAsync(second.Key, blocker.Key);
+
+        await h.MoveAsync(blocker.Key, h.Shelf);
+
+        Assert.Single(await h.CommentsAsync(first.Key));
+        Assert.Single(await h.CommentsAsync(second.Key));
+
+        // And nothing on the blocker's own thread: it knows what happened to
+        // it, and the note is for whoever is left waiting.
+        Assert.Empty(await h.CommentsAsync(blocker.Key));
+    }
+
+    /// <summary>
+    /// The one thing that would make this feature unreadable: a ticket with
+    /// nine identical notes on it because somebody tidied the shelf.
+    /// </summary>
+    [Fact]
+    public async Task MovingBetweenTwoDeferredColumns_SaysNothingASecondTime()
+    {
+        var h = await NewAsync();
+        var blocker = await h.FileAsync(title: "phase one");
+        var waiting = await h.FileAsync(title: "phase two");
+        await h.AddAsync(waiting.Key, blocker.Key);
+
+        await h.MoveAsync(blocker.Key, h.Shelf);
+        await h.MoveAsync(blocker.Key, h.OtherShelf);
+
+        Assert.Single(await h.CommentsAsync(waiting.Key));
+    }
+
+    [Fact]
+    public async Task DeferringSomethingNobodyWaitsOn_WritesNothing()
+    {
+        var h = await NewAsync();
+        var alone = await h.FileAsync(title: "on its own");
+        var other = await h.FileAsync(title: "unrelated");
+
+        await h.MoveAsync(alone.Key, h.Shelf);
+
+        Assert.Empty(await h.CommentsAsync(alone.Key));
+        Assert.Empty(await h.CommentsAsync(other.Key));
+    }
+
+    /// <summary>
+    /// The direction matters: an issue waiting on something is not news to the
+    /// thing it waits on. Only the far end of the edge is told.
+    /// </summary>
+    [Fact]
+    public async Task DeferringTheIssueThatWaits_TellsItsBlockerNothing()
+    {
+        var h = await NewAsync();
+        var blocker = await h.FileAsync(title: "phase one");
+        var waiting = await h.FileAsync(title: "phase two");
+        await h.AddAsync(waiting.Key, blocker.Key);
+
+        await h.MoveAsync(waiting.Key, h.Shelf);
+
+        Assert.Empty(await h.CommentsAsync(blocker.Key));
+    }
+
+    [Fact]
+    public async Task TakingABlockerBackOffTheShelf_WritesNothingFurther()
+    {
+        var h = await NewAsync();
+        var blocker = await h.FileAsync(title: "phase one");
+        var waiting = await h.FileAsync(title: "phase two");
+        await h.AddAsync(waiting.Key, blocker.Key);
+
+        await h.MoveAsync(blocker.Key, h.Shelf);
+        await h.MoveAsync(blocker.Key, h.Inbox);
+
+        // Back on the board is the ordinary case, and the note that is already
+        // there is the record of what happened. Nothing announces a return.
+        Assert.Single(await h.CommentsAsync(waiting.Key));
+    }
+
     // ---- The edge that is deliberately *not* cut ----
 
     [Fact]
@@ -284,6 +398,18 @@ public class IssueDependenciesControllerTests
         public required FakeTimeProvider Time { get; init; }
         public required int ProjectId { get; init; }
         public required int OtherProjectId { get; init; }
+        public required int Inbox { get; init; }
+        public required int Shelf { get; init; }
+        public required int OtherShelf { get; init; }
+
+        /// <summary>A move by column, which is how anything is shelved.</summary>
+        public async Task<IssueDto> MoveAsync(string key, int statusId) =>
+            Value(await Issues.PatchIssue(
+                key, new IssuePatchRequest(null, null, null, statusId, null, null, null, null), default));
+
+        /// <summary>What is written on an issue's thread, oldest first.</summary>
+        public async Task<IReadOnlyList<CommentDto>> CommentsAsync(string key) =>
+            Value(await Thread.GetComments(key, default));
 
         public async Task<IssueDto> FileAsync(
             string type = "task", string title = "a thing", string? parentKey = null, int? projectId = null) =>
@@ -331,7 +457,10 @@ public class IssueDependenciesControllerTests
         var aerie = new EfHatchProject { Key = "AER", Name = "Aerie", CreatedAt = Now };
         var other = new EfHatchProject { Key = "OPS", Name = "Operations", CreatedAt = Now };
         db.AddRange(aerie, other);
-        db.Add(new EfHatchStatus { Name = "inbox", SortOrder = 10 });
+        var inbox = new EfHatchStatus { Name = "inbox", SortOrder = 10 };
+        var shelved = new EfHatchStatus { Name = "shelved", SortOrder = 20, IsDeferred = true };
+        var also = new EfHatchStatus { Name = "someday", SortOrder = 30, IsDeferred = true };
+        db.AddRange(inbox, shelved, also);
         await db.SaveChangesAsync();
 
         var time = new FakeTimeProvider(Now);
@@ -345,6 +474,9 @@ public class IssueDependenciesControllerTests
             Time = time,
             ProjectId = aerie.Id,
             OtherProjectId = other.Id,
+            Inbox = inbox.Id,
+            Shelf = shelved.Id,
+            OtherShelf = also.Id,
         };
     }
 

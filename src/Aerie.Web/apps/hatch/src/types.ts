@@ -32,6 +32,11 @@ export interface Status {
   name: string;
   sortOrder: number;
   isTerminal: boolean;
+  /** Parked work rather than a lane: no column, no drop target, and reachable
+      only from the issue page's status bar. Every read sends every column,
+      deferred ones included - `boardColumns` in lib/columns.ts is what drops
+      them, and it is the one place that does. */
+  isDeferred: boolean;
   /** `#rrggbb`, lower case. What the column, the drag feedback and the issue
       page's status pill are all painted from - see lib/color.ts. */
   color: string;
@@ -326,6 +331,7 @@ export interface StatusCreateRequest {
   name: string;
   sortOrder?: number | null;
   isTerminal?: boolean | null;
+  isDeferred?: boolean | null;
   color?: string | null;
 }
 
@@ -333,6 +339,7 @@ export interface StatusPatchRequest {
   name?: string | null;
   sortOrder?: number | null;
   isTerminal?: boolean | null;
+  isDeferred?: boolean | null;
   color?: string | null;
 }
 

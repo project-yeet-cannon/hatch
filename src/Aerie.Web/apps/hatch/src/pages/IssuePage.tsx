@@ -41,6 +41,7 @@ import { assigneeHint } from '../lib/assignee';
 import { childTypes } from '../lib/childTypes';
 import { statusVars } from '../lib/color';
 import { closeOffer } from '../lib/closeSubtree';
+import { boardColumns, isSettled } from '../lib/columns';
 import { dependencyCandidates } from '../lib/dependencies';
 import { message } from '../lib/errors';
 import { renderMarkdown } from '../lib/markdown';
@@ -295,9 +296,11 @@ export function IssuePage() {
   // both the composer and, with childKeys, whether the card is drawn at all.
   const filings = childTypes(issue.type);
 
-  // Sitting in a column that means it shipped, so the due chip stops warning -
-  // the same rule the board follows, for the same reason.
-  const terminal = board.statuses.find((s) => s.id === issue.statusId)?.isTerminal ?? false;
+  // Sitting in a column where the work has stopped - shipped or shelved - so
+  // the due chip stops warning. The board follows the same rule for the half of
+  // it that it can draw, and for the same reason: a date is only late if
+  // somebody is still waiting on the thing.
+  const stopped = isSettled(board.statuses.find((s) => s.id === issue.statusId));
 
   /* A const rather than a declaration, so it is written after the guards above
      and `issue` and `board` are the narrowed ones. */
@@ -328,7 +331,7 @@ export function IssuePage() {
             <TypeBadge type={issue.type} />
             {issue.parentKey && <Link to={`/issues/${issue.parentKey}`}>↳ {issue.parentKey}</Link>}
             <MomentChip kind="ready" value={issue.readyAt} />
-            <MomentChip kind="due" value={issue.dueAt} muted={terminal} />
+            <MomentChip kind="due" value={issue.dueAt} muted={stopped} />
             <PullRequestLink url={issue.pullRequestUrl} />
             <span className="text-muted">
               filed by {issue.createdBy} on {new Date(issue.createdAt).toLocaleDateString()}
@@ -545,6 +548,12 @@ export function IssuePage() {
  * Every column is offered, in board order, because Hatch has no transition
  * rules on purpose (docs/hatch.md, "Non-goals") - any status to any status,
  * we trust ourselves.
+ *
+ * Including the deferred ones, which is what makes this band the only way onto
+ * the shelf. The board cannot offer them - a column there is a drop target, and
+ * work must not be parked by being dragged one lane too far - so they are drawn
+ * here, after a divider, as the presses they are: a decision about this ticket,
+ * made on this ticket's page.
  */
 function StatusBar({
   statuses,
@@ -556,6 +565,25 @@ function StatusBar({
   onMove: (statusId: number) => void;
 }) {
   const current = statuses.find((s) => s.id === statusId);
+  const lanes = boardColumns(statuses);
+  const shelf = statuses.filter((s) => s.isDeferred);
+
+  const step = (status: Status) => {
+    const here = status.id === statusId;
+    return (
+      <button
+        key={status.id}
+        type="button"
+        className={`hatch-status-step${here ? ' here' : ''}${status.isDeferred ? ' deferred' : ''}`}
+        style={statusVars(status.color)}
+        aria-pressed={here}
+        disabled={here}
+        onClick={() => onMove(status.id)}
+      >
+        {status.name}
+      </button>
+    );
+  };
 
   return (
     <section className="hatch-status-bar" style={statusVars(current?.color)} aria-label="Status">
@@ -565,22 +593,20 @@ function StatusBar({
       </div>
 
       <div className="hatch-status-steps" role="group" aria-label="Move this issue">
-        {statuses.map((status) => {
-          const here = status.id === statusId;
-          return (
-            <button
-              key={status.id}
-              type="button"
-              className={`hatch-status-step${here ? ' here' : ''}`}
-              style={statusVars(status.color)}
-              aria-pressed={here}
-              disabled={here}
-              onClick={() => onMove(status.id)}
-            >
-              {status.name}
-            </button>
-          );
-        })}
+        {lanes.map(step)}
+
+        {/* Grouped and labelled rather than run on to the end of the row,
+            because these do not continue the board - they leave it. A board
+            with no deferred column draws neither the divider nor the label and
+            reads exactly as it did before. */}
+        {shelf.length > 0 && (
+          <>
+            <span className="hatch-status-shelf-label" aria-hidden="true">
+              or park it
+            </span>
+            {shelf.map(step)}
+          </>
+        )}
       </div>
     </section>
   );

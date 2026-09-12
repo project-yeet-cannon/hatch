@@ -21,7 +21,7 @@ public class StatusesController(HatchContext db) : ControllerBase
         var statuses = await db.Statuses.AsNoTracking()
             .OrderBy(s => s.SortOrder)
             .ThenBy(s => s.Id)
-            .Select(s => new StatusDto(s.Id, s.Name, s.SortOrder, s.IsTerminal, s.Color))
+            .Select(s => new StatusDto(s.Id, s.Name, s.SortOrder, s.IsTerminal, s.IsDeferred, s.Color))
             .ToListAsync(ct);
 
         return statuses;
@@ -44,13 +44,14 @@ public class StatusesController(HatchContext db) : ControllerBase
             // next insertion between two columns is a single write.
             SortOrder = request.SortOrder ?? await NextSortOrderAsync(ct),
             IsTerminal = request.IsTerminal ?? false,
+            IsDeferred = request.IsDeferred ?? false,
         };
         db.Statuses.Add(status);
         await db.SaveChangesAsync(ct);
 
         return CreatedAtAction(
             nameof(GetStatuses),
-            new StatusDto(status.Id, status.Name, status.SortOrder, status.IsTerminal, status.Color));
+            new StatusDto(status.Id, status.Name, status.SortOrder, status.IsTerminal, status.IsDeferred, status.Color));
     }
 
     [HttpPatch("{id:int}")]
@@ -76,9 +77,10 @@ public class StatusesController(HatchContext db) : ControllerBase
 
         if (request.SortOrder is { } sortOrder) status.SortOrder = sortOrder;
         if (request.IsTerminal is { } terminal) status.IsTerminal = terminal;
+        if (request.IsDeferred is { } deferred) status.IsDeferred = deferred;
 
         await db.SaveChangesAsync(ct);
-        return new StatusDto(status.Id, status.Name, status.SortOrder, status.IsTerminal, status.Color);
+        return new StatusDto(status.Id, status.Name, status.SortOrder, status.IsTerminal, status.IsDeferred, status.Color);
     }
 
     /// <summary>

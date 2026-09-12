@@ -149,8 +149,8 @@ its epic.
 
 ### Status
 
-`EfHatchStatus` — `Name` (unique), `SortOrder`, `IsTerminal`, `Color`
-(`#rrggbb`).
+`EfHatchStatus` — `Name` (unique), `SortOrder`, `IsTerminal`, `IsDeferred`,
+`Color` (`#rrggbb`).
 
 One row is one column on the board. **Global, not per-project**, because the
 board shows every project at once and a per-project set would have no column to
@@ -166,6 +166,27 @@ importer lands a checked box in a terminal column, the dispatcher refuses to
 move anything into one, and the browser offers to close a subtree when an issue
 lands in one (see [closing a subtree](#closing-a-subtree)).
 
+`IsDeferred` marks the columns that mean *parked* — shelved, not shipped, and
+not coming back on its own. Any number of columns may carry it, and it is
+independent of `IsTerminal`: the two answer different questions, and both boxes
+on one column is not refused (the reads that care take deferred first).
+
+**A deferred column is not drawn on the board, and has no drop target.** That is
+the whole of the feature and the reason it is a flag rather than a convention:
+parking a ticket is a decision somebody makes about a particular ticket, not a
+lane work drifts into, and a column nobody can drag to is a column nothing lands
+in by accident. The way in is the issue page's status bar, which offers every
+column including the deferred ones — see [deferring an issue](#deferring-an-issue).
+
+Everything that measures the board measures it off the columns that are drawn
+(`Columns.Board`, and `boardColumns` in `lib/columns.ts`), so a shelf sorted
+between two lanes moves no landmark: the review column stays where it was, and
+`In Progress` still advances into `In Review` across the gap. The dispatcher
+refuses to start anything sitting in one — *a person puts it back on the board,
+not a pass* — and the rollup leaves deferred leaves out of every total, so an
+epic finished except for work nobody is going to do reads finished without
+claiming the shelved half shipped.
+
 `Color` is a column rather than a palette keyed on the shipped names, because
 the operator invents columns — a lookup by name would leave a new one grey
 forever and lose a renamed one's colour. The ink written on a colour is computed
@@ -173,6 +194,11 @@ from its luminance (`lib/color.ts`), because CSS still cannot ask that question.
 
 Every install starts with the same seven columns, and with the same flow
 through them:
+
+No column ships deferred. It is a box the operator ticks on the Statuses page
+for a column they added — `Shelved`, `Someday`, `Won't Do For Now`, whatever
+they call it — and until they do, every board behaves exactly as it did before
+the flag existed.
 
 | Column | Sort | Terminal | Whose | What happens in it |
 |---|---|---|---|---|
@@ -448,9 +474,11 @@ was listed is what the operator agreed to.
 
 Four smaller decisions, each of which reads as arbitrary until it is said:
 
-- A descendant **already in a terminal column stays where it is**. It is already
-  closed, and closing it again in a different flavour rewrites what happened to
-  it.
+- A descendant that has **already stopped stays where it is** — terminal or
+  deferred. It is already closed or already shelved, and stopping it again in a
+  different flavour rewrites what happened to it. That cuts both ways: a task
+  that shipped is not un-shipped by its epic being shelved, and a task somebody
+  parked on purpose is not quietly marked done by its epic closing.
 - A descendant the filter is hiding, or a ready date is folding away, **moves
   like any other**. The fold is a view, not a fact — work that cannot start
   until August is still work under this issue.
@@ -462,6 +490,39 @@ Four smaller decisions, each of which reads as arbitrary until it is said:
   descendants, so dismissing it means *leave them*, never *undo that* — which is
   also what lets the drag stay optimistic, with no card springing back out of a
   column it was deliberately dropped in.
+
+#### Deferring an issue
+
+A deferred column ([Status](#status)) is reached from one place: the status bar
+on the issue page, which draws the board's own columns and then, after a
+divider, the deferred ones. The board cannot offer them, because a column there
+is a drop target and work must not be parked by being dragged one lane too far.
+
+**Deferring cascades exactly as closing does**, through the same module and the
+same dialog — `closeOffer` fires on any column where work stops, and the dialog
+words itself from `column.isDeferred`: *Defer what is under AER-12?*, and the
+press that takes the subtree with it is the one the dialog leads with. An epic
+put on the shelf with eleven live tasks under it has not been shelved, it has
+been hidden, and the work under it goes on being dispatched from a board nobody
+can see the parent on. A stack of work is deferred as a unit or not at all.
+
+Two things follow it off the board:
+
+- **A deferred blocker does not clear a dependency.** Only work that lands does
+  — a story built on a branch that was never written is the failure the gate
+  exists to prevent. So deferring a ticket writes a comment on every issue
+  waiting on it, saying which ticket was shelved and that the gate still holds
+  (`Deferrals.NoteAsync`). Without that sentence the edge quietly becomes
+  permanent and nothing anywhere says why the dependent stopped moving. Moving
+  between two deferred columns says nothing a second time.
+- **A deferred leaf leaves the rollup's totals** — not counted done, not counted
+  outstanding. "12 of 20" is a promise about work somebody still intends to do,
+  and a shelved ticket is neither half of it.
+
+Nothing about a deferred issue is hidden from the API: `GET /board` sends every
+column and every card, the issue is reachable by key, by search, and from its
+parent's children, and moving it back onto a lane is one press. The board is a
+view, and this is the one thing it does not draw.
 
 ### Dependency
 
@@ -1243,25 +1304,29 @@ An override changes what a dispatch costs and never whether one happens.
 Nothing in the refusals below consults one: an issue with no playbook for its
 next move is refused in the same sentence whether it names a model or not.
 
-**Six refusals**, and two of them are rules of the whole loop rather than
+**Seven refusals**, and two of them are rules of the whole loop rather than
 missing configuration:
 
 1. The issue is already in a terminal column — there is nothing after it.
-2. There is no column to its right.
-3. The next column **is** terminal — *only the operator decides that something
+2. The issue is in a [deferred](#status) column — *a person puts it back on the
+   board, not a pass*. Said before the next one, which would otherwise refuse it
+   with "there is nowhere for this to go": true of a shelf, and no use to
+   somebody reading a queue wondering why a ticket they parked is not moving.
+3. There is no column to its right.
+4. The next column **is** terminal — *only the operator decides that something
    shipped*.
-4. Something else holds a live [claim](#claim) on it — *somebody is working this
+5. Something else holds a live [claim](#claim) on it — *somebody is working this
    right now*, named with the runner it is being worked from and when it was
    last heard from.
-5. The issue holds an unanswered question — *it is waiting on a person, not on
+6. The issue holds an unanswered question — *it is waiting on a person, not on
    an agent*.
-6. Something it [depends on](#dependency) is unfinished, and the move is into
+7. Something it [depends on](#dependency) is unfinished, and the move is into
    the column where the code gets written.
 
 …and then, if none of those, the ordinary one: no playbook covers this
 transition for this type.
 
-The claim is fourth rather than last because it is the only one of these that
+The claim is fifth rather than last because it is the only one of these that
 says work is happening *now*; everything under it is about whether the issue
 could be worked at all, and "no playbook covers this" is a true sentence about
 the wrong thing when another runner is three minutes in.
@@ -1349,8 +1414,8 @@ it is only worth saying about an issue that is otherwise a candidate. The one
 that is the *loop's* policy rather than a fact about an issue is asked only when
 the pass is asking, so `work/{key}` still ignores it.
 
-The columns with nowhere to go — a terminal one, and a rightmost one that is not
-terminal — are absent rather than listed as blocked. An issue the dispatcher
+The columns with nowhere to go — a terminal one, a deferred one, and a rightmost
+one that is not terminal — are absent rather than listed as blocked. An issue the dispatcher
 never reaches is not something the pass skipped, and shipped work is not a
 backlog.
 
@@ -2005,6 +2070,16 @@ column), `waiting` (open questions on the issue and everything below it), and
 `slices`, one `{ statusId, count }` per column in board order with the empty
 ones left out.
 
+A leaf in a [deferred](#status) column is in none of them — not `leaves`, not
+`done`, and not a slice. It is out of the denominator rather than counted either
+way, because calling it done would claim something shipped that never did and
+calling it outstanding would leave an epic that is finished except for three
+parked tasks stuck at 85% forever, which is how a progress bar stops being read.
+`waiting` is the exception and deliberately: a question is waiting on a person
+wherever its issue happens to stand, which is the rule the attention panel
+states, and a count that quietly dropped would be a question nobody ever
+answers.
+
 [`Rollup.cs`](../src/Aerie.Api/Modules/Hatch/Rollup.cs) loads the tracker once
 and folds post-order — O(n) for the tree rather than a walk per node — because
 the Plan page asks about every epic in the house at once. It is server-side for
@@ -2141,6 +2216,10 @@ so the trail says who did what without anybody being asked to record it.
   comment saying what landed and what did not. Only the operator decides that
   something shipped, and the board enforces it: the dispatcher refuses a
   transition into a terminal column outright.
+- **Shelve work in a [deferred](#status) column.** Whether something is worth
+  doing at all is the same kind of call, and it is refused the same way: `hatch
+  move` will not take a ticket there, and no pass dispatches one out of there.
+  If work should be parked, say so on the ticket.
 - **Edit a playbook.** The API refuses it, and the refusal is deliberate; if a
   playbook is wrong, say so on the ticket and stop.
 - **Mint and revoke keys**, and everything else behind a plain `[RequireAdmin]`.

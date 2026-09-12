@@ -14,6 +14,7 @@ public sealed class IssueCommandsTests
                 Fixtures.Status(2, "To Do"),
                 Fixtures.Status(3, "In Progress"),
                 Fixtures.Status(4, "Done", terminal: true),
+                Fixtures.Status(5, "Shelved", deferred: true),
             ],
             []);
 
@@ -187,6 +188,23 @@ public sealed class IssueCommandsTests
         Assert.Empty(h.Wire.To("POST", "/api/hatch/issues/AER-12/move"));
     }
 
+    /// <summary>
+    /// And a deferred column on the same footing: shelving a ticket is a
+    /// decision about whether the work is worth doing, which is the operator's
+    /// to make and not a session's to make on the way past.
+    /// </summary>
+    [Fact]
+    public async Task A_deferred_column_is_refused_and_nothing_is_written()
+    {
+        using var h = new CliHarness();
+        h.Wire.Json("GET", "/api/hatch/board", ABoard());
+
+        Assert.Equal(1, await new IssueCommands(h.Cli).MoveAsync(["AER-12", "shelved"], default));
+
+        Assert.Contains("is a deferred column - only the operator shelves a ticket", h.Complained);
+        Assert.Empty(h.Wire.To("POST", "/api/hatch/issues/AER-12/move"));
+    }
+
     [Fact]
     public async Task Moving_to_a_column_nobody_has_names_the_ones_there_are()
     {
@@ -194,7 +212,7 @@ public sealed class IssueCommandsTests
         h.Wire.Json("GET", "/api/hatch/board", ABoard());
 
         Assert.Equal(1, await new IssueCommands(h.Cli).MoveAsync(["AER-12", "elsewhere"], default));
-        Assert.Contains("no column called \"elsewhere\" - there is To Do, In Progress, Done", h.Complained);
+        Assert.Contains("no column called \"elsewhere\" - there is To Do, In Progress, Done, Shelved", h.Complained);
     }
 
     // ---- comment ----

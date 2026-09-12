@@ -36,7 +36,15 @@ public sealed class BoardCommands(Cli cli)
         "  each sits in.",
     ];
 
-    /// <summary>Every column, and how many cards are on it.</summary>
+    /// <summary>
+    /// Every column, and how many cards are on it.
+    ///
+    /// <para>The board's own columns first, in board order, then any deferred
+    /// ones. The board page cannot draw a deferred column at all - it is a
+    /// drop target, and nothing may be dropped into a siding - but a printed
+    /// count is not a drop target, and a shelf holding nine tickets is worth
+    /// one line rather than silence.</para>
+    /// </summary>
     public async Task<int> BoardAsync(string[] args, CancellationToken ct)
     {
         if (Usage.Wanted(args)) return Usage.Print(cli.Say, BoardUsage);
@@ -45,9 +53,13 @@ public sealed class BoardCommands(Cli cli)
         var board = await cli.Board.BoardAsync(ct);
         if (board is null) return 1;
 
-        foreach (var status in board.Statuses)
+        var columns = board.Statuses
+            .OrderBy(s => s.IsDeferred)
+            .ToList();
+
+        foreach (var status in columns)
         {
-            var terminal = status.IsTerminal ? " (terminal)" : "";
+            var terminal = status.IsDeferred ? " (deferred)" : status.IsTerminal ? " (terminal)" : "";
             var column = board.Issues.Where(i => i.StatusId == status.Id).ToList();
 
             // What this command draws is a count, so this is where an expedited

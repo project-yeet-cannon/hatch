@@ -6,12 +6,14 @@ const TODO = 1;
 const DOING = 2;
 const DONE = 3;
 const DROPPED = 4;
+const SHELVED = 5;
 
 const statuses: Status[] = [
-  { id: TODO, name: 'To Do', sortOrder: 1, isTerminal: false, color: '#888888' },
-  { id: DOING, name: 'In Progress', sortOrder: 2, isTerminal: false, color: '#888888' },
-  { id: DONE, name: 'Done', sortOrder: 3, isTerminal: true, color: '#888888' },
-  { id: DROPPED, name: "Won't Do", sortOrder: 4, isTerminal: true, color: '#888888' },
+  { id: TODO, name: 'To Do', sortOrder: 1, isTerminal: false, isDeferred: false, color: '#888888' },
+  { id: DOING, name: 'In Progress', sortOrder: 2, isTerminal: false, isDeferred: false, color: '#888888' },
+  { id: DONE, name: 'Done', sortOrder: 3, isTerminal: true, isDeferred: false, color: '#888888' },
+  { id: DROPPED, name: "Won't Do", sortOrder: 4, isTerminal: true, isDeferred: false, color: '#888888' },
+  { id: SHELVED, name: 'Deferred', sortOrder: 5, isTerminal: false, isDeferred: true, color: '#888888' },
 ];
 
 const card = (key: string, statusId: number, parentKey: string | null, rank = 1024): IssueCard => ({
@@ -103,6 +105,28 @@ describe('closeSubtree', () => {
 
     expect(keys(closeSubtree(later, 'AER-1', statuses))).toContain('AER-5');
   });
+
+  /* Shelved work has already stopped. Restamping it into Done would have the
+     board claim something shipped that nobody ever built. */
+  it('leaves a descendant that is already deferred where it is', () => {
+    const parked = cards.map((c) => (c.key === 'AER-3' ? { ...c, statusId: SHELVED } : c));
+
+    expect(keys(closeSubtree(parked, 'AER-1', statuses))).toEqual(['AER-2', 'AER-5', 'AER-4']);
+  });
+
+  /* And the same reach-through a terminal descendant gets: a story on the shelf
+     can still have a live task under it that nobody parked. */
+  it('reaches through a deferred descendant to the open work under it', () => {
+    const parked = cards.map((c) => (c.key === 'AER-2' ? { ...c, statusId: SHELVED } : c));
+
+    expect(keys(closeSubtree(parked, 'AER-1', statuses))).toEqual(['AER-3', 'AER-5', 'AER-4']);
+  });
+
+  it('has nothing to move when every descendant is already deferred', () => {
+    const parked = cards.map((c) => (c.parentKey === null ? c : { ...c, statusId: SHELVED }));
+
+    expect(closeSubtree(parked, 'AER-1', statuses)).toEqual([]);
+  });
 });
 
 describe('closeOffer', () => {
@@ -136,5 +160,26 @@ describe('closeOffer', () => {
 
   it('asks nothing when the issue has nothing open under it', () => {
     expect(closeOffer(board, 'AER-9', TODO, DONE)).toBeNull();
+  });
+
+  /* The whole of the deferred half: the same offer, about the same subtree,
+     naming the column that is not on the board. The dialog words itself from
+     `column.isDeferred`, so this is what makes it say "defer" rather than
+     "close". */
+  it('offers the same subtree when the issue is deferred instead of closed', () => {
+    const offer = closeOffer(board, 'AER-1', DOING, SHELVED)!;
+
+    expect(offer.column.name).toBe('Deferred');
+    expect(offer.column.isDeferred).toBe(true);
+    expect(keys(offer.cards)).toEqual(['AER-2', 'AER-3', 'AER-5', 'AER-4']);
+  });
+
+  /* Taken off the shelf and put back to work. Nothing is asked, because nothing
+     under it has stopped - which is the same answer any move into an ordinary
+     column gets. */
+  it('asks nothing about a move out of a deferred column', () => {
+    const parked: Board = { statuses, issues: cards.map((c) => (c.key === 'AER-1' ? { ...c, statusId: SHELVED } : c)) };
+
+    expect(closeOffer(parked, 'AER-1', SHELVED, TODO)).toBeNull();
   });
 });

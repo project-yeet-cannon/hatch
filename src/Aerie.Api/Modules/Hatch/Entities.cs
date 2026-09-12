@@ -122,6 +122,30 @@ public class EfHatchStatus
     public bool IsTerminal { get; set; }
 
     /// <summary>
+    /// Whether landing here means the work is parked: shelved, not shipped, and
+    /// not coming back on its own.
+    ///
+    /// <para>A deferred column is not drawn on the board and has no drop target,
+    /// so the only way into one is the issue page's status bar. That is
+    /// deliberate: parking a ticket is a decision somebody makes about a
+    /// particular ticket, not a lane work drifts into, and a column nobody can
+    /// drag to is a column nothing lands in by accident.</para>
+    ///
+    /// <para>Separate from <see cref="IsTerminal"/> rather than a flavour of it
+    /// because the two answer different questions. Terminal is "this shipped",
+    /// which is what a dependency waits for and what a quarter is counted by.
+    /// Deferred is "stop counting this", which takes the work out of the
+    /// denominator without ever claiming it was done - see
+    /// <see cref="Rollup"/>.</para>
+    ///
+    /// <para>Both flags on one column is not refused. It would mean a column
+    /// that ships work and hides it from the board at once, which is a strange
+    /// thing to want and an easy thing to undo; the reads that care take
+    /// deferred first, so such a column behaves as a parked one.</para>
+    /// </summary>
+    public bool IsDeferred { get; set; }
+
+    /// <summary>
     /// The column's colour, as <c>#rrggbb</c>. A row rather than a lookup in
     /// the frontend for the same reason the name is a row: the operator invents
     /// columns, and a palette keyed on the four names shipped here would leave

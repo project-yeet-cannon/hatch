@@ -251,6 +251,88 @@ public class RollupTests
         Assert.IsType<NotFoundResult>((await h.Plan.GetIssuePlan("not-a-key", default)).Result);
     }
 
+    // ---- Deferred work ----
+
+    /// <summary>
+    /// The answer the operator chose when this flag was added: a shelved leaf
+    /// is neither done nor outstanding, so it leaves the denominator.
+    /// </summary>
+    [Fact]
+    public async Task ADeferredLeaf_IsCountedNeitherDoneNorOutstanding()
+    {
+        var h = await NewAsync();
+        var story = await h.FileAsync("story", "three tasks, one shelved", h.Todo);
+        await h.FileAsync("task", "a", h.Done, parentId: story.Id);
+        await h.FileAsync("task", "b", h.Todo, parentId: story.Id);
+        await h.FileAsync("task", "c", h.Shelved, parentId: story.Id);
+
+        var plan = Value(await h.Plan.GetIssuePlan(Key(story), default));
+
+        // Two leaves, not three: "1 of 2" is a promise about work somebody
+        // still intends to do, and the shelved task is not part of it.
+        Assert.Equal(2, plan.Rollup.Leaves);
+        Assert.Equal(1, plan.Rollup.Done);
+        Assert.Equal(new Dictionary<int, int> { [h.Todo] = 1, [h.Done] = 1 }, Counts(plan.Rollup));
+    }
+
+    /// <summary>
+    /// The bar is drawn from the slices and labelled from the total, so a slice
+    /// outside the total would be a bar that does not add up to itself.
+    /// </summary>
+    [Fact]
+    public async Task ADeferredColumn_IsNotASliceOfTheBar()
+    {
+        var h = await NewAsync();
+        var story = await h.FileAsync("story", "all of it shelved", h.Todo);
+        await h.FileAsync("task", "a", h.Shelved, parentId: story.Id);
+        await h.FileAsync("task", "b", h.Shelved, parentId: story.Id);
+
+        var plan = Value(await h.Plan.GetIssuePlan(Key(story), default));
+
+        Assert.Equal(0, plan.Rollup.Leaves);
+        Assert.Empty(plan.Rollup.Slices);
+    }
+
+    /// <summary>
+    /// The point of taking them out of the denominator rather than calling them
+    /// done: an epic finished except for work nobody is going to do reads
+    /// finished, and does not claim the shelved half shipped.
+    /// </summary>
+    [Fact]
+    public async Task AnEpicWhoseRemainderIsShelved_ReadsComplete()
+    {
+        var h = await NewAsync();
+        var epic = await h.FileAsync("epic", "the epic", h.InProgress);
+        await h.FileAsync("story", "landed", h.Done, parentId: epic.Id);
+        await h.FileAsync("story", "also landed", h.Done, parentId: epic.Id);
+        await h.FileAsync("story", "not doing this one", h.Shelved, parentId: epic.Id);
+
+        var plan = Value(await h.Plan.GetIssuePlan(Key(epic), default));
+
+        Assert.Equal(2, plan.Rollup.Leaves);
+        Assert.Equal(2, plan.Rollup.Done);
+    }
+
+    /// <summary>
+    /// A question is waiting on a person wherever its issue happens to stand -
+    /// the rule AttentionController states, unchanged by the shelf. Somebody is
+    /// still owed an answer, and a count that quietly dropped would be a
+    /// question nobody ever sees again.
+    /// </summary>
+    [Fact]
+    public async Task AQuestionOnAShelvedIssue_IsStillWaiting()
+    {
+        var h = await NewAsync();
+        var story = await h.FileAsync("story", "shelved mid-question", h.Todo);
+        var task = await h.FileAsync("task", "parked", h.Shelved, parentId: story.Id);
+        await h.AskAsync(task, "which way round?");
+
+        var plan = Value(await h.Plan.GetIssuePlan(Key(story), default));
+
+        Assert.Equal(0, plan.Rollup.Leaves);
+        Assert.Equal(1, plan.Rollup.Waiting);
+    }
+
     // ---- The harness ----
 
     private static readonly DateTimeOffset Now = new(2026, 3, 1, 9, 0, 0, TimeSpan.Zero);
@@ -264,6 +346,7 @@ public class RollupTests
         public required int InProgress { get; init; }
         public required int Review { get; init; }
         public required int Done { get; init; }
+        public required int Shelved { get; init; }
 
         private int next = 1;
 
@@ -330,7 +413,11 @@ public class RollupTests
         }
     }
 
-    /// <summary>A board with the shape the seed leaves behind: five columns, the rightmost terminal.</summary>
+    /// <summary>
+    /// A board with the shape the seed leaves behind: five columns, the
+    /// rightmost terminal - plus a deferred one, which is not a column the
+    /// board draws and is the only thing here the arithmetic discards.
+    /// </summary>
     private static async Task<Harness> NewAsync()
     {
         var db = new HatchContext(
@@ -342,7 +429,8 @@ public class RollupTests
         var doing = new EfHatchStatus { Name = "in progress", SortOrder = 30 };
         var review = new EfHatchStatus { Name = "review", SortOrder = 35 };
         var done = new EfHatchStatus { Name = "done", SortOrder = 40, IsTerminal = true };
-        db.AddRange(project, inbox, todo, doing, review, done);
+        var shelved = new EfHatchStatus { Name = "shelved", SortOrder = 50, IsDeferred = true };
+        db.AddRange(project, inbox, todo, doing, review, done, shelved);
         await db.SaveChangesAsync();
 
         return new Harness
@@ -354,6 +442,7 @@ public class RollupTests
             InProgress = doing.Id,
             Review = review.Id,
             Done = done.Id,
+            Shelved = shelved.Id,
         };
     }
 

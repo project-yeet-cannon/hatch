@@ -119,6 +119,40 @@ public class AttentionControllerTests
         Assert.Equal(Key(moved), Assert.Single(Value(await h.Attention.GetAttention(default)).Reviews).Key);
     }
 
+    /// <summary>
+    /// The landmark is measured off the columns the board draws, so a siding
+    /// parked between review and done does not become "the column before
+    /// terminal" - which would have the panel hunting for pull requests in a
+    /// column nothing is ever dispatched from.
+    /// </summary>
+    [Fact]
+    public async Task Attention_IgnoresADeferredColumnWhenItFindsTheReviewColumn()
+    {
+        var h = await NewAsync();
+        var up = await h.FileAsync("story", "delivered", h.Review, pullRequestUrl: "https://forge.example/pulls/1");
+        await h.ShelfAsync(37);
+
+        Assert.Equal(Key(up), Assert.Single(Value(await h.Attention.GetAttention(default)).Reviews).Key);
+    }
+
+    /// <summary>
+    /// And a shelved ticket is not in review however the board is shaped: the
+    /// column it sits in is not the review column, so it is neither listed nor
+    /// counted as one waiting for a link.
+    /// </summary>
+    [Fact]
+    public async Task Attention_SaysNothingAboutAShelvedIssue()
+    {
+        var h = await NewAsync();
+        var shelf = await h.ShelfAsync(37);
+        await h.FileAsync("story", "parked with a branch open", shelf, pullRequestUrl: "https://forge.example/pulls/1");
+
+        var attention = Value(await h.Attention.GetAttention(default));
+
+        Assert.Empty(attention.Reviews);
+        Assert.Equal(0, attention.InReviewWithoutPullRequest);
+    }
+
     [Fact]
     public async Task Attention_AnswersEmptyOnABoardWithNoRoomForAReviewColumn()
     {
@@ -237,6 +271,15 @@ public class AttentionControllerTests
         {
             (await Db.Statuses.SingleAsync(s => s.Id == statusId)).SortOrder = sortOrder;
             await Db.SaveChangesAsync();
+        }
+
+        /// <summary>A deferred column dropped into the board at a given position.</summary>
+        public async Task<int> ShelfAsync(int sortOrder)
+        {
+            var shelf = new EfHatchStatus { Name = "shelved", SortOrder = sortOrder, IsDeferred = true };
+            Db.Statuses.Add(shelf);
+            await Db.SaveChangesAsync();
+            return shelf.Id;
         }
 
         public async Task<EfHatchComment> AskAsync(EfHatchIssue issue, string body, DateTimeOffset? at = null)

@@ -120,7 +120,11 @@ public sealed class IssueCommands(Cli cli)
     /// </summary>
     /// <remarks>
     /// A terminal column is refused here rather than left to a careful prompt,
-    /// because the rule is about the tool and not about who is holding it.
+    /// because the rule is about the tool and not about who is holding it. A
+    /// deferred one is refused for the same reason and on the same footing:
+    /// shelving a ticket is a decision about whether the work is worth doing,
+    /// which is the operator's to make and not a session's to make on the way
+    /// past.
     /// </remarks>
     public async Task<int> MoveAsync(string[] args, CancellationToken ct)
     {
@@ -142,6 +146,13 @@ public sealed class IssueCommands(Cli cli)
         {
             cli.Say.Complain(
                 $"hatch: \"{want}\" is a terminal column - only the operator moves a ticket there (CLAUDE.md)");
+            return 1;
+        }
+
+        if (column.IsDeferred)
+        {
+            cli.Say.Complain(
+                $"hatch: \"{want}\" is a deferred column - only the operator shelves a ticket (CLAUDE.md)");
             return 1;
         }
 

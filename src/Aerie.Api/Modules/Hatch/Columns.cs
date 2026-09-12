@@ -18,16 +18,41 @@ namespace Aerie.Api.Modules.Hatch;
 public static class Columns
 {
     /// <summary>
+    /// The columns the board actually draws, in order: every status that is not
+    /// deferred.
+    ///
+    /// <para>Every measurement below is taken off this list rather than off the
+    /// status table, because a deferred column is not a lane work passes
+    /// through - it is a siding. Counting one would move the board's landmarks
+    /// by one the moment somebody ticked a box on the Statuses page: a
+    /// <c>Parked</c> column sorted between review and done would make
+    /// <see cref="AwaitingReview"/> name it, and the attention panel would go
+    /// looking for pull requests in a column nothing is dispatched from.</para>
+    ///
+    /// <para>Sort order is the operator's, so a deferred column can sit
+    /// anywhere in it; the board simply closes over the gap.</para>
+    /// </summary>
+    public static List<EfHatchStatus> Board(List<EfHatchStatus> statuses) =>
+        statuses.Where(s => !s.IsDeferred).ToList();
+
+    /// <summary>
     /// The column immediately to the right, or null at the end of the board.
     /// Terminal columns are returned rather than skipped - a caller refusing a
     /// move wants to name the one it is refusing.
+    ///
+    /// <para>Deferred columns are skipped on the way past and have nothing
+    /// after them: work is never advanced into a siding, and nothing advances
+    /// out of one either. A ticket comes back off the shelf because a person
+    /// put it back, which is a press on the issue page and not a step a pass
+    /// takes.</para>
     /// </summary>
     public static EfHatchStatus? Advance(List<EfHatchStatus> statuses, EfHatchStatus from)
     {
-        if (from.IsTerminal) return null;
+        if (from.IsTerminal || from.IsDeferred) return null;
 
-        var at = statuses.FindIndex(s => s.Id == from.Id);
-        return at >= 0 && at + 1 < statuses.Count ? statuses[at + 1] : null;
+        var board = Board(statuses);
+        var at = board.FindIndex(s => s.Id == from.Id);
+        return at >= 0 && at + 1 < board.Count ? board[at + 1] : null;
     }
 
     /// <summary>
@@ -46,9 +71,10 @@ public static class Columns
     /// </summary>
     public static EfHatchStatus? AwaitingReview(List<EfHatchStatus> statuses)
     {
-        var terminal = statuses.FindIndex(s => s.IsTerminal);
-        var at = terminal < 0 ? statuses.Count - 1 : terminal - 1;
-        return at >= 0 ? statuses[at] : null;
+        var board = Board(statuses);
+        var terminal = board.FindIndex(s => s.IsTerminal);
+        var at = terminal < 0 ? board.Count - 1 : terminal - 1;
+        return at >= 0 ? board[at] : null;
     }
 
     /// <summary>

@@ -8,6 +8,7 @@ import {
   patchPlaybook,
 } from '../api/client';
 import { Choice } from '../components/Choice';
+import { boardColumns } from '../lib/columns';
 import { message } from '../lib/errors';
 import { useLoaded } from '../lib/useLoaded';
 import {
@@ -209,14 +210,20 @@ function TypesCell({ types, onChange }: { types: IssueType[]; onChange: (types: 
  * A new row. The transition is chosen from the board's own columns, so a
  * playbook can only ever name a column that exists - and an install that
  * renamed "todo" gets its own names here without this page knowing any.
+ *
+ * The board's columns, and only those: nothing is dispatched out of a deferred
+ * column or into one, so a playbook naming one is a row that can never match.
+ * Offering it would be offering an hour of wondering why the loop is ignoring
+ * a rule somebody wrote.
  */
 function NewPlaybook({
-  statuses,
+  statuses: every,
   onCreate,
 }: {
   statuses: Status[];
   onCreate: (request: PlaybookCreateRequest) => void;
 }) {
+  const statuses = boardColumns(every);
   const [from, setFrom] = useState(statuses[0]?.id ?? 0);
   const [to, setTo] = useState(statuses[1]?.id ?? 0);
   const [types, setTypes] = useState<IssueType[]>([]);

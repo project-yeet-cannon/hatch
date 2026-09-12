@@ -1019,6 +1019,24 @@
   opacity: 1;
 }
 
+/* A deferred column is not the next step along the board, so it does not wear
+   the board's outline: dashed, to say the same thing the board says by not
+   drawing this column at all. */
+.hatch-status-step.deferred {
+  border-style: dashed;
+}
+
+/* What separates the lanes from the shelf. Words rather than a rule, because a
+   divider in a wrapping row lands wherever the wrap puts it, and "or park it"
+   still reads correctly on the line it ends up on. */
+.hatch-status-shelf-label {
+  align-self: center;
+  padding-left: var(--sp-2);
+  font-size: var(--t-label);
+  font-style: italic;
+  color: var(--muted);
+}
+
 .hatch-issue-controls {
   display: flex;
   gap: var(--sp-5);

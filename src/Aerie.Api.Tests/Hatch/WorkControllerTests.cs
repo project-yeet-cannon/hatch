@@ -796,6 +796,63 @@ public class WorkControllerTests
         Assert.Equal([Key(live)], Value(await h.Work.GetQueue(0, null, default)).Select(e => e.Issue.Key));
     }
 
+    /// <summary>
+    /// Nothing comes off the shelf on a pass's say-so. The refusal names the
+    /// column rather than saying "there is nowhere for this to go", which is
+    /// true of a deferred column and no use to anybody reading a queue.
+    /// </summary>
+    [Fact]
+    public async Task Queue_FoldsPastAShelvedIssueAndSaysWhy()
+    {
+        var h = await NewAsync();
+        var parked = await h.FileAsync("story", "not now", h.Shelved);
+
+        var entry = Value(await h.Work.GetQueue(0, null, default)).SingleOrDefault(e => e.Issue.Key == Key(parked));
+
+        // Either it is not in the queue at all, or it is there refused - both
+        // are "nothing is dispatched from here", and only the second has a
+        // sentence to check.
+        if (entry is not null) Assert.Contains("deferred", entry.Blocked);
+
+        Assert.DoesNotContain(
+            Key(parked),
+            Value(await h.Work.GetQueue(0, null, default)).Where(e => e.Blocked is null).Select(e => e.Issue.Key));
+    }
+
+    /// <summary>
+    /// Named by hand rather than found by a scan, which is the path that hands
+    /// out an actual refusal to read - and the one somebody hits when they
+    /// wonder why the loop is ignoring a ticket they parked last week.
+    /// </summary>
+    [Fact]
+    public async Task Work_RefusesAShelvedIssueByName()
+    {
+        var h = await NewAsync();
+        var parked = await h.FileAsync("story", "not now", h.Shelved);
+
+        var work = Value(await h.Work.GetWork(Key(parked), null, default));
+
+        Assert.Contains("deferred", work.Blocked);
+    }
+
+    /// <summary>
+    /// The board closes over the gap. "In progress" advances into review even
+    /// though a deferred column is sorted between them, which is the whole of
+    /// why the geometry is measured off the drawn columns.
+    /// </summary>
+    [Fact]
+    public async Task Queue_AdvancesPastADeferredColumnRatherThanIntoIt()
+    {
+        var h = await NewAsync();
+        var live = await h.FileAsync("story", "being written", h.InProgress);
+
+        var entry = Only(await h.Work.GetQueue(0, null, default));
+
+        Assert.Equal(Key(live), entry.Issue.Key);
+        Assert.Equal(h.Review, entry.ToStatus?.Id);
+        Assert.Null(entry.Blocked);
+    }
+
     [Fact]
     public async Task Queue_FirstClearEntryIsWhatNextReturns()
     {
@@ -1206,6 +1263,7 @@ public class WorkControllerTests
         public required int InProgress { get; init; }
         public required int Review { get; init; }
         public required int Done { get; init; }
+        public required int Shelved { get; init; }
 
         private int next = 1;
 
@@ -1375,7 +1433,13 @@ public class WorkControllerTests
         var doing = new EfHatchStatus { Name = "in progress", SortOrder = 30 };
         var review = new EfHatchStatus { Name = "review", SortOrder = 35 };
         var done = new EfHatchStatus { Name = "done", SortOrder = 40, IsTerminal = true };
-        db.AddRange(project, inbox, todo, doing, review, done);
+
+        // Sorted into the middle of the board on purpose. Every landmark below
+        // is measured off the columns the board draws, so a siding sitting
+        // between two lanes has to change none of them - and if it ever does,
+        // half of these tests say so at once.
+        var shelved = new EfHatchStatus { Name = "shelved", SortOrder = 32, IsDeferred = true };
+        db.AddRange(project, inbox, todo, doing, review, done, shelved);
         await db.SaveChangesAsync();
 
         db.AddRange(
@@ -1404,6 +1468,7 @@ public class WorkControllerTests
             InProgress = doing.Id,
             Review = review.Id,
             Done = done.Id,
+            Shelved = shelved.Id,
         };
     }
 

@@ -33,17 +33,27 @@ public record ProjectPatchRequest(string? Name, string? Key = null);
 /// the colour is what makes a column identifiable at a glance once the cards in
 /// it are too narrow to read.
 /// </param>
-public record StatusDto(int Id, string Name, int SortOrder, bool IsTerminal, string Color);
+/// <param name="IsDeferred">
+/// Whether this column is parked work rather than a lane on the board. Every
+/// column is sent on every read, deferred ones included: the board drops them
+/// when it draws itself, and the issue page needs them in order to offer the
+/// move into one. A reader that wants the board's shape wants the columns this
+/// is false on - the same list <c>Columns</c> measures the board off.
+/// </param>
+public record StatusDto(int Id, string Name, int SortOrder, bool IsTerminal, bool IsDeferred, string Color);
 
 /// <summary>
 /// A new column. The optional fields each have a server-side default -
-/// rightmost position, not terminal, and <see cref="EfHatchStatus.DefaultColor"/>
-/// - so the shortest way to add a column is still a name.
+/// rightmost position, neither terminal nor deferred, and
+/// <see cref="EfHatchStatus.DefaultColor"/> - so the shortest way to add a
+/// column is still a name.
 /// </summary>
-public record StatusCreateRequest(string Name, int? SortOrder, bool? IsTerminal, string? Color = null);
+public record StatusCreateRequest(
+    string Name, int? SortOrder, bool? IsTerminal, string? Color = null, bool? IsDeferred = null);
 
 /// <summary>Every field optional: null means "leave this one alone".</summary>
-public record StatusPatchRequest(string? Name, int? SortOrder, bool? IsTerminal, string? Color = null);
+public record StatusPatchRequest(
+    string? Name, int? SortOrder, bool? IsTerminal, string? Color = null, bool? IsDeferred = null);
 
 // ---- Issues ----
 
