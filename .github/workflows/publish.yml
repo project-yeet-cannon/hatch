@@ -103,7 +103,7 @@ jobs:
       # BUILDPLATFORM and cross-publishes, so only the small runtime stage -
       # apt-get and the claude installer - is ever emulated here.
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
