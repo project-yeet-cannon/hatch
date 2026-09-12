@@ -1,11 +1,21 @@
+# Hatch, from source, on one computer. This is the standard way to run this
+# install locally: `docker compose up -d`, then open
+# http://localhost:8080/apps/hatch/. See src/Aerie.Web/apps/hatch/public/hatch-at-home.md
+# for the full walkthrough (also served in the app itself, under Docs in the nav).
+#
+# Named explicitly so the stack is the same stack however this file is reached,
+# and so it matches the volume names docs/hatch.md and hatch-at-home.md quote.
+name: hatch-local
+
 services:
   db:
     build:
       context: ./containers/aerie-db
       dockerfile: Dockerfile.db
-    networks:
-      - local
     ports:
+      # Published, unlike a shipped-image deployment would publish it: this is
+      # the developer's stack, and tests (`make test-api-db`) reach Postgres on
+      # the host at this port.
       - "5432:5432"
     restart: always
     volumes:
@@ -19,26 +29,120 @@ services:
       timeout: 5s
       retries: 5
 
+  # The api image in its migration mode (Program.cs reads AERIE_MIGRATE) and
+  # then exited. It carries no `restart:` on purpose: the default of `no` is
+  # what leaves it in the "completed successfully" state `api` waits on, on
+  # every start rather than only the first.
+  migrate:
+    build:
+      context: .
+      dockerfile: src/Aerie.Api/Dockerfile.api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DOTNET_ENVIRONMENT: Docker
+      Auth__Enabled: "false"
+      AERIE_MIGRATE: "1"
 
   api:
     build:
       context: .
       dockerfile: src/Aerie.Api/Dockerfile.api
-    networks:
-      - local
-    ports:
-      - "8080:8080"
+    # Not `depends_on: db` - the API does not retry a schema that is not there
+    # yet, it exits (AERIE-931). Waiting for the migration to *finish* is the
+    # difference between a stack that comes up and one that races.
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     volumes:
       - ./src/Aerie.Api/.env.json:/App/.env.json
     environment:
-      - DOTNET_ENVIRONMENT=Docker
+      DOTNET_ENVIRONMENT: Docker
+      Auth__Enabled: "false"
+      # Whoever ran the command, by whichever name their OS uses: USERNAME on
+      # Windows, USER on macOS and Linux. Read from the invoking shell's own
+      # environment - no .env file, nothing to export first.
+      Auth__LocalPerson__Name: "${USERNAME:-${USER:-}}"
+    ports:
+      - "${HATCH_PORT:-8080}:8080"
+    restart: unless-stopped
+
+  # The runner, in a container, off by default. `profiles:` is what makes the
+  # stack without it byte-for-byte the stack that was there before: Compose
+  # starts nothing under a profile nobody named, so `up -d` is unchanged and
+  # `up -d --profile runner` is this as well.
+  #
+  # Every variable below defaults to empty on purpose. What this container
+  # actually needs is checked by its own entrypoint, at the moment it starts,
+  # where the refusal can say what to fix. See
+  # src/Aerie.Web/apps/hatch/public/hatch-at-home.md.
+  runner:
+    build:
+      context: .
+      dockerfile: containers/hatch-runner/Dockerfile
+    profiles: ["runner"]
     depends_on:
-      db:
-        condition: service_healthy
+      - api
+    # Not `unless-stopped` like the two services above, and this is the one
+    # place in this file where that is the wrong policy. `go-to-work` exits 0
+    # when it was told to stop - the Runners page said so, or --max-runs /
+    # --until was reached - and non-zero when something actually went wrong.
+    # `unless-stopped` would restart the container after a deliberate stop and
+    # undo the button that stopped it; `on-failure` obeys the board and still
+    # recovers from a crash.
+    restart: on-failure
+    environment:
+      # The service name, over Compose's own network. Nothing about this
+      # crosses the machine.
+      AERIE_BASE: http://api:8080
+      HATCH_RUNNER: "${HATCH_RUNNER_NAME:-hatch-runner}"
+      HATCH_ROOT: /checkout
+      GIT_AUTHOR_NAME: "${HATCH_GIT_NAME:-}"
+      GIT_AUTHOR_EMAIL: "${HATCH_GIT_EMAIL:-}"
+      HATCH_GIT_TOKEN: "${HATCH_GIT_TOKEN:-}"
+    volumes:
+      # The repository the board is about. Defaults to the directory this file
+      # was reached from, which is right for a checkout you brought the stack
+      # up inside of and wrong everywhere else - so set HATCH_CHECKOUT.
+      - "${HATCH_CHECKOUT:-.}:/checkout"
+      # Uncomment whichever push credential you use; see
+      # src/Aerie.Web/apps/hatch/public/hatch-at-home.md for what goes in each.
+      #
+      # A credential helper, as git already has it configured on the host:
+      # - "${HOME}/.gitconfig:/root/.gitconfig:ro"
+      # - "${HOME}/.git-credentials:/root/.git-credentials:ro"
+      #
+      # Or an SSH agent, which also wants SSH_AUTH_SOCK: /ssh-agent adding to
+      # the environment above:
+      # - "${SSH_AUTH_SOCK}:/ssh-agent"
+
+  # The UI Design library's gallery (src/Aerie.Web/apps/design) - every token
+  # and component in @aerie/ui, browsable on its own. Off by default, same
+  # reasoning as `runner`: this stack is Hatch's, and the gallery is a bonus
+  # for anyone touching the design system.
+  #
+  # A plain Vite dev server rather than a build, so an edit under packages/ui
+  # or apps/design hot-reloads without a rebuild - the workflow the gallery is
+  # for (see src/Aerie.Web/apps/design/README.md). `npm ci` runs on every start
+  # rather than being baked into an image, which keeps this profile free for
+  # anyone who never asks for it.
+  design:
+    image: node:22-alpine
+    profiles: ["design"]
+    working_dir: /repo/src/Aerie.Web
+    command: sh -c "npm ci && npm run dev -w apps/design -- --host 0.0.0.0 --port 5173"
+    volumes:
+      - .:/repo
+      # Anonymous volumes so the container's own installs are not shadowed by
+      # (or shadow) whatever is checked out on the host.
+      - /repo/src/Aerie.Web/node_modules
+    ports:
+      - "5173:5173"
 
 networks:
-  local:
-    driver: bridge
+  default:
+    name: hatch-local
 
 volumes:
   pgdata:
