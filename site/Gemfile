@@ -1,0 +1,6 @@
+# Local preview only: GitHub Pages builds the site with its own copy of this
+# gem, so this file is never read by the deploy.
+#
+#   cd site && bundle install && bundle exec jekyll serve
+source "https://rubygems.org"
+gem "github-pages", group: :jekyll_plugins

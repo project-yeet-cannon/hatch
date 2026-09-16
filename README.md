@@ -105,6 +105,7 @@ src/
 containers/
   hatch-db           Postgres, with Hatch's own init
   hatch-runner       the CLI, packaged as a container (the `runner` profile)
+site/                the GitHub Pages site: quick start, how to Hatch, the runner manual
 ```
 
 Always `make`, never a bare `dotnet` — the npm step needs the shell profile.

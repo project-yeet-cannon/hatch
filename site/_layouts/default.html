@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="{{ site.lang | default: "en" }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if page.title %}{{ page.title }} · {% endif %}{{ site.title }}</title>
+  <link rel="icon" href="{{ '/assets/hatch-logo.png' | relative_url }}">
+  <link rel="stylesheet" href="{{ '/assets/site.css' | relative_url }}">
+  {% seo title=false %}
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="top">
+    <a class="brand" href="{{ '/' | relative_url }}">
+      <img src="{{ '/assets/hatch-logo.png' | relative_url }}" alt="" width="28" height="28">
+      <span>Hatch</span>
+    </a>
+    <nav class="nav" aria-label="Pages">
+      {% for item in site.nav %}
+        {% assign here = page.url | replace: 'index.html', '' %}
+        <a href="{{ item.url | relative_url }}"{% if here == item.url %} aria-current="page"{% endif %}>{{ item.title }}</a>
+      {% endfor %}
+      {% if site.github.repository_url %}
+        <a class="ext" href="{{ site.github.repository_url }}">Source</a>
+      {% endif %}
+    </nav>
+  </header>
+
+  <main id="content" class="page">
+    {% if page.title and page.url != "/" %}
+      <h1>{{ page.title }}</h1>
+      {% if page.lede %}<p class="lede">{{ page.lede }}</p>{% endif %}
+    {% endif %}
+    {{ content }}
+  </main>
+
+  <footer class="foot">
+    <p>
+      Hatch is open source.
+      {% if site.github.repository_url %}<a href="{{ site.github.repository_url }}">The repository</a> carries the code, the design notes and the ethos every change is held to.{% endif %}
+    </p>
+  </footer>
+  <script src="{{ '/assets/site.js' | relative_url }}"></script>
+</body>
+</html>

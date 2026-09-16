@@ -1,0 +1,61 @@
+name: Publish the site
+
+# The GitHub Pages site under site/, rebuilt on every push to the default
+# branch. Deployed through Actions rather than "from a branch" so that the
+# source can live in site/ rather than in docs/, which is the repository's
+# own documentation and not a website.
+#
+# One-time setup on the repository: Settings → Pages → Source: GitHub Actions.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Pages
+        uses: actions/configure-pages@v5
+
+      # The same builder GitHub Pages uses for a "from a branch" site, so the
+      # plugin set (jekyll-github-metadata, jekyll-seo-tag, jekyll-relative-
+      # links) and the baseurl for a project site come from the environment
+      # and nothing in site/_config.yml has to name this repository.
+      - name: Build with Jekyll
+        uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./site
+          destination: ./_site
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v4
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

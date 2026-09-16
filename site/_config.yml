@@ -1,0 +1,51 @@
+# The public site for Hatch, built by GitHub Pages from this directory.
+#
+# Nothing here names an owner, an organisation or a domain (docs/ethos.md):
+# the repository's own URL, clone URL and name come from the jekyll-github-
+# metadata plugin at build time as `site.github.*`, so a fork publishes a site
+# that points at itself.
+title: Hatch
+description: A kanban board worked by agents as much as by people.
+lang: en
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+  toc_levels: 2..3
+
+plugins:
+  - jekyll-github-metadata
+  - jekyll-relative-links
+  - jekyll-seo-tag
+
+relative_links:
+  enabled: true
+  collections: false
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - README.md
+  - vendor
+
+# The order the navigation draws the pages in.
+nav:
+  - title: Quick start
+    url: /
+  - title: How to Hatch
+    url: /how-to-hatch/
+  - title: Running the agent
+    url: /running-the-agent/
+  - title: The container runner
+    url: /container-runner/
+  - title: Agent manual
+    url: /agent-manual/
+  - title: Operating the stack
+    url: /operating-the-stack/

@@ -504,3 +504,8 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+# The GitHub Pages site under site/ (local preview output)
+site/_site/
+site/.jekyll-cache/
+site/Gemfile.lock
