@@ -33,7 +33,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       # The same builder GitHub Pages uses for a "from a branch" site, so the
       # plugin set (jekyll-github-metadata, jekyll-seo-tag, jekyll-relative-
